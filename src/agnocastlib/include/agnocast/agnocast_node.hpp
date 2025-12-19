@@ -3,18 +3,24 @@
 #include "agnocast/node_interfaces/node_base.hpp"
 #include "agnocast/node_interfaces/node_parameters.hpp"
 #include "agnocast/node_interfaces/node_topics.hpp"
+#include "rcl_interfaces/msg/parameter_descriptor.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace agnocast
 {
+
+using ParameterDescriptor = rcl_interfaces::msg::ParameterDescriptor;
 
 class Node
 {
 public:
   using SharedPtr = std::shared_ptr<Node>;
+  using ParameterValue = rclcpp::ParameterValue;
 
   explicit Node(
     const std::string & node_name, const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
@@ -63,6 +69,54 @@ public:
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr get_node_parameters_interface()
   {
     return node_parameters_;
+  }
+
+  const ParameterValue & declare_parameter(
+    const std::string & name, const ParameterValue & default_value,
+    const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
+  {
+    return node_parameters_->declare_parameter(name, default_value, descriptor, ignore_override);
+  }
+
+  template <typename ParameterT>
+  ParameterT declare_parameter(
+    const std::string & name, const ParameterT & default_value,
+    const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
+  {
+    return declare_parameter(
+             name, rclcpp::ParameterValue(default_value), descriptor, ignore_override)
+      .get<ParameterT>();
+  }
+
+  bool has_parameter(const std::string & name) const
+  {
+    return node_parameters_->has_parameter(name);
+  }
+
+  rclcpp::Parameter get_parameter(const std::string & name) const
+  {
+    return node_parameters_->get_parameter(name);
+  }
+
+  bool get_parameter(const std::string & name, rclcpp::Parameter & parameter) const
+  {
+    return node_parameters_->get_parameter(name, parameter);
+  }
+
+  template <typename ParameterT>
+  bool get_parameter(const std::string & name, ParameterT & parameter) const
+  {
+    rclcpp::Parameter param;
+    bool result = node_parameters_->get_parameter(name, param);
+    if (result) {
+      parameter = param.get_value<ParameterT>();
+    }
+    return result;
+  }
+
+  std::vector<rclcpp::Parameter> get_parameters(const std::vector<std::string> & names) const
+  {
+    return node_parameters_->get_parameters(names);
   }
 
   template <typename MessageT, typename Func>
