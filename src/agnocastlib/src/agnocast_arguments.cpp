@@ -1,45 +1,122 @@
 #include "agnocast/agnocast_arguments.hpp"
 
+#include <rcutils/allocator.h>
+#include <rcutils/logging_macros.h>
+
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <functional>
-#include <sstream>
 
 namespace agnocast
 {
 
-ParameterValue parse_parameter_value(const std::string & value_str)
+namespace
 {
-  std::string lower_value = value_str;
-  std::transform(lower_value.begin(), lower_value.end(), lower_value.begin(), [](unsigned char c) {
-    return std::tolower(c);
-  });
 
-  if (lower_value == "true") {
-    return rclcpp::ParameterValue(true);
-  }
-  if (lower_value == "false") {
-    return rclcpp::ParameterValue(false);
+std::string parse_node_name_prefix(const std::string & arg, size_t & pos)
+{
+  size_t colon_pos = arg.find(':', pos);
+  size_t separator_pos = arg.find(":=", pos);
+
+  // If ':' exists and is before ':=', it's a node name prefix
+  if (colon_pos != std::string::npos && colon_pos < separator_pos) {
+    std::string node_name = arg.substr(pos, colon_pos - pos);
+    pos = colon_pos + 1;
+    return node_name;
   }
 
-  {
-    std::istringstream iss(value_str);
-    int64_t int_value = 0;
-    if (iss >> int_value && iss.eof()) {
-      return rclcpp::ParameterValue(int_value);
+  // No node name prefix, match all nodes
+  return "/**";
+}
+
+}  // namespace
+
+ParameterOverrides::ParameterOverrides()
+{
+  rcutils_allocator_t allocator = rcutils_get_default_allocator();
+  params_ = rcl_yaml_node_struct_init(allocator);
+  if (nullptr == params_) {
+    throw std::runtime_error("Failed to initialize rcl_params_t");
+  }
+}
+
+ParameterOverrides::~ParameterOverrides()
+{
+  if (params_ != nullptr) {
+    rcl_yaml_node_struct_fini(params_);
+    params_ = nullptr;
+  }
+}
+
+ParameterOverrides::ParameterOverrides(const ParameterOverrides & other) : params_(nullptr)
+{
+  if (other.params_ != nullptr) {
+    params_ = rcl_yaml_node_struct_copy(other.params_);
+    if (nullptr == params_) {
+      throw std::runtime_error("Failed to copy rcl_params_t");
     }
   }
+}
 
-  {
-    std::istringstream iss(value_str);
-    double double_value = 0.0;
-    if (iss >> double_value && iss.eof()) {
-      return rclcpp::ParameterValue(double_value);
+ParameterOverrides & ParameterOverrides::operator=(const ParameterOverrides & other)
+{
+  if (this != &other) {
+    if (params_ != nullptr) {
+      rcl_yaml_node_struct_fini(params_);
+      params_ = nullptr;
+    }
+    if (other.params_ != nullptr) {
+      params_ = rcl_yaml_node_struct_copy(other.params_);
+      if (nullptr == params_) {
+        throw std::runtime_error("Failed to copy rcl_params_t");
+      }
     }
   }
+  return *this;
+}
 
-  return rclcpp::ParameterValue(value_str);
+ParameterOverrides::ParameterOverrides(ParameterOverrides && other) noexcept
+: params_(other.params_)
+{
+  other.params_ = nullptr;
+}
+
+ParameterOverrides & ParameterOverrides::operator=(ParameterOverrides && other) noexcept
+{
+  if (this != &other) {
+    if (params_ != nullptr) {
+      rcl_yaml_node_struct_fini(params_);
+    }
+    params_ = other.params_;
+    other.params_ = nullptr;
+  }
+  return *this;
+}
+
+bool ParameterOverrides::parse_yaml_file(const std::string & yaml_file)
+{
+  return rcl_parse_yaml_file(yaml_file.c_str(), params_);
+}
+
+bool ParameterOverrides::parse_param_rule(const std::string & arg)
+{
+  size_t pos = 0;
+  std::string node_name = parse_node_name_prefix(arg, pos);
+
+  // Find the separator ':='
+  size_t separator_pos = arg.find(":=", pos);
+  if (separator_pos == std::string::npos) {
+    return false;
+  }
+
+  std::string param_name = arg.substr(pos, separator_pos - pos);
+  std::string yaml_value = arg.substr(separator_pos + 2);
+
+  if (param_name.empty()) {
+    return false;
+  }
+
+  return rcl_parse_yaml_value(node_name.c_str(), param_name.c_str(), yaml_value.c_str(), params_);
 }
 
 bool parse_remap_rule(const std::string & arg, RemapRule & output_rule)
@@ -82,27 +159,6 @@ bool parse_remap_rule(const std::string & arg, RemapRule & output_rule)
   return true;
 }
 
-bool parse_param_rule(
-  const std::string & arg, std::string & param_name, ParameterValue & param_value)
-{
-  // Corresponds to _rcl_parse_param_rule in rcl/src/rcl/arguments.c.
-  //
-  // Limitations compared to rcl:
-  // - No yaml parser: arrays (e.g., [1,2,3]) are not supported, only scalar values.
-  // - No node name prefix: "node_name:param_name:=value" format is not supported.
-
-  size_t delim_pos = arg.find(":=");
-
-  if (delim_pos == std::string::npos) {
-    return false;
-  }
-
-  param_name = arg.substr(0, delim_pos);
-  std::string yaml_value = arg.substr(delim_pos + 2);
-  param_value = parse_parameter_value(yaml_value);
-  return true;
-}
-
 ParsedArguments parse_arguments(const std::vector<std::string> & arguments)
 {
   // Corresponds to rcl_parse_arguments in rcl/src/rcl/arguments.c
@@ -124,13 +180,22 @@ ParsedArguments parse_arguments(const std::vector<std::string> & arguments)
         continue;
       }
 
+      // Attempt to parse argument as parameter file flag
+      if (arg == RCL_PARAM_FILE_FLAG && i + 1 < arguments.size()) {
+        ++i;
+        if (!result.parameter_overrides.parse_yaml_file(arguments[i])) {
+          RCUTILS_LOG_WARN_NAMED(
+            "agnocast", "Failed to parse params file: %s", arguments[i].c_str());
+        }
+        continue;
+      }
+
       // Attempt to parse argument as parameter override flag
       if ((arg == RCL_PARAM_FLAG || arg == RCL_SHORT_PARAM_FLAG) && i + 1 < arguments.size()) {
         ++i;
-        std::string param_name;
-        ParameterValue param_value;
-        if (parse_param_rule(arguments[i], param_name, param_value)) {
-          result.parameter_overrides[param_name] = param_value;
+        if (!result.parameter_overrides.parse_param_rule(arguments[i])) {
+          RCUTILS_LOG_WARN_NAMED(
+            "agnocast", "Failed to parse parameter rule: %s", arguments[i].c_str());
         }
         continue;
       }
@@ -167,25 +232,19 @@ std::map<std::string, ParameterValue> resolve_parameter_overrides(
   const ParsedArguments & local_args, const ParsedArguments & global_args)
 {
   // Corresponds to rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp
-  //
-  // TODO(Koichi98): node_fqn is currently unused. In rclcpp, node_fqn is used to filter
-  // parameters by node name. This requires:
-  // - YAML parser support (--params-file)
-  // - Node name prefix support ("node_name:param_name:=value" format)
-  // Currently, all parameters are applied globally to all nodes.
+  // NOTE: node_fqn, local_args, and global_args are intentionally unused for now.
+  // They will be consumed by parameter_map_from once it is implemented to resolve
+  // parameter overrides from YAML/CLI sources scoped to the given node FQN.
   (void)node_fqn;
+  (void)local_args;
+  (void)global_args;
 
   std::map<std::string, ParameterValue> result;
 
-  // global before local so that local overwrites global
-  std::array<std::reference_wrapper<const ParsedArguments>, 2> argument_sources = {
-    std::cref(global_args), std::cref(local_args)};
-
-  for (const ParsedArguments & source : argument_sources) {
-    for (const auto & [name, value] : source.parameter_overrides) {
-      result[name] = value;
-    }
-  }
+  // TODO(Koichi98): Implement a helper equivalent to rclcpp::detail::parameter_map_from
+  // (see rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp in
+  // https://github.com/ros2/rclcpp/blob/rolling/rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp)
+  // and use it here to filter parameters by node FQN from global_args and local_args.
 
   // parameter overrides passed to constructor will overwrite overrides from yaml file sources
   for (const auto & param : parameter_overrides) {

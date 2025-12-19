@@ -4,8 +4,11 @@
 #include <rclcpp/parameter_value.hpp>
 
 #include <rcl/arguments.h>
+#include <rcl_yaml_param_parser/parser.h>
+#include <rcl_yaml_param_parser/types.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,24 +27,41 @@ struct RemapRule
 
 using ParameterValue = rclcpp::ParameterValue;
 
+class ParameterOverrides
+{
+public:
+  ParameterOverrides();
+  ~ParameterOverrides();
+
+  ParameterOverrides(const ParameterOverrides & other);
+  ParameterOverrides & operator=(const ParameterOverrides & other);
+
+  ParameterOverrides(ParameterOverrides && other) noexcept;
+  ParameterOverrides & operator=(ParameterOverrides && other) noexcept;
+
+  rcl_params_t * get() const { return params_; }
+
+  bool parse_yaml_file(const std::string & yaml_file);
+  bool parse_param_rule(const std::string & arg);
+
+private:
+  rcl_params_t * params_;
+};
+
 struct ParsedArguments
 {
   std::vector<RemapRule> remap_rules;
-  std::map<std::string, ParameterValue> parameter_overrides;
+  ParameterOverrides parameter_overrides;
 };
 
-ParameterValue parse_parameter_value(const std::string & value_str);
 bool parse_remap_rule(const std::string & arg, RemapRule & output_rule);
-bool parse_param_rule(
-  const std::string & arg, std::string & param_name, ParameterValue & param_value);
 
 ParsedArguments parse_arguments(const std::vector<std::string> & arguments);
 
 /// Resolve parameter overrides from multiple sources.
 /// Corresponds to rclcpp::detail::resolve_parameter_overrides.
 /// Priority (later overwrites earlier): global_args < local_args < parameter_overrides
-/// @param node_fqn Fully qualified name of the node (for future node-specific filtering:
-/// TODO(Koichi98))
+/// @param node_fqn Fully qualified name of the node (used for node-specific filtering)
 /// @param parameter_overrides Parameters from NodeOptions::parameter_overrides()
 /// @param local_args Parsed arguments from NodeOptions::arguments()
 /// @param global_args Parsed arguments from command line (via agnocast::init)

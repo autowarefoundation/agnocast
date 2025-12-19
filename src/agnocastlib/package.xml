@@ -23,6 +23,7 @@
 
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
+  <depend>rcl_yaml_param_parser</depend>
   <depend>std_msgs</depend>
   <depend>tracetools</depend>
   <depend>liblttng-ust-dev</depend>
