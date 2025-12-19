@@ -33,21 +33,10 @@ template <typename ServiceT>
 class Client
 {
 public:
-  // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
-  struct RequestT : public ServiceT::Request
-  {
-    std::string _node_name;
-    int64_t _sequence_number;
-  };
-  struct ResponseT : public ServiceT::Response
-  {
-    int64_t _sequence_number;
-  };
-
   using SharedPtr = std::shared_ptr<Client<ServiceT>>;
 
-  using Future = std::future<ipc_shared_ptr<ResponseT>>;
-  using SharedFuture = std::shared_future<ipc_shared_ptr<ResponseT>>;
+  using Future = std::future<ipc_shared_ptr<typename ServiceT::Response>>;
+  using SharedFuture = std::shared_future<ipc_shared_ptr<typename ServiceT::Response>>;
 
   struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
   {
@@ -60,9 +49,20 @@ public:
   };
 
 private:
+  // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
+  struct RequestT : public ServiceT::Request
+  {
+    std::string _node_name;
+    int64_t _sequence_number;
+  };
+  struct ResponseT : public ServiceT::Response
+  {
+    int64_t _sequence_number;
+  };
+
   struct ResponseCallInfo
   {
-    std::promise<ipc_shared_ptr<ResponseT>> promise;
+    std::promise<ipc_shared_ptr<typename ServiceT::Response>> promise;
     std::optional<SharedFuture> shared_future;
     std::optional<std::function<void(SharedFuture)>> callback;
 
@@ -107,7 +107,8 @@ public:
       /* --- critical section end --- */
       lock.unlock();
 
-      info.promise.set_value(std::move(response));
+      info.promise.set_value(
+        static_ipc_shared_ptr_cast<typename ServiceT::Response>(std::move(response)));
       if (info.callback.has_value()) {
         (info.callback.value())(info.shared_future.value());
       }
@@ -120,12 +121,12 @@ public:
       node_, topic_name, qos, std::move(subscriber_callback), options);
   }
 
-  ipc_shared_ptr<RequestT> borrow_loaned_request()
+  ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
-    auto request = publisher_->borrow_loaned_message();
+    ipc_shared_ptr<RequestT> request = publisher_->borrow_loaned_message();
     request->_node_name = node_->get_fully_qualified_name();
     request->_sequence_number = next_sequence_number_.fetch_add(1);
-    return request;
+    return static_ipc_shared_ptr_cast<typename ServiceT::Request>(std::move(request));
   }
 
   const char * get_service_name() const { return service_name_.c_str(); }
@@ -142,10 +143,12 @@ public:
   }
 
   SharedFutureAndRequestId async_send_request(
-    ipc_shared_ptr<RequestT> && request, std::function<void(SharedFuture)> callback)
+    ipc_shared_ptr<typename ServiceT::Request> && request,
+    std::function<void(SharedFuture)> callback)
   {
     SharedFuture shared_future;
-    int64_t seqno = request->_sequence_number;
+    auto derived_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    int64_t seqno = derived_request->_sequence_number;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -153,14 +156,15 @@ public:
       shared_future = it->second.shared_future.value();
     }
 
-    publisher_->publish(std::move(request));
+    publisher_->publish(std::move(derived_request));
     return SharedFutureAndRequestId(std::move(shared_future), seqno);
   }
 
-  FutureAndRequestId async_send_request(ipc_shared_ptr<RequestT> && request)
+  FutureAndRequestId async_send_request(ipc_shared_ptr<typename ServiceT::Request> && request)
   {
     Future future;
-    int64_t seqno = request->_sequence_number;
+    auto derived_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    int64_t seqno = derived_request->_sequence_number;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -168,7 +172,7 @@ public:
       future = it->second.promise.get_future();
     }
 
-    publisher_->publish(std::move(request));
+    publisher_->publish(std::move(derived_request));
     return FutureAndRequestId(std::move(future), seqno);
   }
 };

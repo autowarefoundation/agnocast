@@ -18,7 +18,7 @@ namespace agnocast
 template <typename ServiceT>
 class Service
 {
-public:
+private:
   // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
   struct RequestT : public ServiceT::Request
   {
@@ -30,7 +30,6 @@ public:
     int64_t _sequence_number;
   };
 
-private:
   rclcpp::Node * node_;
   const std::string service_name_;
   const rclcpp::QoS qos_;
@@ -52,12 +51,13 @@ public:
   {
     static_assert(
       std::is_invocable_v<
-        std::decay_t<Func>, const ipc_shared_ptr<RequestT> &, ipc_shared_ptr<ResponseT> &>,
-      "Callback must be callable with "
-      "(const ipc_shared_ptr<RequestT> &, ipc_shared_ptr<ResponseT> &)");
+        std::decay_t<Func>, ipc_shared_ptr<typename ServiceT::Request> &&,
+        ipc_shared_ptr<typename ServiceT::Response> &&>,
+      "Callback must be callable with ipc_shared_ptr<typename ServiceT::Request> and "
+      "ipc_shared_ptr<typename ServiceT::Response> (const&, &&, or by-value)");
 
     auto subscriber_callback =
-      [this, callback = std::forward<Func>(callback)](const ipc_shared_ptr<RequestT> & request) {
+      [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
         typename AgnocastOnlyPublisher<ResponseT>::SharedPtr publisher;
 
         {
@@ -76,7 +76,13 @@ public:
         ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
         response->_sequence_number = request->_sequence_number;
 
-        callback(request, response);
+        typename ServiceT::Response * response_raw_ptr = response.get();  // upcasting
+        ipc_shared_ptr<typename ServiceT::Response> response_double{
+          response_raw_ptr, response.get_topic_name(), response.get_pubsub_id()};
+
+        callback(
+          static_ipc_shared_ptr_cast<typename ServiceT::Request>(std::move(request)),
+          std::move(response_double));
 
         publisher->publish(std::move(response));
       };
