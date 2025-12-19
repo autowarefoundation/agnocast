@@ -1,11 +1,11 @@
 #include "agnocast/agnocast_arguments.hpp"
 
+#include <rclcpp/parameter_map.hpp>
+
 #include <rcutils/allocator.h>
 #include <rcutils/logging_macros.h>
 
 #include <algorithm>
-#include <array>
-#include <functional>
 
 namespace agnocast
 {
@@ -232,19 +232,25 @@ std::map<std::string, ParameterValue> resolve_parameter_overrides(
   const ParsedArguments & local_args, const ParsedArguments & global_args)
 {
   // Corresponds to rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp
-  // NOTE: node_fqn, local_args, and global_args are intentionally unused for now.
-  // They will be consumed by parameter_map_from once it is implemented to resolve
-  // parameter overrides from YAML/CLI sources scoped to the given node FQN.
-  (void)node_fqn;
-  (void)local_args;
-  (void)global_args;
-
   std::map<std::string, ParameterValue> result;
 
-  // TODO(Koichi98): Implement a helper equivalent to rclcpp::detail::parameter_map_from
-  // (see rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp in
-  // https://github.com/ros2/rclcpp/blob/rolling/rclcpp/src/rclcpp/detail/resolve_parameter_overrides.cpp)
-  // and use it here to filter parameters by node FQN from global_args and local_args.
+  // global before local so that local overwrites global
+  std::array<const ParameterOverrides *, 2> arguments_sources = {
+    &global_args.parameter_overrides, &local_args.parameter_overrides};
+
+  for (const ParameterOverrides * source : arguments_sources) {
+    if (source == nullptr || source->get() == nullptr) {
+      continue;
+    }
+
+    rclcpp::ParameterMap initial_map = rclcpp::parameter_map_from(source->get(), node_fqn.c_str());
+
+    if (initial_map.count(node_fqn) > 0) {
+      for (const rclcpp::Parameter & param : initial_map.at(node_fqn)) {
+        result[param.get_name()] = rclcpp::ParameterValue(param.get_value_message());
+      }
+    }
+  }
 
   // parameter overrides passed to constructor will overwrite overrides from yaml file sources
   for (const auto & param : parameter_overrides) {
