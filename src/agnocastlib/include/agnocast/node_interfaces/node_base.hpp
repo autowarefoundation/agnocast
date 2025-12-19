@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_arguments.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/context.hpp"
 #include "rclcpp/guard_condition.hpp"
@@ -22,7 +23,8 @@ public:
 
   NodeBase(
     std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-    bool use_intra_process_default = false, bool enable_topic_statistics_default = false);
+    std::vector<RemapRule> local_remap_rules, bool use_intra_process_default = false,
+    bool enable_topic_statistics_default = false);
 
   virtual ~NodeBase() = default;
 
@@ -53,6 +55,9 @@ public:
   std::string resolve_topic_or_service_name(
     const std::string & name, bool is_service, bool only_expand = false) const override;
 
+  const std::vector<RemapRule> & get_local_remap_rules() const;
+  const std::vector<RemapRule> & get_global_remap_rules() const;
+
 private:
   std::string node_name_;
   std::string namespace_;
@@ -69,6 +74,9 @@ private:
 
   bool use_intra_process_default_;
   bool enable_topic_statistics_default_;
+
+  std::vector<RemapRule> local_remap_rules_;
+  std::vector<RemapRule> global_remap_rules_;
 };
 
 }  // namespace agnocast::node_interfaces

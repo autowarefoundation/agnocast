@@ -1,10 +1,12 @@
 #pragma once
 
+#include "agnocast/node_interfaces/node_base.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/node_interfaces/node_topics_interface.hpp"
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace agnocast::node_interfaces
 {
@@ -15,7 +17,7 @@ public:
   using SharedPtr = std::shared_ptr<NodeTopics>;
   using WeakPtr = std::weak_ptr<NodeTopics>;
 
-  explicit NodeTopics(rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base);
+  explicit NodeTopics(NodeBase::SharedPtr node_base);
 
   virtual ~NodeTopics() = default;
 
@@ -39,7 +41,10 @@ public:
 
 private:
   std::string expand_topic_name(const std::string & input_topic_name) const;
+  const RemapRule * remap_first_match(
+    const std::vector<RemapRule> & remap_rules, const std::string & name) const;
+  std::string remap_name(const std::string & topic_name) const;
 
-  rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
+  NodeBase::SharedPtr node_base_;
 };
 }  // namespace agnocast::node_interfaces

@@ -12,11 +12,13 @@ namespace agnocast::node_interfaces
 
 NodeBase::NodeBase(
   std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-  bool use_intra_process_default, bool enable_topic_statistics_default)
+  std::vector<RemapRule> local_remap_rules, bool use_intra_process_default,
+  bool enable_topic_statistics_default)
 : node_name_(std::move(node_name)),
   context_(std::move(context)),
   use_intra_process_default_(use_intra_process_default),
-  enable_topic_statistics_default_(enable_topic_statistics_default)
+  enable_topic_statistics_default_(enable_topic_statistics_default),
+  local_remap_rules_(std::move(local_remap_rules))
 {
   // Ensure it starts with '/' or is empty
   if (!ns.empty() && ns[0] != '/') {
@@ -30,19 +32,19 @@ NodeBase::NodeBase(
   {
     std::lock_guard<std::mutex> lock(g_context_mtx);
     if (g_context.is_initialized()) {
-      auto global_rules = g_context.get_remap_rules();
+      global_remap_rules_ = g_context.get_remap_rules();
 
       auto node_name_it = std::find_if(
-        global_rules.begin(), global_rules.end(),
+        global_remap_rules_.begin(), global_remap_rules_.end(),
         [](const auto & rule) { return rule.type == RemapType::NODE_NAME; });
-      if (node_name_it != global_rules.end()) {
+      if (node_name_it != global_remap_rules_.end()) {
         node_name_ = node_name_it->replacement;
       }
 
       auto namespace_it = std::find_if(
-        global_rules.begin(), global_rules.end(),
+        global_remap_rules_.begin(), global_remap_rules_.end(),
         [](const auto & rule) { return rule.type == RemapType::NAMESPACE; });
-      if (namespace_it != global_rules.end()) {
+      if (namespace_it != global_remap_rules_.end()) {
         namespace_ = namespace_it->replacement;
         if (!namespace_.empty() && namespace_[0] != '/') {
           namespace_ = "/" + namespace_;
@@ -187,6 +189,16 @@ std::string NodeBase::resolve_topic_or_service_name(
   (void)only_expand;
   // TODO(Koichi98)
   return "";
+}
+
+const std::vector<RemapRule> & NodeBase::get_local_remap_rules() const
+{
+  return local_remap_rules_;
+}
+
+const std::vector<RemapRule> & NodeBase::get_global_remap_rules() const
+{
+  return global_remap_rules_;
 }
 
 }  // namespace agnocast::node_interfaces
