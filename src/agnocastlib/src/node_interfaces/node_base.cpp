@@ -4,6 +4,7 @@
 #include "rclcpp/contexts/default_context.hpp"
 #include "rclcpp/logging.hpp"
 
+#include <rcl/error_handling.h>
 #include <rcl/remap.h>
 
 #include <stdexcept>
@@ -37,11 +38,43 @@ NodeBase::NodeBase(
     }
   }
 
+  rcl_allocator_t allocator = rcl_get_default_allocator();
+
   // Apply node name remapping
-  // TODO(Koichi98)
+  {
+    char * remapped_node_name = nullptr;
+    rcl_ret_t ret = rcl_remap_node_name(
+      local_args_, global_args_, node_name_.c_str(), allocator, &remapped_node_name);
+
+    if (ret != RCL_RET_OK) {
+      std::string error_msg =
+        std::string("Failed to remap node name: ") + rcl_get_error_string().str;
+      rcl_reset_error();
+      throw std::runtime_error(error_msg);
+    }
+    if (remapped_node_name != nullptr) {
+      node_name_ = remapped_node_name;
+      allocator.deallocate(remapped_node_name, allocator.state);
+    }
+  }
 
   // Apply namespace remapping
-  // TODO(Koichi98)
+  {
+    char * remapped_namespace = nullptr;
+    rcl_ret_t ret = rcl_remap_node_namespace(
+      local_args_, global_args_, node_name_.c_str(), allocator, &remapped_namespace);
+
+    if (ret != RCL_RET_OK) {
+      std::string error_msg =
+        std::string("Failed to remap namespace: ") + rcl_get_error_string().str;
+      rcl_reset_error();
+      throw std::runtime_error(error_msg);
+    }
+    if (remapped_namespace != nullptr) {
+      namespace_ = remapped_namespace;
+      allocator.deallocate(remapped_namespace, allocator.state);
+    }
+  }
 
   if (namespace_.empty() || namespace_ == "/") {
     fqn_ = "/" + node_name_;
