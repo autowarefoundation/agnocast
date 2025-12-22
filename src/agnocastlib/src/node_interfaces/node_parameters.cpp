@@ -147,10 +147,26 @@ const rclcpp::ParameterValue & NodeParameters::declare_parameter(
 
 void NodeParameters::undeclare_parameter(const std::string & name)
 {
-  // TODO(Koichi98)
-  (void)name;
-  throw std::runtime_error(
-    "NodeParameters::undeclare_parameter is not yet implemented in agnocast");
+  std::lock_guard<std::mutex> lock(parameters_mutex_);
+  // Note: rclcpp uses ParameterMutationRecursionGuard here to prevent parameter modification
+  // from within callbacks. Not needed in Agnocast since callbacks are not implemented.
+
+  auto parameter_info = parameters_.find(name);
+  if (parameter_info == parameters_.end()) {
+    throw rclcpp::exceptions::ParameterNotDeclaredException(
+      "cannot undeclare parameter '" + name + "' which has not yet been declared");
+  }
+
+  if (parameter_info->second.descriptor.read_only) {
+    throw rclcpp::exceptions::ParameterImmutableException(
+      "cannot undeclare parameter '" + name + "' because it is read-only");
+  }
+  if (!parameter_info->second.descriptor.dynamic_typing) {
+    throw rclcpp::exceptions::InvalidParameterTypeException{
+      name, "cannot undeclare a statically typed parameter"};
+  }
+
+  parameters_.erase(parameter_info);
 }
 
 bool NodeParameters::has_parameter(const std::string & name) const

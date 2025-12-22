@@ -93,6 +93,11 @@ public:
     return node_parameters_->has_parameter(name);
   }
 
+  void undeclare_parameter(const std::string & name)
+  {
+    node_parameters_->undeclare_parameter(name);
+  }
+
   rclcpp::Parameter get_parameter(const std::string & name) const
   {
     return node_parameters_->get_parameter(name);
