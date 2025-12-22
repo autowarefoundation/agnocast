@@ -4,57 +4,38 @@
 #include <rclcpp/parameter_value.hpp>
 
 #include <rcl/arguments.h>
-#include <rcl_yaml_param_parser/parser.h>
-#include <rcl_yaml_param_parser/types.h>
 
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace agnocast
 {
 
-enum class RemapType { NODE_NAME, NAMESPACE, TOPIC_OR_SERVICE };
-
-struct RemapRule
-{
-  RemapType type;
-  std::string node_name;  // Node name prefix (empty means global rule)
-  std::string match;
-  std::string replacement;
-};
-
-using ParameterValue = rclcpp::ParameterValue;
-
-class ParameterOverrides
+class ParsedArguments
 {
 public:
-  ParameterOverrides();
-  ~ParameterOverrides();
+  ParsedArguments();
+  ~ParsedArguments();
 
-  ParameterOverrides(const ParameterOverrides & other);
-  ParameterOverrides & operator=(const ParameterOverrides & other);
+  ParsedArguments(ParsedArguments && other) noexcept;
+  ParsedArguments & operator=(ParsedArguments && other) noexcept;
 
-  ParameterOverrides(ParameterOverrides && other) noexcept;
-  ParameterOverrides & operator=(ParameterOverrides && other) noexcept;
+  ParsedArguments(const ParsedArguments & other);
+  ParsedArguments & operator=(const ParsedArguments & other);
 
-  rcl_params_t * get() const { return params_; }
+  void parse(const std::vector<std::string> & arguments);
 
-  bool parse_yaml_file(const std::string & yaml_file);
-  bool parse_param_rule(const std::string & arg);
+  rcl_arguments_t * get() { return &args_; }
+  const rcl_arguments_t * get() const { return &args_; }
+
+  bool is_valid() const { return args_.impl != nullptr; }
 
 private:
-  rcl_params_t * params_;
-};
+  rcl_arguments_t args_;
 
-struct ParsedArguments
-{
-  std::vector<RemapRule> remap_rules;
-  ParameterOverrides parameter_overrides;
+  void fini();
 };
-
-bool parse_remap_rule(const std::string & arg, RemapRule & output_rule);
 
 ParsedArguments parse_arguments(const std::vector<std::string> & arguments);
 
@@ -65,8 +46,8 @@ ParsedArguments parse_arguments(const std::vector<std::string> & arguments);
 /// @param parameter_overrides Parameters from NodeOptions::parameter_overrides()
 /// @param local_args Parsed arguments from NodeOptions::arguments()
 /// @param global_args Parsed arguments from command line (via agnocast::init)
-std::map<std::string, ParameterValue> resolve_parameter_overrides(
+std::map<std::string, rclcpp::ParameterValue> resolve_parameter_overrides(
   const std::string & node_fqn, const std::vector<rclcpp::Parameter> & parameter_overrides,
-  const ParsedArguments & local_args, const ParsedArguments & global_args);
+  const rcl_arguments_t * local_args, const rcl_arguments_t * global_args);
 
 }  // namespace agnocast

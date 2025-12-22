@@ -6,7 +6,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace agnocast::node_interfaces
 {
@@ -40,11 +39,6 @@ public:
   rclcpp::node_interfaces::NodeTimersInterface * get_node_timers_interface() const override;
 
 private:
-  std::string expand_topic_name(const std::string & input_topic_name) const;
-  const RemapRule * remap_first_match(
-    const std::vector<RemapRule> & remap_rules, const std::string & name) const;
-  std::string remap_name(const std::string & topic_name) const;
-
   NodeBase::SharedPtr node_base_;
 };
 }  // namespace agnocast::node_interfaces

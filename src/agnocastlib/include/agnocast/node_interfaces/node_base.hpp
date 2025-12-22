@@ -6,6 +6,8 @@
 #include "rclcpp/guard_condition.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 
+#include <rcl/arguments.h>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -23,7 +25,7 @@ public:
 
   NodeBase(
     std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-    std::vector<RemapRule> local_remap_rules, bool use_intra_process_default = false,
+    const rcl_arguments_t * local_args, bool use_intra_process_default = false,
     bool enable_topic_statistics_default = false);
 
   virtual ~NodeBase() = default;
@@ -55,8 +57,8 @@ public:
   std::string resolve_topic_or_service_name(
     const std::string & name, bool is_service, bool only_expand = false) const override;
 
-  const std::vector<RemapRule> & get_local_remap_rules() const;
-  const std::vector<RemapRule> & get_global_remap_rules() const;
+  const rcl_arguments_t * get_local_args() const { return local_args_; }
+  const rcl_arguments_t * get_global_args() const { return global_args_; }
 
 private:
   std::string node_name_;
@@ -75,8 +77,8 @@ private:
   bool use_intra_process_default_;
   bool enable_topic_statistics_default_;
 
-  std::vector<RemapRule> local_remap_rules_;
-  std::vector<RemapRule> global_remap_rules_;
+  const rcl_arguments_t * local_args_ = nullptr;
+  const rcl_arguments_t * global_args_ = nullptr;
 };
 
 }  // namespace agnocast::node_interfaces

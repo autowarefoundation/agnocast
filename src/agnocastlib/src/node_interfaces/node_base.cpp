@@ -4,6 +4,8 @@
 #include "rclcpp/contexts/default_context.hpp"
 #include "rclcpp/logging.hpp"
 
+#include <rcl/remap.h>
+
 #include <stdexcept>
 #include <utility>
 
@@ -12,13 +14,13 @@ namespace agnocast::node_interfaces
 
 NodeBase::NodeBase(
   std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-  std::vector<RemapRule> local_remap_rules, bool use_intra_process_default,
+  const rcl_arguments_t * local_args, bool use_intra_process_default,
   bool enable_topic_statistics_default)
 : node_name_(std::move(node_name)),
   context_(std::move(context)),
   use_intra_process_default_(use_intra_process_default),
   enable_topic_statistics_default_(enable_topic_statistics_default),
-  local_remap_rules_(std::move(local_remap_rules))
+  local_args_(local_args)
 {
   // Ensure it starts with '/' or is empty
   if (!ns.empty() && ns[0] != '/') {
@@ -27,49 +29,19 @@ NodeBase::NodeBase(
     namespace_ = ns;
   }
 
-  // Get global remap rules from context
+  // Get global arguments from context
   {
     std::lock_guard<std::mutex> lock(g_context_mtx);
     if (g_context.is_initialized()) {
-      global_remap_rules_ = g_context.get_remap_rules();
+      global_args_ = g_context.get_parsed_arguments();
     }
   }
 
   // Apply node name remapping
-  auto local_node_name_it = std::find_if(
-    local_remap_rules_.begin(), local_remap_rules_.end(),
-    [](const auto & rule) { return rule.type == RemapType::NODE_NAME; });
-  if (local_node_name_it != local_remap_rules_.end()) {
-    node_name_ = local_node_name_it->replacement;
-  } else {
-    auto global_node_name_it = std::find_if(
-      global_remap_rules_.begin(), global_remap_rules_.end(),
-      [](const auto & rule) { return rule.type == RemapType::NODE_NAME; });
-    if (global_node_name_it != global_remap_rules_.end()) {
-      node_name_ = global_node_name_it->replacement;
-    }
-  }
+  // TODO(Koichi98)
 
   // Apply namespace remapping
-  auto local_namespace_it = std::find_if(
-    local_remap_rules_.begin(), local_remap_rules_.end(),
-    [](const auto & rule) { return rule.type == RemapType::NAMESPACE; });
-  if (local_namespace_it != local_remap_rules_.end()) {
-    namespace_ = local_namespace_it->replacement;
-    if (!namespace_.empty() && namespace_[0] != '/') {
-      namespace_ = "/" + namespace_;
-    }
-  } else {
-    auto global_namespace_it = std::find_if(
-      global_remap_rules_.begin(), global_remap_rules_.end(),
-      [](const auto & rule) { return rule.type == RemapType::NAMESPACE; });
-    if (global_namespace_it != global_remap_rules_.end()) {
-      namespace_ = global_namespace_it->replacement;
-      if (!namespace_.empty() && namespace_[0] != '/') {
-        namespace_ = "/" + namespace_;
-      }
-    }
-  }
+  // TODO(Koichi98)
 
   if (namespace_.empty() || namespace_ == "/") {
     fqn_ = "/" + node_name_;
@@ -207,16 +179,6 @@ std::string NodeBase::resolve_topic_or_service_name(
   (void)only_expand;
   // TODO(Koichi98)
   return "";
-}
-
-const std::vector<RemapRule> & NodeBase::get_local_remap_rules() const
-{
-  return local_remap_rules_;
-}
-
-const std::vector<RemapRule> & NodeBase::get_global_remap_rules() const
-{
-  return global_remap_rules_;
 }
 
 }  // namespace agnocast::node_interfaces

@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_arguments.hpp"
 
 #include <mutex>
+#include <string>
 
 namespace agnocast
 {
@@ -19,8 +20,11 @@ public:
 
   void init(int argc, char const * const * argv);
   bool is_initialized() const { return initialized_; }
-  std::vector<RemapRule> get_remap_rules() const { return parsed_arguments_.remap_rules; }
-  ParsedArguments get_parsed_arguments() const { return parsed_arguments_; }
+
+  const rcl_arguments_t * get_parsed_arguments() const
+  {
+    return parsed_arguments_.is_valid() ? parsed_arguments_.get() : nullptr;
+  }
 
 private:
   bool initialized_ = false;

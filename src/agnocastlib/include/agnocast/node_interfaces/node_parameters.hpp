@@ -1,6 +1,5 @@
 #pragma once
 
-#include "agnocast/agnocast_arguments.hpp"
 #include "rcl_interfaces/msg/list_parameters_result.hpp"
 #include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
@@ -8,6 +7,8 @@
 #include "rclcpp/node_interfaces/node_parameters.hpp"
 #include "rclcpp/node_interfaces/node_parameters_interface.hpp"
 #include "rclcpp/parameter.hpp"
+
+#include <rcl/arguments.h>
 
 #include <map>
 #include <memory>
@@ -28,7 +29,7 @@ public:
 
   explicit NodeParameters(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
-    const std::vector<rclcpp::Parameter> & parameter_overrides, const ParsedArguments & local_args,
+    const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
     bool allow_undeclared_parameters = false);
 
   virtual ~NodeParameters() = default;
