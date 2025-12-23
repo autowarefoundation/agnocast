@@ -23,8 +23,9 @@ NodeBase::NodeBase(
   enable_topic_statistics_default_(enable_topic_statistics_default),
   local_args_(local_args)
 {
-  // Ensure it starts with '/' or is empty
-  if (!ns.empty() && ns[0] != '/') {
+  if (ns.empty()) {
+    namespace_ = "/";
+  } else if (ns[0] != '/') {
     namespace_ = "/" + ns;
   } else {
     namespace_ = ns;
@@ -76,7 +77,7 @@ NodeBase::NodeBase(
     }
   }
 
-  if (namespace_.empty() || namespace_ == "/") {
+  if (namespace_ == "/") {
     fqn_ = "/" + node_name_;
   } else {
     fqn_ = namespace_ + "/" + node_name_;

@@ -127,6 +127,11 @@ public:
     return node_parameters_->get_parameters(names);
   }
 
+  std::string resolve_topic_name(const std::string & topic_name, bool only_expand = false) const
+  {
+    return node_topics_->resolve_topic_name(topic_name, only_expand);
+  }
+
   template <typename MessageT, typename Func>
   typename agnocast::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, size_t queue_size, Func && callback,

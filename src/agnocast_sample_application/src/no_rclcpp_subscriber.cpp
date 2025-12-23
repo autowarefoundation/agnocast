@@ -22,14 +22,18 @@ class NoRclcppSubscriber : public agnocast::Node
 public:
   explicit NoRclcppSubscriber() : agnocast::Node("no_rclcpp_subscriber")
   {
-    declare_parameter("topic_name", rclcpp::ParameterValue(std::string("/my_topic")));
+    declare_parameter("topic_name", rclcpp::ParameterValue(std::string("my_topic")));
     declare_parameter("queue_size", rclcpp::ParameterValue(int64_t(1)));
 
     get_parameter("topic_name", topic_name_);
     get_parameter("queue_size", queue_size_);
 
+    std::string resolved_topic = resolve_topic_name(topic_name_);
+
     RCLCPP_INFO(get_logger(), "=== NoRclcppSubscriber Node Info ===");
-    RCLCPP_INFO(get_logger(), "Topic name: %s", topic_name_.c_str());
+    RCLCPP_INFO(get_logger(), "Fully qualified name: %s", get_fully_qualified_name().c_str());
+    RCLCPP_INFO(get_logger(), "Topic name (input): %s", topic_name_.c_str());
+    RCLCPP_INFO(get_logger(), "Topic name (resolved): %s", resolved_topic.c_str());
     RCLCPP_INFO(get_logger(), "Queue size: %ld", queue_size_);
     RCLCPP_INFO(get_logger(), "====================================");
 
@@ -38,7 +42,7 @@ public:
     agnocast_options.callback_group = group;
 
     sub_dynamic_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
-      topic_name_, static_cast<size_t>(queue_size_),
+      resolved_topic, static_cast<size_t>(queue_size_),
       std::bind(&NoRclcppSubscriber::callback, this, _1), agnocast_options);
   }
 };
