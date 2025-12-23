@@ -6,7 +6,7 @@
 #include <elf.h>
 #include <link.h>
 
-#include <cstdint>  // uintptr_t
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
