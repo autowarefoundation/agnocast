@@ -6,6 +6,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace agnocast
 {
@@ -24,6 +25,20 @@ public:
 private:
   enum class AddBridgeResult { SUCCESS, EXIST, ERROR };
 
+  struct BridgeKernelResult
+  {
+    AddBridgeResult status;
+    pid_t owner_pid;
+    bool has_r2a;
+    bool has_a2r;
+  };
+
+  struct BridgeInfo
+  {
+    std::optional<MqMsgBridge> req_r2a;
+    std::optional<MqMsgBridge> req_a2r;
+  };
+
   const pid_t target_pid_;
   rclcpp::Logger logger_;
 
@@ -38,26 +53,24 @@ private:
   std::thread executor_thread_;
 
   std::map<std::string, std::shared_ptr<void>> active_bridges_;
-  std::map<std::string, MqMsgBridge> watch_bridges_;
-  std::map<std::string, MqMsgBridge> pending_delegations_;
+  std::map<std::string, BridgeInfo> managed_bridges_;
 
   void start_ros_execution();
 
-  void on_mq_create_request(mqd_t fd);
-  void on_mq_delegation_request(mqd_t fd);
+  void on_mq_request(mqd_t fd);
   void on_signal();
 
-  void handle_create_request(const MqMsgBridge & req);
-  void handle_delegate_request(const MqMsgBridge & req);
+  void register_request(const MqMsgBridge & req);
 
-  static AddBridgeResult try_add_bridge_to_kernel(
-    const std::string & topic_name, pid_t & out_owner_pid);
-  bool try_activate_bridge(const MqMsgBridge & req, const std::string & topic_name_with_direction);
-  bool try_send_delegation(const MqMsgBridge & req, pid_t owner_pid);
-  void check_and_recover_bridges();
+  static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
+  void activate_bridge(const MqMsgBridge & req, const std::string & topic_name_with_direction);
+  void send_delegation(const MqMsgBridge & req, pid_t owner_pid);
+  void process_managed_bridge(
+    const std::string & topic_name, const std::optional<MqMsgBridge> & req);
 
   void check_parent_alive();
   void check_active_bridges();
+  void check_managed_bridges();
   void check_should_exit();
 
   int get_agnocast_subscriber_count(const std::string & topic_name);

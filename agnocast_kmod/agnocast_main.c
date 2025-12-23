@@ -110,6 +110,8 @@ struct bridge_info
 {
   char * topic_name;
   pid_t pid;
+  bool has_r2a;  // ROS2 -> Agnocast
+  bool has_a2r;  // Agnocast -> ROS2
   const struct ipc_namespace * ipc_ns;
   struct hlist_node node;
 };
@@ -1621,23 +1623,33 @@ static struct bridge_info * find_bridge_info(
 }
 
 int add_bridge(
-  const char * topic_name, const pid_t pid, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const pid_t pid, const bool is_r2a, const struct ipc_namespace * ipc_ns,
   struct ioctl_add_bridge_args * ioctl_ret)
 {
-  const struct bridge_info * existing = find_bridge_info(topic_name, ipc_ns);
+  struct bridge_info * existing = find_bridge_info(topic_name, ipc_ns);
+
   if (existing) {
-    if (existing->pid == pid) {
-      dev_info(
-        agnocast_device, "Bridge (topic=%s) already registered by this process.\n", topic_name);
-      return 0;
-    } else {
+    if (existing->pid != pid) {
+      ioctl_ret->ret_pid = existing->pid;
+      ioctl_ret->ret_has_r2a = existing->has_r2a;
+      ioctl_ret->ret_has_a2r = existing->has_a2r;
       dev_info(
         agnocast_device, "Bridge (topic=%s) already exists with different pid.\n", topic_name);
-      if (ioctl_ret) {
-        ioctl_ret->ret_pid = existing->pid;
-      }
       return -EEXIST;
     }
+
+    // pid matches
+    if (is_r2a) {
+      existing->has_r2a = true;
+    } else {
+      existing->has_a2r = true;
+    }
+
+    ioctl_ret->ret_pid = existing->pid;
+    ioctl_ret->ret_has_r2a = existing->has_r2a;
+    ioctl_ret->ret_has_a2r = existing->has_a2r;
+    dev_info(agnocast_device, "Bridge (topic=%s) updated flags for pid %d.\n", topic_name, pid);
+    return 0;
   }
 
   struct bridge_info * br_info = kmalloc(sizeof(*br_info), GFP_KERNEL);
@@ -1658,6 +1670,20 @@ int add_bridge(
   br_info->pid = pid;
   br_info->ipc_ns = ipc_ns;
 
+  if (is_r2a) {
+    br_info->has_r2a = true;
+    br_info->has_a2r = false;
+  } else {
+    br_info->has_r2a = false;
+    br_info->has_a2r = true;
+  }
+
+  if (ioctl_ret) {
+    ioctl_ret->ret_pid = pid;
+    ioctl_ret->ret_has_r2a = br_info->has_r2a;
+    ioctl_ret->ret_has_a2r = br_info->has_a2r;
+  }
+
   INIT_HLIST_NODE(&br_info->node);
   uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
 
@@ -1666,12 +1692,13 @@ int add_bridge(
   return 0;
 }
 
-int remove_bridge(const char * topic_name, const pid_t pid, const struct ipc_namespace * ipc_ns)
+int remove_bridge(
+  const char * topic_name, const pid_t pid, const bool is_r2a, const struct ipc_namespace * ipc_ns)
 {
   struct bridge_info * br_info = find_bridge_info(topic_name, ipc_ns);
 
   if (!br_info) {
-    dev_warn(agnocast_device, "Bridge (topic=%s) not found.\n", topic_name);
+    dev_warn(agnocast_device, "Bridge (topic=%s) not found. (remove_bridge)\n", topic_name);
     return -ENOENT;
   }
 
@@ -1682,11 +1709,29 @@ int remove_bridge(const char * topic_name, const pid_t pid, const struct ipc_nam
     return -EPERM;
   }
 
-  hash_del(&br_info->node);
-  kfree(br_info->topic_name);
-  kfree(br_info);
+  if (is_r2a) {
+    if (!br_info->has_r2a) {
+      dev_warn(agnocast_device, "Bridge (topic=%s) r2a flag was already false.\n", topic_name);
+    }
+    br_info->has_r2a = false;
+  } else {
+    if (!br_info->has_a2r) {
+      dev_warn(agnocast_device, "Bridge (topic=%s) a2r flag was already false.\n", topic_name);
+    }
+    br_info->has_a2r = false;
+  }
 
-  dev_info(agnocast_device, "Bridge (topic=%s) removed successfully.\n", topic_name);
+  if (!br_info->has_r2a && !br_info->has_a2r) {
+    hash_del(&br_info->node);
+    kfree(br_info->topic_name);
+    kfree(br_info);
+
+    dev_info(agnocast_device, "Bridge (topic=%s) removed completely.\n", topic_name);
+  } else {
+    dev_info(
+      agnocast_device, "Bridge (topic=%s) direction removed. Remaining: r2a=%d, a2r=%d.\n",
+      topic_name, br_info->has_r2a, br_info->has_a2r);
+  }
 
   return 0;
 }
@@ -2112,9 +2157,9 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       goto return_EFAULT;
     }
     topic_name_buf[bridge_args.topic_name.len] = '\0';
-    ret = add_bridge(topic_name_buf, bridge_args.pid, ipc_ns, &bridge_args);
+    ret = add_bridge(topic_name_buf, bridge_args.pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
     kfree(topic_name_buf);
-    if (ret == -EEXIST) {
+    if (ret == 0 || ret == -EEXIST) {
       if (copy_to_user(
             (struct ioctl_add_bridge_args __user *)arg, &bridge_args, sizeof(bridge_args)))
         goto return_EFAULT;
@@ -2133,7 +2178,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       goto return_EFAULT;
     }
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
-    ret = remove_bridge(topic_name_buf, remove_bridge_args.pid, ipc_ns);
+    ret = remove_bridge(topic_name_buf, remove_bridge_args.pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
   } else {
     goto return_EINVAL;
