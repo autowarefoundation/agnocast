@@ -1,7 +1,7 @@
 <launch>
     <arg name="use_param" default="false" />
 
-    <node pkg="agnocast_sample_application" exec="no_rclcpp_listener" name="no_rclcpp_listener_node" namespace="sample_app" output="screen" unless="$(var use_param)">
+    <node pkg="agnocast_sample_application" exec="no_rclcpp_listener" name="no_rclcpp_listener_node" output="screen" unless="$(var use_param)">
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
     </node>
 
