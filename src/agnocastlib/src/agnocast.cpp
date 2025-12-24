@@ -384,10 +384,8 @@ struct initialize_agnocast_result initialize_agnocast(
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
 
-  // TODO(yutarokobayashi): Temporarily commented out to prevent premature startup until
-  // implementation is complete.
-  // pid_t parent_pid = getpid();
-  // spawn_daemon_process([parent_pid]() { poll_for_bridge_manager(parent_pid); });
+  pid_t parent_pid = getpid();
+  spawn_daemon_process([parent_pid]() { poll_for_bridge_manager(parent_pid); });
 
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);

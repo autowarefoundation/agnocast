@@ -74,13 +74,14 @@ private:
     }
   };
 
+  using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRequestPolicy>;
+
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   rclcpp::Node * node_;
   const std::string service_name_;
-  // AgnocastOnlyPublisher is used since RequestT is not a compatible ROS message type.
-  typename AgnocastOnlyPublisher<RequestT>::SharedPtr publisher_;
+  typename ServiceRequestPublisher::SharedPtr publisher_;
   typename BasicSubscription<ResponseT, NoBridgeRequestPolicy>::SharedPtr subscriber_;
 
 public:
@@ -88,10 +89,12 @@ public:
     rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos,
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
-    service_name_(node_->get_node_services_interface()->resolve_service_name(service_name)),
-    publisher_(std::make_shared<AgnocastOnlyPublisher<RequestT>>(
-      node, create_service_request_topic_name(service_name_), qos))
+    service_name_(node_->get_node_services_interface()->resolve_service_name(service_name))
   {
+    agnocast::PublisherOptions pub_options;
+    publisher_ = std::make_shared<ServiceRequestPublisher>(
+      node, create_service_request_topic_name(service_name_), qos, pub_options);
+
     auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */

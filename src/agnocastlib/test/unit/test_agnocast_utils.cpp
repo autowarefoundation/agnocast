@@ -5,16 +5,12 @@
 TEST(AgnocastUtilsTest, create_mq_name_normal)
 {
   EXPECT_EQ(agnocast::create_mq_name_for_agnocast_publish("/dummy", 0), "/agnocast@dummy@0");
-  EXPECT_EQ(agnocast::create_mq_name_for_ros2_publish("/dummy", 0), "/agnocast_to_ros2@dummy@0");
 }
 
 TEST(AgnocastUtilsTest, create_mq_name_slash_included)
 {
   EXPECT_EQ(
     agnocast::create_mq_name_for_agnocast_publish("/dummy/dummy", 0), "/agnocast@dummy_dummy@0");
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_ros2_publish("/dummy/dummy", 0),
-    "/agnocast_to_ros2@dummy_dummy@0");
 }
 
 TEST(AgnocastUtilsTest, create_mq_name_invalid_topic)
@@ -22,9 +18,6 @@ TEST(AgnocastUtilsTest, create_mq_name_invalid_topic)
   EXPECT_EXIT(
     agnocast::create_mq_name_for_agnocast_publish("dummy", 0),
     ::testing::ExitedWithCode(EXIT_FAILURE), "");
-  EXPECT_EXIT(
-    agnocast::create_mq_name_for_ros2_publish("dummy", 0), ::testing::ExitedWithCode(EXIT_FAILURE),
-    "");
 }
 
 TEST(AgnocastUtilsTest, create_mq_name_bridge_manager)

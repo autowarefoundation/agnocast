@@ -39,8 +39,8 @@ def generate_test_description():
                                 "transient_local": False,
                                 "init_pub_num": 0,
                                 "pub_num": PUB_NUM,
-                                "planned_pub_count": 2,
-                                "planned_sub_count": 2,
+                                "planned_pub_count": 1, # Number of ROS 2 inside the bridge.
+                                "planned_sub_count": 2, # Number of external Agnocast.
                                 "forever": FOREVER,
                             }
                         ],
