@@ -11,7 +11,7 @@ SubscriptionBase::SubscriptionBase(rclcpp::Node * node, const std::string & topi
 
 SubscriptionBase::SubscriptionBase(
   agnocast::Node * node, const std::string & topic_name)  // NOLINT(modernize-pass-by-value)
-: id_(0), topic_name_(node->resolve_topic_name(topic_name))
+: id_(0), topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
 {
   validate_ld_preload();
 }

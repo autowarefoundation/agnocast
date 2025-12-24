@@ -28,7 +28,7 @@ public:
     get_parameter("topic_name", topic_name_);
     get_parameter("queue_size", queue_size_);
 
-    std::string resolved_topic = resolve_topic_name(topic_name_);
+    std::string resolved_topic = get_node_topics_interface()->resolve_topic_name(topic_name_);
 
     RCLCPP_INFO(get_logger(), "=== NoRclcppSubscriber Node Info ===");
     RCLCPP_INFO(get_logger(), "Fully qualified name: %s", get_fully_qualified_name().c_str());
