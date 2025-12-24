@@ -1633,22 +1633,27 @@ int add_bridge(
       ioctl_ret->ret_pid = existing->pid;
       ioctl_ret->ret_has_r2a = existing->has_r2a;
       ioctl_ret->ret_has_a2r = existing->has_a2r;
-      dev_info(
-        agnocast_device, "Bridge (topic=%s) already exists with different pid.\n", topic_name);
       return -EEXIST;
     }
 
     // pid matches
     if (is_r2a) {
-      existing->has_r2a = true;
+      if (!existing->has_r2a) {
+        existing->has_r2a = true;
+        dev_info(
+          agnocast_device, "Bridge (topic=%s) r2a direction added for pid=%d.\n", topic_name, pid);
+      }
     } else {
-      existing->has_a2r = true;
+      if (!existing->has_a2r) {
+        existing->has_a2r = true;
+        dev_info(
+          agnocast_device, "Bridge (topic=%s) a2r direction added for pid=%d.\n", topic_name, pid);
+      }
     }
 
     ioctl_ret->ret_pid = existing->pid;
     ioctl_ret->ret_has_r2a = existing->has_r2a;
     ioctl_ret->ret_has_a2r = existing->has_a2r;
-    dev_info(agnocast_device, "Bridge (topic=%s) updated flags for pid %d.\n", topic_name, pid);
     return 0;
   }
 
@@ -1688,6 +1693,10 @@ int add_bridge(
   uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
 
   hash_add(bridge_htable, &br_info->node, hash_val);
+
+  dev_info(
+    agnocast_device, "Bridge (topic=%s) added. pid=%d, r2a=%d, a2r=%d.\n", topic_name, pid,
+    br_info->has_r2a, br_info->has_a2r);
 
   return 0;
 }
