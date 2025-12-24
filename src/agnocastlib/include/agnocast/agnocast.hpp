@@ -42,26 +42,8 @@ extern "C" struct initialize_agnocast_result initialize_agnocast(
 
 template <typename MessageT>
 typename Publisher<MessageT>::SharedPtr create_publisher(
-  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
-{
-  PublisherOptions options;
-  return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
-    node, topic_name, qos, options);
-}
-
-template <typename MessageT>
-typename Publisher<MessageT>::SharedPtr create_publisher(
-  rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth)
-{
-  PublisherOptions options;
-  return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
-    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
-}
-
-template <typename MessageT>
-typename Publisher<MessageT>::SharedPtr create_publisher(
   rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-  const PublisherOptions & options)
+  const PublisherOptions & options = PublisherOptions{})
 {
   return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
     node, topic_name, qos, options);
@@ -70,36 +52,16 @@ typename Publisher<MessageT>::SharedPtr create_publisher(
 template <typename MessageT>
 typename Publisher<MessageT>::SharedPtr create_publisher(
   rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth,
-  const PublisherOptions & options)
+  const PublisherOptions & options = PublisherOptions{})
 {
   return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
-}
-
-template <typename MessageT, typename Func>
-typename Subscription<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback)
-{
-  const agnocast::SubscriptionOptions options;
-  return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
-    node, topic_name, qos, std::forward<Func>(callback), options);
-}
-
-template <typename MessageT, typename Func>
-typename Subscription<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth,
-  Func && callback)
-{
-  const agnocast::SubscriptionOptions options;
-  return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
-    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
-    std::forward<Func>(callback), options);
 }
 
 template <typename MessageT, typename Func>
 typename Subscription<MessageT>::SharedPtr create_subscription(
   rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
-  agnocast::SubscriptionOptions options)
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
   return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, qos, std::forward<Func>(callback), options);
@@ -108,7 +70,7 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
 template <typename MessageT, typename Func>
 typename Subscription<MessageT>::SharedPtr create_subscription(
   rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth,
-  Func && callback, agnocast::SubscriptionOptions options)
+  Func && callback, agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
   return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
