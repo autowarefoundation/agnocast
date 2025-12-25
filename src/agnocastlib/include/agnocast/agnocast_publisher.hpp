@@ -24,6 +24,7 @@
 
 namespace agnocast
 {
+class Node;
 
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
@@ -52,22 +53,35 @@ class BasicPublisher
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
   PublisherOptions options_;
 
+  template <typename NodeT>
+  void constructor_impl(NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
+  {
+    topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
+    id_ = initialize_publisher(topic_name_, node->get_fully_qualified_name(), qos);
+    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+  }
+
 public:
   using SharedPtr = std::shared_ptr<BasicPublisher<MessageT, BridgeRequestPolicy>>;
 
   BasicPublisher(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & /*options*/)
-  : topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
   {
+    constructor_impl(node, topic_name, qos);
+
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(
         node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
       topic_name_.c_str(), qos.depth());
+  }
 
-    id_ = initialize_publisher(topic_name_, node->get_fully_qualified_name(), qos);
-    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+  BasicPublisher(agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
+  {
+    constructor_impl(node, topic_name, qos);
+
+    // TODO: CARET tracepoint for agnocast::Node
   }
 
   ~BasicPublisher()

@@ -42,6 +42,12 @@ target_include_directories(no_rclcpp_listener PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
+add_executable(no_rclcpp_pubsub src/no_rclcpp_pubsub.cpp)
+ament_target_dependencies(no_rclcpp_pubsub agnocastlib agnocast_sample_interfaces)
+target_include_directories(no_rclcpp_pubsub PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+
 add_executable(client src/minimal_client.cpp)
 ament_target_dependencies(client rclcpp agnocastlib agnocast_sample_interfaces)
 target_include_directories(client PRIVATE
@@ -87,6 +93,9 @@ install(TARGETS cie_talker
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS no_rclcpp_listener
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS no_rclcpp_pubsub
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS client

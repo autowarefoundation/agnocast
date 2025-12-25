@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
@@ -125,6 +126,20 @@ public:
   std::vector<rclcpp::Parameter> get_parameters(const std::vector<std::string> & names) const
   {
     return node_parameters_->get_parameters(names);
+  }
+
+  template <typename MessageT>
+  typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
+    const std::string & topic_name, const rclcpp::QoS & qos)
+  {
+    return std::make_shared<Publisher<MessageT>>(this, topic_name, qos);
+  }
+
+  template <typename MessageT>
+  typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
+    const std::string & topic_name, size_t queue_size)
+  {
+    return create_publisher<MessageT>(topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)));
   }
 
   template <typename MessageT, typename Func>
