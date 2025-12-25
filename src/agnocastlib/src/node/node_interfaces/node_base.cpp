@@ -1,6 +1,6 @@
-#include "agnocast/node_interfaces/node_base.hpp"
+#include "agnocast/node/node_interfaces/node_base.hpp"
 
-#include "agnocast/agnocast_context.hpp"
+#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/contexts/default_context.hpp"
 #include "rclcpp/logging.hpp"
 

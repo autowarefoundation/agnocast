@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/node_interfaces/node_base.hpp"
+#include "agnocast/node/node_interfaces/node_base.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/node_interfaces/node_topics_interface.hpp"
 

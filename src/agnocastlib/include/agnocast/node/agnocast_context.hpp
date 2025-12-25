@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/agnocast_arguments.hpp"
+#include "agnocast/node/agnocast_arguments.hpp"
 
 #include <mutex>
 #include <string>

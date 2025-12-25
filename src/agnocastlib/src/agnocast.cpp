@@ -1,9 +1,9 @@
 #include "agnocast/agnocast.hpp"
 
-#include "agnocast/agnocast_bridge_manager.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
+#include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
 #include <dlfcn.h>
 #include <sys/types.h>

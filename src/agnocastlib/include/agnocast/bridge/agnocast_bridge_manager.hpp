@@ -1,8 +1,8 @@
 #pragma once
 
-#include "agnocast/agnocast_bridge_ipc_event_loop.hpp"
-#include "agnocast/agnocast_bridge_loader.hpp"
 #include "agnocast/agnocast_multi_threaded_executor.hpp"
+#include "agnocast/bridge/agnocast_bridge_ipc_event_loop.hpp"
+#include "agnocast/bridge/agnocast_bridge_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <memory>

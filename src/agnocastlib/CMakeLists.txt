@@ -27,15 +27,15 @@ find_package(cie_config_msgs REQUIRED)
 find_package(cie_thread_configurator REQUIRED)
 
 add_library(agnocast SHARED
-  src/agnocast.cpp src/agnocast_arguments.cpp src/agnocast_context.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
+  src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
   src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
-  src/agnocast_callback_isolated_executor.cpp src/agnocast_only_executor.cpp
-  src/agnocast_only_single_threaded_executor.cpp src/agnocast_only_multi_threaded_executor.cpp
+  src/agnocast_callback_isolated_executor.cpp
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
-  src/agnocast_node.cpp src/node_interfaces/node_base.cpp
-  src/node_interfaces/node_parameters.cpp src/node_interfaces/node_topics.cpp
-  src/agnocast_bridge_ipc_event_loop.cpp src/agnocast_bridge_loader.cpp src/agnocast_bridge_manager.cpp)
+  src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp
+  src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
+  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp
+  src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp)
 
 ament_target_dependencies(agnocast cie_thread_configurator)
 

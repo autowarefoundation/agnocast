@@ -1,11 +1,11 @@
 #pragma once
 
-#include "agnocast/agnocast_arguments.hpp"
-#include "agnocast/agnocast_context.hpp"
 #include "agnocast/agnocast_subscription.hpp"
-#include "agnocast/node_interfaces/node_base.hpp"
-#include "agnocast/node_interfaces/node_parameters.hpp"
-#include "agnocast/node_interfaces/node_topics.hpp"
+#include "agnocast/node/agnocast_arguments.hpp"
+#include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/node_interfaces/node_base.hpp"
+#include "agnocast/node/node_interfaces/node_parameters.hpp"
+#include "agnocast/node/node_interfaces/node_topics.hpp"
 #include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 

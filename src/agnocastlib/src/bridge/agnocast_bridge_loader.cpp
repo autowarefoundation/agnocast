@@ -1,4 +1,4 @@
-#include "agnocast/agnocast_bridge_loader.hpp"
+#include "agnocast/bridge/agnocast_bridge_loader.hpp"
 
 #include "agnocast/agnocast_utils.hpp"
 

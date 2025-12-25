@@ -1,7 +1,7 @@
-#include "agnocast/agnocast_node.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
-#include "agnocast/agnocast_arguments.hpp"
-#include "agnocast/agnocast_context.hpp"
+#include "agnocast/node/agnocast_arguments.hpp"
+#include "agnocast/node/agnocast_context.hpp"
 
 namespace agnocast
 {

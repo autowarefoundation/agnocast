@@ -8,8 +8,10 @@ src/agnocastlib/src/*executor* @Koichi98 @atsushi421 @sykwer
 src/agnocastlib/include/agnocast/*executor* @Koichi98 @atsushi421 @sykwer
 src/agnocastlib/src/*component_container* @Koichi98 @atsushi421 @sykwer
 src/agnocastlib/include/agnocast/*component_container* @Koichi98 @atsushi421 @sykwer
-src/agnocastlib/src/*bridge* @kobayu858 @Koichi98 @sykwer
-src/agnocastlib/include/agnocast/*bridge* @kobayu858 @Koichi98 @sykwer 
+src/agnocastlib/src/bridge @kobayu858 @Koichi98 @sykwer
+src/agnocastlib/include/agnocast/bridge @kobayu858 @Koichi98 @sykwer 
+src/agnocastlib/src/node @Koichi98 @sykwer
+src/agnocastlib/include/agnocast/node @Koichi98 @sykwer
 
 # ros2agnocast
 src/ros2agnocast/ @TetsuKawa @veqcc @atsushi421 @Koichi98 @sykwer

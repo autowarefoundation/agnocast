@@ -1,4 +1,4 @@
-#include "agnocast/node_interfaces/node_topics.hpp"
+#include "agnocast/node/node_interfaces/node_topics.hpp"
 
 #include <rcl/expand_topic_name.h>
 #include <rcl/remap.h>

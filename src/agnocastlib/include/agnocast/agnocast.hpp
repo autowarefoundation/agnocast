@@ -1,19 +1,19 @@
 #pragma once
 
-#include "agnocast/agnocast_bridge_node.hpp"
 #include "agnocast/agnocast_callback_info.hpp"
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/agnocast_client.hpp"
-#include "agnocast/agnocast_context.hpp"
 #include "agnocast/agnocast_multi_threaded_executor.hpp"
-#include "agnocast/agnocast_node.hpp"
-#include "agnocast/agnocast_only_executor.hpp"
-#include "agnocast/agnocast_only_multi_threaded_executor.hpp"
-#include "agnocast/agnocast_only_single_threaded_executor.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_single_threaded_executor.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_node.hpp"
+#include "agnocast/node/agnocast_only_executor.hpp"
+#include "agnocast/node/agnocast_only_multi_threaded_executor.hpp"
+#include "agnocast/node/agnocast_only_single_threaded_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <fcntl.h>

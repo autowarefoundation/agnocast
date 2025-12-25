@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/agnocast_arguments.hpp"
+#include "agnocast/node/agnocast_arguments.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/context.hpp"
 #include "rclcpp/guard_condition.hpp"

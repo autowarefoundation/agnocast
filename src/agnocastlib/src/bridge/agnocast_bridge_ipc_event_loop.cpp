@@ -1,4 +1,4 @@
-#include "agnocast/agnocast_bridge_ipc_event_loop.hpp"
+#include "agnocast/bridge/agnocast_bridge_ipc_event_loop.hpp"
 
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"

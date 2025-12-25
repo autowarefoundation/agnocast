@@ -1,7 +1,7 @@
-#include "agnocast/node_interfaces/node_parameters.hpp"
+#include "agnocast/node/node_interfaces/node_parameters.hpp"
 
-#include "agnocast/agnocast_arguments.hpp"
-#include "agnocast/agnocast_context.hpp"
+#include "agnocast/node/agnocast_arguments.hpp"
+#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/exceptions/exceptions.hpp"
 
 #include <utility>

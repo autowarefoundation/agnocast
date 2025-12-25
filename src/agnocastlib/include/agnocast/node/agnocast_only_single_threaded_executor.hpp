@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/agnocast_only_executor.hpp"
+#include "agnocast/node/agnocast_only_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace agnocast

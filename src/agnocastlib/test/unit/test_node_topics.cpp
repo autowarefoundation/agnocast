@@ -1,4 +1,4 @@
-#include "agnocast/agnocast_node.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <gtest/gtest.h>
