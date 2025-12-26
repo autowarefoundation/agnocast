@@ -282,3 +282,4 @@ rm /dev/mqueue/agnocast_bridge_manager_daemon@*
 - [Clang-tidy Suppressions](./docs/clang_tidy_suppression.md)
 - [How to set environment variables](./docs/how_to_set_environment_variables.md)
 - [ros2 command extension](./docs/ros2_command_extension.md)
+- [agnocast::Node and rclcpp::Node interface comparison](./docs/agnocast_node_interface_comparison.md)
