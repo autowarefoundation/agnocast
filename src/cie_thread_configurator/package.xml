@@ -20,6 +20,7 @@
   <test_depend>ament_lint_common</test_depend>
 
   <depend>rclcpp</depend>
+  <depend>yaml-cpp</depend>
 
   <depend>cie_config_msgs</depend>
 
