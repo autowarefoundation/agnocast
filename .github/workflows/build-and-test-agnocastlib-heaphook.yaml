@@ -131,7 +131,7 @@ jobs:
       id: test
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
-        colcon test --event-handlers console_direct+ --ctest-args -R "test_unit_agnocastlib|test_integration_agnocastlib"
+        colcon test --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_integration_agnocastlib"
 
     - name: Display coverage report in PR comment
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
@@ -202,4 +202,4 @@ jobs:
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.heaphook_changed == 'true'
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
-        colcon test --event-handlers console_direct+ --ctest-args -R "test_integration_agnocast_heaphook"
+        colcon test --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
