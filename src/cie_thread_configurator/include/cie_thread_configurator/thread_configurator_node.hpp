@@ -7,6 +7,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 class ThreadConfiguratorNode : public rclcpp::Node
 {

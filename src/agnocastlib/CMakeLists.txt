@@ -155,7 +155,7 @@ if(BUILD_TESTING)
     test/integration/test_agnocast_heaphook.cpp)
   target_link_libraries(test_integration_agnocast_heaphook agnocast)
   set_tests_properties(test_integration_agnocast_heaphook PROPERTIES
-    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:;AGNOCAST_MEMPOOL_SIZE=1000000")
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:")
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)

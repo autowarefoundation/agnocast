@@ -10,26 +10,34 @@
 
 int shm_fd;
 
+struct initialize_agnocast_result
+{
+  void * mempool_ptr;
+  uint64_t mempool_size;
+};
+
 namespace agnocast
 {
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
-extern "C" void * initialize_agnocast(
-  const uint64_t shm_size, const unsigned char * heaphook_version_ptr,
-  const size_t heaphook_version_str_len)
+extern "C" struct initialize_agnocast_result initialize_agnocast(
+  const unsigned char * heaphook_version_ptr, const size_t heaphook_version_str_len)
 {
+  // 8GB: same as kernel module default
+  constexpr uint64_t shm_size = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+
   const std::string shm_name = "/agnocast_heaphook_test@" + std::to_string(getpid());
 
   int oflag = O_CREAT | O_RDWR;
   const int shm_mode = 0666;
   shm_fd = shm_open(shm_name.c_str(), oflag, shm_mode);
   if (shm_fd == -1) {
-    return nullptr;
+    return {nullptr, 0};
   }
 
   if (ftruncate(shm_fd, static_cast<off_t>(shm_size)) == -1) {
-    return nullptr;
+    return {nullptr, 0};
   }
 
   int prot = PROT_READ | PROT_WRITE;
@@ -38,10 +46,10 @@ extern "C" void * initialize_agnocast(
     shm_fd, 0);
 
   if (ret == MAP_FAILED) {
-    return nullptr;
+    return {nullptr, 0};
   }
 
-  return ret;
+  return {ret, shm_size};
 }
 #pragma GCC diagnostic pop
 

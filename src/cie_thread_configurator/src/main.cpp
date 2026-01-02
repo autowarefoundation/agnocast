@@ -120,10 +120,11 @@ int main(int argc, char * argv[])
   std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
 
   bool prerun_mode = false;
-  for (const auto & arg : args)
+  for (const auto & arg : args) {
     if (arg == "--prerun") {
       prerun_mode = true;
     }
+  }
 
   if (prerun_mode) {
     spin_prerun_node();
@@ -137,7 +138,9 @@ int main(int argc, char * argv[])
         break;
       }
 
-      if (arg == std::string("--config-file")) next = true;
+      if (arg == std::string("--config-file")) {
+        next = true;
+      }
     }
 
     spin_thread_configurator_node(filename);

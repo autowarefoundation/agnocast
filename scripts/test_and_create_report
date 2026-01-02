@@ -9,6 +9,13 @@ fi
 
 rm -rf build install log
 colcon build --cmake-args -DCOVERAGE=ON
+
+# Build and install heaphook for tests
+cd agnocast_heaphook
+cargo build --release
+cd ..
+cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/agnocastlib/lib/
+
 colcon test --event-handlers console_direct+
 lcov --capture --directory . --output-file coverage.info
 lcov --remove coverage.info '/usr/*' '*/test/*' '*gtest*' '*gmock*' '/opt/*' --output-file coverage_filtered.info

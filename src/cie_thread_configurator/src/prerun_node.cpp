@@ -20,7 +20,9 @@ PrerunNode::PrerunNode() : Node("prerun_node")
 
 void PrerunNode::topic_callback(const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
-  if (callback_group_ids_.find(msg->callback_group_id) != callback_group_ids_.end()) return;
+  if (callback_group_ids_.find(msg->callback_group_id) != callback_group_ids_.end()) {
+    return;
+  }
 
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: tid=%ld | %s", msg->thread_id,

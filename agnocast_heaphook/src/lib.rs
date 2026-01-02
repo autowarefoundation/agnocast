@@ -873,7 +873,7 @@ mod tests {
 
     #[test]
     fn test_realloc_with_null_pointer() {
-        // If the pointer is null, `realloc` bahaves like `malloc`.
+        // If the pointer is null, `realloc` behaves like `malloc`.
 
         // If the size is 0, the behavior is implementation-defined. It must not panic.
         let _ = unsafe { libc::realloc(ptr::null_mut(), 0) };

@@ -21,7 +21,9 @@ std::string create_callback_group_id(
   std::stringstream ss;
 
   std::string ns = std::string(node->get_namespace());
-  if (ns != "/") ns = ns + "/";
+  if (ns != "/") {
+    ns = ns + "/";
+  }
 
   ss << ns << node->get_name() << "@";
 
@@ -121,7 +123,9 @@ std::map<std::string, std::string> get_hardware_info()
 
   while (std::getline(iss, line)) {
     size_t colon_pos = line.find(':');
-    if (colon_pos == std::string::npos) continue;
+    if (colon_pos == std::string::npos) {
+      continue;
+    }
 
     std::string key = line.substr(0, colon_pos);
     std::string value = line.substr(colon_pos + 1);
