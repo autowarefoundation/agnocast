@@ -4,6 +4,9 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/exceptions/exceptions.hpp"
 
+#include <cmath>
+#include <limits>
+#include <sstream>
 #include <utility>
 
 namespace agnocast::node_interfaces
@@ -85,6 +88,122 @@ const rclcpp::ParameterValue & declare_parameter_helper(
   // - parameter events publishing: not implemented
 
   return parameters.at(name).value;
+}
+
+// see https://en.cppreference.com/w/cpp/types/numeric_limits/epsilon
+bool are_doubles_equal(double x, double y, double ulp = 100.0)
+{
+  return std::abs(x - y) <= std::numeric_limits<double>::epsilon() * std::abs(x + y) * ulp;
+}
+
+std::string format_range_reason(const std::string & name, const char * range_type)
+{
+  std::ostringstream ss;
+  ss << "Parameter {" << name << "} doesn't comply with " << range_type << " range.";
+  return ss.str();
+}
+
+rcl_interfaces::msg::SetParametersResult check_parameter_value_in_range(
+  const rcl_interfaces::msg::ParameterDescriptor & descriptor, const rclcpp::ParameterValue & value)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  if (!descriptor.integer_range.empty() && value.get_type() == rclcpp::PARAMETER_INTEGER) {
+    int64_t v = value.get<int64_t>();
+    auto integer_range = descriptor.integer_range.at(0);
+    if (v == integer_range.from_value || v == integer_range.to_value) {
+      return result;
+    }
+    if ((v < integer_range.from_value) || (v > integer_range.to_value)) {
+      result.successful = false;
+      result.reason = format_range_reason(descriptor.name, "integer");
+      return result;
+    }
+    if (integer_range.step == 0) {
+      return result;
+    }
+    if (((v - integer_range.from_value) % integer_range.step) == 0) {
+      return result;
+    }
+    result.successful = false;
+    result.reason = format_range_reason(descriptor.name, "integer");
+    return result;
+  }
+
+  if (!descriptor.floating_point_range.empty() && value.get_type() == rclcpp::PARAMETER_DOUBLE) {
+    double v = value.get<double>();
+    auto fp_range = descriptor.floating_point_range.at(0);
+    if (are_doubles_equal(v, fp_range.from_value) || are_doubles_equal(v, fp_range.to_value)) {
+      return result;
+    }
+    if ((v < fp_range.from_value) || (v > fp_range.to_value)) {
+      result.successful = false;
+      result.reason = format_range_reason(descriptor.name, "floating point");
+      return result;
+    }
+    if (fp_range.step == 0.0) {
+      return result;
+    }
+    double rounded_div = std::round((v - fp_range.from_value) / fp_range.step);
+    if (are_doubles_equal(v, fp_range.from_value + rounded_div * fp_range.step)) {
+      return result;
+    }
+    result.successful = false;
+    result.reason = format_range_reason(descriptor.name, "floating point");
+    return result;
+  }
+  return result;
+}
+
+[[maybe_unused]] std::string format_type_reason(
+  const std::string & name, const std::string & old_type, const std::string & new_type)
+{
+  std::ostringstream ss;
+  // WARN: A condition later depends on this message starting with "Wrong parameter type",
+  // check `declare_parameter` if you modify this!
+  ss << "Wrong parameter type, parameter {" << name << "} is of type {" << old_type
+     << "}, setting it to {" << new_type << "} is not allowed.";
+  return ss.str();
+}
+
+// Return true if parameter values comply with the descriptors in parameter_infos.
+[[maybe_unused]] rcl_interfaces::msg::SetParametersResult check_parameters(
+  std::map<std::string, ParameterInfo> & parameter_infos,
+  const std::vector<rclcpp::Parameter> & parameters, bool allow_undeclared)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  for (const rclcpp::Parameter & parameter : parameters) {
+    const std::string & name = parameter.get_name();
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+    if (allow_undeclared) {
+      auto it = parameter_infos.find(name);
+      if (it != parameter_infos.cend()) {
+        descriptor = it->second.descriptor;
+      } else {
+        // implicitly declared parameters are dynamically typed!
+        descriptor.dynamic_typing = true;
+      }
+    } else {
+      descriptor = parameter_infos[name].descriptor;
+    }
+    if (descriptor.name.empty()) {
+      descriptor.name = name;
+    }
+    const auto new_type = parameter.get_type();
+    const auto specified_type = static_cast<rclcpp::ParameterType>(descriptor.type);
+    result.successful = descriptor.dynamic_typing || specified_type == new_type;
+    if (!result.successful) {
+      result.reason =
+        format_type_reason(name, rclcpp::to_string(specified_type), rclcpp::to_string(new_type));
+      return result;
+    }
+    result = check_parameter_value_in_range(descriptor, parameter.get_parameter_value());
+    if (!result.successful) {
+      return result;
+    }
+  }
+  return result;
 }
 
 }  // namespace
