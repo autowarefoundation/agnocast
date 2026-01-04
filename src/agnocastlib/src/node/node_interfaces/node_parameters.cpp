@@ -4,6 +4,8 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/exceptions/exceptions.hpp"
 
+#include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -155,7 +157,7 @@ rcl_interfaces::msg::SetParametersResult check_parameter_value_in_range(
   return result;
 }
 
-[[maybe_unused]] std::string format_type_reason(
+std::string format_type_reason(
   const std::string & name, const std::string & old_type, const std::string & new_type)
 {
   std::ostringstream ss;
@@ -167,7 +169,7 @@ rcl_interfaces::msg::SetParametersResult check_parameter_value_in_range(
 }
 
 // Return true if parameter values comply with the descriptors in parameter_infos.
-[[maybe_unused]] rcl_interfaces::msg::SetParametersResult check_parameters(
+rcl_interfaces::msg::SetParametersResult check_parameters(
   std::map<std::string, ParameterInfo> & parameter_infos,
   const std::vector<rclcpp::Parameter> & parameters, bool allow_undeclared)
 {
@@ -204,6 +206,85 @@ rcl_interfaces::msg::SetParametersResult check_parameter_value_in_range(
     }
   }
   return result;
+}
+
+rcl_interfaces::msg::SetParametersResult set_parameters_atomically_common(
+  const std::vector<rclcpp::Parameter> & parameters,
+  std::map<std::string, ParameterInfo> & parameter_infos, bool allow_undeclared = false)
+{
+  // Check if the value being set complies with the descriptor.
+  rcl_interfaces::msg::SetParametersResult result =
+    check_parameters(parameter_infos, parameters, allow_undeclared);
+  if (!result.successful) {
+    return result;
+  }
+  // TODO(Koichi98): rclcpp calls on_parameters_set callbacks here.
+
+  // If accepted, actually set the values.
+  for (const auto & parameter : parameters) {
+    const std::string & name = parameter.get_name();
+    parameter_infos[name].descriptor.name = parameter.get_name();
+    parameter_infos[name].descriptor.type = parameter.get_type();
+    parameter_infos[name].value = parameter.get_parameter_value();
+  }
+
+  return result;
+}
+
+rcl_interfaces::msg::SetParametersResult declare_parameter_common(
+  const std::string & name, const rclcpp::ParameterValue & default_value,
+  const rcl_interfaces::msg::ParameterDescriptor & parameter_descriptor,
+  std::map<std::string, ParameterInfo> & parameters_out,
+  const std::map<std::string, rclcpp::ParameterValue> & overrides, bool ignore_override = false)
+{
+  std::map<std::string, ParameterInfo> parameter_infos{{name, ParameterInfo()}};
+  parameter_infos.at(name).descriptor = parameter_descriptor;
+
+  // Use the value from the overrides if available, otherwise use the default.
+  const rclcpp::ParameterValue * initial_value = &default_value;
+  auto overrides_it = overrides.find(name);
+  if (!ignore_override && overrides_it != overrides.end()) {
+    initial_value = &overrides_it->second;
+  }
+
+  // If there is no initial value, then skip initialization
+  if (initial_value->get_type() == rclcpp::PARAMETER_NOT_SET) {
+    // Add declared parameters to storage (without a value)
+    parameter_infos[name].descriptor.name = name;
+    if (parameter_descriptor.dynamic_typing) {
+      parameter_infos[name].descriptor.type = rclcpp::PARAMETER_NOT_SET;
+    } else {
+      parameter_infos[name].descriptor.type = parameter_descriptor.type;
+    }
+    parameters_out[name] = parameter_infos.at(name);
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    return result;
+  }
+
+  // Check with the user's callback to see if the initial value can be set.
+  std::vector<rclcpp::Parameter> parameter_wrappers{rclcpp::Parameter(name, *initial_value)};
+  // This function also takes care of default vs initial value.
+  auto result = set_parameters_atomically_common(parameter_wrappers, parameter_infos);
+
+  if (!result.successful) {
+    return result;
+  }
+
+  // Add declared parameters to storage.
+  parameters_out[name] = parameter_infos.at(name);
+
+  // TODO(Koichi98): rclcpp extends the given parameter event here.
+
+  return result;
+}
+
+template <typename ParameterVectorType>
+auto find_parameter_by_name(ParameterVectorType & parameters, const std::string & name)
+{
+  return std::find_if(parameters.begin(), parameters.end(), [&](const auto & parameter) {
+    return parameter.get_name() == name;
+  });
 }
 
 }  // namespace
@@ -306,10 +387,161 @@ std::vector<rcl_interfaces::msg::SetParametersResult> NodeParameters::set_parame
 rcl_interfaces::msg::SetParametersResult NodeParameters::set_parameters_atomically(
   const std::vector<rclcpp::Parameter> & parameters)
 {
-  // TODO(Koichi98)
-  (void)parameters;
-  throw std::runtime_error(
-    "NodeParameters::set_parameters_atomically is not yet implemented in agnocast");
+  std::lock_guard<std::mutex> lock(parameters_mutex_);
+  // Note: rclcpp uses ParameterMutationRecursionGuard here to prevent parameter modification
+  // from within callbacks. Not needed in Agnocast since callbacks are not implemented.
+
+  rcl_interfaces::msg::SetParametersResult result;
+
+  // Check if any of the parameters are read-only, or if any parameters are not
+  // declared.
+  // If not declared, keep track of them in order to declare them later, when
+  // undeclared parameters are allowed, and if they're not allowed, fail.
+  std::vector<const rclcpp::Parameter *> parameters_to_be_declared;
+  for (const auto & parameter : parameters) {
+    const std::string & name = parameter.get_name();
+
+    // Check to make sure the parameter name is valid.
+    if (name.empty()) {
+      throw rclcpp::exceptions::InvalidParametersException("parameter name must not be empty");
+    }
+
+    // Check to see if it is declared.
+    auto parameter_info = parameters_.find(name);
+    if (parameter_info == parameters_.end()) {
+      // If not check to see if undeclared parameters are allowed, ...
+      if (allow_undeclared_) {
+        // If so, mark the parameter to be declared for the user implicitly.
+        parameters_to_be_declared.push_back(&parameter);
+        // continue as it cannot be read-only, and because the declare will
+        // implicitly set the parameter and parameter_infos is for setting only.
+        continue;
+      }
+      // If not, then throw the exception as documented.
+      throw rclcpp::exceptions::ParameterNotDeclaredException(
+        "parameter '" + name + "' cannot be set because it was not declared");
+    }
+
+    // Check to see if it is read-only.
+    if (parameter_info->second.descriptor.read_only) {
+      result.successful = false;
+      result.reason = "parameter '" + name + "' cannot be set because it is read-only";
+      return result;
+    }
+  }
+
+  // Declare parameters into a temporary "staging area", incase one of the declares fail.
+  // We will use the staged changes as input to the "set atomically" action.
+  // We explicitly avoid calling the user callback here, so that it may be called once, with
+  // all the other parameters to be set (already declared parameters).
+  std::map<std::string, ParameterInfo> staged_parameter_changes;
+
+  // Implicit declare uses dynamic type descriptor.
+  rcl_interfaces::msg::ParameterDescriptor descriptor;
+  descriptor.dynamic_typing = true;
+  for (const auto * parameter_to_be_declared : parameters_to_be_declared) {
+    // This should not throw, because we validated the name and checked that
+    // the parameter was not already declared.
+    result = declare_parameter_common(
+      parameter_to_be_declared->get_name(), parameter_to_be_declared->get_parameter_value(),
+      descriptor, staged_parameter_changes, parameter_overrides_,
+      true);  // ignore_override = true
+    if (!result.successful) {
+      // Declare failed, return knowing that nothing was changed because the
+      // staged changes were not applied.
+      return result;
+    }
+  }
+
+  // If there were implicitly declared parameters, then we may need to copy the input parameters
+  // and then assign the value that was selected after the declare (could be affected by the
+  // initial parameter values).
+  // NOTE: In the current implementation, since declare_parameter_common is called with
+  // ignore_override=true, the staged value should always match the user input value.
+  // This code path is likely never executed, but is kept to align with rclcpp.
+  const std::vector<rclcpp::Parameter> * parameters_to_be_set = &parameters;
+  std::vector<rclcpp::Parameter> parameters_copy;
+  if (!staged_parameter_changes.empty()) {  // If there were any implicitly declared parameters.
+    bool any_initial_values_used = false;
+    for (const auto & staged_parameter_change : staged_parameter_changes) {
+      auto it = find_parameter_by_name(parameters, staged_parameter_change.first);
+      if (it->get_parameter_value() != staged_parameter_change.second.value) {
+        // In this case, the value of the staged parameter differs from the
+        // input from the user, and therefore we need to update things before setting.
+        any_initial_values_used = true;
+        // No need to search further since at least one initial value needs to be used.
+        break;
+      }
+    }
+    if (any_initial_values_used) {
+      parameters_copy = parameters;
+      for (const auto & staged_parameter_change : staged_parameter_changes) {
+        auto it = find_parameter_by_name(parameters_copy, staged_parameter_change.first);
+        *it =
+          rclcpp::Parameter(staged_parameter_change.first, staged_parameter_change.second.value);
+      }
+      parameters_to_be_set = &parameters_copy;
+    }
+  }
+
+  // Collect parameters who will have had their type changed to
+  // rclcpp::PARAMETER_NOT_SET so they can later be implicitly undeclared.
+  std::vector<const rclcpp::Parameter *> parameters_to_be_undeclared;
+  for (const auto & parameter : *parameters_to_be_set) {
+    if (rclcpp::PARAMETER_NOT_SET == parameter.get_type()) {
+      auto it = parameters_.find(parameter.get_name());
+      if (it != parameters_.end() && rclcpp::PARAMETER_NOT_SET != it->second.value.get_type()) {
+        if (!it->second.descriptor.dynamic_typing) {
+          result.reason = "cannot undeclare a statically typed parameter";
+          result.successful = false;
+          return result;
+        }
+        parameters_to_be_undeclared.push_back(&parameter);
+      }
+    }
+  }
+
+  // Set all of the parameters including the ones declared implicitly above.
+  result = set_parameters_atomically_common(
+    // either the original parameters given by the user, or ones updated with initial values
+    *parameters_to_be_set,
+    // they are actually set on the official parameter storage
+    parameters_,
+    allow_undeclared_);  // allow undeclared
+
+  // If not successful, then stop here.
+  if (!result.successful) {
+    return result;
+  }
+
+  // If successful, then update the parameter infos from the implicitly declared parameter's.
+  for (const auto & kv_pair : staged_parameter_changes) {
+    // assumption: the parameter is already present in parameters_ due to the above "set"
+    assert(lockless_has_parameter(parameters_, kv_pair.first));
+    // assumption: the value in parameters_ is the same as the value resulting from the declare
+    assert(parameters_[kv_pair.first].value == kv_pair.second.value);
+    // This assignment should not change the name, type, or value, but may
+    // change other things from the ParameterInfo.
+    parameters_[kv_pair.first] = kv_pair.second;
+  }
+
+  // Undeclare parameters that need to be.
+  for (const auto * parameter_to_undeclare : parameters_to_be_undeclared) {
+    auto it = parameters_.find(parameter_to_undeclare->get_name());
+    // assumption: the parameter to be undeclared should be in the parameter infos map
+    assert(it != parameters_.end());
+    if (it != parameters_.end()) {
+      // TODO(Koichi98): rclcpp updates the parameter event message here.
+      parameters_.erase(it);
+    }
+  }
+
+  // TODO(Koichi98): rclcpp updates the parameter event message for parameters which were only set
+  // here.
+
+  // TODO(Koichi98): rclcpp publishes the parameter event here.
+
+  return result;
 }
 
 std::vector<rclcpp::Parameter> NodeParameters::get_parameters(
