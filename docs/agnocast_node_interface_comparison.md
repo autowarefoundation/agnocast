@@ -57,7 +57,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `for_each_callback_group()` | ✓ | **Full Support** | - | |
 | `get_notify_guard_condition()` | ✗ | **Throws Exception** | Yes | Not needed as agnocast uses epoll instead of condition variables, but planned for loading into Component Container |
 | `get_associated_with_executor_atomic()` | ✓ | **Full Support** | - | |
-| `resolve_topic_or_service_name()` | ✗ | **Not Implemented** | Yes | **Still TODO**, returns empty string. Use NodeTopics' `resolve_topic_name()` instead |
+| `resolve_topic_or_service_name()` | ✓ | **Full Support** | - | Used by NodeTopics and (future) NodeServices |
 | `get_use_intra_process_default()` | ⚠ | **API Only** | No | Returns value while logging a warning. agnocast uses its own shared memory IPC, so rclcpp's intra_process_communication is not used. |
 | `get_enable_topic_statistics_default()` | ⚠ | **API Only** | Yes | Returns value passed from NodeOptions. |
 

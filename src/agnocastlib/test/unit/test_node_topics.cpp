@@ -6,7 +6,7 @@
 class NodeTopicsExpandTest : public ::testing::Test
 {
 protected:
-  void SetUp() override { GTEST_SKIP() << "Skipped until resolve_topic_name() is implemented"; }
+  void SetUp() override {}
 
   void TearDown() override {}
 
@@ -36,20 +36,18 @@ TEST_F(NodeTopicsExpandTest, absolute_path_with_node_substitution)
   EXPECT_EQ(node_topics->resolve_topic_name("/{node}", true), "/my_node");
 }
 
-TEST_F(NodeTopicsExpandTest, absolute_path_with_ns_substitution)
+TEST_F(NodeTopicsExpandTest, absolute_path_with_ns_substitution_throws)
 {
   auto node_topics = create_node_topics("my_node", "/my_ns");
-  // Produces invalid "//", but matches rcl_expand_topic_name. rmw_validate_full_topic_name catches
-  // this.
-  EXPECT_EQ(node_topics->resolve_topic_name("/{ns}", true), "//my_ns");
+  // Produces invalid "//", which is rejected by rmw_validate_full_topic_name
+  EXPECT_THROW(node_topics->resolve_topic_name("/{ns}", true), std::runtime_error);
 }
 
-TEST_F(NodeTopicsExpandTest, absolute_path_with_namespace_substitution)
+TEST_F(NodeTopicsExpandTest, absolute_path_with_namespace_substitution_throws)
 {
   auto node_topics = create_node_topics("my_node", "/my_ns");
-  // Same as above: produces invalid "//" but matches rcl_expand_topic_name behavior.
-  // Validation should catch this in the full resolve_topic_name flow.
-  EXPECT_EQ(node_topics->resolve_topic_name("/{namespace}", true), "//my_ns");
+  // Produces invalid "//", which is rejected by rmw_validate_full_topic_name
+  EXPECT_THROW(node_topics->resolve_topic_name("/{namespace}", true), std::runtime_error);
 }
 
 // =========================================
@@ -130,10 +128,11 @@ TEST_F(NodeTopicsExpandTest, root_namespace_node_substitution)
   EXPECT_EQ(node_topics->resolve_topic_name("{node}", true), "/my_node");
 }
 
-TEST_F(NodeTopicsExpandTest, root_namespace_ns_substitution)
+TEST_F(NodeTopicsExpandTest, root_namespace_ns_substitution_throws)
 {
   auto node_topics = create_node_topics("my_node", "/");
-  EXPECT_EQ(node_topics->resolve_topic_name("{ns}", true), "/");
+  // Produces "/" which ends with '/', rejected by rmw_validate_full_topic_name
+  EXPECT_THROW(node_topics->resolve_topic_name("{ns}", true), std::runtime_error);
 }
 
 // =========================================
@@ -146,13 +145,11 @@ TEST_F(NodeTopicsExpandTest, multiple_substitutions)
   EXPECT_EQ(node_topics->resolve_topic_name("{ns}/{node}/topic", true), "/my_ns/my_node/topic");
 }
 
-TEST_F(NodeTopicsExpandTest, tilde_with_multiple_substitutions)
+TEST_F(NodeTopicsExpandTest, tilde_with_multiple_substitutions_throws)
 {
   auto node_topics = create_node_topics("my_node", "/my_ns");
-  // This also produces "//" in the middle, which is invalid but matches rcl_expand_topic_name.
-  // rmw_validate_full_topic_name() should catch this.
-  EXPECT_EQ(
-    node_topics->resolve_topic_name("~/{ns}/{node}", true), "/my_ns/my_node//my_ns/my_node");
+  // Produces "//" in the middle, which is rejected by rmw_validate_full_topic_name
+  EXPECT_THROW(node_topics->resolve_topic_name("~/{ns}/{node}", true), std::runtime_error);
 }
 
 // =========================================
@@ -162,13 +159,13 @@ TEST_F(NodeTopicsExpandTest, tilde_with_multiple_substitutions)
 TEST_F(NodeTopicsExpandTest, empty_topic_name_throws)
 {
   auto node_topics = create_node_topics("my_node", "/my_ns");
-  EXPECT_THROW(node_topics->resolve_topic_name("", true), std::invalid_argument);
+  EXPECT_THROW(node_topics->resolve_topic_name("", true), std::runtime_error);
 }
 
 TEST_F(NodeTopicsExpandTest, unknown_substitution_throws)
 {
   auto node_topics = create_node_topics("my_node", "/my_ns");
-  EXPECT_THROW(node_topics->resolve_topic_name("{unknown}", true), std::invalid_argument);
+  EXPECT_THROW(node_topics->resolve_topic_name("{unknown}", true), std::runtime_error);
 }
 
 // =========================================

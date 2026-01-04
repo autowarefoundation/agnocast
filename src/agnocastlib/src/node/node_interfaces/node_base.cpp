@@ -5,7 +5,11 @@
 #include "rclcpp/logging.hpp"
 
 #include <rcl/error_handling.h>
+#include <rcl/expand_topic_name.h>
 #include <rcl/remap.h>
+#include <rcutils/strdup.h>
+#include <rmw/error_handling.h>
+#include <rmw/validate_full_topic_name.h>
 
 #include <stdexcept>
 #include <utility>
@@ -205,14 +209,112 @@ bool NodeBase::get_enable_topic_statistics_default() const
   return enable_topic_statistics_default_;
 }
 
+// This implementation aligns with rcl_resolve_name() in rcl/src/rcl/node_resolve_name.c
 std::string NodeBase::resolve_topic_or_service_name(
   const std::string & name, bool is_service, bool only_expand) const
 {
-  (void)name;
-  (void)is_service;
-  (void)only_expand;
-  // TODO(Koichi98)
-  return "";
+  rcl_allocator_t allocator = rcl_get_default_allocator();
+
+  std::string output_topic_name;
+
+  // Create default topic name substitutions map
+  rcutils_string_map_t substitutions_map = rcutils_get_zero_initialized_string_map();
+  rcutils_ret_t rcutils_ret = rcutils_string_map_init(&substitutions_map, 0, allocator);
+  if (rcutils_ret != RCUTILS_RET_OK) {
+    rcutils_error_string_t error = rcutils_get_error_string();
+    rcutils_reset_error();
+    if (RCUTILS_RET_BAD_ALLOC == rcutils_ret) {
+      throw std::bad_alloc();
+    }
+    throw std::runtime_error(&error.str[0]);
+  }
+
+  char * expanded_topic_name = nullptr;
+  char * remapped_topic_name = nullptr;
+  int validation_result = 0;
+  rmw_ret_t rmw_ret = RMW_RET_OK;
+  rcl_ret_t ret = rcl_get_default_topic_name_substitutions(&substitutions_map);
+  if (ret != RCL_RET_OK) {
+    if (RCL_RET_BAD_ALLOC != ret) {
+      ret = RCL_RET_ERROR;
+    }
+    goto cleanup;  // NOLINT(cppcoreguidelines-avoid-goto, hicpp-avoid-goto)
+  }
+
+  // expand topic name
+  ret = rcl_expand_topic_name(
+    name.c_str(), node_name_.c_str(), namespace_.c_str(), &substitutions_map, allocator,
+    &expanded_topic_name);
+  if (RCL_RET_OK != ret) {
+    goto cleanup;  // NOLINT(cppcoreguidelines-avoid-goto, hicpp-avoid-goto)
+  }
+
+  // remap topic name
+  if (!only_expand) {
+    if (is_service) {
+      ret = rcl_remap_service_name(
+        local_args_, global_args_, expanded_topic_name, node_name_.c_str(), namespace_.c_str(),
+        allocator, &remapped_topic_name);
+    } else {
+      ret = rcl_remap_topic_name(
+        local_args_, global_args_, expanded_topic_name, node_name_.c_str(), namespace_.c_str(),
+        allocator, &remapped_topic_name);
+    }
+    if (RCL_RET_OK != ret) {
+      goto cleanup;  // NOLINT(cppcoreguidelines-avoid-goto, hicpp-avoid-goto)
+    }
+  }
+
+  if (nullptr == remapped_topic_name) {
+    remapped_topic_name = expanded_topic_name;
+    expanded_topic_name = nullptr;
+  }
+
+  // validate the result
+  rmw_ret = rmw_validate_full_topic_name(remapped_topic_name, &validation_result, nullptr);
+  if (rmw_ret != RMW_RET_OK) {
+    rcutils_error_string_t error = rmw_get_error_string();
+    rmw_reset_error();
+    RCL_SET_ERROR_MSG(&error.str[0]);
+    ret = RCL_RET_ERROR;
+    goto cleanup;  // NOLINT(cppcoreguidelines-avoid-goto, hicpp-avoid-goto)
+  }
+  if (validation_result != RMW_TOPIC_VALID) {
+    RCL_SET_ERROR_MSG(rmw_full_topic_name_validation_result_string(validation_result));
+    ret = RCL_RET_TOPIC_NAME_INVALID;
+    goto cleanup;  // NOLINT(cppcoreguidelines-avoid-goto, hicpp-avoid-goto)
+  }
+
+  output_topic_name = remapped_topic_name;
+  remapped_topic_name = nullptr;
+
+cleanup:
+  rcutils_ret = rcutils_string_map_fini(&substitutions_map);
+  if (rcutils_ret != RCUTILS_RET_OK) {
+    rcutils_error_string_t error = rcutils_get_error_string();
+    rcutils_reset_error();
+    if (RCL_RET_OK == ret) {
+      RCL_SET_ERROR_MSG(&error.str[0]);
+      ret = RCL_RET_ERROR;
+    } else {
+      RCLCPP_ERROR(
+        rclcpp::get_logger(node_name_), "failed to fini string_map (%d) during error handling: %s",
+        rcutils_ret, &error.str[0]);
+    }
+  }
+  allocator.deallocate(expanded_topic_name, allocator.state);
+  allocator.deallocate(remapped_topic_name, allocator.state);
+  if (is_service && RCL_RET_TOPIC_NAME_INVALID == ret) {
+    ret = RCL_RET_SERVICE_NAME_INVALID;
+  }
+
+  if (ret != RCL_RET_OK) {
+    rcl_error_string_t error = rcl_get_error_string();
+    rcl_reset_error();
+    throw std::runtime_error(&error.str[0]);
+  }
+
+  return output_topic_name;
 }
 
 }  // namespace agnocast::node_interfaces
