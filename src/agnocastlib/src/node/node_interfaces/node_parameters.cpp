@@ -379,9 +379,15 @@ bool NodeParameters::has_parameter(const std::string & name) const
 std::vector<rcl_interfaces::msg::SetParametersResult> NodeParameters::set_parameters(
   const std::vector<rclcpp::Parameter> & parameters)
 {
-  // TODO(Koichi98)
-  (void)parameters;
-  throw std::runtime_error("NodeParameters::set_parameters is not yet implemented in agnocast");
+  std::vector<rcl_interfaces::msg::SetParametersResult> results;
+  results.reserve(parameters.size());
+
+  for (const auto & p : parameters) {
+    auto result = set_parameters_atomically(std::vector<rclcpp::Parameter>{p});
+    results.push_back(result);
+  }
+
+  return results;
 }
 
 rcl_interfaces::msg::SetParametersResult NodeParameters::set_parameters_atomically(

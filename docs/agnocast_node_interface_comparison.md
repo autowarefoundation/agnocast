@@ -95,8 +95,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_parameter(name, param&)` | ✓ | **Full Support** | - | |
 | `get_parameters(names)` | ✓ | **Full Support** | - | |
 | `get_parameter_overrides()` | ✓ | **Full Support** | - | |
-| `set_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
-| `set_parameters_atomically()` | ✗ | **Not Implemented** | Yes | Throws exception |
+| `set_parameters()` | ✓ | **Full Support** | - | Callbacks and parameter events not triggered (see below) |
+| `set_parameters_atomically()` | ✓ | **Full Support** | - | Callbacks and parameter events not triggered (see below) |
 | `get_parameters_by_prefix()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `describe_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `get_parameter_types()` | ✗ | **Not Implemented** | Yes | Throws exception |
@@ -110,6 +110,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 |------|------------------------|-------------------------|---------|
 | Parameter Service | Creates `ParameterService` (optional) | None | Yes |
 | Parameter Event Publishing | Publishes to `/parameter_events` | None | TBD |
+| On-Set Callbacks | `set_parameters*()` triggers registered callbacks | Callbacks not called | Yes |
 
 ---
 
@@ -237,9 +238,9 @@ The following tables compare methods that are **directly defined** in each class
 | `get_parameter()` | ✓ | ✓ | |
 | `get_parameter_or()` | ✓ | ✗ | |
 | `get_parameters()` | ✓ | ✓ | agnocast does not support prefix specification |
-| `set_parameter()` | ✓ | ✗ | |
-| `set_parameters()` | ✓ | ✗ | |
-| `set_parameters_atomically()` | ✓ | ✗ | |
+| `set_parameter()` | ✓ | ✓ | |
+| `set_parameters()` | ✓ | ✓ | |
+| `set_parameters_atomically()` | ✓ | ✓ | |
 | `describe_parameter()` | ✓ | ✗ | |
 | `describe_parameters()` | ✓ | ✗ | |
 | `get_parameter_types()` | ✓ | ✗ | |

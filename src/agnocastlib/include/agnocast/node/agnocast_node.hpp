@@ -124,6 +124,23 @@ public:
     return node_parameters_->get_parameters(names);
   }
 
+  rcl_interfaces::msg::SetParametersResult set_parameter(const rclcpp::Parameter & parameter)
+  {
+    return set_parameters_atomically({parameter});
+  }
+
+  std::vector<rcl_interfaces::msg::SetParametersResult> set_parameters(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    return node_parameters_->set_parameters(parameters);
+  }
+
+  rcl_interfaces::msg::SetParametersResult set_parameters_atomically(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    return node_parameters_->set_parameters_atomically(parameters);
+  }
+
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, const rclcpp::QoS & qos)
