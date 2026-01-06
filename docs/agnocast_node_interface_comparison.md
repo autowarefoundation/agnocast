@@ -236,7 +236,7 @@ The following tables compare methods that are **directly defined** in each class
 | `has_parameter()` | ✓ | ✓ | |
 | `get_parameter()` | ✓ | ✓ | |
 | `get_parameter_or()` | ✓ | ✗ | |
-| `get_parameters()` | ✓ | ✓ | agnocast does not support prefix specification |
+| `get_parameters()` | ✓ | ✓ | |
 | `set_parameter()` | ✓ | ✓ | |
 | `set_parameters()` | ✓ | ✓ | |
 | `set_parameters_atomically()` | ✓ | ✓ | |

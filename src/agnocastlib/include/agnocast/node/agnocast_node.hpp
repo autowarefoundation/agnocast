@@ -124,6 +124,20 @@ public:
     return node_parameters_->get_parameters(names);
   }
 
+  template <typename ParameterT>
+  bool get_parameters(const std::string & prefix, std::map<std::string, ParameterT> & values) const
+  {
+    std::map<std::string, rclcpp::Parameter> params;
+    bool result = node_parameters_->get_parameters_by_prefix(prefix, params);
+    if (result) {
+      for (const auto & param : params) {
+        values[param.first] = static_cast<ParameterT>(param.second.get_value<ParameterT>());
+      }
+    }
+
+    return result;
+  }
+
   rcl_interfaces::msg::SetParametersResult set_parameter(const rclcpp::Parameter & parameter)
   {
     return set_parameters_atomically({parameter});

@@ -51,7 +51,7 @@ public:
     get_parameter("topic_name", topic_name_);
 
     std::map<std::string, rclcpp::Parameter> qos_parameters;
-    get_node_parameters_interface()->get_parameters_by_prefix("qos", qos_parameters);
+    get_parameters("qos", qos_parameters);
     queue_size_ = qos_parameters["queue_size"].as_int();
     transient_local_ = qos_parameters["transient_local"].as_bool();
 
