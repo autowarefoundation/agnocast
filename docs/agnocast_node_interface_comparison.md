@@ -95,14 +95,14 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_parameter(name, param&)` | ✓ | **Full Support** | - | |
 | `get_parameters(names)` | ✓ | **Full Support** | - | |
 | `get_parameter_overrides()` | ✓ | **Full Support** | - | |
-| `set_parameters()` | ✓ | **Full Support** | - | Callbacks and parameter events not triggered (see below) |
-| `set_parameters_atomically()` | ✓ | **Full Support** | - | Callbacks and parameter events not triggered (see below) |
+| `set_parameters()` | ✓ | **Full Support** | - | Parameter events not triggered (see below) |
+| `set_parameters_atomically()` | ✓ | **Full Support** | - | Parameter events not triggered (see below) |
 | `get_parameters_by_prefix()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `describe_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `get_parameter_types()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `list_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
-| `add_on_set_parameters_callback()` | ✗ | **Not Implemented** | Yes | Throws exception |
-| `remove_on_set_parameters_callback()` | ✗ | **Not Implemented** | Yes | Throws exception |
+| `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
+| `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 
 **Other differences from rclcpp::NodeParameters**:
 
@@ -110,7 +110,6 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 |------|------------------------|-------------------------|---------|
 | Parameter Service | Creates `ParameterService` (optional) | None | Yes |
 | Parameter Event Publishing | Publishes to `/parameter_events` | None | TBD |
-| On-Set Callbacks | `set_parameters*()` triggers registered callbacks | Callbacks not called | Yes |
 
 ---
 
@@ -245,8 +244,8 @@ The following tables compare methods that are **directly defined** in each class
 | `describe_parameters()` | ✓ | ✗ | |
 | `get_parameter_types()` | ✓ | ✗ | |
 | `list_parameters()` | ✓ | ✗ | |
-| `add_on_set_parameters_callback()` | ✓ | ✗ | |
-| `remove_on_set_parameters_callback()` | ✓ | ✗ | |
+| `add_on_set_parameters_callback()` | ✓ | ✓ | |
+| `remove_on_set_parameters_callback()` | ✓ | ✓ | |
 
 #### Timers, Services, Clients
 

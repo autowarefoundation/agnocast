@@ -8,6 +8,7 @@ using std::placeholders::_1;
 class NoRclcppSubscriber : public agnocast::Node
 {
   agnocast::Subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_dynamic_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
   std::string topic_name_;
   int64_t queue_size_;
@@ -19,11 +20,29 @@ class NoRclcppSubscriber : public agnocast::Node
       get_logger(), "I heard dynamic size array message with size: %zu", message->data.size());
   }
 
+  rcl_interfaces::msg::SetParametersResult on_parameter_change(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+
+    for (const auto & param : parameters) {
+      RCLCPP_INFO(
+        get_logger(), "Parameter '%s' changed to: %s", param.get_name().c_str(),
+        param.value_to_string().c_str());
+    }
+
+    return result;
+  }
+
 public:
   explicit NoRclcppSubscriber() : agnocast::Node("no_rclcpp_subscriber")
   {
     declare_parameter("topic_name", rclcpp::ParameterValue(std::string("my_topic")));
     declare_parameter("queue_size", rclcpp::ParameterValue(int64_t(1)));
+
+    param_callback_handle_ = add_on_set_parameters_callback(
+      std::bind(&NoRclcppSubscriber::on_parameter_change, this, std::placeholders::_1));
 
     set_parameter(rclcpp::Parameter("queue_size", int64_t(5)));
 

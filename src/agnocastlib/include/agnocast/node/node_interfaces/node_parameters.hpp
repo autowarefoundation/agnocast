@@ -10,6 +10,7 @@
 
 #include <rcl/arguments.h>
 
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -26,6 +27,8 @@ class NodeParameters : public rclcpp::node_interfaces::NodeParametersInterface
 public:
   using SharedPtr = std::shared_ptr<NodeParameters>;
   using WeakPtr = std::weak_ptr<NodeParameters>;
+  using CallbacksContainerType =
+    std::list<rclcpp::node_interfaces::OnSetParametersCallbackHandle::WeakPtr>;
 
   explicit NodeParameters(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
@@ -89,6 +92,8 @@ private:
   mutable std::mutex parameters_mutex_;
   std::map<std::string, rclcpp::ParameterValue> parameter_overrides_;
   std::map<std::string, ParameterInfo> parameters_;
+
+  CallbacksContainerType on_parameters_set_callback_container_;
 
   bool allow_undeclared_ = false;
 };

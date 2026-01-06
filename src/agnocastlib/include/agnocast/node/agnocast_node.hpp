@@ -141,6 +141,18 @@ public:
     return node_parameters_->set_parameters_atomically(parameters);
   }
 
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
+    rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType callback)
+  {
+    return node_parameters_->add_on_set_parameters_callback(callback);
+  }
+
+  void remove_on_set_parameters_callback(
+    const rclcpp::node_interfaces::OnSetParametersCallbackHandle * const handler)
+  {
+    node_parameters_->remove_on_set_parameters_callback(handler);
+  }
+
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, const rclcpp::QoS & qos)
