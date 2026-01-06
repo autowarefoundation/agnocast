@@ -97,7 +97,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_parameter_overrides()` | ✓ | **Full Support** | - | |
 | `set_parameters()` | ✓ | **Full Support** | - | Parameter events not triggered (see below) |
 | `set_parameters_atomically()` | ✓ | **Full Support** | - | Parameter events not triggered (see below) |
-| `get_parameters_by_prefix()` | ✗ | **Not Implemented** | Yes | Throws exception |
+| `get_parameters_by_prefix()` | ✓ | **Full Support** | - | |
 | `describe_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `get_parameter_types()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `list_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |

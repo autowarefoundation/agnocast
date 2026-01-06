@@ -12,6 +12,7 @@ class NoRclcppSubscriber : public agnocast::Node
 
   std::string topic_name_;
   int64_t queue_size_;
+  bool transient_local_;
 
   void callback(
     const agnocast::ipc_shared_ptr<agnocast_sample_interfaces::msg::DynamicSizeArray> & message)
@@ -38,17 +39,21 @@ class NoRclcppSubscriber : public agnocast::Node
 public:
   explicit NoRclcppSubscriber() : agnocast::Node("no_rclcpp_subscriber")
   {
-    declare_parameter("queue_size", rclcpp::ParameterValue(int64_t(1)));
+    declare_parameter("topic_name", rclcpp::ParameterValue(std::string("my_topic")));
+    declare_parameter("qos.queue_size", rclcpp::ParameterValue(int64_t(1)));
+    declare_parameter("qos.transient_local", rclcpp::ParameterValue(false));
 
     param_callback_handle_ = add_on_set_parameters_callback(
       std::bind(&NoRclcppSubscriber::on_parameter_change, this, std::placeholders::_1));
 
-    declare_parameter("topic_name", rclcpp::ParameterValue(std::string("my_topic")));
-
-    set_parameter(rclcpp::Parameter("queue_size", int64_t(5)));
+    set_parameter(rclcpp::Parameter("qos.queue_size", int64_t(5)));
 
     get_parameter("topic_name", topic_name_);
-    get_parameter("queue_size", queue_size_);
+
+    std::map<std::string, rclcpp::Parameter> qos_parameters;
+    get_node_parameters_interface()->get_parameters_by_prefix("qos", qos_parameters);
+    queue_size_ = qos_parameters["queue_size"].as_int();
+    transient_local_ = qos_parameters["transient_local"].as_bool();
 
     std::string resolved_topic = get_node_topics_interface()->resolve_topic_name(topic_name_);
 
@@ -57,15 +62,20 @@ public:
     RCLCPP_INFO(get_logger(), "Topic name (input): %s", topic_name_.c_str());
     RCLCPP_INFO(get_logger(), "Topic name (resolved): %s", resolved_topic.c_str());
     RCLCPP_INFO(get_logger(), "Queue size: %ld", queue_size_);
+    RCLCPP_INFO(get_logger(), "Durability: %s", transient_local_ ? "Transient local" : "Volatile");
     RCLCPP_INFO(get_logger(), "====================================");
 
     auto group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions agnocast_options;
     agnocast_options.callback_group = group;
 
+    rclcpp::QoS qos(rclcpp::KeepLast(static_cast<size_t>(queue_size_)));
+    if (transient_local_) {
+      qos.transient_local();
+    }
+
     sub_dynamic_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
-      resolved_topic, static_cast<size_t>(queue_size_),
-      std::bind(&NoRclcppSubscriber::callback, this, _1), agnocast_options);
+      resolved_topic, qos, std::bind(&NoRclcppSubscriber::callback, this, _1), agnocast_options);
   }
 };
 

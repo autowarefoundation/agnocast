@@ -625,11 +625,21 @@ bool NodeParameters::get_parameter(const std::string & name, rclcpp::Parameter &
 bool NodeParameters::get_parameters_by_prefix(
   const std::string & prefix, std::map<std::string, rclcpp::Parameter> & parameters) const
 {
-  // TODO(Koichi98)
-  (void)prefix;
-  (void)parameters;
-  throw std::runtime_error(
-    "NodeParameters::get_parameters_by_prefix is not yet implemented in agnocast");
+  std::lock_guard<std::mutex> lock(parameters_mutex_);
+
+  std::string prefix_with_dot = prefix.empty() ? prefix : prefix + ".";
+  bool ret = false;
+
+  for (const auto & param : parameters_) {
+    // TODO(bdm-k): Account for PARAMETER_NOT_SET?
+    //   The current implementation mirrors that of rclcpp.
+    if (param.first.find(prefix_with_dot) == 0 && param.first.length() > prefix_with_dot.length()) {
+      parameters[param.first.substr(prefix_with_dot.length())] = rclcpp::Parameter(param.second);
+      ret = true;
+    }
+  }
+
+  return ret;
 }
 
 std::vector<rcl_interfaces::msg::ParameterDescriptor> NodeParameters::describe_parameters(

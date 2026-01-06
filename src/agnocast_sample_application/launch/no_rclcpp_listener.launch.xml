@@ -8,6 +8,7 @@
     <node pkg="agnocast_sample_application" exec="no_rclcpp_listener" name="no_rclcpp_listener_node" output="screen" if="$(var use_param)">
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
         <param name="topic_name" value="/custom_topic" />
-        <param name="queue_size" value="10" />
+        <param name="qos.queue_size" value="10" />
+        <param name="qos.transient_local" value="false" />
     </node>
 </launch>
