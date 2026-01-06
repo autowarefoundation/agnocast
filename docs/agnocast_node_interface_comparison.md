@@ -321,6 +321,8 @@ The following tables compare methods that are **directly defined** in each class
 
 `agnocast::Node` implements `rclcpp::node_interfaces::NodeBaseInterface`, so it can be loaded as a Composable Node into a Component Container.
 
+**Note**: While `agnocast::Node` can be loaded into a Component Container, the Component Container itself becomes a DDS participant. Therefore, the performance maximization benefits—which are the primary purpose of using `agnocast::Node`—cannot be fully realized when using a Component Container.
+
 ---
 
 ## 6. Dependencies on rcl/rclcpp
