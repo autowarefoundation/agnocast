@@ -19,6 +19,14 @@ namespace
 
 using CallbacksContainerType = NodeParameters::CallbacksContainerType;
 
+// Forward declaration
+rcl_interfaces::msg::SetParametersResult declare_parameter_common(
+  const std::string & name, const rclcpp::ParameterValue & default_value,
+  const rcl_interfaces::msg::ParameterDescriptor & parameter_descriptor,
+  std::map<std::string, ParameterInfo> & parameters_out,
+  const std::map<std::string, rclcpp::ParameterValue> & overrides,
+  CallbacksContainerType & callback_container, bool ignore_override);
+
 rcl_interfaces::msg::SetParametersResult call_on_parameters_set_callbacks(
   const std::vector<rclcpp::Parameter> & parameters, CallbacksContainerType & callback_container)
 {
@@ -70,7 +78,8 @@ const rclcpp::ParameterValue & declare_parameter_helper(
   const rclcpp::ParameterValue & default_value,
   rcl_interfaces::msg::ParameterDescriptor parameter_descriptor, bool ignore_override,
   std::map<std::string, ParameterInfo> & parameters,
-  const std::map<std::string, rclcpp::ParameterValue> & overrides)
+  const std::map<std::string, rclcpp::ParameterValue> & overrides,
+  CallbacksContainerType & callback_container)
 {
   if (name.empty()) {
     throw rclcpp::exceptions::InvalidParametersException("parameter name must not be empty");
@@ -93,24 +102,21 @@ const rclcpp::ParameterValue & declare_parameter_helper(
     parameter_descriptor.type = static_cast<uint8_t>(type);
   }
 
-  ParameterInfo parameter_info;
-  parameter_info.descriptor = parameter_descriptor;
-  parameter_info.descriptor.name = name;
+  auto result = declare_parameter_common(
+    name, default_value, parameter_descriptor, parameters, overrides, callback_container,
+    ignore_override);
 
-  // Use the value from the overrides if available, otherwise use the default.
-  auto overrides_it = overrides.find(name);
-  if (!ignore_override && overrides_it != overrides.end()) {
-    parameter_info.value = overrides_it->second;
-  } else {
-    parameter_info.value = default_value;
+  // If it failed to be set, then throw an exception.
+  if (!result.successful) {
+    constexpr auto type_error_msg_start = "Wrong parameter type";
+    if (result.reason.rfind(type_error_msg_start, 0) == 0) {
+      throw rclcpp::exceptions::InvalidParameterTypeException(name, result.reason);
+    }
+    throw rclcpp::exceptions::InvalidParameterValueException(
+      "parameter '" + name + "' could not be set: " + result.reason);
   }
 
-  parameters[name] = parameter_info;
-
-  // Note: rclcpp has __declare_parameter_common which is not currently needed in Agnocast because:
-  // - override handling: done directly in this function
-  // - on_parameters_set callbacks: not implemented
-  // - parameter events publishing: not implemented
+  // TODO(Koichi98): rclcpp publishes parameter event here.
 
   return parameters.at(name).value;
 }
@@ -349,7 +355,7 @@ const rclcpp::ParameterValue & NodeParameters::declare_parameter(
 
   return declare_parameter_helper(
     name, rclcpp::PARAMETER_NOT_SET, default_value, parameter_descriptor, ignore_override,
-    parameters_, parameter_overrides_);
+    parameters_, parameter_overrides_, on_parameters_set_callback_container_);
 }
 
 const rclcpp::ParameterValue & NodeParameters::declare_parameter(
@@ -373,7 +379,7 @@ const rclcpp::ParameterValue & NodeParameters::declare_parameter(
 
   return declare_parameter_helper(
     name, type, rclcpp::ParameterValue{}, parameter_descriptor, ignore_override, parameters_,
-    parameter_overrides_);
+    parameter_overrides_, on_parameters_set_callback_container_);
 }
 
 void NodeParameters::undeclare_parameter(const std::string & name)
