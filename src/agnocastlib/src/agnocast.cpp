@@ -4,6 +4,7 @@
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/agnocast_bridge_manager.hpp"
+#include "agnocast/bridge/agnocast_performance_bridge_manager.hpp"
 
 #include <dlfcn.h>
 #include <sys/types.h>
@@ -198,8 +199,17 @@ void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-    BridgeManager manager(target_pid);
-    manager.run();
+
+    auto bridge_mode = get_bridge_mode();
+    if (bridge_mode == BridgeMode::Standard) {
+      BridgeManager manager(target_pid);
+      manager.run();
+    } else if (bridge_mode == BridgeMode::Performance) {
+      {
+        PerformanceBridgeManager manager;
+        manager.run();
+      }
+    }
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "BridgeManager crashed: %s", e.what());
     exit(EXIT_FAILURE);
@@ -386,14 +396,29 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
+  pid_t target_pid = 0;
+  bool should_spawn_bridge = false;
+  auto bridge_mode = get_bridge_mode();
+
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
+
+    // Since the performance bridge daemon is created once per IPC namespace,
+    // this logic is placed inside this block.
+    if (bridge_mode == BridgeMode::Performance) {
+      should_spawn_bridge = true;
+    }
+  }
+  if (bridge_mode == BridgeMode::Standard) {
+    target_pid = getpid();
+    should_spawn_bridge = true;
   }
 
-  pid_t parent_pid = getpid();
-  bridge_manager_pid =
-    spawn_daemon_process([parent_pid]() { poll_for_bridge_manager(parent_pid); });
+  if (should_spawn_bridge) {
+    bridge_manager_pid =
+      spawn_daemon_process([target_pid]() { poll_for_bridge_manager(target_pid); });
+  }
 
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
