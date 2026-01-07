@@ -42,7 +42,10 @@ extern "C" uint32_t agnocast_get_borrowed_publisher_num();
 
 struct PublisherOptions
 {
-  // Currently empty, reserved for future use.
+  // NOTE: This option is deprecated. Any values set here will be ignored.
+  bool do_always_ros2_publish = false;
+  // NOTE: This option is deprecated. Any values set here will be ignored.
+  rclcpp::QosOverridingOptions qos_overriding_options;
 };
 
 template <typename MessageT, typename BridgeRequestPolicy>
@@ -66,8 +69,16 @@ public:
 
   BasicPublisher(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & /*options*/)
+    const PublisherOptions & options)
   {
+    if (options.do_always_ros2_publish) {
+      RCLCPP_ERROR(logger, "The 'do_always_ros2_publish' option is deprecated.");
+    }
+
+    if (!options.qos_overriding_options.get_policy_kinds().empty()) {
+      RCLCPP_ERROR(logger, "The 'qos_overriding_options' option is deprecated.");
+    }
+
     constructor_impl(node, topic_name, qos);
 
     TRACEPOINT(
