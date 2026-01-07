@@ -22,11 +22,7 @@ TEST(AgnocastUtilsTest, create_mq_name_invalid_topic)
 
 TEST(AgnocastUtilsTest, create_mq_name_bridge_manager)
 {
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_bridge_parent(12345), "/agnocast_bridge_manager_parent@12345");
-
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_bridge_daemon(67890), "/agnocast_bridge_manager_daemon@67890");
+  EXPECT_EQ(agnocast::create_mq_name_for_bridge(12345), "/agnocast_bridge_manager@12345");
 }
 
 TEST(AgnocastUtilsTest, validate_ld_preload_normal)

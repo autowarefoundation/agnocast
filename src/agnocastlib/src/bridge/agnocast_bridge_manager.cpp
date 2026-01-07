@@ -15,7 +15,7 @@ namespace agnocast
 BridgeManager::BridgeManager(pid_t target_pid)
 : target_pid_(target_pid),
   logger_(rclcpp::get_logger("agnocast_bridge_manager")),
-  event_loop_(target_pid, logger_),
+  event_loop_(logger_),
   loader_(logger_)
 {
   // Optimization: Fail-fast to avoid rclcpp::init overhead.
@@ -66,8 +66,7 @@ void BridgeManager::run()
 
   start_ros_execution();
 
-  event_loop_.set_parent_mq_handler([this](int fd) { this->on_mq_request(fd); });
-  event_loop_.set_peer_mq_handler([this](int fd) { this->on_mq_request(fd); });
+  event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
 
   while (!shutdown_requested_) {
@@ -174,7 +173,7 @@ void BridgeManager::activate_bridge(
 
 void BridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)
 {
-  std::string mq_name = create_mq_name_for_bridge_daemon(owner_pid);
+  std::string mq_name = create_mq_name_for_bridge(owner_pid);
 
   mqd_t mq = mq_open(mq_name.c_str(), O_WRONLY | O_NONBLOCK);
   if (mq == -1) {
@@ -233,7 +232,6 @@ void BridgeManager::check_parent_alive()
   }
   if (kill(target_pid_, 0) != 0) {
     is_parent_alive_ = false;
-    event_loop_.close_parent_mq();
     managed_bridges_.clear();
   }
 }

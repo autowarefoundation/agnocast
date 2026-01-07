@@ -91,14 +91,9 @@ std::string create_mq_name_for_agnocast_publish(
   return create_mq_name("/agnocast", topic_name, id);
 }
 
-std::string create_mq_name_for_bridge_parent(const pid_t pid)
+std::string create_mq_name_for_bridge(const pid_t pid)
 {
-  return "/agnocast_bridge_manager_parent@" + std::to_string(pid);
-}
-
-std::string create_mq_name_for_bridge_daemon(const pid_t pid)
-{
-  return "/agnocast_bridge_manager_daemon@" + std::to_string(pid);
+  return "/agnocast_bridge_manager@" + std::to_string(pid);
 }
 
 std::string create_shm_name(const pid_t pid)

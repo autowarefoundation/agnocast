@@ -23,11 +23,10 @@
 namespace agnocast
 {
 
-BridgeIpcEventLoop::BridgeIpcEventLoop(pid_t target_pid, const rclcpp::Logger & logger)
-: logger_(logger)
+BridgeIpcEventLoop::BridgeIpcEventLoop(const rclcpp::Logger & logger) : logger_(logger)
 {
   try {
-    setup_mq(target_pid);
+    setup_mq();
     setup_signals();
     setup_epoll();
   } catch (...) {
@@ -59,13 +58,9 @@ bool BridgeIpcEventLoop::spin_once(int timeout_ms)
   }
   for (int event_index = 0; event_index < event_count; ++event_index) {
     int fd = events[event_index].data.fd;
-    if (fd == mq_parent_fd_) {
-      if (parent_cb_) {
-        parent_cb_(fd);
-      }
-    } else if (fd == mq_peer_fd_) {
-      if (peer_cb_) {
-        peer_cb_(fd);
+    if (fd == mq_fd_) {
+      if (mq_cb_) {
+        mq_cb_(fd);
       }
     } else if (fd == signal_fd_) {
       struct signalfd_siginfo fdsi
@@ -82,39 +77,14 @@ bool BridgeIpcEventLoop::spin_once(int timeout_ms)
   return true;
 }
 
-void BridgeIpcEventLoop::set_parent_mq_handler(EventCallback cb)
+void BridgeIpcEventLoop::set_mq_handler(EventCallback cb)
 {
-  parent_cb_ = std::move(cb);
-}
-
-void BridgeIpcEventLoop::set_peer_mq_handler(EventCallback cb)
-{
-  peer_cb_ = std::move(cb);
+  mq_cb_ = std::move(cb);
 }
 
 void BridgeIpcEventLoop::set_signal_handler(SignalCallback cb)
 {
   signal_cb_ = std::move(cb);
-}
-
-void BridgeIpcEventLoop::close_parent_mq()
-{
-  if (mq_parent_fd_ != -1) {
-    if (mq_close(mq_parent_fd_) == -1) {
-      RCLCPP_WARN(logger_, "Failed to close mq_parent_fd: %s", strerror(errno));
-    }
-    mq_parent_fd_ = -1;
-  }
-
-  if (!mq_parent_name_.empty()) {
-    if (mq_unlink(mq_parent_name_.c_str()) == -1) {
-      if (errno != ENOENT) {
-        RCLCPP_WARN(
-          logger_, "Failed to unlink mq %s: %s", mq_parent_name_.c_str(), strerror(errno));
-      }
-    }
-    mq_parent_name_.clear();
-  }
 }
 
 void BridgeIpcEventLoop::ignore_signals(std::initializer_list<int> signals)
@@ -148,12 +118,10 @@ sigset_t BridgeIpcEventLoop::block_signals(std::initializer_list<int> signals)
   return mask;
 }
 
-void BridgeIpcEventLoop::setup_mq(pid_t target_pid)
+void BridgeIpcEventLoop::setup_mq()
 {
-  mq_parent_name_ = create_mq_name_for_bridge_parent(target_pid);
-  mq_parent_fd_ = create_and_open_mq(mq_parent_name_, "Parent");
-  mq_self_name_ = create_mq_name_for_bridge_daemon(getpid());
-  mq_peer_fd_ = create_and_open_mq(mq_self_name_, "Peer");
+  mq_name_ = create_mq_name_for_bridge(getpid());
+  mq_fd_ = create_and_open_mq(mq_name_);
 }
 
 void BridgeIpcEventLoop::setup_signals()
@@ -174,12 +142,11 @@ void BridgeIpcEventLoop::setup_epoll()
     throw std::runtime_error("epoll_create1 failed: " + std::string(strerror(errno)));
   }
 
-  add_fd_to_epoll(mq_parent_fd_, "Parent MQ");
-  add_fd_to_epoll(mq_peer_fd_, "Peer MQ");
+  add_fd_to_epoll(mq_fd_, "MQ");
   add_fd_to_epoll(signal_fd_, "Signal");
 }
 
-mqd_t BridgeIpcEventLoop::create_and_open_mq(const std::string & name, const std::string & label)
+mqd_t BridgeIpcEventLoop::create_and_open_mq(const std::string & name)
 {
   struct mq_attr attr = {};
   attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
@@ -189,7 +156,7 @@ mqd_t BridgeIpcEventLoop::create_and_open_mq(const std::string & name, const std
     mq_open(name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK | O_CLOEXEC, BRIDGE_MQ_PERMS, &attr);
 
   if (fd == -1) {
-    throw std::system_error(errno, std::generic_category(), label + " MQ open failed");
+    throw std::system_error(errno, std::generic_category(), "MQ open failed");
   }
 
   return fd;
@@ -222,23 +189,14 @@ void BridgeIpcEventLoop::cleanup_resources()
     signal_fd_ = -1;
   }
 
-  close_parent_mq();
-
-  if (mq_peer_fd_ != -1) {
-    if (mq_close(mq_peer_fd_) == -1) {
+  if (mq_fd_ != -1) {
+    if (mq_close(mq_fd_) == -1) {
       RCLCPP_WARN(logger_, "Failed to close mq_peer_fd: %s", strerror(errno));
     }
-    mq_peer_fd_ = -1;
+    mq_fd_ = -1;
   }
 
-  if (!mq_self_name_.empty()) {
-    if (mq_unlink(mq_self_name_.c_str()) == -1) {
-      if (errno != ENOENT) {
-        RCLCPP_WARN(logger_, "Failed to unlink mq %s: %s", mq_self_name_.c_str(), strerror(errno));
-      }
-    }
-    mq_self_name_.clear();
-  }
+  mq_name_.clear();
 }
 
 }  // namespace agnocast

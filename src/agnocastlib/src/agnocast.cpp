@@ -171,6 +171,11 @@ void poll_for_unlink()
       if (get_exit_process_args.ret_pid > 0) {
         const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
         shm_unlink(shm_name.c_str());
+
+        // We don't need to call mq_unlink for non BridgeManager processes. However, we do it for
+        // all exited processes to avoid the complexity of checking the process type.
+        const std::string mq_name = create_mq_name_for_bridge(get_exit_process_args.ret_pid);
+        mq_unlink(mq_name.c_str());
       }
     } while (get_exit_process_args.ret_pid > 0);
 
@@ -327,7 +332,7 @@ bool is_version_consistent(
 }
 
 template <typename Func>
-void spawn_daemon_process(Func && func)
+pid_t spawn_daemon_process(Func && func)
 {
   pid_t pid = fork();
   if (pid < 0) {
@@ -339,6 +344,8 @@ void spawn_daemon_process(Func && func)
     func();
     exit(0);
   }
+
+  return pid;
 }
 
 // NOTE: Avoid heap allocation inside initialize_agnocast. TLSF is not initialized yet.
@@ -385,7 +392,8 @@ struct initialize_agnocast_result initialize_agnocast(
   }
 
   pid_t parent_pid = getpid();
-  spawn_daemon_process([parent_pid]() { poll_for_bridge_manager(parent_pid); });
+  bridge_manager_pid =
+    spawn_daemon_process([parent_pid]() { poll_for_bridge_manager(parent_pid); });
 
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
