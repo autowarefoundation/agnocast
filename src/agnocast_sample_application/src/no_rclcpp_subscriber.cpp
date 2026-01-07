@@ -33,6 +33,14 @@ class NoRclcppSubscriber : public agnocast::Node
         param.value_to_string().c_str());
     }
 
+    // Test ParameterMutationRecursionGuard: try to modify parameter from within callback
+    try {
+      set_parameter(rclcpp::Parameter("queue_size", int64_t(999)));
+      RCLCPP_ERROR(get_logger(), "ERROR: Should have thrown ParameterModifiedInCallbackException!");
+    } catch (const rclcpp::exceptions::ParameterModifiedInCallbackException & e) {
+      RCLCPP_INFO(get_logger(), "ParameterMutationRecursionGuard works: %s", e.what());
+    }
+
     return result;
   }
 

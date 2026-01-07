@@ -356,3 +356,6 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rclcpp::node_interfaces::NodeBaseInterface` - Node base interface (inherited)
 - `rclcpp::node_interfaces::NodeTopicsInterface` - Node topics interface (inherited)
 - `rclcpp::node_interfaces::NodeParametersInterface` - Node parameters interface (inherited)
+- `rclcpp::node_interfaces::ParameterMutationRecursionGuard` - RAII guard to prevent recursive parameter modifications from within callbacks
+- `rclcpp::node_interfaces::ParameterInfo` - Parameter value and descriptor storage
+- `rclcpp::node_interfaces::OnSetParametersCallbackHandle` - Handle for parameter set callbacks

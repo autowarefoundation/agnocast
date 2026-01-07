@@ -21,6 +21,7 @@ namespace agnocast::node_interfaces
 {
 
 using rclcpp::node_interfaces::ParameterInfo;
+using rclcpp::node_interfaces::ParameterMutationRecursionGuard;
 
 class NodeParameters : public rclcpp::node_interfaces::NodeParametersInterface
 {
@@ -89,7 +90,13 @@ public:
 private:
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
 
-  mutable std::mutex parameters_mutex_;
+  mutable std::recursive_mutex parameters_mutex_;
+
+  // There are times when we don't want to allow modifications to parameters
+  // (particularly when a set_parameter callback tries to call set_parameter,
+  // declare_parameter, etc).  In those cases, this will be set to false.
+  bool parameter_modification_enabled_{true};
+
   std::map<std::string, rclcpp::ParameterValue> parameter_overrides_;
   std::map<std::string, ParameterInfo> parameters_;
 
