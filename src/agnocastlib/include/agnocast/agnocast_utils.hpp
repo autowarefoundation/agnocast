@@ -12,6 +12,8 @@ inline constexpr std::string_view SUFFIX_R2A = "_R2A";
 inline constexpr std::string_view SUFFIX_A2R = "_A2R";
 inline constexpr size_t SUFFIX_LEN = SUFFIX_R2A.length();
 
+inline constexpr pid_t PERFORMANCE_BRIDGE_VIRTUAL_PID = -1;
+
 extern rclcpp::Logger logger;
 
 enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };

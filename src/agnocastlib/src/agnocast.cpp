@@ -181,6 +181,11 @@ void poll_for_unlink()
     } while (get_exit_process_args.ret_pid > 0);
 
     if (get_exit_process_args.ret_daemon_should_exit) {
+      auto bridge_mode = get_bridge_mode();
+      if (bridge_mode == BridgeMode::Performance) {
+        const std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
+        mq_unlink(mq_name.c_str());
+      }
       break;
     }
   }

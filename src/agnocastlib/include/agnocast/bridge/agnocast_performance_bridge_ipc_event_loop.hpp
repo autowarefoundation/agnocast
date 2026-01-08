@@ -1,20 +1,29 @@
 #pragma once
 
+#include "agnocast/bridge/agnocast_bridge_ipc_event_loop_base.hpp"
+
 #include <rclcpp/logger.hpp>
+
+#include <functional>
 
 namespace agnocast
 {
 
-class PerformanceBridgeIpcEventLoop
+class PerformanceBridgeIpcEventLoop : public IpcEventLoopBase
 {
 public:
-  explicit PerformanceBridgeIpcEventLoop(const rclcpp::Logger & logger);
-  ~PerformanceBridgeIpcEventLoop();
+  using ReloadCallback = std::function<void()>;
 
-  void spin_once();
+  explicit PerformanceBridgeIpcEventLoop(const rclcpp::Logger & logger);
+  ~PerformanceBridgeIpcEventLoop() override = default;
+
+  void set_reload_handler(ReloadCallback cb);
+
+protected:
+  void handle_signal(int signo) override;
 
 private:
-  rclcpp::Logger logger_;
+  ReloadCallback reload_cb_;
 };
 
 }  // namespace agnocast
