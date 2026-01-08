@@ -57,8 +57,21 @@ class BasicPublisher
   PublisherOptions options_;
 
   template <typename NodeT>
-  void constructor_impl(NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
+  void constructor_impl(
+    NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    const PublisherOptions & options)
   {
+    if (options.do_always_ros2_publish) {
+      RCLCPP_ERROR(
+        logger,
+        "The 'do_always_ros2_publish' option is deprecated. "
+        "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
+    }
+
+    if (!options.qos_overriding_options.get_policy_kinds().empty()) {
+      RCLCPP_ERROR(logger, "The 'qos_overriding_options' option is deprecated.");
+    }
+
     topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
     id_ = initialize_publisher(topic_name_, node->get_fully_qualified_name(), qos);
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
@@ -71,15 +84,7 @@ public:
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options)
   {
-    if (options.do_always_ros2_publish) {
-      RCLCPP_ERROR(logger, "The 'do_always_ros2_publish' option is deprecated.");
-    }
-
-    if (!options.qos_overriding_options.get_policy_kinds().empty()) {
-      RCLCPP_ERROR(logger, "The 'qos_overriding_options' option is deprecated.");
-    }
-
-    constructor_impl(node, topic_name, qos);
+    constructor_impl(node, topic_name, qos, options);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
@@ -88,9 +93,11 @@ public:
       topic_name_.c_str(), qos.depth());
   }
 
-  BasicPublisher(agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
+  BasicPublisher(
+    agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    const PublisherOptions & options = PublisherOptions{})
   {
-    constructor_impl(node, topic_name, qos);
+    constructor_impl(node, topic_name, qos, options);
 
     // TODO: CARET tracepoint for agnocast::Node
   }
