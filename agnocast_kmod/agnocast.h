@@ -203,6 +203,11 @@ struct ioctl_remove_bridge_args
   bool is_r2a;
 };
 
+struct ioctl_get_process_num_args
+{
+  uint32_t ret_process_num;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -221,6 +226,7 @@ struct ioctl_remove_bridge_args
 #define AGNOCAST_GET_PUBLISHER_NUM_CMD _IOWR(0xA6, 16, union ioctl_get_publisher_num_args)
 #define AGNOCAST_REMOVE_SUBSCRIBER_CMD _IOW(0xA6, 17, struct ioctl_remove_subscriber_args)
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
+#define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
 
 // ================================================
 // ros2cli ioctls
@@ -347,6 +353,8 @@ int add_bridge(
 
 int remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
+
+int get_process_num(const struct ipc_namespace * ipc_ns);
 
 void process_exit_cleanup(const pid_t pid);
 

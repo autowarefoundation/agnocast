@@ -22,6 +22,10 @@ private:
   PerformanceBridgeIpcEventLoop event_loop_;
   PerformanceBridgeLoader loader_;
   PerformanceBridgeConfig config_;
+
+  bool shutdown_requested_ = false;
+
+  void check_and_request_shutdown();
 };
 
 }  // namespace agnocast

@@ -705,20 +705,6 @@ static int get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-static bool check_daemon_necessity(const struct ipc_namespace * ipc_ns)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 int add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret)
 {
@@ -726,7 +712,7 @@ int add_process(
     dev_warn(agnocast_device, "Process (pid=%d) already exists. (add_process)\n", pid);
     return -EINVAL;
   }
-  ioctl_ret->ret_unlink_daemon_exist = check_daemon_necessity(ipc_ns);
+  ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
 
   struct process_info * new_proc_info = kmalloc(sizeof(struct process_info), GFP_KERNEL);
   if (!new_proc_info) {
@@ -1170,7 +1156,7 @@ static int get_exit_process(
     break;
   }
 
-  ioctl_ret->ret_daemon_should_exit = !check_daemon_necessity(ipc_ns);
+  ioctl_ret->ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
   return 0;
 }
 
@@ -1745,6 +1731,20 @@ int remove_bridge(
   return 0;
 }
 
+int get_process_num(const struct ipc_namespace * ipc_ns)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 {
   mutex_lock(&global_mutex);
@@ -2189,6 +2189,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
     ret = remove_bridge(topic_name_buf, remove_bridge_args.pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
+  } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
+    struct ioctl_get_process_num_args get_process_num_args;
+    get_process_num_args.ret_process_num = get_process_num(ipc_ns);
+    if (copy_to_user(
+          (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
+          sizeof(get_process_num_args)))
+      goto return_EFAULT;
   } else {
     goto return_EINVAL;
   }
