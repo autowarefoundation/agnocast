@@ -181,6 +181,12 @@ public:
     return node_parameters_->get_parameter_types(names);
   }
 
+  rcl_interfaces::msg::ListParametersResult list_parameters(
+    const std::vector<std::string> & prefixes, uint64_t depth) const
+  {
+    return node_parameters_->list_parameters(prefixes, depth);
+  }
+
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType callback)
   {

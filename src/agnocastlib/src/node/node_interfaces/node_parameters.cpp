@@ -697,10 +697,56 @@ std::vector<uint8_t> NodeParameters::get_parameter_types(
 rcl_interfaces::msg::ListParametersResult NodeParameters::list_parameters(
   const std::vector<std::string> & prefixes, uint64_t depth) const
 {
-  // TODO(Koichi98)
-  (void)prefixes;
-  (void)depth;
-  throw std::runtime_error("NodeParameters::list_parameters is not yet implemented in agnocast");
+  std::lock_guard<std::recursive_mutex> lock(parameters_mutex_);
+  rcl_interfaces::msg::ListParametersResult result;
+
+  const char * separator = ".";
+
+  auto separators_less_than_depth = [&depth, &separator](const std::string & str) -> bool {
+    return static_cast<uint64_t>(std::count(str.begin(), str.end(), *separator)) < depth;
+  };
+
+  bool recursive =
+    (prefixes.empty()) && (depth == rcl_interfaces::srv::ListParameters::Request::DEPTH_RECURSIVE);
+
+  for (const auto & param : parameters_) {
+    if (!recursive) {
+      bool get_all = (prefixes.empty()) && separators_less_than_depth(param.first);
+      if (!get_all) {
+        bool prefix_matches = std::any_of(
+          prefixes.cbegin(), prefixes.cend(),
+          [&param, &depth, &separator, &separators_less_than_depth](const std::string & prefix) {
+            if (param.first == prefix) {
+              return true;
+            }
+            if (param.first.find(prefix + separator) == 0) {
+              if (depth == rcl_interfaces::srv::ListParameters::Request::DEPTH_RECURSIVE) {
+                return true;
+              }
+              std::string substr = param.first.substr(prefix.length() + 1);
+              return separators_less_than_depth(substr);
+            }
+            return false;
+          });
+
+        if (!prefix_matches) {
+          continue;
+        }
+      }
+    }
+
+    result.names.push_back(param.first);
+    size_t last_separator = param.first.find_last_of(separator);
+    if (std::string::npos != last_separator) {
+      std::string prefix = param.first.substr(0, last_separator);
+      if (
+        std::find(result.prefixes.cbegin(), result.prefixes.cend(), prefix) ==
+        result.prefixes.cend()) {
+        result.prefixes.push_back(prefix);
+      }
+    }
+  }
+  return result;
 }
 
 rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
