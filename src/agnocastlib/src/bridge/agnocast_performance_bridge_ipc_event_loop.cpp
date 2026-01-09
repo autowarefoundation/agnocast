@@ -21,6 +21,7 @@ PerformanceBridgeIpcEventLoop::PerformanceBridgeIpcEventLoop(const rclcpp::Logge
     // 4. Ignore Signals
     {SIGPIPE})
 {
+  // TODO(yutarokobayashi): For debugging. Remove later.
   RCLCPP_INFO(logger_, "PerformanceBridgeIpcEventLoop initialized (Skeleton).");
 }
 

@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <dlfcn.h>
@@ -169,43 +170,6 @@ public:
       agno_opts);
   }
 };
-
-inline rclcpp::QoS get_subscriber_qos(
-  const std::string & topic_name, topic_local_id_t subscriber_id)
-{
-  struct ioctl_get_subscriber_qos_args get_subscriber_qos_args = {};
-  get_subscriber_qos_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  get_subscriber_qos_args.subscriber_id = subscriber_id;
-
-  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_QOS_CMD, &get_subscriber_qos_args) < 0) {
-    // This exception is intended to be caught by the factory function that instantiates the bridge.
-    throw std::runtime_error("Failed to fetch subscriber QoS from agnocast kernel module");
-  }
-  return rclcpp::QoS(get_subscriber_qos_args.ret_depth)
-    .durability(
-      get_subscriber_qos_args.ret_is_transient_local ? rclcpp::DurabilityPolicy::TransientLocal
-                                                     : rclcpp::DurabilityPolicy::Volatile)
-    .reliability(
-      get_subscriber_qos_args.ret_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
-                                              : rclcpp::ReliabilityPolicy::BestEffort);
-}
-
-inline rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t publisher_id)
-{
-  struct ioctl_get_publisher_qos_args get_publisher_qos_args = {};
-  get_publisher_qos_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  get_publisher_qos_args.publisher_id = publisher_id;
-
-  if (ioctl(agnocast_fd, AGNOCAST_GET_PUBLISHER_QOS_CMD, &get_publisher_qos_args) < 0) {
-    // This exception is intended to be caught by the factory function that instantiates the bridge.
-    throw std::runtime_error("Failed to fetch publisher QoS from agnocast kernel module");
-  }
-
-  return rclcpp::QoS(get_publisher_qos_args.ret_depth)
-    .durability(
-      get_publisher_qos_args.ret_is_transient_local ? rclcpp::DurabilityPolicy::TransientLocal
-                                                    : rclcpp::DurabilityPolicy::Volatile);
-}
 
 template <typename MessageT>
 std::shared_ptr<void> start_ros_to_agno_node(

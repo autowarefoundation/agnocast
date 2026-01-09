@@ -8,6 +8,7 @@ namespace agnocast
 
 PerformanceBridgeConfig::PerformanceBridgeConfig(const rclcpp::Logger & logger) : logger_(logger)
 {
+  // TODO(yutarokobayashi): For debugging. Remove later.
   RCLCPP_INFO(logger_, "PerformanceBridgeConfig initialized (Skeleton).");
 }
 
