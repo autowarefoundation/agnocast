@@ -51,8 +51,8 @@ struct MqMsgBridge
 
 struct MqMsgPerformanceBridge
 {
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
   char message_type[MESSAGE_TYPE_BUFFER_SIZE];
+  BridgeTargetInfo target;
   BridgeDirection direction;
 };
 
