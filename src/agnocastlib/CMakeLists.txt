@@ -57,6 +57,123 @@ target_include_directories(agnocast PUBLIC
   ${LTTNGUST_INCLUDE_DIRS}
 )
 
+# Start of generic bridge plugin
+
+if("$ENV{BUILD_GENERIC_BRIDGE}" STREQUAL "ON")
+  set(BUILD_GENERIC_BRIDGE ON)
+else()
+  set(BUILD_GENERIC_BRIDGE OFF)
+endif()
+
+if(BUILD_GENERIC_BRIDGE)
+  message(STATUS "BUILD_GENERIC_BRIDGE is ON. Generating bridge plugins...")
+  set(MESSAGE_TYPES_FILE "${CMAKE_CURRENT_BINARY_DIR}/ros2_interfaces.txt")
+  execute_process(
+    COMMAND ros2 interface list -m
+    OUTPUT_FILE "${MESSAGE_TYPES_FILE}"
+    RESULT_VARIABLE ros2_list_res
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(NOT ros2_list_res EQUAL 0)
+    message(FATAL_ERROR "Failed to execute 'ros2 interface list -m'.")
+  endif()
+
+  set(GENERATED_PLUGINS_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_bridge_plugins")
+  set(GENERATED_DEPENDENCIES_TXT "${CMAKE_CURRENT_BINARY_DIR}/generated_dependencies.txt")
+  set(CLEAN_MESSAGE_LIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/clean_ros2_interfaces.txt") 
+  set(BRIDGE_PLUGIN_GENERATION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/scripts/generate_bridge_plugin.py")
+
+  set(R2A_TEMPLATE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/templates/r2a_bridge_plugin.cpp.em")
+  execute_process(
+  COMMAND ${Python3_EXECUTABLE} "${BRIDGE_PLUGIN_GENERATION_SCRIPT}"
+          "${MESSAGE_TYPES_FILE}"
+          "${GENERATED_PLUGINS_SRC_DIR}"
+          "${GENERATED_DEPENDENCIES_TXT}"
+          "${CLEAN_MESSAGE_LIST_FILE}"
+          "${R2A_TEMPLATE_FILE}"
+          "r2a"
+  RESULT_VARIABLE r2a_script_res
+  )
+  if(NOT r2a_script_res EQUAL 0)
+    message(FATAL_ERROR "Python script for r2a plugin generation failed.")
+  endif()
+
+  set(A2R_TEMPLATE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/templates/a2r_bridge_plugin.cpp.em")
+  execute_process(
+  COMMAND ${Python3_EXECUTABLE} "${BRIDGE_PLUGIN_GENERATION_SCRIPT}" # 共通スクリプト
+          "${MESSAGE_TYPES_FILE}"
+          "${GENERATED_PLUGINS_SRC_DIR}"
+          "${GENERATED_DEPENDENCIES_TXT}"
+          "${CLEAN_MESSAGE_LIST_FILE}"
+          "${A2R_TEMPLATE_FILE}"
+          "a2r"
+  RESULT_VARIABLE a2r_script_res
+  )
+  if(NOT a2r_script_res EQUAL 0)
+    message(FATAL_ERROR "Python script for a2r plugin generation failed.")
+  endif()
+
+  file(STRINGS "${GENERATED_DEPENDENCIES_TXT}" auto_dependencies)
+  list(REMOVE_DUPLICATES auto_dependencies)
+  foreach(dep ${auto_dependencies})
+    find_package(${dep} REQUIRED)
+  endforeach()
+
+  file(STRINGS "${CLEAN_MESSAGE_LIST_FILE}" all_message_types)
+  foreach(msg_type ${all_message_types})
+    # msg_type: geometry_msgs/msg/Pose -> package: geometry_msgs
+    string(REPLACE "/" "_" safe_msg_name ${msg_type})
+    string(REGEX MATCH "^[a-zA-Z0-9_]+" msg_package ${msg_type})
+
+    # --- R2A Plugin ---
+    set(r2a_plugin_src_file "${GENERATED_PLUGINS_SRC_DIR}/register_r2a_${safe_msg_name}.cpp")
+    set(r2a_plugin_target_name "r2a_bridge_plugin_${safe_msg_name}")
+
+    add_library(${r2a_plugin_target_name} SHARED ${r2a_plugin_src_file})
+
+    target_link_libraries(${r2a_plugin_target_name} agnocast)
+
+    ament_target_dependencies(${r2a_plugin_target_name} 
+      "rclcpp" 
+      "${msg_package}"
+    )
+
+    target_include_directories(${r2a_plugin_target_name} PRIVATE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+
+    install(
+      TARGETS ${r2a_plugin_target_name}
+      DESTINATION lib/${PROJECT_NAME}/bridge_plugins 
+    )
+
+    # --- A2R Plugin ---
+    set(a2r_plugin_src_file "${GENERATED_PLUGINS_SRC_DIR}/register_a2r_${safe_msg_name}.cpp")
+    set(a2r_plugin_target_name "a2r_bridge_plugin_${safe_msg_name}")
+
+    add_library(${a2r_plugin_target_name} SHARED ${a2r_plugin_src_file})
+
+    target_link_libraries(${a2r_plugin_target_name} agnocast)
+
+    ament_target_dependencies(${a2r_plugin_target_name} 
+      "rclcpp" 
+      "${msg_package}"
+    )
+
+    target_include_directories(${a2r_plugin_target_name} PRIVATE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+
+    install(
+      TARGETS ${a2r_plugin_target_name}
+      DESTINATION lib/${PROJECT_NAME}/bridge_plugins
+    )
+  endforeach()
+
+# End of generic bridge plugin
+
+endif()
+
 add_executable(agnocast_component_container src/agnocast_component_container.cpp)
 
 target_link_libraries(agnocast_component_container
