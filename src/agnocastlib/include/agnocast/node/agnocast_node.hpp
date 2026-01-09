@@ -155,6 +155,27 @@ public:
     return node_parameters_->set_parameters_atomically(parameters);
   }
 
+  rcl_interfaces::msg::ParameterDescriptor describe_parameter(const std::string & name) const
+  {
+    auto result = node_parameters_->describe_parameters({name});
+    // TODO(bdm-k): These if checks are redundant because describe_parameters() ensures that the
+    // result is the same size as the input vector.
+    //   The current implementation mirrors that of rclcpp.
+    if (0 == result.size()) {
+      throw rclcpp::exceptions::ParameterNotDeclaredException(name);
+    }
+    if (result.size() > 1) {
+      throw std::runtime_error("number of described parameters unexpectedly more than one");
+    }
+    return result.front();
+  }
+
+  std::vector<rcl_interfaces::msg::ParameterDescriptor> describe_parameters(
+    const std::vector<std::string> & names) const
+  {
+    return node_parameters_->describe_parameters(names);
+  }
+
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType callback)
   {

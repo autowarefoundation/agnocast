@@ -641,10 +641,30 @@ bool NodeParameters::get_parameters_by_prefix(
 std::vector<rcl_interfaces::msg::ParameterDescriptor> NodeParameters::describe_parameters(
   const std::vector<std::string> & names) const
 {
-  // TODO(Koichi98)
-  (void)names;
-  throw std::runtime_error(
-    "NodeParameters::describe_parameters is not yet implemented in agnocast");
+  std::lock_guard<std::recursive_mutex> lock(parameters_mutex_);
+  std::vector<rcl_interfaces::msg::ParameterDescriptor> results;
+  results.reserve(names.size());
+
+  for (const auto & name : names) {
+    auto it = parameters_.find(name);
+    if (it != parameters_.cend()) {
+      results.push_back(it->second.descriptor);
+    } else if (allow_undeclared_) {
+      rcl_interfaces::msg::ParameterDescriptor default_description;
+      default_description.name = name;
+      results.push_back(std::move(default_description));
+    } else {
+      throw rclcpp::exceptions::ParameterNotDeclaredException(name);
+    }
+  }
+
+  // TODO(bdm-k): This is unreachable code and can be removed.
+  //   The current implementation mirrors that of rclcpp.
+  if (results.size() != names.size()) {
+    throw std::runtime_error("results and names unexpectedly different sizes");
+  }
+
+  return results;
 }
 
 std::vector<uint8_t> NodeParameters::get_parameter_types(
