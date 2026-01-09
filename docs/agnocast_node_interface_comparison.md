@@ -345,6 +345,10 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 
 - `rcl_arguments_t` - Parsed arguments
 
+**rclcpp Functions**:
+
+- `rclcpp::detail::declare_qos_parameters()` - Declares QoS-related parameters and applies overrides. This function only requires `NodeParametersInterface` and internally calls `declare_parameter`/`get_parameter`, so it works with `agnocast::Node`. When `QosOverridingOptions` is specified, QoS policies are automatically applied from parameters using the naming convention `qos_overrides.<topic>.<entity>.<policy>` (e.g., `qos_overrides./my_topic.subscription.durability`), without requiring explicit parameter declaration in user code.
+
 **rclcpp Classes/Interfaces**:
 
 - `rclcpp::Context` - Context management
@@ -352,6 +356,7 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rclcpp::Logger` - Logging
 - `rclcpp::Parameter` / `rclcpp::ParameterValue` - Parameter management
 - `rclcpp::QoS` - QoS configuration
+- `rclcpp::QosOverridingOptions` - QoS override configuration via parameters
 - `rclcpp::NodeOptions` - Node construction options
 - `rclcpp::node_interfaces::NodeBaseInterface` - Node base interface (inherited)
 - `rclcpp::node_interfaces::NodeTopicsInterface` - Node topics interface (inherited)

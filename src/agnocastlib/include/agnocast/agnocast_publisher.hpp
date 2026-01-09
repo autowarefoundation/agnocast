@@ -5,6 +5,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
+#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <fcntl.h>
@@ -44,7 +45,6 @@ struct PublisherOptions
 {
   // NOTE: This option is deprecated. Any values set here will be ignored.
   bool do_always_ros2_publish = false;
-  // NOTE: This option is deprecated. Any values set here will be ignored.
   rclcpp::QosOverridingOptions qos_overriding_options;
 };
 
@@ -54,10 +54,9 @@ class BasicPublisher
   topic_local_id_t id_ = -1;
   std::string topic_name_;
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
-  PublisherOptions options_;
 
   template <typename NodeT>
-  void constructor_impl(
+  rclcpp::QoS constructor_impl(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options)
   {
@@ -68,13 +67,20 @@ class BasicPublisher
         "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
     }
 
-    if (!options.qos_overriding_options.get_policy_kinds().empty()) {
-      RCLCPP_ERROR(logger, "The 'qos_overriding_options' option is deprecated.");
-    }
-
     topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
-    id_ = initialize_publisher(topic_name_, node->get_fully_qualified_name(), qos);
+
+    auto node_parameters = node->get_node_parameters_interface();
+    const rclcpp::QoS actual_qos =
+      options.qos_overriding_options.get_policy_kinds().size()
+        ? rclcpp::detail::declare_qos_parameters(
+            options.qos_overriding_options, node_parameters, topic_name_, qos,
+            rclcpp::detail::PublisherQosParametersTraits{})
+        : qos;
+
+    id_ = initialize_publisher(topic_name_, node->get_fully_qualified_name(), actual_qos);
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+
+    return actual_qos;
   }
 
 public:
@@ -84,13 +90,13 @@ public:
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options)
   {
-    constructor_impl(node, topic_name, qos, options);
+    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(
         node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-      topic_name_.c_str(), qos.depth());
+      topic_name_.c_str(), actual_qos.depth());
   }
 
   BasicPublisher(

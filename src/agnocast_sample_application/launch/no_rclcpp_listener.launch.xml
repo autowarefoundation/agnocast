@@ -9,6 +9,6 @@
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
         <param name="topic_name" value="/custom_topic" />
         <param name="qos.queue_size" value="10" />
-        <param name="qos.transient_local" value="false" />
+        <param name="qos_overrides./custom_topic.subscription.durability" value="transient_local" />
     </node>
 </launch>

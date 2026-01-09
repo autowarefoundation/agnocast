@@ -195,16 +195,19 @@ public:
 
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
-    const std::string & topic_name, const rclcpp::QoS & qos)
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::PublisherOptions options = agnocast::PublisherOptions{})
   {
-    return std::make_shared<Publisher<MessageT>>(this, topic_name, qos);
+    return std::make_shared<Publisher<MessageT>>(this, topic_name, qos, options);
   }
 
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
-    const std::string & topic_name, size_t queue_size)
+    const std::string & topic_name, size_t queue_size,
+    agnocast::PublisherOptions options = agnocast::PublisherOptions{})
   {
-    return create_publisher<MessageT>(topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)));
+    return create_publisher<MessageT>(
+      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), options);
   }
 
   template <typename MessageT, typename Func>

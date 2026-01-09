@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
+#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <fcntl.h>
@@ -36,6 +37,7 @@ struct SubscriptionOptions
 {
   rclcpp::CallbackGroup::SharedPtr callback_group{nullptr};
   bool ignore_local_publications{false};
+  rclcpp::QosOverridingOptions qos_overriding_options;
 };
 
 // These are cut out of the class for information hiding.
@@ -103,15 +105,24 @@ class BasicSubscription : public SubscriptionBase
     NodeT * node, const rclcpp::QoS & qos, Func && callback,
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options)
   {
-    union ioctl_add_subscriber_args add_subscriber_args =
-      initialize(qos, false, options.ignore_local_publications, node->get_fully_qualified_name());
+    auto node_parameters = node->get_node_parameters_interface();
+    const rclcpp::QoS actual_qos =
+      options.qos_overriding_options.get_policy_kinds().size()
+        ? rclcpp::detail::declare_qos_parameters(
+            options.qos_overriding_options, node_parameters, topic_name_, qos,
+            rclcpp::detail::SubscriptionQosParametersTraits{})
+        : qos;
+
+    union ioctl_add_subscriber_args add_subscriber_args = initialize(
+      actual_qos, false, options.ignore_local_publications, node->get_fully_qualified_name());
 
     id_ = add_subscriber_args.ret_id;
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
 
     mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
 
-    const bool is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+    const bool is_transient_local =
+      actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
     uint32_t callback_info_id = agnocast::register_callback<MessageT>(
       std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq, callback_group);
 
