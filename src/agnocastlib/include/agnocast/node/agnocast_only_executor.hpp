@@ -32,6 +32,7 @@ public:
 
   virtual void spin() = 0;
 
+  // Implemented align to unify the API with rclcpp::Executor
   void add_node(const std::shared_ptr<agnocast::Node> & node);
 };
 

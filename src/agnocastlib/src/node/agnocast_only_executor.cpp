@@ -71,6 +71,7 @@ void AgnocastOnlyExecutor::execute_agnocast_executable(AgnocastExecutable & agno
   }
 }
 
+// Implemented align to unify the API with rclcpp::Executor
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void AgnocastOnlyExecutor::add_node(const std::shared_ptr<agnocast::Node> & node)
 {
