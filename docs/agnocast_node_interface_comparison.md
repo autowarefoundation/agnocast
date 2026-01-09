@@ -99,7 +99,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `set_parameters_atomically()` | ✓ | **Full Support** | - | Parameter events not triggered (see below) |
 | `get_parameters_by_prefix()` | ✓ | **Full Support** | - | |
 | `describe_parameters()` | ✓ | **Full Support** | - | |
-| `get_parameter_types()` | ✗ | **Not Implemented** | Yes | Throws exception |
+| `get_parameter_types()` | ✓ | **Full Support** | - | |
 | `list_parameters()` | ✗ | **Not Implemented** | Yes | Throws exception |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
@@ -242,7 +242,7 @@ The following tables compare methods that are **directly defined** in each class
 | `set_parameters_atomically()` | ✓ | ✓ | |
 | `describe_parameter()` | ✓ | ✓ | |
 | `describe_parameters()` | ✓ | ✓ | |
-| `get_parameter_types()` | ✓ | ✗ | |
+| `get_parameter_types()` | ✓ | ✓ | |
 | `list_parameters()` | ✓ | ✗ | |
 | `add_on_set_parameters_callback()` | ✓ | ✓ | |
 | `remove_on_set_parameters_callback()` | ✓ | ✓ | |

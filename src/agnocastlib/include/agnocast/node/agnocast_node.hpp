@@ -176,6 +176,11 @@ public:
     return node_parameters_->describe_parameters(names);
   }
 
+  std::vector<uint8_t> get_parameter_types(const std::vector<std::string> & names) const
+  {
+    return node_parameters_->get_parameter_types(names);
+  }
+
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType callback)
   {

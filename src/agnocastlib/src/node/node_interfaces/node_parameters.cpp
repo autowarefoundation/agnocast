@@ -670,10 +670,28 @@ std::vector<rcl_interfaces::msg::ParameterDescriptor> NodeParameters::describe_p
 std::vector<uint8_t> NodeParameters::get_parameter_types(
   const std::vector<std::string> & names) const
 {
-  // TODO(Koichi98)
-  (void)names;
-  throw std::runtime_error(
-    "NodeParameters::get_parameter_types is not yet implemented in agnocast");
+  std::lock_guard<std::recursive_mutex> lock(parameters_mutex_);
+  std::vector<uint8_t> results;
+  results.reserve(names.size());
+
+  for (const auto & name : names) {
+    auto it = parameters_.find(name);
+    if (it != parameters_.cend()) {
+      results.push_back(it->second.value.get_type());
+    } else if (allow_undeclared_) {
+      results.push_back(rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET);
+    } else {
+      throw rclcpp::exceptions::ParameterNotDeclaredException(name);
+    }
+  }
+
+  // TODO(bdm-k): This is unreachable code and can be removed.
+  //    The current implementation mirrors that of rclcpp.
+  if (results.size() != names.size()) {
+    throw std::runtime_error("results and names unexpectedly different sizes");
+  }
+
+  return results;
 }
 
 rcl_interfaces::msg::ListParametersResult NodeParameters::list_parameters(
