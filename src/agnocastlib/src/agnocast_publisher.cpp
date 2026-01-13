@@ -133,13 +133,18 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
   get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  get_subscriber_count_args.include_ros2 = true;
   if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &get_subscriber_count_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
-  return get_subscriber_count_args.ret_subscriber_num;
+  uint32_t count = get_subscriber_count_args.ret_subscriber_num;
+  if (get_subscriber_count_args.ret_bridge_exist && count > 0) {
+    count--;
+  }
+  return count;
 }
 
 }  // namespace agnocast

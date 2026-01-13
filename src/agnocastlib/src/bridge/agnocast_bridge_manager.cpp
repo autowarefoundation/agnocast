@@ -263,6 +263,10 @@ void BridgeManager::check_active_bridges()
       auto result = get_agnocast_publisher_count(std::string(topic_name_view));
       count = result.count;
       reverse_bridge_exist = result.bridge_exist;
+      if (!update_ros2_subscriber_num(std::string(topic_name_view))) {
+        to_remove.push_back(key);
+        continue;
+      }
     }
 
     const int threshold = reverse_bridge_exist ? 1 : 0;
@@ -304,6 +308,21 @@ void BridgeManager::check_should_exit()
       executor_->cancel();
     }
   }
+}
+
+bool BridgeManager::update_ros2_subscriber_num(const std::string & topic_name)
+{
+  size_t ros2_count = container_node_->count_subscribers(topic_name);
+
+  struct ioctl_set_ros2_subscriber_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.ros2_subscriber_num = static_cast<uint32_t>(ros2_count);
+
+  if (ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger_, "AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+    return false;
+  }
+  return true;
 }
 
 void BridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)

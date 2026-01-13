@@ -161,8 +161,9 @@ public:
     message.reset();
   }
 
-  // Note: Currently returns only agnocast core subscribers.
-  // We also want to include the ros2 subscriber's number in the future.
+  // Returns the total subscriber count (Agnocast + ROS 2).
+  // Note: ROS 2 subscriber count is updated by the Bridge Manager periodically.
+  // TODO(Koichi98): It just returns the number of Agnocast subscribers for performance bridge.
   uint32_t get_subscription_count() const { return get_subscription_count_core(topic_name_); }
 };
 
