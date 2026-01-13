@@ -40,7 +40,6 @@ private:
 
   void on_mq_request(int fd);
   void on_signal();
-  void on_reload();
 
   void check_and_remove_bridges();
   void check_and_request_shutdown();

@@ -62,7 +62,6 @@ void PerformanceBridgeManager::run()
 
   event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
-  event_loop_.set_reload_handler([this]() { this->on_reload(); });
 
   while (!shutdown_requested_) {
     if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
@@ -161,12 +160,6 @@ void PerformanceBridgeManager::on_signal()
   if (executor_) {
     executor_->cancel();
   }
-}
-
-void PerformanceBridgeManager::on_reload()
-{
-  // TODO(yutarokobayashi): Implement configuration reload
-  RCLCPP_INFO(logger_, "Reload signal (SIGHUP) received.");
 }
 
 void PerformanceBridgeManager::check_and_remove_bridges()

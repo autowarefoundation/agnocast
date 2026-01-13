@@ -17,28 +17,10 @@ PerformanceBridgeIpcEventLoop::PerformanceBridgeIpcEventLoop(const rclcpp::Logge
     // 2. Message Size
     PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE,
     // 3. Block Signals
-    {SIGTERM, SIGINT, SIGHUP},
+    {SIGTERM, SIGINT},
     // 4. Ignore Signals
-    {SIGPIPE})
+    {SIGPIPE, SIGHUP})
 {
-  // TODO(yutarokobayashi): For debugging. Remove later.
-  RCLCPP_INFO(logger_, "PerformanceBridgeIpcEventLoop initialized (Skeleton).");
-}
-
-void PerformanceBridgeIpcEventLoop::set_reload_handler(ReloadCallback cb)
-{
-  reload_cb_ = std::move(cb);
-}
-
-void PerformanceBridgeIpcEventLoop::handle_signal(int signo)
-{
-  IpcEventLoopBase::handle_signal(signo);
-
-  if (signo == SIGHUP) {
-    if (reload_cb_) {
-      reload_cb_();
-    }
-  }
 }
 
 }  // namespace agnocast
