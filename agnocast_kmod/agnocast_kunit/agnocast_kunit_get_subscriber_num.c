@@ -132,3 +132,24 @@ void test_case_get_subscriber_num_include_ros2(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret3, 0);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_subscriber_num, 4);
 }
+
+void test_case_get_subscriber_num_bridge_exist(struct kunit * test)
+{
+  char * topic_name = "/kunit_test_topic";
+  pid_t bridge_owner_pid = 9000;
+  setup_one_subscriber(test, topic_name);
+
+  union ioctl_get_subscriber_num_args subscriber_num_args;
+  int ret1 = get_subscriber_num(topic_name, current->nsproxy->ipc_ns, false, &subscriber_num_args);
+  KUNIT_EXPECT_EQ(test, ret1, 0);
+  KUNIT_EXPECT_FALSE(test, subscriber_num_args.ret_bridge_exist);
+
+  struct ioctl_add_bridge_args add_bridge_args = {0};
+  int ret2 =
+    add_bridge(topic_name, bridge_owner_pid, false, current->nsproxy->ipc_ns, &add_bridge_args);
+  KUNIT_ASSERT_EQ(test, ret2, 0);
+
+  int ret3 = get_subscriber_num(topic_name, current->nsproxy->ipc_ns, false, &subscriber_num_args);
+  KUNIT_EXPECT_EQ(test, ret3, 0);
+  KUNIT_EXPECT_TRUE(test, subscriber_num_args.ret_bridge_exist);
+}
