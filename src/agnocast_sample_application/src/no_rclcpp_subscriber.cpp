@@ -1,5 +1,6 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast_sample_interfaces/msg/dynamic_size_array.hpp"
+#include "rclcpp/time.hpp"
 
 #include <iostream>
 
@@ -76,8 +77,16 @@ public:
 
     rclcpp::QoS qos(rclcpp::KeepLast(static_cast<size_t>(queue_size_)));
 
+    double start = now().seconds();
+    /* --- Start measuring elapsed time --- */
     sub_dynamic_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       resolved_topic, qos, std::bind(&NoRclcppSubscriber::callback, this, _1), agnocast_options);
+    /* --- End measuring elapsed time --- */
+    double end = now().seconds();
+    double elapsed_us = (end - start) * 1000.0 * 1000.0;
+
+    RCLCPP_INFO(
+      get_logger(), "Subscription created (took %ld us)", static_cast<int64_t>(elapsed_us));
 
     std::string durability_param_name =
       "qos_overrides." + resolved_topic + ".subscription.durability";

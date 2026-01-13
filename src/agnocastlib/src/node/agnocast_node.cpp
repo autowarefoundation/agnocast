@@ -3,6 +3,8 @@
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 
+#include <rcl/time.h>
+
 namespace agnocast
 {
 
@@ -25,6 +27,8 @@ Node::Node(
 
   node_parameters_ = std::make_shared<node_interfaces::NodeParameters>(
     node_base_, options.parameter_overrides(), local_args_.get());
+
+  node_clock_ = std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME);
 }
 
 }  // namespace agnocast

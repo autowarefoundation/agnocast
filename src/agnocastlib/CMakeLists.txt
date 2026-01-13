@@ -34,7 +34,7 @@ add_library(agnocast SHARED
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
-  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp
+  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp
   src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp
   src/bridge/agnocast_bridge_utils.cpp
   src/bridge/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/agnocast_performance_bridge_loader.cpp 

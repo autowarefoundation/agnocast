@@ -113,7 +113,19 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 ---
 
-### 2.4 Other Interfaces
+### 2.4 NodeClockInterface
+
+**Purpose**: Clock access
+
+| Feature | agnocast::Node | Support Level | Planned | Notes |
+|---------|----------------|---------------|---------|-------|
+| `get_clock()` | ✓ | **Full Support** | - | |
+
+**NOTE**: *Simulated time* is yet to be supported.
+
+---
+
+### 2.5 Other Interfaces
 
 The following interfaces are all **unsupported**. agnocast::Node does not implement these interfaces.
 
@@ -123,7 +135,6 @@ The following interfaces are all **unsupported**. agnocast::Node does not implem
 | NodeLoggingInterface | Unsupported | TBD | `get_logger()` is provided as a direct method |
 | NodeServicesInterface | Unsupported | TBD | Uses agnocast's own service functionality |
 | NodeTimersInterface | Unsupported | Yes | |
-| NodeClockInterface | Unsupported | TBD | |
 | NodeWaitablesInterface | Unsupported | TBD | |
 | NodeTimeSourceInterface | Unsupported | TBD | |
 
@@ -274,8 +285,8 @@ The following tables compare methods that are **directly defined** in each class
 
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
-| `get_clock()` | ✓ | ✗ | |
-| `now()` | ✓ | ✗ | |
+| `get_clock()` | ✓ | ✓ | |
+| `now()` | ✓ | ✓ | |
 
 #### Node Interface Access
 
