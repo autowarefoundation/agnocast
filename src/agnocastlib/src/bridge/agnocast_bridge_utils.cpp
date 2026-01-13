@@ -46,4 +46,26 @@ rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t p
                                                     : rclcpp::DurabilityPolicy::Volatile);
 }
 
+int get_agnocast_subscriber_count(const std::string & topic_name)
+{
+  union ioctl_get_subscriber_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+    return -1;
+  }
+  return static_cast<int>(args.ret_subscriber_num);
+}
+
+int get_agnocast_publisher_count(const std::string & topic_name)
+{
+  union ioctl_get_publisher_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  if (ioctl(agnocast_fd, AGNOCAST_GET_PUBLISHER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_PUBLISHER_NUM_CMD failed: %s", strerror(errno));
+    return -1;
+  }
+  return static_cast<int>(args.ret_publisher_num);
+}
+
 }  // namespace agnocast

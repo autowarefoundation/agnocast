@@ -42,6 +42,7 @@ private:
   void on_signal();
   void on_reload();
 
+  void check_and_remove_bridges();
   void check_and_request_shutdown();
 };
 
