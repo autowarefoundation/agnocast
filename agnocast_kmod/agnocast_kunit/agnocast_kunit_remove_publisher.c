@@ -108,7 +108,7 @@ void test_case_remove_publisher_keeps_topic_with_subscriber(struct kunit * test)
   get_publisher_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_pub_args);
   KUNIT_EXPECT_EQ(test, get_pub_args.ret_publisher_num, 0);
   union ioctl_get_subscriber_num_args get_sub_args;
-  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_sub_args);
+  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, false, &get_sub_args);
   KUNIT_EXPECT_EQ(test, get_sub_args.ret_subscriber_num, 1);
 }
 

@@ -16,6 +16,7 @@
 #include "agnocast_kunit/agnocast_kunit_remove_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_remove_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_remove_subscriber.h"
+#include "agnocast_kunit/agnocast_kunit_set_ros2_subscriber_num.h"
 #include "agnocast_kunit/agnocast_kunit_take_msg.h"
 #include "agnocast_memory_allocator.h"
 
@@ -41,6 +42,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_GET_PUBLISHER_QOS,
   TEST_CASES_ADD_BRIDGE,
   TEST_CASES_REMOVE_BRIDGE,
+  TEST_CASES_SET_ROS2_SUBSCRIBER_NUM,
   TEST_CASES_DO_EXIT,
   {},
 };

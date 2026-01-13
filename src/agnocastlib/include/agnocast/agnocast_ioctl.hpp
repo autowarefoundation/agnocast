@@ -157,10 +157,17 @@ union ioctl_take_msg_args {
 };
 #pragma GCC diagnostic pop
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_get_subscriber_num_args {
-  struct name_info topic_name;
+  struct
+  {
+    struct name_info topic_name;
+    bool include_ros2;
+  };
   uint32_t ret_subscriber_num;
 };
+#pragma GCC diagnostic pop
 
 union ioctl_get_publisher_num_args {
   struct name_info topic_name;
@@ -271,6 +278,12 @@ struct ioctl_get_process_num_args
   uint32_t ret_process_num;
 };
 
+struct ioctl_set_ros2_subscriber_num_args
+{
+  struct name_info topic_name;
+  uint32_t ros2_subscriber_num;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -291,5 +304,7 @@ struct ioctl_get_process_num_args
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
 #define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
+#define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
+  _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 
 }  // namespace agnocast

@@ -77,7 +77,7 @@ void test_case_remove_subscriber_basic(struct kunit * test)
 
   KUNIT_ASSERT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 1);
   union ioctl_get_subscriber_num_args get_sub_args;
-  int ret = get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_sub_args);
+  int ret = get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, false, &get_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_EQ(test, get_sub_args.ret_subscriber_num, 1);
 
@@ -102,7 +102,7 @@ void test_case_remove_subscriber_keeps_topic_with_publisher(struct kunit * test)
 
   KUNIT_ASSERT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 1);
   union ioctl_get_subscriber_num_args get_sub_args;
-  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_sub_args);
+  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, false, &get_sub_args);
   KUNIT_ASSERT_EQ(test, get_sub_args.ret_subscriber_num, 1);
 
   // Act
@@ -112,7 +112,7 @@ void test_case_remove_subscriber_keeps_topic_with_publisher(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 1);
   KUNIT_EXPECT_TRUE(test, is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
-  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_sub_args);
+  get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, false, &get_sub_args);
   KUNIT_EXPECT_EQ(test, get_sub_args.ret_subscriber_num, 0);
   union ioctl_get_publisher_num_args get_pub_args;
   get_publisher_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_pub_args);
