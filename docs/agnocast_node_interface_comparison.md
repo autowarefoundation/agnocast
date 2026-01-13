@@ -230,7 +230,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
-| `declare_parameter()` | ✓ | ✓ | agnocast requires default value |
+| `declare_parameter()` | ✓ | ✓ | |
 | `declare_parameters()` | ✓ | ✗ | |
 | `undeclare_parameter()` | ✓ | ✓ | |
 | `has_parameter()` | ✓ | ✓ | |

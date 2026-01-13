@@ -78,14 +78,41 @@ public:
     return node_parameters_->declare_parameter(name, default_value, descriptor, ignore_override);
   }
 
+  const ParameterValue & declare_parameter(
+    const std::string & name, rclcpp::ParameterType type,
+    const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
+  {
+    return node_parameters_->declare_parameter(name, type, descriptor, ignore_override);
+  }
+
   template <typename ParameterT>
   ParameterT declare_parameter(
     const std::string & name, const ParameterT & default_value,
     const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
   {
-    return declare_parameter(
-             name, rclcpp::ParameterValue(default_value), descriptor, ignore_override)
-      .get<ParameterT>();
+    try {
+      return declare_parameter(
+               name, rclcpp::ParameterValue(default_value), descriptor, ignore_override)
+        .get<ParameterT>();
+    } catch (const rclcpp::ParameterTypeException & ex) {
+      throw rclcpp::exceptions::InvalidParameterTypeException(name, ex.what());
+    }
+  }
+
+  template <typename ParameterT>
+  ParameterT declare_parameter(
+    const std::string & name, const ParameterDescriptor & descriptor = ParameterDescriptor{},
+    bool ignore_override = false)
+  {
+    // take advantage of parameter value template magic to get
+    // the correct rclcpp::ParameterType from ParameterT
+    rclcpp::ParameterValue value{ParameterT{}};
+    try {
+      return declare_parameter(name, value.get_type(), descriptor, ignore_override)
+        .template get<ParameterT>();
+    } catch (const rclcpp::ParameterTypeException &) {
+      throw rclcpp::exceptions::UninitializedStaticallyTypedParameterException(name);
+    }
   }
 
   bool has_parameter(const std::string & name) const
