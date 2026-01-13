@@ -67,3 +67,30 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, get_all_callback_groups)
   groups = executor->get_all_callback_groups();
   EXPECT_EQ(groups.size(), 0);
 }
+
+TEST_F(CallbackIsolatedAgnocastExecutorTest, cancel)
+{
+  // Arrange
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  bool timer_called = false;
+  auto timer = node->create_wall_timer(
+    std::chrono::milliseconds(10), [&timer_called]() { timer_called = true; });
+  executor->add_node(node);
+  bool spin_finished = false;
+  std::thread spin_thread([this, &spin_finished]() {
+    executor->spin();
+    spin_finished = true;
+  });
+  while (!timer_called) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  // Act
+  EXPECT_NO_THROW(executor->cancel());
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+
+  // Assert
+  EXPECT_TRUE(spin_finished) << "Spin should have finished after cancel";
+}
