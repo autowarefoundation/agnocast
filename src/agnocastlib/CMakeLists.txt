@@ -265,6 +265,38 @@ if(BUILD_TESTING)
     TIMEOUT 120
   )
 
+  # Test component for ComponentManagerCallbackIsolated integration tests
+  add_library(test_publisher_component SHARED
+    test/integration/src/test_publisher_component.cpp)
+  target_link_libraries(test_publisher_component agnocast)
+  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs)
+  rclcpp_components_register_node(test_publisher_component
+    PLUGIN "agnocastlib_test::TestPublisherComponent"
+    EXECUTABLE test_publisher_component_node)
+  install(TARGETS test_publisher_component
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)
+
+  add_library(test_subscription_component SHARED
+    test/integration/src/test_subscription_component.cpp)
+  target_link_libraries(test_subscription_component agnocast)
+  ament_target_dependencies(test_subscription_component rclcpp rclcpp_components std_msgs)
+  rclcpp_components_register_node(test_subscription_component
+    PLUGIN "agnocastlib_test::TestSubscriptionComponent"
+    EXECUTABLE test_subscription_component_node)
+  install(TARGETS test_subscription_component
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)
+
+  # Integration tests for ComponentManagerCallbackIsolated using launch_testing
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(
+    test/integration/test_agnocast_component_container_cie_launch.py
+    TIMEOUT 120
+  )
+
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)
   set_target_properties(initialize_shutdown_mock PROPERTIES
