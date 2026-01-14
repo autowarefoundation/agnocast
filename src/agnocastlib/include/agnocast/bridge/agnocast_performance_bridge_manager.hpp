@@ -41,6 +41,7 @@ private:
   void on_mq_request(int fd);
   void on_signal();
 
+  void check_ros2_demand_and_create_bridges();
   void check_and_remove_bridges();
   void check_and_request_shutdown();
 };

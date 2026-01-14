@@ -69,6 +69,7 @@ void PerformanceBridgeManager::run()
       break;
     }
 
+    check_ros2_demand_and_create_bridges();
     check_and_remove_bridges();
     check_and_request_shutdown();
   }
@@ -121,6 +122,14 @@ void PerformanceBridgeManager::on_mq_request(int fd)
       return;
     }
 
+    if (!has_external_ros2_publisher(container_node_.get(), topic_name)) {
+      RCLCPP_INFO(
+        // TODO(yutarokobayashi): For debugging. Remove later.
+        logger_, "Skipping R2A creation for '%s': No external ROS 2 publisher found.",
+        topic_name.c_str());
+      return;
+    }
+
     rclcpp::QoS qos = get_subscriber_qos(topic_name, target_id);
     auto bridge_result = loader_.create_r2a_bridge(container_node_, topic_name, message_type, qos);
     if (bridge_result.entity_handle) {
@@ -140,6 +149,14 @@ void PerformanceBridgeManager::on_mq_request(int fd)
     if (active_a2r_bridges_.count(topic_name) > 0) {
       // TODO(yutarokobayashi): For debugging. Remove later.
       RCLCPP_INFO(logger_, "A2R Bridge for '%s' already exists. Skipping.", topic_name.c_str());
+      return;
+    }
+
+    if (!has_external_ros2_subscriber(container_node_.get(), topic_name)) {
+      // TODO(yutarokobayashi): For debugging. Remove later.
+      RCLCPP_INFO(
+        logger_, "Skipping A2R creation for '%s': No external ROS 2 subscriber found.",
+        topic_name.c_str());
       return;
     }
 
@@ -171,12 +188,22 @@ void PerformanceBridgeManager::on_signal()
   }
 }
 
+void PerformanceBridgeManager::check_ros2_demand_and_create_bridges()
+{
+  // TODO(yutarokobayashi): Implement dynamic bridge creation based on ROS 2 demand.
+  // 1. Scan ROS 2 graph to identify topics with active subscribers.
+  // 2. Check if a corresponding Agnocast publisher exists for those topics.
+  // 3. If both exist and no bridge is currently active, instantiate a new bridge
+  //    and register its CallbackGroup to the executor.
+}
+
 void PerformanceBridgeManager::check_and_remove_bridges()
 {
   auto r2a_it = active_r2a_bridges_.begin();
   while (r2a_it != active_r2a_bridges_.end()) {
     const std::string & topic_name = r2a_it->first;
     auto result = get_agnocast_subscriber_count(topic_name);
+    bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
@@ -186,7 +213,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     }
 
     const int threshold = result.bridge_exist ? 1 : 0;
-    if (result.count <= threshold) {
+    if (result.count <= threshold || !is_demanded_by_ros2) {
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
       ++r2a_it;
@@ -197,6 +224,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
   while (a2r_it != active_a2r_bridges_.end()) {
     const std::string & topic_name = a2r_it->first;
     auto result = get_agnocast_publisher_count(topic_name);
+    bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
@@ -206,7 +234,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     }
 
     const int threshold = result.bridge_exist ? 1 : 0;
-    if (result.count <= threshold) {
+    if (result.count <= threshold || !is_demanded_by_ros2) {
       a2r_it = active_a2r_bridges_.erase(a2r_it);
     } else {
       ++a2r_it;
