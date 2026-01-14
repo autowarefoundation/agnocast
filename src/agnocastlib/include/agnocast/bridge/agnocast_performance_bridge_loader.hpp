@@ -19,11 +19,11 @@ public:
   explicit PerformanceBridgeLoader(const rclcpp::Logger & logger);
   ~PerformanceBridgeLoader();
 
-  rclcpp::SubscriptionBase::SharedPtr create_r2a_bridge(
+  PerformanceBridgeResult create_r2a_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
-  std::shared_ptr<agnocast::SubscriptionBase> create_a2r_bridge(
+  PerformanceBridgeResult create_a2r_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 

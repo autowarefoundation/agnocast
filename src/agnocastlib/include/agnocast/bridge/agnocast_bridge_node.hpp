@@ -81,7 +81,7 @@ struct NoBridgeRequestPolicy
 };
 
 template <typename MessageT>
-class RosToAgnocastBridge
+class RosToAgnocastBridge : public BridgeBase
 {
   using AgnoPub = agnocast::BasicPublisher<MessageT, NoBridgeRequestPolicy>;
   typename AgnoPub::SharedPtr agnocast_pub_;
@@ -100,7 +100,7 @@ public:
       parent_node.get(), topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).transient_local(),
       agnocast::PublisherOptions{});
     ros_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
     rclcpp::SubscriptionOptions ros_opts;
     ros_opts.ignore_local_publications = true;
@@ -119,6 +119,8 @@ public:
       },
       ros_opts);
   }
+
+  rclcpp::CallbackGroup::SharedPtr get_callback_group() const override { return ros_cb_group_; }
 };
 
 // We should document that things don't work well when Agnocast publishers have a mix of transient
@@ -128,7 +130,7 @@ public:
 // feature can also receive from volatile Agnocast publishers. (This isn't very clean, so we'd
 // prefer to avoid it if possible.)
 template <typename MessageT>
-class AgnocastToRosBridge
+class AgnocastToRosBridge : public BridgeBase
 {
   using AgnoSub = agnocast::BasicSubscription<MessageT, NoBridgeRequestPolicy>;
   typename rclcpp::Publisher<MessageT>::SharedPtr ros_pub_;
@@ -147,7 +149,7 @@ public:
     ros_pub_ = parent_node->create_publisher<MessageT>(
       topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).reliable().transient_local());
     agno_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
     agnocast::SubscriptionOptions agno_opts;
     agno_opts.ignore_local_publications = true;
@@ -169,6 +171,8 @@ public:
       },
       agno_opts);
   }
+
+  rclcpp::CallbackGroup::SharedPtr get_callback_group() const override { return agno_cb_group_; }
 };
 
 template <typename MessageT>

@@ -33,8 +33,8 @@ private:
 
   bool shutdown_requested_ = false;
 
-  std::unordered_map<std::string, rclcpp::SubscriptionBase::SharedPtr> active_r2a_bridges_;
-  std::unordered_map<std::string, std::shared_ptr<agnocast::SubscriptionBase>> active_a2r_bridges_;
+  std::unordered_map<std::string, std::shared_ptr<void>> active_r2a_bridges_;
+  std::unordered_map<std::string, std::shared_ptr<void>> active_a2r_bridges_;
 
   void start_ros_execution();
 

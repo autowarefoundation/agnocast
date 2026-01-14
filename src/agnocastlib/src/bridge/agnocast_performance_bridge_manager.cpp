@@ -122,10 +122,15 @@ void PerformanceBridgeManager::on_mq_request(int fd)
     }
 
     rclcpp::QoS qos = get_subscriber_qos(topic_name, target_id);
-    auto bridge = loader_.create_r2a_bridge(container_node_, topic_name, message_type, qos);
+    auto bridge_result = loader_.create_r2a_bridge(container_node_, topic_name, message_type, qos);
+    if (bridge_result.entity_handle) {
+      active_r2a_bridges_[topic_name] = bridge_result.entity_handle;
 
-    if (bridge) {
-      active_r2a_bridges_[topic_name] = bridge;
+      if (bridge_result.callback_group) {
+        executor_->add_callback_group(
+          bridge_result.callback_group, container_node_->get_node_base_interface(), true);
+      }
+
       // TODO(yutarokobayashi): For debugging. Remove later.
       RCLCPP_INFO(logger_, "Activated R2A Bridge. Total active: %zu", active_r2a_bridges_.size());
     } else {
@@ -139,10 +144,14 @@ void PerformanceBridgeManager::on_mq_request(int fd)
     }
 
     rclcpp::QoS qos = get_publisher_qos(topic_name, target_id);
-    auto bridge = loader_.create_a2r_bridge(container_node_, topic_name, message_type, qos);
+    auto bridge_result = loader_.create_a2r_bridge(container_node_, topic_name, message_type, qos);
+    if (bridge_result.entity_handle) {
+      active_a2r_bridges_[topic_name] = bridge_result.entity_handle;
 
-    if (bridge) {
-      active_a2r_bridges_[topic_name] = bridge;
+      if (bridge_result.callback_group) {
+        executor_->add_callback_group(
+          bridge_result.callback_group, container_node_->get_node_base_interface(), true);
+      }
       // TODO(yutarokobayashi): For debugging. Remove later.
       RCLCPP_INFO(logger_, "Activated A2R Bridge. Total active: %zu", active_a2r_bridges_.size());
     } else {

@@ -170,6 +170,13 @@ void BridgeManager::activate_bridge(
   }
 
   active_bridges_[topic_name_with_direction] = bridge;
+
+  auto cast_bridge = std::static_pointer_cast<agnocast::BridgeBase>(bridge);
+
+  auto callback_group = cast_bridge->get_callback_group();
+  if (callback_group) {
+    executor_->add_callback_group(callback_group, container_node_->get_node_base_interface(), true);
+  }
 }
 
 void BridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)

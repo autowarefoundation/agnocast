@@ -2,12 +2,19 @@
 
 #include "agnocast/agnocast_ioctl.hpp"
 
-#include <rclcpp/qos.hpp>
+#include <rclcpp/rclcpp.hpp>
 
 #include <string>
 
 namespace agnocast
 {
+
+class BridgeBase
+{
+public:
+  virtual ~BridgeBase() = default;
+  virtual rclcpp::CallbackGroup::SharedPtr get_callback_group() const = 0;
+};
 
 struct SubscriberCountResult
 {

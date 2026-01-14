@@ -5,9 +5,10 @@
 #include "agnocast/bridge/agnocast_performance_bridge_plugin_api.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include <utility>
 #include "@(header_path)"
 
-extern "C" rclcpp::SubscriptionBase::SharedPtr @(function_name)(
+extern "C" PerformanceBridgeResult @(function_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
@@ -20,7 +21,7 @@ extern "C" rclcpp::SubscriptionBase::SharedPtr @(function_name)(
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(),
     agnocast::PublisherOptions{});
 
-  auto ros_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto ros_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   rclcpp::SubscriptionOptions ros_opts;
   ros_opts.ignore_local_publications = true;
@@ -36,5 +37,5 @@ extern "C" rclcpp::SubscriptionBase::SharedPtr @(function_name)(
     },
     ros_opts);
 
-  return ros_sub;
+  return {ros_sub, ros_cb_group};
 }

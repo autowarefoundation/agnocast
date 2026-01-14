@@ -23,13 +23,13 @@ PerformanceBridgeLoader::~PerformanceBridgeLoader()
   loaded_libraries_.clear();
 }
 
-rclcpp::SubscriptionBase::SharedPtr PerformanceBridgeLoader::create_r2a_bridge(
+PerformanceBridgeResult PerformanceBridgeLoader::create_r2a_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
   void * symbol = get_bridge_factory_symbol(message_type, "r2a", "create_r2a_bridge");
   if (symbol == nullptr) {
-    return nullptr;
+    return {nullptr, nullptr};
   }
 
   auto factory = reinterpret_cast<BridgeEntryR2A>(symbol);
@@ -39,13 +39,13 @@ rclcpp::SubscriptionBase::SharedPtr PerformanceBridgeLoader::create_r2a_bridge(
   return factory(std::move(node), topic_name, qos);
 }
 
-std::shared_ptr<agnocast::SubscriptionBase> PerformanceBridgeLoader::create_a2r_bridge(
+PerformanceBridgeResult PerformanceBridgeLoader::create_a2r_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
   void * symbol = get_bridge_factory_symbol(message_type, "a2r", "create_a2r_bridge");
   if (symbol == nullptr) {
-    return nullptr;
+    return {nullptr, nullptr};
   }
 
   auto factory = reinterpret_cast<BridgeEntryA2R>(symbol);

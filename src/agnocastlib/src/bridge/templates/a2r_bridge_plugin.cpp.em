@@ -5,9 +5,10 @@
 #include "agnocast/bridge/agnocast_performance_bridge_plugin_api.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include <utility>
 #include "@(header_path)"
 
-extern "C" std::shared_ptr<agnocast::SubscriptionBase> @(function_name)(
+extern "C" PerformanceBridgeResult @(function_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
@@ -15,7 +16,7 @@ extern "C" std::shared_ptr<agnocast::SubscriptionBase> @(function_name)(
   auto ros_pub = node->create_publisher<@(cpp_type)>(
     topic_name, rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<@(cpp_type)> msg) {
     auto loaned_msg = ros_pub->borrow_loaned_message();
@@ -39,5 +40,5 @@ extern "C" std::shared_ptr<agnocast::SubscriptionBase> @(function_name)(
     agno_callback,
     sub_opts);
 
-  return agno_sub;
+  return {agno_sub, cb_group};
 }
