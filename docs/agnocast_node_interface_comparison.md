@@ -121,11 +121,29 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 |---------|----------------|---------------|---------|-------|
 | `get_clock()` | ✓ | **Full Support** | - | |
 
-**NOTE**: *Simulated time* is yet to be supported.
+---
+
+### 2.5 NodeTimeSourceInterface
+
+**Purpose**: Time source configuration for simulated time (`use_sim_time`)
+
+| Feature | agnocast::Node | Support Level | Planned | Notes |
+|---------|----------------|---------------|---------|-------|
+| `use_sim_time` parameter | ✓ | **Full Support** | - | Declared at node construction |
+| `/clock` subscription | ✓ | **Full Support** | - | Subscribes when `use_sim_time:=true` |
+| ROS time override | ✓ | **Full Support** | - | Uses `rcl_*_ros_time_override()` functions |
+
+**Unimplemented Features** (compared to rclcpp::TimeSource):
+
+| Feature | Impact | Notes |
+|---------|--------|-------|
+| Multiple clocks | Low | `agnocast::Node` uses single clock; rarely needed |
+| Message caching | Low | Only matters when attaching clocks after `/clock` messages arrive |
+| Dynamic parameter change | Low | Typically `use_sim_time` is set at launch time and not changed at runtime (e.g., Autoware's logging_simulation) |
 
 ---
 
-### 2.5 Other Interfaces
+### 2.6 Other Interfaces
 
 The following interfaces are all **unsupported**. agnocast::Node does not implement these interfaces.
 
@@ -136,7 +154,6 @@ The following interfaces are all **unsupported**. agnocast::Node does not implem
 | NodeServicesInterface | Unsupported | TBD | Uses agnocast's own service functionality |
 | NodeTimersInterface | Unsupported | Yes | |
 | NodeWaitablesInterface | Unsupported | TBD | |
-| NodeTimeSourceInterface | Unsupported | TBD | |
 
 ---
 
@@ -351,6 +368,9 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rcl_arguments_get_param_overrides()` - Get parameter overrides
 - `rcl_arguments_fini()` - Argument cleanup
 - `rcl_get_default_allocator()` - Get default allocator
+- `rcl_enable_ros_time_override()` - Enable ROS time override for simulated time
+- `rcl_disable_ros_time_override()` - Disable ROS time override
+- `rcl_set_ros_time_override()` - Set ROS time override value
 
 **rcl Data Structures**:
 
@@ -359,6 +379,7 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 **rclcpp Functions**:
 
 - `rclcpp::detail::declare_qos_parameters()` - Declares QoS-related parameters and applies overrides. This function only requires `NodeParametersInterface` and internally calls `declare_parameter`/`get_parameter`, so it works with `agnocast::Node`. When `QosOverridingOptions` is specified, QoS policies are automatically applied from parameters using the naming convention `qos_overrides.<topic>.<entity>.<policy>` (e.g., `qos_overrides./my_topic.subscription.durability`), without requiring explicit parameter declaration in user code.
+- `rclcpp::exceptions::throw_from_rcl_error()` - Throw exception from rcl error
 
 **rclcpp Classes/Interfaces**:
 
@@ -375,3 +396,11 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rclcpp::node_interfaces::ParameterMutationRecursionGuard` - RAII guard to prevent recursive parameter modifications from within callbacks
 - `rclcpp::node_interfaces::ParameterInfo` - Parameter value and descriptor storage
 - `rclcpp::node_interfaces::OnSetParametersCallbackHandle` - Handle for parameter set callbacks
+- `rclcpp::node_interfaces::NodeClockInterface` - Node clock interface (inherited)
+- `rclcpp::node_interfaces::NodeTimeSourceInterface` - Node time source interface (inherited)
+- `rclcpp::Clock` - Clock management
+- `rclcpp::Time` - Time representation
+
+**Message Types**:
+
+- `rosgraph_msgs::msg::Clock` - Clock message for simulated time

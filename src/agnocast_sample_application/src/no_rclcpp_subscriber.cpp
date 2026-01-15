@@ -2,6 +2,7 @@
 #include "agnocast_sample_interfaces/msg/dynamic_size_array.hpp"
 #include "rclcpp/time.hpp"
 
+#include <chrono>
 #include <iostream>
 
 using std::placeholders::_1;
@@ -17,8 +18,15 @@ class NoRclcppSubscriber : public agnocast::Node
   void callback(
     const agnocast::ipc_shared_ptr<agnocast_sample_interfaces::msg::DynamicSizeArray> & message)
   {
+    auto ros_time = now();
+    auto wall_time = std::chrono::system_clock::now();
+    auto wall_seconds = std::chrono::duration<double>(wall_time.time_since_epoch()).count();
+
     RCLCPP_INFO(
       get_logger(), "I heard dynamic size array message with size: %zu", message->data.size());
+    RCLCPP_INFO(
+      get_logger(), "[TimeSource check] ROS time: %.3f sec, Wall time: %.3f sec",
+      ros_time.seconds(), wall_seconds);
   }
 
   rcl_interfaces::msg::SetParametersResult on_parameter_change(
@@ -63,8 +71,12 @@ public:
 
     std::string resolved_topic = get_node_topics_interface()->resolve_topic_name(topic_name_);
 
+    bool use_sim_time = false;
+    get_parameter("use_sim_time", use_sim_time);
+
     RCLCPP_INFO(get_logger(), "=== NoRclcppSubscriber Node Info ===");
     RCLCPP_INFO(get_logger(), "Fully qualified name: %s", get_fully_qualified_name().c_str());
+    RCLCPP_INFO(get_logger(), "use_sim_time: %s", use_sim_time ? "true" : "false");
     RCLCPP_INFO(get_logger(), "Topic name (input): %s", topic_name_.c_str());
     RCLCPP_INFO(get_logger(), "Topic name (resolved): %s", resolved_topic.c_str());
     RCLCPP_INFO(get_logger(), "Queue size: %ld", queue_size_);

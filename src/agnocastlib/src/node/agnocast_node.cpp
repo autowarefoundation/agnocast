@@ -29,6 +29,8 @@ Node::Node(
     node_base_, options.parameter_overrides(), local_args_.get());
 
   node_clock_ = std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME);
+
+  node_time_source_ = std::make_shared<node_interfaces::NodeTimeSource>(node_clock_, this);
 }
 
 }  // namespace agnocast
