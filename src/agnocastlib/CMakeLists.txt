@@ -41,7 +41,7 @@ add_library(agnocast SHARED
   src/bridge/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/agnocast_performance_bridge_loader.cpp 
   src/bridge/agnocast_performance_bridge_manager.cpp src/bridge/agnocast_performance_bridge_config.cpp)
 
-ament_target_dependencies(agnocast cie_thread_configurator rosgraph_msgs)
+ament_target_dependencies(agnocast cie_thread_configurator rosgraph_msgs cie_config_msgs)
 
 target_link_libraries(agnocast
   ${rclcpp_LIBRARIES}
