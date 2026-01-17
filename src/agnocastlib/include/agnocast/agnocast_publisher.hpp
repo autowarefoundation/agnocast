@@ -164,7 +164,10 @@ public:
   // Returns the total subscriber count (Agnocast + ROS 2).
   // Note: ROS 2 subscriber count is updated by the Bridge Manager periodically.
   // TODO(Koichi98): It just returns the number of Agnocast subscribers for performance bridge.
+  // TODO(Koichi98): Define get_intra_subscription_count separately to align with rclcpp.
   uint32_t get_subscription_count() const { return get_subscription_count_core(topic_name_); }
+
+  const char * get_topic_name() const { return topic_name_.c_str(); }
 };
 
 struct AgnocastToRosRequestPolicy;
