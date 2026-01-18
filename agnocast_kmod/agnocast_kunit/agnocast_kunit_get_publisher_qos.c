@@ -8,6 +8,7 @@ static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const pid_t PUBLISHER_PID = 1000;
 static const uint32_t QOS_DEPTH = 10;
+static const bool IS_BRIDGE = false;
 
 static void setup_process(struct kunit * test, const pid_t pid)
 {
@@ -26,7 +27,7 @@ static void verify_publisher_qos(struct kunit * test, bool is_transient)
 
   ret = add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, is_transient,
-    &add_pub_args);
+    IS_BRIDGE, &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   ret = get_publisher_qos(TOPIC_NAME, current->nsproxy->ipc_ns, add_pub_args.ret_id, &get_qos_args);
@@ -72,7 +73,7 @@ void test_case_error_publisher_not_found(struct kunit * test)
   setup_process(test, PUBLISHER_PID);
 
   ret = add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false, IS_BRIDGE,
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 

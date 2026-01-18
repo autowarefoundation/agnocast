@@ -13,6 +13,7 @@ static pid_t subscriber_pid = 1000;
 static pid_t publisher_pid = 2000;
 static pid_t common_pid = 3000;
 static bool is_take_sub = false;
+static bool is_bridge = false;
 
 static void setup_one_subscriber(
   struct kunit * test, topic_local_id_t * subscriber_id, bool ignore_local_publications)
@@ -25,7 +26,7 @@ static void setup_one_subscriber(
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
   *subscriber_id = add_subscriber_args.ret_id;
 
@@ -45,7 +46,7 @@ static void setup_one_publisher(
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-    qos_is_transient_local, &add_publisher_args);
+    qos_is_transient_local, is_bridge, &add_publisher_args);
   *publisher_id = add_publisher_args.ret_id;
 
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -68,7 +69,7 @@ static void setup_pub_sub_same_process(
   union ioctl_add_publisher_args add_publisher_args;
   int ret_pub = add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
-    &add_publisher_args);
+    is_bridge, &add_publisher_args);
 
   if (publisher_id) {
     *publisher_id = add_publisher_args.ret_id;
@@ -77,7 +78,7 @@ static void setup_pub_sub_same_process(
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret_sub = add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
-    qos_is_reliable, is_take_sub, ignore_local_publications, &add_subscriber_args);
+    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, &add_subscriber_args);
 
   if (subscriber_id) {
     *subscriber_id = add_subscriber_args.ret_id;

@@ -40,7 +40,8 @@ void decrement_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos)
+  const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
+  const bool is_bridge)
 {
   validate_ld_preload();
 
@@ -49,6 +50,7 @@ topic_local_id_t initialize_publisher(
   pub_args.node_name = {node_name.c_str(), node_name.size()};
   pub_args.qos_depth = qos.depth();
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+  pub_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PUBLISHER_CMD, &pub_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PUBLISHER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);

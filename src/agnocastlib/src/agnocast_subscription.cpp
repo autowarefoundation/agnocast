@@ -18,7 +18,7 @@ SubscriptionBase::SubscriptionBase(
 
 union ioctl_add_subscriber_args SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-  const std::string & node_name)
+  const bool is_bridge, const std::string & node_name)
 {
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
@@ -29,6 +29,7 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   add_subscriber_args.qos_is_reliable = qos.reliability() == rclcpp::ReliabilityPolicy::Reliable;
   add_subscriber_args.is_take_sub = is_take_sub;
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
+  add_subscriber_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);

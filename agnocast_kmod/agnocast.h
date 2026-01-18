@@ -48,6 +48,7 @@ union ioctl_add_subscriber_args {
     bool qos_is_reliable;
     bool is_take_sub;
     bool ignore_local_publications;
+    bool is_bridge;
   };
   struct
   {
@@ -62,6 +63,7 @@ union ioctl_add_publisher_args {
     struct name_info node_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
+    bool is_bridge;
   };
   struct
   {
@@ -311,12 +313,12 @@ int add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  union ioctl_add_subscriber_args * ioctl_ret);
+  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
 
 int add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  union ioctl_add_publisher_args * ioctl_ret);
+  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
 
 int increment_message_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,

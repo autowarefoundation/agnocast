@@ -72,7 +72,7 @@ protected:
   const std::string topic_name_;
   union ioctl_add_subscriber_args initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-    const std::string & node_name);
+    const bool is_bridge, const std::string & node_name);
 
 public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
@@ -103,7 +103,8 @@ class BasicSubscription : public SubscriptionBase
   template <typename NodeT, typename Func>
   uint32_t constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, Func && callback,
-    rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options)
+    rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
+    const bool is_bridge)
   {
     auto node_parameters = node->get_node_parameters_interface();
     const rclcpp::QoS actual_qos =
@@ -114,7 +115,8 @@ class BasicSubscription : public SubscriptionBase
         : qos;
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
-      actual_qos, false, options.ignore_local_publications, node->get_fully_qualified_name());
+      actual_qos, false, options.ignore_local_publications, is_bridge,
+      node->get_fully_qualified_name());
 
     id_ = add_subscriber_args.ret_id;
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
@@ -135,13 +137,13 @@ public:
   template <typename Func>
   BasicSubscription(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
-    agnocast::SubscriptionOptions options)
+    agnocast::SubscriptionOptions options, const bool is_bridge = false)
   : SubscriptionBase(node, topic_name)
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
     [[maybe_unused]] uint32_t callback_info_id =
-      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options);
+      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, is_bridge);
 
     {
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id;
@@ -163,7 +165,7 @@ public:
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
     [[maybe_unused]] uint32_t callback_info_id =
-      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options);
+      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, false);
 
     // TODO(atsushi421): CARET tracepoint for agnocast::Node
   }
@@ -195,8 +197,8 @@ public:
         dummy_cb_symbols.c_str(), topic_name_.c_str(), qos.depth(), 0);
     }
 
-    union ioctl_add_subscriber_args add_subscriber_args =
-      initialize(qos, true, options.ignore_local_publications, node->get_fully_qualified_name());
+    union ioctl_add_subscriber_args add_subscriber_args = initialize(
+      qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
 
     id_ = add_subscriber_args.ret_id;
 

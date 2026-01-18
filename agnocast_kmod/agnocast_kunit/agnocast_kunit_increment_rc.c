@@ -13,6 +13,7 @@ static pid_t subscriber_pid = 1000;
 static pid_t publisher_pid = 2000;
 static const bool IS_TAKE_SUB = false;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
+static const bool IS_BRIDGE = false;
 
 static void setup_one_publisher(
   struct kunit * test, topic_local_id_t * publisher_id, uint64_t * ret_addr)
@@ -26,7 +27,7 @@ static void setup_one_publisher(
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, &add_publisher_args);
+    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
   *publisher_id = add_publisher_args.ret_id;
 
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -43,7 +44,7 @@ static void setup_one_subscriber(struct kunit * test, topic_local_id_t * subscri
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
   *subscriber_id = add_subscriber_args.ret_id;
 

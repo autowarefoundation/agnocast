@@ -9,6 +9,7 @@ static const char * node_name = "/kunit_test_node";
 static const pid_t publisher_pid = 1000;
 static const uint32_t qos_depth = 1;
 static const bool qos_is_transient_local = false;
+static const bool is_bridge = false;
 
 void test_case_add_publisher_normal(struct kunit * test)
 {
@@ -21,7 +22,7 @@ void test_case_add_publisher_normal(struct kunit * test)
   union ioctl_add_publisher_args add_publisher_args;
   int ret1 = add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-    qos_is_transient_local, &add_publisher_args);
+    qos_is_transient_local, is_bridge, &add_publisher_args);
 
   KUNIT_EXPECT_EQ(test, ret1, 0);
   int ret2 = get_publisher_num(topic_name, current->nsproxy->ipc_ns, &get_publisher_num_args);
@@ -48,7 +49,7 @@ void test_case_add_publisher_many(struct kunit * test)
   for (int i = 0; i < publisher_num; i++) {
     ret1 = add_publisher(
       topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-      qos_is_transient_local, &add_publisher_args);
+      qos_is_transient_local, is_bridge, &add_publisher_args);
   }
 
   KUNIT_EXPECT_EQ(test, ret1, 0);
@@ -74,7 +75,7 @@ void test_case_add_publisher_too_many(struct kunit * test)
     union ioctl_add_publisher_args add_publisher_args;
     ret1 = add_publisher(
       topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-      qos_is_transient_local, &add_publisher_args);
+      qos_is_transient_local, is_bridge, &add_publisher_args);
   }
 
   KUNIT_EXPECT_EQ(test, ret1, -ENOBUFS);

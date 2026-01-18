@@ -10,6 +10,7 @@ static const bool QOS_IS_TRANSIENT_LOCAL = true;
 static const bool QOS_IS_RELIABLE = true;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const uint32_t QOS_DEPTH = 1;
+static const bool IS_BRIDGE = false;
 
 static void setup_one_publisher(
   struct kunit * test, topic_local_id_t * ret_publisher_id, uint64_t * ret_addr)
@@ -21,7 +22,7 @@ static void setup_one_publisher(
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, &add_publisher_args);
+    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
 
   KUNIT_ASSERT_EQ(test, ret1, 0);
   KUNIT_ASSERT_EQ(test, ret2, 0);
@@ -127,7 +128,7 @@ void test_case_decrement_rc_multi_reference(struct kunit * test)
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret3 = add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
   KUNIT_ASSERT_EQ(test, ret3, 0);
 

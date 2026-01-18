@@ -38,7 +38,8 @@ extern "C" PerformanceBridgeResult @(function_name)(
     topic_name,
     sub_qos,
     agno_callback,
-    sub_opts);
+    sub_opts,
+    true);
 
   return {agno_sub, cb_group};
 }

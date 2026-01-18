@@ -24,7 +24,8 @@ void increment_rc(const std::string &, const topic_local_id_t, const int64_t)
 {
   increment_rc_mock_called_count++;
 }
-topic_local_id_t initialize_publisher(const std::string &, const std::string &, const rclcpp::QoS &)
+topic_local_id_t initialize_publisher(
+  const std::string &, const std::string &, const rclcpp::QoS &, const bool)
 {
   return 0;  // Dummy value
 }
