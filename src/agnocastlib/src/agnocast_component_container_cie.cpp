@@ -136,6 +136,10 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
 
   node->for_each_callback_group(
     [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
+      if (!callback_group->automatically_add_to_executor_with_node()) {
+        return;
+      }
+
       auto agnocast_topics = agnocast::get_agnocast_topics_by_group(callback_group);
       std::string group_id =
         cie_thread_configurator::create_callback_group_id(callback_group, node, agnocast_topics);

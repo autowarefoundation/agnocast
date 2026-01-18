@@ -24,12 +24,24 @@ public:
       publisher_->publish(message);
     });
 
+    // Create a callback group that is NOT automatically added to executor
+    no_exec_callback_group_ = this->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive, false /* automatically_add_to_executor */);
+    no_exec_timer_ = this->create_wall_timer(
+      std::chrono::seconds(10),
+      []() {
+        // This callback should never be called since it's not added to executor
+      },
+      no_exec_callback_group_);
+
     RCLCPP_INFO(this->get_logger(), "TestPublisherComponent initialized");
   }
 
 private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::CallbackGroup::SharedPtr no_exec_callback_group_;
+  rclcpp::TimerBase::SharedPtr no_exec_timer_;
   int count_;
 };
 

@@ -81,6 +81,7 @@ class TestComponentContainerCIE(unittest.TestCase):
             output_text = "".join(cm._output)
             callback_info_count = output_text.count('Received CallbackGroupInfo:')
 
+            # Total expected: 2 (not 3, because the callback group with `automatically_add_to_executor = false` should be skipped)
             self.assertEqual(
                 callback_info_count, 2,
                 f"Expected exactly 2 'Received CallbackGroupInfo:' messages, but got {callback_info_count}"
