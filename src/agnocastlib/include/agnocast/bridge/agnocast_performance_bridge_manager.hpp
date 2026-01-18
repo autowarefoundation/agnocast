@@ -22,6 +22,8 @@ public:
   void run();
 
 private:
+  using RequestMap = std::unordered_map<topic_local_id_t, MqMsgPerformanceBridge>;
+
   rclcpp::Logger logger_;
   PerformanceBridgeIpcEventLoop event_loop_;
   PerformanceBridgeLoader loader_;
@@ -35,15 +37,23 @@ private:
 
   std::unordered_map<std::string, std::shared_ptr<void>> active_r2a_bridges_;
   std::unordered_map<std::string, std::shared_ptr<void>> active_a2r_bridges_;
+  std::unordered_map<std::string, RequestMap> request_cache_;
 
   void start_ros_execution();
 
   void on_mq_request(int fd);
   void on_signal();
 
-  void check_ros2_demand_and_create_bridges();
+  void check_and_create_bridges();
   void check_and_remove_bridges();
+  void check_and_remove_request_cache();
   void check_and_request_shutdown();
+
+  bool should_create_bridge(const std::string & topic_name, BridgeDirection direction) const;
+  void create_bridge_if_needed(
+    const std::string & topic_name, RequestMap & requests, const std::string & message_type,
+    BridgeDirection direction);
+  void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 
 }  // namespace agnocast
