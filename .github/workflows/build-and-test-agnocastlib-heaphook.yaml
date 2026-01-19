@@ -192,7 +192,7 @@ jobs:
         cd agnocast_heaphook
         cargo build --release
         cd ..
-        cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/agnocastlib/lib
+        cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/lib/
 
     - name: Unit test for agnocast_heaphook
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.heaphook_changed == 'true'
