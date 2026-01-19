@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agnocast/agnocast_multi_threaded_executor.hpp"
-#include "agnocast/bridge/agnocast_performance_bridge_config.hpp"
 #include "agnocast/bridge/agnocast_performance_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/agnocast_performance_bridge_loader.hpp"
 
@@ -27,7 +26,6 @@ private:
   rclcpp::Logger logger_;
   PerformanceBridgeIpcEventLoop event_loop_;
   PerformanceBridgeLoader loader_;
-  PerformanceBridgeConfig config_;
 
   std::shared_ptr<rclcpp::Node> container_node_;
   std::shared_ptr<agnocast::MultiThreadedAgnocastExecutor> executor_;

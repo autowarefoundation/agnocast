@@ -20,8 +20,7 @@ namespace agnocast
 PerformanceBridgeManager::PerformanceBridgeManager()
 : logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
   event_loop_(logger_),
-  loader_(logger_),
-  config_(logger_)
+  loader_(logger_)
 {
   if (rclcpp::ok()) {
     rclcpp::shutdown();
@@ -82,7 +81,6 @@ void PerformanceBridgeManager::start_ros_execution()
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
-  // TODO(yutarokobayashi): Select executor type based on config
   executor_ = std::make_shared<agnocast::MultiThreadedAgnocastExecutor>();
   executor_->add_node(container_node_);
 
