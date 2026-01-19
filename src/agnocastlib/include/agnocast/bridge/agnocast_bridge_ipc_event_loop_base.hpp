@@ -48,7 +48,7 @@ public:
 
 protected:
   rclcpp::Logger logger_;
-  virtual void handle_signal(int signo);
+  virtual void handle_signal();
 
 private:
   int epoll_fd_ = -1;
@@ -123,16 +123,16 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
       };
       ssize_t s = read(signal_fd_, &fdsi, sizeof(struct signalfd_siginfo));
       if (s == sizeof(struct signalfd_siginfo)) {
-        handle_signal(fdsi.ssi_signo);
+        handle_signal();
       }
     }
   }
   return true;
 }
 
-inline void IpcEventLoopBase::handle_signal(int signo)
+inline void IpcEventLoopBase::handle_signal()
 {
-  if ((signo == SIGTERM || signo == SIGINT) && signal_cb_) {
+  if (signal_cb_) {
     signal_cb_();
   }
 }
