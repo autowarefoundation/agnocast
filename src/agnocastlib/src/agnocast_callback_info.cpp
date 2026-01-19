@@ -17,35 +17,50 @@ void receive_message(
   const CallbackInfo & callback_info, std::mutex & ready_agnocast_executables_mutex,
   std::vector<AgnocastExecutable> & ready_agnocast_executables)
 {
-  union ioctl_receive_msg_args receive_args = {};
-  receive_args.topic_name = {callback_info.topic_name.c_str(), callback_info.topic_name.size()};
-  receive_args.subscriber_id = callback_info.subscriber_id;
+  std::vector<std::pair<int64_t, uint64_t>> entries;  // entry_id, entry_addr
 
-  {
-    std::lock_guard<std::mutex> lock(mmap_mtx);
+  bool call_again = true;
+  while (call_again) {
+    union ioctl_receive_msg_args receive_args = {};
+    receive_args.topic_name = {callback_info.topic_name.c_str(), callback_info.topic_name.size()};
+    receive_args.subscriber_id = callback_info.subscriber_id;
 
-    if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {
-      RCLCPP_ERROR(logger, "AGNOCAST_RECEIVE_MSG_CMD failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+    {
+      std::lock_guard<std::mutex> lock(mmap_mtx);
+
+      if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {
+        RCLCPP_ERROR(logger, "AGNOCAST_RECEIVE_MSG_CMD failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+
+      // Map the shared memory region with read permissions whenever a new publisher is discovered.
+      for (uint32_t i = 0; i < receive_args.ret_pub_shm_info.publisher_num; i++) {
+        const pid_t pid = receive_args.ret_pub_shm_info.publisher_pids[i];
+        const uint64_t addr = receive_args.ret_pub_shm_info.shm_addrs[i];
+        const uint64_t size = receive_args.ret_pub_shm_info.shm_sizes[i];
+        map_read_only_area(pid, addr, size);
+      }
     }
 
-    // Map the shared memory region with read permissions whenever a new publisher is discovered.
-    for (uint32_t i = 0; i < receive_args.ret_pub_shm_info.publisher_num; i++) {
-      const pid_t pid = receive_args.ret_pub_shm_info.publisher_pids[i];
-      const uint64_t addr = receive_args.ret_pub_shm_info.shm_addrs[i];
-      const uint64_t size = receive_args.ret_pub_shm_info.shm_sizes[i];
-      map_read_only_area(pid, addr, size);
+    // Collect entries (oldest first order from ioctl)
+    for (uint16_t i = 0; i < receive_args.ret_entry_num; i++) {
+      entries.emplace_back(receive_args.ret_entry_ids[i], receive_args.ret_entry_addrs[i]);
     }
+
+    call_again = receive_args.ret_call_again;
   }
 
-  // older messages first
-  for (int32_t i = static_cast<int32_t>(receive_args.ret_entry_num) - 1; i >= 0; i--) {
+  // Process entries from oldest to newest (ioctl returns oldest first)
+  for (const auto & entry : entries) {
+    const int64_t entry_id = entry.first;
+    const uint64_t entry_addr = entry.second;
+
     const std::shared_ptr<std::function<void()>> callable =
-      std::make_shared<std::function<void()>>([callback_info, receive_args, i]() {
+      std::make_shared<std::function<void()>>([callback_info, entry_addr, entry_id]() {
         auto typed_msg = callback_info.message_creator(
-          reinterpret_cast<void *>(receive_args.ret_entry_addrs[i]), callback_info.topic_name,
-          callback_info.subscriber_id, receive_args.ret_entry_ids[i]);
+          reinterpret_cast<void *>(entry_addr), callback_info.topic_name,
+          callback_info.subscriber_id, entry_id);
         callback_info.callback(std::move(*typed_msg));
       });
 
@@ -54,8 +69,8 @@ void receive_message(
       uint64_t pid_callback_info_id =
         (static_cast<uint64_t>(my_pid) << PID_SHIFT_BITS) | callback_info_id;
       TRACEPOINT(
-        agnocast_create_callable, static_cast<const void *>(callable.get()),
-        receive_args.ret_entry_ids[i], pid_callback_info_id);
+        agnocast_create_callable, static_cast<const void *>(callable.get()), entry_id,
+        pid_callback_info_id);
     }
 
     {

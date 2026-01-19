@@ -10,7 +10,10 @@ namespace agnocast
 
 #define MAX_PUBLISHER_NUM 4    // Maximum number of publishers per topic
 #define MAX_SUBSCRIBER_NUM 16  // Maximum number of subscribers per topic
-#define MAX_QOS_DEPTH 10       // Maximum QoS depth for each publisher/subscriber
+/* Maximum number of entries that can be received at one ioctl. This value is heuristically set to
+ * balance the number of calling ioctl and the overhead of copying data between user and kernel
+ * space. */
+#define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3      // Maximum number of entries that can be released at one ioctl
 #define VERSION_BUFFER_LEN 32  // Maximum size of version number represented as a string
 
@@ -114,8 +117,9 @@ union ioctl_receive_msg_args {
   struct
   {
     uint16_t ret_entry_num;
-    int64_t ret_entry_ids[MAX_QOS_DEPTH];
-    uint64_t ret_entry_addrs[MAX_QOS_DEPTH];
+    bool ret_call_again;
+    int64_t ret_entry_ids[MAX_RECEIVE_NUM];
+    uint64_t ret_entry_addrs[MAX_RECEIVE_NUM];
     struct publisher_shm_info ret_pub_shm_info;
   };
 };

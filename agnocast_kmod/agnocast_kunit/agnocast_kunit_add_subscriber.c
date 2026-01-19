@@ -49,24 +49,6 @@ void test_case_add_subscriber_normal(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
 }
 
-void test_case_add_subscriber_invalid_qos(struct kunit * test)
-{
-  // Arrange
-  union ioctl_add_subscriber_args add_subscriber_args;
-  const pid_t subscriber_pid = 1000;
-  const uint32_t invalid_qos_depth = MAX_QOS_DEPTH + 1;
-  setup_process(test, subscriber_pid);
-
-  // Act
-  int ret = add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, invalid_qos_depth,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
-    &add_subscriber_args);
-
-  // Assert
-  KUNIT_EXPECT_EQ(test, ret, -EINVAL);
-}
-
 void test_case_add_subscriber_too_many_subscribers(struct kunit * test)
 {
   // Arrange

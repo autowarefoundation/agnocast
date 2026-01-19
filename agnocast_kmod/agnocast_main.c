@@ -242,15 +242,6 @@ static int insert_subscriber_info(
   const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
   struct subscriber_info ** new_info)
 {
-  if (qos_depth > MAX_QOS_DEPTH) {
-    dev_warn(
-      agnocast_device,
-      "Subscriber's (topic_local_id=%s, pid=%d, qos_depth=%d) qos_depth can't be larger than "
-      "MAX_QOS_DEPTH(=%d). (insert_subscriber_info)\n",
-      wrapper->key, subscriber_pid, qos_depth, MAX_QOS_DEPTH);
-    return -EINVAL;
-  }
-
   int count = get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
     dev_warn(
@@ -954,6 +945,88 @@ int publish_msg(
   return 0;
 }
 
+// Find the first entry with entry_id >= target_entry_id
+static struct rb_node * find_first_entry_ge(struct rb_root * root, const int64_t target_entry_id)
+{
+  struct rb_node ** curr = &(root->rb_node);
+  struct rb_node * candidate = NULL;
+
+  while (*curr) {
+    const struct entry_node * en = container_of(*curr, struct entry_node, node);
+    if (en->entry_id >= target_entry_id) {
+      candidate = *curr;
+      curr = &((*curr)->rb_left);
+    } else {
+      curr = &((*curr)->rb_right);
+    }
+  }
+
+  return candidate;
+}
+
+static int receive_msg_core(
+  struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
+  const topic_local_id_t subscriber_id, union ioctl_receive_msg_args * ioctl_ret)
+{
+  ioctl_ret->ret_entry_num = 0;
+  ioctl_ret->ret_call_again = false;
+
+  struct rb_node * newest_node = rb_last(&wrapper->topic.entries);
+  if (!newest_node) {
+    return 0;
+  }
+
+  const struct entry_node * newest_en = container_of(newest_node, struct entry_node, node);
+  const int64_t newest_entry_id = newest_en->entry_id;
+
+  // Calculate start_entry_id = max(newest - qos_depth + 1, latest_received_entry_id + 1)
+  const int64_t latest_received_entry_id = sub_info->latest_received_entry_id;
+  const int64_t qos_start = newest_entry_id - (int64_t)sub_info->qos_depth + 1;
+  const int64_t start_entry_id =
+    (qos_start > latest_received_entry_id) ? qos_start : (latest_received_entry_id + 1);
+
+  struct rb_node * node = find_first_entry_ge(&wrapper->topic.entries, start_entry_id);
+
+  for (; node; node = rb_next(node)) {
+    struct entry_node * en = container_of(node, struct entry_node, node);
+
+    if (MAX_RECEIVE_NUM == ioctl_ret->ret_entry_num) {
+      ioctl_ret->ret_call_again = true;
+      break;
+    }
+
+    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
+    if (!pub_info) {
+      dev_warn(
+        agnocast_device,
+        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
+        "topic(topic_name=%s). (receive_msg_core)\n",
+        en->publisher_id, en->entry_id, wrapper->key);
+      return -ENODATA;
+    }
+
+    const struct process_info * proc_info = find_process_info(pub_info->pid);
+    if (!proc_info || proc_info->exited) {
+      continue;
+    }
+
+    int ret = increment_sub_rc(en, subscriber_id);
+    if (ret < 0) {
+      return ret;
+    }
+
+    ioctl_ret->ret_entry_ids[ioctl_ret->ret_entry_num] = en->entry_id;
+    ioctl_ret->ret_entry_addrs[ioctl_ret->ret_entry_num] = en->msg_virtual_address;
+    ioctl_ret->ret_entry_num++;
+  }
+
+  if (ioctl_ret->ret_entry_num > 0) {
+    sub_info->latest_received_entry_id = ioctl_ret->ret_entry_ids[ioctl_ret->ret_entry_num - 1];
+  }
+
+  return 0;
+}
+
 int receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, union ioctl_receive_msg_args * ioctl_ret)
@@ -974,46 +1047,9 @@ int receive_msg(
     return -EINVAL;
   }
 
-  // Receive msg
-  ioctl_ret->ret_entry_num = 0;
-  bool sub_info_updated = false;
-  int64_t latest_received_entry_id = sub_info->latest_received_entry_id;
-  for (struct rb_node * node = rb_last(&wrapper->topic.entries); node; node = rb_prev(node)) {
-    struct entry_node * en = container_of(node, struct entry_node, node);
-    if (
-      (en->entry_id <= latest_received_entry_id) ||
-      (sub_info->qos_depth == ioctl_ret->ret_entry_num)) {
-      break;
-    }
-
-    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
-    if (!pub_info) {
-      dev_warn(
-        agnocast_device,
-        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
-        "topic(topic_name=%s). (receive_msg)\n",
-        en->publisher_id, en->entry_id, topic_name);
-      return -ENODATA;
-    }
-
-    const struct process_info * proc_info = find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
-      continue;
-    }
-
-    int ret = increment_sub_rc(en, subscriber_id);
-    if (ret < 0) {
-      return ret;
-    }
-
-    ioctl_ret->ret_entry_ids[ioctl_ret->ret_entry_num] = en->entry_id;
-    ioctl_ret->ret_entry_addrs[ioctl_ret->ret_entry_num] = en->msg_virtual_address;
-    ioctl_ret->ret_entry_num++;
-
-    if (!sub_info_updated) {
-      sub_info->latest_received_entry_id = en->entry_id;
-      sub_info_updated = true;
-    }
+  int ret = receive_msg_core(wrapper, sub_info, subscriber_id, ioctl_ret);
+  if (ret < 0) {
+    return ret;
   }
 
   // Check if there is any publisher that need to be mmapped
@@ -1022,7 +1058,7 @@ int receive_msg(
     return 0;
   }
 
-  int ret = set_publisher_shm_info(wrapper, sub_info->pid, &ioctl_ret->ret_pub_shm_info);
+  ret = set_publisher_shm_info(wrapper, sub_info->pid, &ioctl_ret->ret_pub_shm_info);
   if (ret < 0) {
     return ret;
   }

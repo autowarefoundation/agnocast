@@ -377,10 +377,11 @@ void test_case_take_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than_pu
   struct kunit * test)
 {
   // Arrange
+  const uint32_t qos_depth = 100;
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
   const pid_t publisher_pid = 1000;
-  const uint32_t publisher_qos_depth = MAX_QOS_DEPTH;
+  const uint32_t publisher_qos_depth = qos_depth;
   const bool publisher_transient_local = false;
   setup_one_publisher(
     test, publisher_pid, publisher_qos_depth, publisher_transient_local, &publisher_id, &ret_addr);
@@ -391,7 +392,7 @@ void test_case_take_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than_pu
   setup_one_subscriber(
     test, subscriber_pid, subscriber_qos_depth, subscriber_transient_local, &subscriber_id);
 
-  for (int i = 0; i < MAX_QOS_DEPTH; i++) {
+  for (uint32_t i = 0; i < qos_depth; i++) {
     union ioctl_publish_msg_args ioctl_publish_msg_ret;
     int ret = publish_msg(
       TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, &ioctl_publish_msg_ret);
@@ -399,7 +400,7 @@ void test_case_take_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than_pu
   }
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
   int ret1 = publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr + MAX_QOS_DEPTH + 1,
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr + qos_depth + 1,
     &ioctl_publish_msg_ret);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
@@ -421,20 +422,21 @@ void test_case_take_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than_pu
   KUNIT_EXPECT_EQ(test, ioctl_take_msg_ret.ret_pub_shm_info.shm_addrs[0], ret_addr);
 }
 
-void test_case_take_msg_publish_num_and_sub_qos_depth_and_pub_qos_depth_are_all_max_qos_depth(
+void test_case_take_msg_publish_num_and_sub_qos_depth_and_pub_qos_depth_are_all_equal(
   struct kunit * test)
 {
   // Arrange
+  const uint32_t qos_depth = 100;
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
   const pid_t publisher_pid = 1000;
-  const uint32_t publisher_qos_depth = MAX_QOS_DEPTH;
+  const uint32_t publisher_qos_depth = qos_depth;
   const bool publisher_transient_local = false;
   setup_one_publisher(
     test, publisher_pid, publisher_qos_depth, publisher_transient_local, &publisher_id, &ret_addr);
   topic_local_id_t subscriber_id;
   const pid_t subscriber_pid = 2000;
-  const uint32_t subscriber_qos_depth = MAX_QOS_DEPTH;
+  const uint32_t subscriber_qos_depth = qos_depth;
   const bool subscriber_transient_local = false;
   setup_one_subscriber(
     test, subscriber_pid, subscriber_qos_depth, subscriber_transient_local, &subscriber_id);
@@ -444,7 +446,7 @@ void test_case_take_msg_publish_num_and_sub_qos_depth_and_pub_qos_depth_are_all_
     TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  for (int i = 0; i < MAX_QOS_DEPTH - 1; i++) {
+  for (uint32_t i = 0; i < qos_depth - 1; i++) {
     union ioctl_publish_msg_args ioctl_publish_msg_ret;
     int ret = publish_msg(
       TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
