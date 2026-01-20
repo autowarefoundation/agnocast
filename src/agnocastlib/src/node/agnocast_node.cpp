@@ -31,6 +31,8 @@ Node::Node(
   node_clock_ = std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME);
 
   node_time_source_ = std::make_shared<node_interfaces::NodeTimeSource>(node_clock_, this);
+
+  node_services_ = std::make_shared<node_interfaces::NodeServices>(node_base_);
 }
 
 }  // namespace agnocast

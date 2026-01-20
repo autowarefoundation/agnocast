@@ -35,7 +35,7 @@ add_library(agnocast SHARED
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
-  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp
+  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp
   src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/agnocast_performance_bridge_loader.cpp src/bridge/agnocast_performance_bridge_manager.cpp)
 
@@ -80,7 +80,7 @@ if(BUILD_GENERIC_BRIDGE)
 
   set(GENERATED_PLUGINS_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_bridge_plugins")
   set(GENERATED_DEPENDENCIES_TXT "${CMAKE_CURRENT_BINARY_DIR}/generated_dependencies.txt")
-  set(CLEAN_MESSAGE_LIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/clean_ros2_interfaces.txt") 
+  set(CLEAN_MESSAGE_LIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/clean_ros2_interfaces.txt")
   set(BRIDGE_PLUGIN_GENERATION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/scripts/generate_bridge_plugin.py")
 
   set(R2A_TEMPLATE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/templates/r2a_bridge_plugin.cpp.em")
@@ -133,8 +133,8 @@ if(BUILD_GENERIC_BRIDGE)
 
     target_link_libraries(${r2a_plugin_target_name} agnocast)
 
-    ament_target_dependencies(${r2a_plugin_target_name} 
-      "rclcpp" 
+    ament_target_dependencies(${r2a_plugin_target_name}
+      "rclcpp"
       "${msg_package}"
     )
 
@@ -144,7 +144,7 @@ if(BUILD_GENERIC_BRIDGE)
 
     install(
       TARGETS ${r2a_plugin_target_name}
-      DESTINATION lib/${PROJECT_NAME}/bridge_plugins 
+      DESTINATION lib/${PROJECT_NAME}/bridge_plugins
     )
 
     # --- A2R Plugin ---
@@ -155,8 +155,8 @@ if(BUILD_GENERIC_BRIDGE)
 
     target_link_libraries(${a2r_plugin_target_name} agnocast)
 
-    ament_target_dependencies(${a2r_plugin_target_name} 
-      "rclcpp" 
+    ament_target_dependencies(${a2r_plugin_target_name}
+      "rclcpp"
       "${msg_package}"
     )
 
@@ -233,7 +233,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
-  
+
   # Unit tests
   ament_add_gmock(test_unit_${PROJECT_NAME}
     test/unit/test_agnocast_utils.cpp

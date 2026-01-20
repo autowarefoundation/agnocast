@@ -143,7 +143,19 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 ---
 
-### 2.6 Other Interfaces
+### 2.6 NodeServicesInterface
+
+**Purpose**: Service and Client management
+
+| Feature | agnocast::Node | Support Level | Planned | Notes |
+|---------|----------------|---------------|---------|-------|
+| `add_client()` | ✗ | **Throws Exception** | No | Use `agnocast::create_client()` |
+| `add_service()` | ✗ | **Throws Exception** | No | Use `agnocast::create_service()` |
+| `resolve_service_name()` | ✓ | **Full Support** | - | |
+
+---
+
+### 2.7 Other Interfaces
 
 The following interfaces are all **unsupported**. agnocast::Node does not implement these interfaces.
 
@@ -151,7 +163,6 @@ The following interfaces are all **unsupported**. agnocast::Node does not implem
 |-----------|---------------|---------|-------|
 | NodeGraphInterface | Unsupported | No | DDS is not used |
 | NodeLoggingInterface | Unsupported | TBD | `get_logger()` is provided as a direct method |
-| NodeServicesInterface | Unsupported | TBD | Uses agnocast's own service functionality |
 | NodeTimersInterface | Unsupported | Yes | |
 | NodeWaitablesInterface | Unsupported | TBD | |
 
@@ -312,13 +323,13 @@ The following tables compare methods that are **directly defined** in each class
 | `get_node_base_interface()` | ✓ | ✓ | |
 | `get_node_topics_interface()` | ✓ | ✓ | |
 | `get_node_parameters_interface()` | ✓ | ✓ | |
-| `get_node_clock_interface()` | ✓ | ✗ | |
+| `get_node_clock_interface()` | ✓ | ✓ | |
 | `get_node_graph_interface()` | ✓ | ✗ | |
 | `get_node_logging_interface()` | ✓ | ✗ | |
 | `get_node_timers_interface()` | ✓ | ✗ | |
-| `get_node_services_interface()` | ✓ | ✗ | |
+| `get_node_services_interface()` | ✓ | ✓ | |
 | `get_node_waitables_interface()` | ✓ | ✗ | |
-| `get_node_time_source_interface()` | ✓ | ✗ | |
+| `get_node_time_source_interface()` | ✓ | ✓ | |
 
 #### Sub-nodes & Namespaces
 
