@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -244,6 +245,26 @@ void send_bridge_request(
     return;
   }
 
+  std::error_code ec;
+  auto self_path = std::filesystem::read_symlink("/proc/self/exe", ec);
+
+  bool is_self_executable = false;
+  if (!ec) {
+    std::filesystem::path factory_lib_path(info.dli_fname);
+    if (std::filesystem::equivalent(factory_lib_path, self_path, ec)) {
+      is_self_executable = true;
+    } else if (ec) {
+      RCLCPP_WARN(
+        logger, "Filesystem check error for '%s' vs '%s': %s", info.dli_fname, self_path.c_str(),
+        ec.message().c_str());
+    }
+  }
+
+  const char * symbol_to_send = MAIN_EXECUTABLE_SYMBOL;
+  if (!is_self_executable && info.dli_sname != nullptr) {
+    symbol_to_send = info.dli_sname;
+  }
+
   MqMsgBridge msg = {};
   msg.direction = direction;
   msg.target.target_id = id;
@@ -253,8 +274,7 @@ void send_bridge_request(
     static_cast<char *>(msg.factory.shared_lib_path), SHARED_LIB_PATH_BUFFER_SIZE, "%s",
     info.dli_fname);
   snprintf(
-    static_cast<char *>(msg.factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s",
-    info.dli_sname ? info.dli_sname : MAIN_EXECUTABLE_SYMBOL);
+    static_cast<char *>(msg.factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
   msg.factory.fn_offset = reinterpret_cast<uintptr_t>(fn_current) - base_addr;
   msg.factory.fn_offset_reverse = reinterpret_cast<uintptr_t>(fn_reverse) - base_addr;
