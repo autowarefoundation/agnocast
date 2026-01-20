@@ -8,7 +8,7 @@
 namespace agnocast
 {
 
-class AgnocastExecutable;
+struct AgnocastExecutable;
 class Node;
 
 class AgnocastOnlyExecutor
