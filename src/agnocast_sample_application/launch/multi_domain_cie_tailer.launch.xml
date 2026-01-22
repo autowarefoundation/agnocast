@@ -1,0 +1,12 @@
+<launch>
+    <!-- Test node for domain 0 (default) using CallbackIsolatedAgnocastExecutor -->
+    <node pkg="agnocast_sample_application" exec="cie_talker" name="cie_talker_domain_0" output="screen">
+      <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <!-- Test node for domain 1 using CallbackIsolatedAgnocastExecutor -->
+    <node pkg="agnocast_sample_application" exec="cie_talker" name="cie_talker_domain_1" output="screen">
+      <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+      <env name="ROS_DOMAIN_ID" value="1" />
+    </node>
+</launch>

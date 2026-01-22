@@ -1,5 +1,6 @@
 #include "cie_thread_configurator/thread_configurator_node.hpp"
 
+#include "cie_thread_configurator/cie_thread_configurator.hpp"
 #include "cie_thread_configurator/sched_deadline.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
@@ -23,6 +24,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   unapplied_num_ = callback_groups.size();
   callback_group_configs_.resize(callback_groups.size());
 
+  size_t default_domain_id = cie_thread_configurator::get_default_domain_id();
+
   // For backward compatibility: remove trailing "Waitable@"s
   auto remove_trailing_waitable = [](std::string s) {
     static constexpr std::string_view suffix = "@Waitable";
@@ -39,11 +42,21 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     return s;
   };
 
+  std::set<size_t> domain_ids;
   for (size_t i = 0; i < callback_groups.size(); i++) {
     const auto & callback_group = callback_groups[i];
     auto & config = callback_group_configs_[i];
 
     config.callback_group_id = remove_trailing_waitable(callback_group["id"].as<std::string>());
+
+    // Get domain_id from config, default to default_domain_id for backward compatibility
+    if (callback_group["domain_id"]) {
+      config.domain_id = callback_group["domain_id"].as<size_t>();
+    } else {
+      config.domain_id = default_domain_id;
+    }
+    domain_ids.insert(config.domain_id);
+
     for (auto & cpu : callback_group["affinity"]) {
       config.affinity.push_back(cpu.as<int>());
     }
@@ -57,14 +70,39 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
       config.priority = callback_group["priority"].as<int>();
     }
 
-    id_to_callback_group_config_[config.callback_group_id] = &config;
+    auto key = std::make_pair(config.domain_id, config.callback_group_id);
+    id_to_callback_group_config_[key] = &config;
   }
 
   auto qos =
     rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 1000)).reliable();
-  subscription_ = this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-    "/cie_thread_configurator/callback_group_info", qos,
-    std::bind(&ThreadConfiguratorNode::topic_callback, this, std::placeholders::_1));
+
+  // Create subscription for default domain on this node
+  subs_for_each_domain_.push_back(
+    this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
+      "/cie_thread_configurator/callback_group_info", qos,
+      [this, default_domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+        this->topic_callback(default_domain_id, msg);
+      }));
+
+  // Create nodes and subscriptions for other domain IDs
+  for (size_t domain_id : domain_ids) {
+    if (domain_id == default_domain_id) {
+      continue;
+    }
+
+    auto node = cie_thread_configurator::create_node_for_domain(domain_id);
+    nodes_for_each_domain_.push_back(node);
+
+    auto sub = node->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
+      "/cie_thread_configurator/callback_group_info", qos,
+      [this, domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+        this->topic_callback(domain_id, msg);
+      });
+    subs_for_each_domain_.push_back(sub);
+
+    RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
+  }
 }
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
@@ -220,30 +258,37 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
   return true;
 }
 
-void ThreadConfiguratorNode::topic_callback(
-  const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
+const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_nodes() const
 {
-  auto it = id_to_callback_group_config_.find(msg->callback_group_id);
+  return nodes_for_each_domain_;
+}
+
+void ThreadConfiguratorNode::topic_callback(
+  size_t domain_id, const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
+{
+  auto key = std::make_pair(domain_id, msg->callback_group_id);
+  auto it = id_to_callback_group_config_.find(key);
   if (it == id_to_callback_group_config_.end()) {
     RCLCPP_INFO(
       this->get_logger(),
       "Received CallbackGroupInfo: but the yaml file does not "
-      "contain configuration for id=%s (tid=%ld)",
-      msg->callback_group_id.c_str(), msg->thread_id);
+      "contain configuration for domain=%zu, id=%s (tid=%ld)",
+      domain_id, msg->callback_group_id.c_str(), msg->thread_id);
     return;
   }
 
   CallbackGroupConfig * config = it->second;
   if (config->applied) {
     RCLCPP_INFO(
-      this->get_logger(), "This callback group is already configured. skip (id=%s, tid=%ld)",
+      this->get_logger(),
+      "This callback group is already configured. skip (domain=%zu, id=%s, tid=%ld)", domain_id,
       msg->callback_group_id.c_str(), msg->thread_id);
     return;
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received CallbackGroupInfo: tid=%ld | %s", msg->thread_id,
-    msg->callback_group_id.c_str());
+    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
+    msg->thread_id, msg->callback_group_id.c_str());
   config->thread_id = msg->thread_id;
 
   if (config->policy == "SCHED_DEADLINE") {

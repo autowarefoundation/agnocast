@@ -76,6 +76,9 @@ static void spin_thread_configurator_node(const std::string & config_filename)
   auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
 
   executor->add_node(node);
+  for (const auto & domain_node : node->get_domain_nodes()) {
+    executor->add_node(domain_node);
+  }
 
   while (rclcpp::ok() && !node->all_applied()) {
     executor->spin_once();
@@ -101,17 +104,47 @@ static void spin_thread_configurator_node(const std::string & config_filename)
   }
 }
 
-static void spin_prerun_node()
+static void spin_prerun_node(const std::set<size_t> & domain_ids)
 {
   std::cout << "prerun mode" << std::endl;
 
-  auto node = std::make_shared<PrerunNode>();
+  auto node = std::make_shared<PrerunNode>(domain_ids);
   auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
 
   executor->add_node(node);
+  for (const auto & sub_node : node->get_domain_nodes()) {
+    executor->add_node(sub_node);
+  }
+
   executor->spin();
 
   node->dump_yaml_config(std::filesystem::current_path());
+}
+
+static std::set<size_t> parse_domain_ids(const std::string & domains_str)
+{
+  // https://docs.ros.org/en/rolling/Concepts/Intermediate/About-Domain-ID.html#choosing-a-domain-id-short-version
+  constexpr size_t max_domain_id = 101;
+
+  std::set<size_t> domain_ids;
+  std::stringstream ss(domains_str);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    if (!token.empty()) {
+      try {
+        size_t domain_id = std::stoul(token);
+        if (domain_id > max_domain_id) {
+          std::cerr << "[WARN] Domain ID " << domain_id << " exceeds maximum valid value ("
+                    << max_domain_id << "). Skipping." << std::endl;
+          continue;
+        }
+        domain_ids.insert(domain_id);
+      } catch (const std::exception & e) {
+        std::cerr << "[WARN] Invalid domain ID value: " << token << ". Skipping." << std::endl;
+      }
+    }
+  }
+  return domain_ids;
 }
 
 int main(int argc, char * argv[])
@@ -120,30 +153,31 @@ int main(int argc, char * argv[])
   std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
 
   bool prerun_mode = false;
-  for (const auto & arg : args) {
-    if (arg == "--prerun") {
+  std::set<size_t> domain_ids;
+  std::string config_filename;
+
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (args[i] == "--prerun") {
       prerun_mode = true;
+    } else if (args[i] == "--domains" && i + 1 < args.size()) {
+      domain_ids = parse_domain_ids(args[i + 1]);
+      ++i;
+    } else if (args[i] == "--config-file" && i + 1 < args.size()) {
+      config_filename = args[i + 1];
+      ++i;
     }
   }
 
   if (prerun_mode) {
-    spin_prerun_node();
+    spin_prerun_node(domain_ids);
   } else {
-    bool next = false;
-    std::string filename;
-
-    for (const auto & arg : args) {
-      if (next) {
-        filename = arg;
-        break;
-      }
-
-      if (arg == std::string("--config-file")) {
-        next = true;
-      }
+    if (config_filename.empty()) {
+      std::cerr << "[ERROR] --config-file must be provided when not running in --prerun mode."
+                << std::endl;
+      rclcpp::shutdown();
+      return 1;
     }
-
-    spin_thread_configurator_node(filename);
+    spin_thread_configurator_node(config_filename);
   }
 
   rclcpp::shutdown();

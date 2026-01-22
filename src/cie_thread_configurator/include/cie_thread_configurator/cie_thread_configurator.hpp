@@ -33,4 +33,10 @@ void publish_callback_group_info(
 // Get hardware information from lscpu command
 std::map<std::string, std::string> get_hardware_info();
 
+// Get default domain ID from ROS_DOMAIN_ID environment variable
+size_t get_default_domain_id();
+
+// Create a node for a different domain
+rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id);
+
 }  // namespace cie_thread_configurator
