@@ -77,6 +77,8 @@ class BasicPublisher
             rclcpp::detail::PublisherQosParametersTraits{})
         : qos;
 
+    validate_qos(actual_qos);
+
     id_ =
       initialize_publisher(topic_name_, node->get_fully_qualified_name(), actual_qos, is_bridge);
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);

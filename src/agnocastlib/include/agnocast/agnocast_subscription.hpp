@@ -114,6 +114,8 @@ class BasicSubscription : public SubscriptionBase
             rclcpp::detail::SubscriptionQosParametersTraits{})
         : qos;
 
+    validate_qos(actual_qos);
+
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
       actual_qos, false, options.ignore_local_publications, is_bridge,
       node->get_fully_qualified_name());
@@ -184,6 +186,16 @@ public:
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
   : SubscriptionBase(node, topic_name)
   {
+    auto node_parameters = node->get_node_parameters_interface();
+    const rclcpp::QoS actual_qos =
+      options.qos_overriding_options.get_policy_kinds().size()
+        ? rclcpp::detail::declare_qos_parameters(
+            options.qos_overriding_options, node_parameters, topic_name_, qos,
+            rclcpp::detail::SubscriptionQosParametersTraits{})
+        : qos;
+
+    validate_qos(actual_qos);
+
     {
       auto dummy_cbg = node->get_node_base_interface()->create_callback_group(
         rclcpp::CallbackGroupType::MutuallyExclusive, false);
@@ -194,11 +206,11 @@ public:
         static_cast<const void *>(
           node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(dummy_cbg.get()),
-        dummy_cb_symbols.c_str(), topic_name_.c_str(), qos.depth(), 0);
+        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos.depth(), 0);
     }
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
-      qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
+      actual_qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
 
     id_ = add_subscriber_args.ret_id;
 
