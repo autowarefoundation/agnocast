@@ -6,6 +6,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
 #include "agnocast/node/node_interfaces/node_clock.hpp"
+#include "agnocast/node/node_interfaces/node_logging.hpp"
 #include "agnocast/node/node_interfaces/node_parameters.hpp"
 #include "agnocast/node/node_interfaces/node_services.hpp"
 #include "agnocast/node/node_interfaces/node_time_source.hpp"
@@ -96,6 +97,13 @@ public:
   rclcpp::node_interfaces::NodeServicesInterface::SharedPtr get_node_services_interface()
   {
     return node_services_;
+  }
+
+  // Non-const to align with rclcpp::Node API
+  // cppcheck-suppress functionConst
+  rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr get_node_logging_interface()
+  {
+    return node_logging_;
   }
 
   const ParameterValue & declare_parameter(
@@ -306,6 +314,7 @@ private:
   node_interfaces::NodeClock::SharedPtr node_clock_;
   node_interfaces::NodeTimeSource::SharedPtr node_time_source_;
   node_interfaces::NodeServices::SharedPtr node_services_;
+  node_interfaces::NodeLogging::SharedPtr node_logging_;
 };
 
 }  // namespace agnocast

@@ -155,14 +155,26 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 ---
 
-### 2.7 Other Interfaces
+### 2.7 NodeLoggingInterface
+
+**Purpose**: Logging functionality
+
+**Important**: `agnocast::node_interfaces::NodeLogging` **inherits from** `rclcpp::node_interfaces::NodeLoggingInterface`.
+
+| Feature | agnocast::Node | Support Level | Planned | Notes |
+|---------|----------------|---------------|---------|-------|
+| `get_logger()` | ✓ | **Full Support** | - | |
+| `get_logger_name()` | ✓ | **Full Support** | - | |
+
+---
+
+### 2.8 Other Interfaces
 
 The following interfaces are all **unsupported**. agnocast::Node does not implement these interfaces.
 
 | Interface | Support Status | Planned | Notes |
 |-----------|---------------|---------|-------|
 | NodeGraphInterface | Unsupported | No | DDS is not used |
-| NodeLoggingInterface | Unsupported | TBD | `get_logger()` is provided as a direct method |
 | NodeTimersInterface | Unsupported | Yes | |
 | NodeWaitablesInterface | Unsupported | TBD | |
 
@@ -325,7 +337,7 @@ The following tables compare methods that are **directly defined** in each class
 | `get_node_parameters_interface()` | ✓ | ✓ | |
 | `get_node_clock_interface()` | ✓ | ✓ | |
 | `get_node_graph_interface()` | ✓ | ✗ | |
-| `get_node_logging_interface()` | ✓ | ✗ | |
+| `get_node_logging_interface()` | ✓ | ✓ | |
 | `get_node_timers_interface()` | ✓ | ✗ | |
 | `get_node_services_interface()` | ✓ | ✓ | |
 | `get_node_waitables_interface()` | ✓ | ✗ | |
@@ -409,6 +421,7 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rclcpp::node_interfaces::OnSetParametersCallbackHandle` - Handle for parameter set callbacks
 - `rclcpp::node_interfaces::NodeClockInterface` - Node clock interface (inherited)
 - `rclcpp::node_interfaces::NodeTimeSourceInterface` - Node time source interface (inherited)
+- `rclcpp::node_interfaces::NodeLoggingInterface` - Node logging interface (inherited)
 - `rclcpp::Clock` - Clock management
 - `rclcpp::Time` - Time representation
 
