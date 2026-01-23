@@ -202,7 +202,11 @@ void send_mq_message(
   const rclcpp::Logger & logger)
 {
   struct mq_attr attr = {};
-  attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
+  int64_t max_messages = BRIDGE_MQ_MAX_MESSAGES;
+  if (get_bridge_mode() == BridgeMode::Performance) {
+    max_messages = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
+  }
+  attr.mq_maxmsg = max_messages;
   attr.mq_msgsize = msg_size_limit;
 
   mqd_t mq =

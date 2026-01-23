@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_mq.hpp"
+#include "agnocast/agnocast_utils.hpp"
 
 #include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
@@ -178,7 +179,11 @@ inline void IpcEventLoopBase::setup_epoll()
 inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const
 {
   struct mq_attr attr = {};
-  attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
+  int64_t max_messages = BRIDGE_MQ_MAX_MESSAGES;
+  if (get_bridge_mode() == BridgeMode::Performance) {
+    max_messages = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
+  }
+  attr.mq_maxmsg = max_messages;
   attr.mq_msgsize = mq_msg_size_;
 
   mqd_t fd =

@@ -68,6 +68,24 @@ git clone --branch v2.1.2 https://github.com/tier4/agnocast.git
 cd agnocast
 ```
 
+### System Configuration
+
+Agnocast requires increasing the system limit for the maximum number of messages in a queue.
+
+**Temporary setting (Current session only):**
+
+```bash
+sudo sysctl -w fs.mqueue.msg_max=256
+
+```
+
+**Permanent setting:**
+
+```bash
+echo "fs.mqueue.msg_max=256" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
 ### Setup
 
 Run the setup script to install dependencies:
