@@ -24,8 +24,10 @@ class TestPublisher : public rclcpp::Node
       return true;
     }
 
+    const auto total_sub_count =
+      publisher_->get_subscription_count() + publisher_->get_intra_subscription_count();
     if (
-      publisher_->get_subscription_count() < planned_sub_count_ ||
+      total_sub_count < planned_sub_count_ ||
       this->count_publishers("/test_topic") < planned_pub_count_) {
       return false;
     }

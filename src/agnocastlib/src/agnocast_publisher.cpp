@@ -133,20 +133,40 @@ union ioctl_publish_msg_args publish_core(
 
 uint32_t get_subscription_count_core(const std::string & topic_name)
 {
+  union ioctl_get_subscriber_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  uint32_t inter_count = args.ret_other_process_subscriber_num;
+  // Assumes at most one bridge subscriber per topic
+  if (args.ret_a2r_bridge_exist && inter_count > 0) {
+    inter_count--;
+  }
+
+  uint32_t ros2_count = args.ret_ros2_subscriber_num;
+  // Assumes at most one bridge subscriber per topic
+  if (args.ret_r2a_bridge_exist && ros2_count > 0) {
+    ros2_count--;
+  }
+
+  return inter_count + ros2_count;
+}
+
+uint32_t get_intra_subscription_count_core(const std::string & topic_name)
+{
   union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
   get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  get_subscriber_count_args.include_ros2 = true;
   if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &get_subscriber_count_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
-  uint32_t count = get_subscriber_count_args.ret_subscriber_num;
-  if (get_subscriber_count_args.ret_bridge_exist && count > 0) {
-    count--;
-  }
-  return count;
+  return get_subscriber_count_args.ret_same_process_subscriber_num;
 }
 
 }  // namespace agnocast

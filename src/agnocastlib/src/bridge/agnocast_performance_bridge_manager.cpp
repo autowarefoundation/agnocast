@@ -169,8 +169,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    const int threshold = result.bridge_exist ? 1 : 0;
-    if (result.count <= threshold || !is_demanded_by_ros2) {
+    if (result.count <= 0 || !is_demanded_by_ros2) {
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
       ++r2a_it;
@@ -190,8 +189,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    const int threshold = result.bridge_exist ? 1 : 0;
-    if (result.count <= threshold || !is_demanded_by_ros2) {
+    if (result.count <= 0 || !is_demanded_by_ros2) {
       a2r_it = active_a2r_bridges_.erase(a2r_it);
     } else {
       ++a2r_it;
@@ -238,8 +236,7 @@ bool PerformanceBridgeManager::should_create_bridge(
     }
 
     const auto stats = get_agnocast_subscriber_count(topic_name);
-    const int threshold = stats.bridge_exist ? 1 : 0;
-    if (stats.count == -1 || stats.count <= threshold) {
+    if (stats.count <= 0) {
       return false;
     }
 
@@ -250,8 +247,7 @@ bool PerformanceBridgeManager::should_create_bridge(
   }
 
   const auto stats = get_agnocast_publisher_count(topic_name);
-  const int threshold = stats.bridge_exist ? 1 : 0;
-  if (stats.count == -1 || stats.count <= threshold) {
+  if (stats.count <= 0) {
     return false;
   }
 

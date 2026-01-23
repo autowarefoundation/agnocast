@@ -261,24 +261,17 @@ void BridgeManager::check_active_bridges()
     bool is_r2a = (suffix == SUFFIX_R2A);
 
     int count = 0;
-    bool reverse_bridge_exist = false;
     if (is_r2a) {
-      auto result = get_agnocast_subscriber_count(std::string(topic_name_view));
-      count = result.count;
-      reverse_bridge_exist = result.bridge_exist;
+      count = get_agnocast_subscriber_count(std::string(topic_name_view)).count;
     } else {
-      auto result = get_agnocast_publisher_count(std::string(topic_name_view));
-      count = result.count;
-      reverse_bridge_exist = result.bridge_exist;
+      count = get_agnocast_publisher_count(std::string(topic_name_view)).count;
       if (!update_ros2_subscriber_num(std::string(topic_name_view))) {
         to_remove.push_back(key);
         continue;
       }
     }
 
-    const int threshold = reverse_bridge_exist ? 1 : 0;
-
-    if (count <= threshold) {
+    if (count <= 0) {
       if (count < 0) {
         RCLCPP_ERROR(
           logger_, "Failed to get connection count for %s. Removing bridge.", key.c_str());

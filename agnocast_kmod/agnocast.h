@@ -130,15 +130,14 @@ union ioctl_take_msg_args {
 };
 
 union ioctl_get_subscriber_num_args {
+  struct name_info topic_name;
   struct
   {
-    struct name_info topic_name;
-    bool include_ros2;
-  };
-  struct
-  {
-    uint32_t ret_subscriber_num;
-    bool ret_bridge_exist;
+    uint32_t ret_other_process_subscriber_num;
+    uint32_t ret_same_process_subscriber_num;
+    uint32_t ret_ros2_subscriber_num;
+    bool ret_a2r_bridge_exist;
+    bool ret_r2a_bridge_exist;
   };
 };
 
@@ -349,7 +348,7 @@ int add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret);
 
 int get_subscriber_num(
-  const char * topic_name, const struct ipc_namespace * ipc_ns, const bool include_ros2,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   union ioctl_get_subscriber_num_args * ioctl_ret);
 
 int get_publisher_num(
