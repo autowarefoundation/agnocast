@@ -121,7 +121,7 @@ public:
   }
 
   template <typename ParameterT>
-  ParameterT declare_parameter(
+  auto declare_parameter(
     const std::string & name, const ParameterT & default_value,
     const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
   {
@@ -135,7 +135,7 @@ public:
   }
 
   template <typename ParameterT>
-  ParameterT declare_parameter(
+  auto declare_parameter(
     const std::string & name, const ParameterDescriptor & descriptor = ParameterDescriptor{},
     bool ignore_override = false)
   {
