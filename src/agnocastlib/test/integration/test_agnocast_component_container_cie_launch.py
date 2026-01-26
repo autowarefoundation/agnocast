@@ -87,6 +87,17 @@ class TestComponentContainerCIE(unittest.TestCase):
                 f"Expected exactly 2 'Received CallbackGroupInfo:' messages, but got {callback_info_count}"
             )
 
+    def test_thread_configurator_receives_non_ros_thread_info(self, proc_output, thread_configurator):
+        with launch_testing.asserts.assertSequentialStdout(proc_output, process=thread_configurator) as cm:
+            output_text = "".join(cm._output)
+            non_ros_thread_info_count = output_text.count('Received NonRosThreadInfo:')
+
+            # Expected: 1 (for test_non_ros_worker)
+            self.assertEqual(
+                non_ros_thread_info_count, 1,
+                f"Expected exactly 1 'Received NonRosThreadInfo:' message, but got {non_ros_thread_info_count}"
+            )
+
 
 @launch_testing.post_shutdown_test()
 class TestComponentContainerCIEShutdown(unittest.TestCase):

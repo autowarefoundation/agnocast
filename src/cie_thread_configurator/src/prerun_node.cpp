@@ -15,6 +15,13 @@ PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node"
 {
   size_t default_domain_id = cie_thread_configurator::get_default_domain_id();
 
+  // Create subscription for non-ROS thread info
+  non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
+    "/cie_thread_configurator/non_ros_thread_info", 100,
+    [this](const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
+      this->non_ros_thread_callback(msg);
+    });
+
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
     this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
@@ -58,6 +65,23 @@ void PrerunNode::topic_callback(
   domain_and_cbg_ids_.insert(key);
 }
 
+void PrerunNode::non_ros_thread_callback(
+  const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+{
+  if (non_ros_thread_names_.find(msg->thread_name) != non_ros_thread_names_.end()) {
+    RCLCPP_ERROR(
+      this->get_logger(), "Duplicate thread_name received: tid=%ld | %s", msg->thread_id,
+      msg->thread_name.c_str());
+    return;
+  }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", msg->thread_id,
+    msg->thread_name.c_str());
+
+  non_ros_thread_names_.insert(msg->thread_name);
+}
+
 const std::vector<rclcpp::Node::SharedPtr> & PrerunNode::get_domain_nodes() const
 {
   return nodes_for_each_domain_;
@@ -89,6 +113,22 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     out << YAML::BeginMap;
     out << YAML::Key << "id" << YAML::Value << callback_group_id;
     out << YAML::Key << "domain_id" << YAML::Value << domain_id;
+    out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
+    out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
+    out << YAML::Key << "priority" << YAML::Value << 0;
+    out << YAML::EndMap;
+    out << YAML::Newline;
+  }
+
+  out << YAML::EndSeq;
+
+  // Add non_ros_threads section
+  out << YAML::Key << "non_ros_threads";
+  out << YAML::Value << YAML::BeginSeq;
+
+  for (const auto & thread_name : non_ros_thread_names_) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "name" << YAML::Value << thread_name;
     out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
     out << YAML::Key << "priority" << YAML::Value << 0;

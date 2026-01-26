@@ -21,8 +21,11 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
 : Node("thread_configurator_node"), unapplied_num_(0), cgroup_num_(0)
 {
   YAML::Node callback_groups = yaml["callback_groups"];
-  unapplied_num_ = callback_groups.size();
+  YAML::Node non_ros_threads = yaml["non_ros_threads"];
+
+  unapplied_num_ = callback_groups.size() + non_ros_threads.size();
   callback_group_configs_.resize(callback_groups.size());
+  non_ros_thread_configs_.resize(non_ros_threads.size());
 
   size_t default_domain_id = cie_thread_configurator::get_default_domain_id();
 
@@ -47,7 +50,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     const auto & callback_group = callback_groups[i];
     auto & config = callback_group_configs_[i];
 
-    config.callback_group_id = remove_trailing_waitable(callback_group["id"].as<std::string>());
+    config.thread_str = remove_trailing_waitable(callback_group["id"].as<std::string>());
 
     // Get domain_id from config, default to default_domain_id for backward compatibility
     if (callback_group["domain_id"]) {
@@ -70,19 +73,49 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
       config.priority = callback_group["priority"].as<int>();
     }
 
-    auto key = std::make_pair(config.domain_id, config.callback_group_id);
+    auto key = std::make_pair(config.domain_id, config.thread_str);
     id_to_callback_group_config_[key] = &config;
+  }
+
+  // Load non-ROS thread configurations
+  for (size_t i = 0; i < non_ros_threads.size(); i++) {
+    const auto & non_ros_thread = non_ros_threads[i];
+    auto & config = non_ros_thread_configs_[i];
+
+    config.thread_str = non_ros_thread["name"].as<std::string>();
+
+    for (auto & cpu : non_ros_thread["affinity"]) {
+      config.affinity.push_back(cpu.as<int>());
+    }
+    config.policy = non_ros_thread["policy"].as<std::string>();
+
+    if (config.policy == "SCHED_DEADLINE") {
+      config.runtime = non_ros_thread["runtime"].as<unsigned int>();
+      config.period = non_ros_thread["period"].as<unsigned int>();
+      config.deadline = non_ros_thread["deadline"].as<unsigned int>();
+    } else {
+      config.priority = non_ros_thread["priority"].as<int>();
+    }
+
+    id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
   auto qos =
     rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 1000)).reliable();
+
+  // Create subscription for non-ROS thread info
+  non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
+    "/cie_thread_configurator/non_ros_thread_info", qos,
+    [this](const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
+      this->non_ros_thread_callback(msg);
+    });
 
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
     this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
       "/cie_thread_configurator/callback_group_info", qos,
       [this, default_domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(default_domain_id, msg);
+        this->callback_group_callback(default_domain_id, msg);
       }));
 
   // Create nodes and subscriptions for other domain IDs
@@ -97,7 +130,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     auto sub = node->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
       "/cie_thread_configurator/callback_group_info", qos,
       [this, domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(domain_id, msg);
+        this->callback_group_callback(domain_id, msg);
       });
     subs_for_each_domain_.push_back(sub);
 
@@ -125,7 +158,15 @@ void ThreadConfiguratorNode::print_all_unapplied()
 
   for (auto & config : callback_group_configs_) {
     if (!config.applied) {
-      RCLCPP_WARN(this->get_logger(), "  - %s", config.callback_group_id.c_str());
+      RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
+    }
+  }
+
+  RCLCPP_WARN(this->get_logger(), "Following non-ROS threads are not yet configured");
+
+  for (auto & config : non_ros_thread_configs_) {
+    if (!config.applied) {
+      RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
     }
   }
 }
@@ -164,7 +205,7 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
   return true;
 }
 
-bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
+bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
 {
   if (
     config.policy == "SCHED_OTHER" || config.policy == "SCHED_BATCH" ||
@@ -181,7 +222,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
     if (sched_setscheduler(config.thread_id, m[config.policy], &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
-        config.callback_group_id.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
 
@@ -189,7 +230,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
     if (setpriority(PRIO_PROCESS, config.thread_id, config.priority) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure nice value (id=%s, tid=%ld): %s",
-        config.callback_group_id.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
 
@@ -205,7 +246,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
     if (sched_setscheduler(config.thread_id, m[config.policy], &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
-        config.callback_group_id.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
 
@@ -225,7 +266,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
     if (sched_setattr(config.thread_id, &attr, 0) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
-        config.callback_group_id.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
   }
@@ -235,7 +276,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
       if (!set_affinity_by_cgroup(config.thread_id, config.affinity)) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (id=%s, tid=%ld): %s",
-          config.callback_group_id.c_str(), config.thread_id,
+          config.thread_str.c_str(), config.thread_id,
           "Please disable cgroup v2 if used: "
           "`systemd.unified_cgroup_hierarchy=0`");
         return false;
@@ -249,7 +290,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const CallbackGroupConfig & config)
       if (sched_setaffinity(config.thread_id, sizeof(set), &set) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (id=%s, tid=%ld): %s",
-          config.callback_group_id.c_str(), config.thread_id, strerror(errno));
+          config.thread_str.c_str(), config.thread_id, strerror(errno));
         return false;
       }
     }
@@ -263,7 +304,7 @@ const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_
   return nodes_for_each_domain_;
 }
 
-void ThreadConfiguratorNode::topic_callback(
+void ThreadConfiguratorNode::callback_group_callback(
   size_t domain_id, const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
@@ -277,7 +318,7 @@ void ThreadConfiguratorNode::topic_callback(
     return;
   }
 
-  CallbackGroupConfig * config = it->second;
+  ThreadConfig * config = it->second;
   if (config->applied) {
     RCLCPP_INFO(
       this->get_logger(),
@@ -289,6 +330,46 @@ void ThreadConfiguratorNode::topic_callback(
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
+  config->thread_id = msg->thread_id;
+
+  if (config->policy == "SCHED_DEADLINE") {
+    // delayed applying
+    deadline_configs_.push_back(config);
+  } else {
+    bool success = issue_syscalls(*config);
+    if (!success) {
+      return;
+    }
+  }
+
+  config->applied = true;
+  unapplied_num_--;
+}
+
+void ThreadConfiguratorNode::non_ros_thread_callback(
+  const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+{
+  auto it = id_to_non_ros_thread_config_.find(msg->thread_name);
+  if (it == id_to_non_ros_thread_config_.end()) {
+    RCLCPP_INFO(
+      this->get_logger(),
+      "Received NonRosThreadInfo: but the yaml file does not "
+      "contain configuration for name=%s (tid=%ld)",
+      msg->thread_name.c_str(), msg->thread_id);
+    return;
+  }
+
+  ThreadConfig * config = it->second;
+  if (config->applied) {
+    RCLCPP_INFO(
+      this->get_logger(), "This non-ROS thread is already configured. skip (name=%s, tid=%ld)",
+      msg->thread_name.c_str(), msg->thread_id);
+    return;
+  }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", msg->thread_id,
+    msg->thread_name.c_str());
   config->thread_id = msg->thread_id;
 
   if (config->policy == "SCHED_DEADLINE") {

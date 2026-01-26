@@ -1,3 +1,4 @@
+#include <cie_thread_configurator/cie_thread_configurator.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
@@ -5,6 +6,7 @@
 
 #include <chrono>
 #include <memory>
+#include <thread>
 
 namespace agnocastlib_test
 {
@@ -34,15 +36,30 @@ public:
       },
       no_exec_callback_group_);
 
+    // Test spawn_non_ros2_thread
+    non_ros_thread_ = cie_thread_configurator::spawn_non_ros2_thread(
+      "test_non_ros_worker", &TestPublisherComponent::non_ros_thread_func, this);
+
     RCLCPP_INFO(this->get_logger(), "TestPublisherComponent initialized");
   }
 
+  ~TestPublisherComponent()
+  {
+    if (non_ros_thread_.joinable()) {
+      non_ros_thread_.join();
+    }
+  }
+
 private:
+  void non_ros_thread_func() {}
+
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::CallbackGroup::SharedPtr no_exec_callback_group_;
   rclcpp::TimerBase::SharedPtr no_exec_timer_;
   int count_;
+
+  std::thread non_ros_thread_;
 };
 
 }  // namespace agnocastlib_test

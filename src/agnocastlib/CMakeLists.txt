@@ -271,7 +271,7 @@ if(BUILD_TESTING)
   add_library(test_publisher_component SHARED
     test/integration/src/test_publisher_component.cpp)
   target_link_libraries(test_publisher_component agnocast)
-  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs)
+  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs cie_thread_configurator)
   rclcpp_components_register_node(test_publisher_component
     PLUGIN "agnocastlib_test::TestPublisherComponent"
     EXECUTABLE test_publisher_component_node)
