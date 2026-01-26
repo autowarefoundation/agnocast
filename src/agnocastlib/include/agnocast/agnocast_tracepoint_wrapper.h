@@ -1,6 +1,11 @@
 #pragma once
 #include "tracetools/tracetools.h"
 
+// Compatibility: Jazzy uses _DECLARE_TRACEPOINT, Humble uses DECLARE_TRACEPOINT
+#ifndef DECLARE_TRACEPOINT
+#define DECLARE_TRACEPOINT(...) _DECLARE_TRACEPOINT(__VA_ARGS__)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

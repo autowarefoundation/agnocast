@@ -87,8 +87,14 @@ NodeBase::NodeBase(
     fqn_ = namespace_ + "/" + node_name_;
   }
 
+  // rclcpp 28+ (Jazzy) requires context argument in CallbackGroup constructor.
+#if RCLCPP_VERSION_MAJOR >= 28
+  default_callback_group_ =
+    std::make_shared<rclcpp::CallbackGroup>(rclcpp::CallbackGroupType::MutuallyExclusive, context_);
+#else
   default_callback_group_ =
     std::make_shared<rclcpp::CallbackGroup>(rclcpp::CallbackGroupType::MutuallyExclusive);
+#endif
   callback_groups_.push_back(default_callback_group_);
 }
 
@@ -143,8 +149,15 @@ std::shared_ptr<const rcl_node_t> NodeBase::get_shared_rcl_node_handle() const
 rclcpp::CallbackGroup::SharedPtr NodeBase::create_callback_group(
   rclcpp::CallbackGroupType group_type, bool automatically_add_to_executor_with_node)
 {
+  // rclcpp 28+ (Jazzy) requires context argument in CallbackGroup constructor.
+  // The old constructor (without context) is deprecated and causes linker errors.
+#if RCLCPP_VERSION_MAJOR >= 28
+  auto group = std::make_shared<rclcpp::CallbackGroup>(
+    group_type, context_, automatically_add_to_executor_with_node);
+#else
   auto group =
     std::make_shared<rclcpp::CallbackGroup>(group_type, automatically_add_to_executor_with_node);
+#endif
 
   std::lock_guard<std::mutex> lock(callback_groups_mutex_);
   callback_groups_.push_back(group);
@@ -316,5 +329,19 @@ cleanup:
 
   return output_topic_name;
 }
+
+// rclcpp 28+ (Jazzy) added these methods to NodeBaseInterface.
+// These are stub implementations - not yet integrated into executor notification.
+#if RCLCPP_VERSION_MAJOR >= 28
+rclcpp::GuardCondition::SharedPtr NodeBase::get_shared_notify_guard_condition()
+{
+  throw std::runtime_error("get_shared_notify_guard_condition is not yet implemented");
+}
+
+void NodeBase::trigger_notify_guard_condition()
+{
+  throw std::runtime_error("trigger_notify_guard_condition is not yet implemented");
+}
+#endif
 
 }  // namespace agnocast::node_interfaces

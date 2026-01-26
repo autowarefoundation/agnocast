@@ -16,7 +16,7 @@ cargo build --release
 cd ..
 cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/agnocastlib/lib/
 
-colcon test --event-handlers console_direct+
+colcon test --packages-skip ros2agnocast --event-handlers console_direct+
 lcov --capture --directory . --output-file coverage.info
 lcov --remove coverage.info '/usr/*' '*/test/*' '*gtest*' '*gmock*' '/opt/*' --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_report_agnocastlib

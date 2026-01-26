@@ -5,6 +5,7 @@
 #include "rclcpp/context.hpp"
 #include "rclcpp/guard_condition.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
+#include "rclcpp/version.h"
 
 #include <rcl/arguments.h>
 
@@ -50,6 +51,12 @@ public:
 
   std::atomic_bool & get_associated_with_executor_atomic() override;
   rclcpp::GuardCondition & get_notify_guard_condition() override;
+
+  // rclcpp 28+ (Jazzy) added these methods to NodeBaseInterface.
+#if RCLCPP_VERSION_MAJOR >= 28
+  rclcpp::GuardCondition::SharedPtr get_shared_notify_guard_condition() override;
+  void trigger_notify_guard_condition() override;
+#endif
 
   bool get_use_intra_process_default() const override;
   bool get_enable_topic_statistics_default() const override;

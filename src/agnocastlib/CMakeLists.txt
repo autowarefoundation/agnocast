@@ -26,6 +26,8 @@ find_package(LTTngUST REQUIRED)
 find_package(cie_config_msgs REQUIRED)
 find_package(cie_thread_configurator REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 add_library(agnocast SHARED
   src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
@@ -39,7 +41,7 @@ add_library(agnocast SHARED
   src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/agnocast_performance_bridge_loader.cpp src/bridge/agnocast_performance_bridge_manager.cpp)
 
-ament_target_dependencies(agnocast cie_thread_configurator rosgraph_msgs cie_config_msgs)
+ament_target_dependencies(agnocast cie_thread_configurator rosgraph_msgs cie_config_msgs ament_index_cpp)
 
 target_link_libraries(agnocast
   ${rclcpp_LIBRARIES}
@@ -243,6 +245,7 @@ if(BUILD_TESTING)
     test/unit/test_node_topics.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs)
   set_tests_properties(test_unit_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )

@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 
 namespace agnocast
 {
@@ -130,6 +131,14 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
     }
 
     execute_any_executable(any_executable);
+
+    // rclcpp 28+ (Jazzy) changed entity collection to work like the static executor.
+    // Entities are collected once and not rebuilt unless explicitly triggered.
+    // We must trigger recollection after executing callbacks for timers/subscriptions to fire
+    // again.
+#if RCLCPP_VERSION_MAJOR >= 28
+    trigger_entity_recollect(true);
+#endif
 
     // Clear the callback_group to prevent the AnyExecutable destructor from
     // resetting the callback group `can_be_taken_from`.

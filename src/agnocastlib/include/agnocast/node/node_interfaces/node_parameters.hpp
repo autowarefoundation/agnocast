@@ -7,6 +7,7 @@
 #include "rclcpp/node_interfaces/node_parameters.hpp"
 #include "rclcpp/node_interfaces/node_parameters_interface.hpp"
 #include "rclcpp/parameter.hpp"
+#include "rclcpp/version.h"
 
 #include <rcl/arguments.h>
 
@@ -79,11 +80,33 @@ public:
   rcl_interfaces::msg::ListParametersResult list_parameters(
     const std::vector<std::string> & prefixes, uint64_t depth) const override;
 
+  // rclcpp 28+ (Jazzy) renamed OnParametersSetCallbackType to OnSetParametersCallbackType
+  // and removed the old name from NodeParametersInterface. Humble uses rclcpp 16.x.
+#if RCLCPP_VERSION_MAJOR >= 28
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
+    OnSetParametersCallbackType callback) override;
+#else
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     OnParametersSetCallbackType callback) override;
+#endif
 
   void remove_on_set_parameters_callback(
     const rclcpp::node_interfaces::OnSetParametersCallbackHandle * const handler) override;
+
+  // rclcpp 28+ (Jazzy) added pre/post set parameters callbacks to NodeParametersInterface.
+#if RCLCPP_VERSION_MAJOR >= 28
+  rclcpp::node_interfaces::PreSetParametersCallbackHandle::SharedPtr
+  add_pre_set_parameters_callback(PreSetParametersCallbackType callback) override;
+
+  rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr
+  add_post_set_parameters_callback(PostSetParametersCallbackType callback) override;
+
+  void remove_pre_set_parameters_callback(
+    const rclcpp::node_interfaces::PreSetParametersCallbackHandle * const handler) override;
+
+  void remove_post_set_parameters_callback(
+    const rclcpp::node_interfaces::PostSetParametersCallbackHandle * const handler) override;
+#endif
 
   const std::map<std::string, rclcpp::ParameterValue> & get_parameter_overrides() const override;
 

@@ -13,6 +13,7 @@
 #include "agnocast/node/node_interfaces/node_topics.hpp"
 #include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
+#include "rclcpp/version.h"
 
 #include <algorithm>
 #include <memory>
@@ -30,8 +31,16 @@ public:
   using SharedPtr = std::shared_ptr<Node>;
   using ParameterValue = rclcpp::ParameterValue;
   using OnSetParametersCallbackHandle = rclcpp::node_interfaces::OnSetParametersCallbackHandle;
-  using OnParametersSetCallbackType =
+  // rclcpp 28+ (Jazzy) renamed OnParametersSetCallbackType to OnSetParametersCallbackType
+  // and removed the old name from NodeParametersInterface (only kept as deprecated alias
+  // in OnSetParametersCallbackHandle). Humble uses rclcpp 16.x with the old name.
+#if RCLCPP_VERSION_MAJOR >= 28
+  using OnSetParametersCallbackType =
+    rclcpp::node_interfaces::NodeParametersInterface::OnSetParametersCallbackType;
+#else
+  using OnSetParametersCallbackType =
     rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType;
+#endif
 
   explicit Node(
     const std::string & node_name, const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
@@ -250,7 +259,7 @@ public:
   }
 
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
-    rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType callback)
+    OnSetParametersCallbackType callback)
   {
     return node_parameters_->add_on_set_parameters_callback(callback);
   }

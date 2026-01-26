@@ -44,7 +44,7 @@ done
 
 # Setup
 rm -rf build/agnocast_e2e_test install/e2e_test
-source /opt/ros/humble/setup.bash
+source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 

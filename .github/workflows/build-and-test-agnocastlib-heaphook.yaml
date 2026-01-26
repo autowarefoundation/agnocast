@@ -10,13 +10,22 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  ROS_DISTRO: humble
   RUST_TOOLCHAIN: "1.75.0"
 
 jobs:
-  build-and-test-agnocastlib-heaphook:
+  build-and-test-matrix:
     if: ${{ github.event_name == 'push' || github.event.label.name == 'run-build-test' }}
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ros_distro: humble
+            os: ubuntu-22.04
+          - ros_distro: jazzy
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    env:
+      ROS_DISTRO: ${{ matrix.ros_distro }}
 
     steps:
     - name: Set PR fetch depth
@@ -61,7 +70,7 @@ jobs:
         sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ros-${{ env.ROS_DISTRO }}-desktop python3-colcon-common-extensions ros-${{ env.ROS_DISTRO }}-ament-cmake python3-colcon-mixin
+        sudo apt-get install -y --no-install-recommends ros-${{ env.ROS_DISTRO }}-desktop python3-colcon-common-extensions ros-${{ env.ROS_DISTRO }}-ament-cmake python3-colcon-mixin ros-${{ env.ROS_DISTRO }}-ament-package
 
     - name: Cache rosdep
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
@@ -87,11 +96,11 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ github.ref }}-${{ github.sha }}
+        key: ${{ runner.os }}-${{ env.ROS_DISTRO }}-ccache-${{ github.ref }}-${{ github.sha }}
         restore-keys: |
-          ${{ runner.os }}-ccache-${{ github.ref }}-
-          ${{ runner.os }}-ccache-refs/heads/main-
-          ${{ runner.os }}-ccache-
+          ${{ runner.os }}-${{ env.ROS_DISTRO }}-ccache-${{ github.ref }}-
+          ${{ runner.os }}-${{ env.ROS_DISTRO }}-ccache-refs/heads/main-
+          ${{ runner.os }}-${{ env.ROS_DISTRO }}-ccache-
 
     - name: Configure ccache
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
@@ -100,6 +109,27 @@ jobs:
         ccache --version
         ccache --max-size=1G
         ccache --zero-stats
+
+    # Symlink ROS Python packages to system path so CMake's execute_process can find them.
+    # Why this is needed:
+    #   - Humble: CMake's execute_process() somehow inherits PYTHONPATH correctly
+    #   - Jazzy: CMake's execute_process() does NOT inherit PYTHONPATH, so Python
+    #     subprocess fails to import ament_package
+    #   - Root cause: CMake invokes /usr/bin/python3 directly without passing
+    #     environment variables. Why Humble works despite this is unclear.
+    - name: Setup ROS Python packages for system Python
+      if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
+      run: |
+        # Get the ROS Python site-packages path
+        ROS_PYTHON_PATH=$(python3 -c "import sys; print(f'/opt/ros/${{ env.ROS_DISTRO }}/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')")
+        # Get the system site-packages path
+        SYSTEM_PYTHON_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")
+        echo "ROS Python path: $ROS_PYTHON_PATH"
+        echo "System Python path: $SYSTEM_PYTHON_PATH"
+        # Symlink ROS Python packages to system path so CMake's execute_process can find them
+        sudo ln -sf "$ROS_PYTHON_PATH/ament_package" "$SYSTEM_PYTHON_PATH/ament_package"
+        # Verify ament_package is now importable without PYTHONPATH
+        python3 -c "import ament_package; print('ament_package found at:', ament_package.__file__)"
 
     - name: Build src
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
@@ -116,8 +146,16 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         ccache --show-stats
 
+    # NOTE: clang-tidy is skipped on Jazzy (Ubuntu 24.04) because it uses clang-tidy 18,
+    # which is significantly stricter than clang-tidy 14 on Humble (Ubuntu 22.04).
+    # Specifically, clang-tidy 18 has more aggressive checks for:
+    #   - misc-include-cleaner: flags transitive includes as errors
+    #   - misc-const-correctness: flags RAII types like std::lock_guard
+    #   - modernize-pass-by-value: stricter about pass-by-value patterns
+    # These produce many false positives with ROS/rclcpp code.
+    # Until we can align the checks across versions, we only run clang-tidy on Humble.
     - name: Run clang-tidy for agnocastlib
-      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
+      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true' && env.ROS_DISTRO == 'humble'
       run: |
         set -euo pipefail
         export FILES=($(echo "${{ steps.check_diff.outputs.changed_files }}" | grep -E '^src/agnocastlib/.*\.(cpp|hpp)$' | grep -v '/test/' || true))
@@ -133,16 +171,25 @@ jobs:
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
-        colcon test --merge-install --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_integration_agnocastlib|test_integration_test_agnocast_component_container_cie_launch"
+        # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
+        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_integration_agnocastlib|test_integration_test_agnocast_component_container_cie_launch"
 
     - name: Display coverage report in PR comment
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gcovr -r . --exclude ".*/test/.*" --exclude ".*/_deps/.*" --txt > coverage.txt
+        # Jazzy (Ubuntu 24.04, GCC 13) needs --gcov-ignore-parse-errors=negative_hits.warn
+        # as a workaround for GCC Bug 68080 where gcov produces negative branch counts
+        # in template-heavy C++ code (e.g., "branch 10 taken -1"). This doesn't occur on
+        # Humble (Ubuntu 22.04, GCC 11), and older gcovr doesn't support this flag syntax.
+        GCOVR_EXTRA_ARGS=""
+        if [ "${{ env.ROS_DISTRO }}" = "jazzy" ]; then
+          GCOVR_EXTRA_ARGS="--gcov-ignore-parse-errors=negative_hits.warn"
+        fi
+        gcovr -r . --exclude ".*/test/.*" --exclude ".*/_deps/.*" $GCOVR_EXTRA_ARGS --txt > coverage.txt
         coverage_text=$(<coverage.txt)
-        gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e '```\n'"$coverage_text"'\n```')"
+        gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e '## Coverage Report (${{ env.ROS_DISTRO }})\n```\n'"$coverage_text"'\n```')"
 
     # ===== agnocast_heaphook =====
 
@@ -205,4 +252,24 @@ jobs:
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
-        colcon test --merge-install --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
+        # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
+        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
+
+  # Summary job that provides a single status check for branch protection rules.
+  # Matrix jobs report status as "job-name (matrix-value)", but branch protection
+  # requires an exact job name. This job uses the original name so existing branch
+  # protection rules continue to work without manual changes.
+  build-and-test-agnocastlib-heaphook:
+    if: ${{ always() && (github.event_name == 'push' || github.event.label.name == 'run-build-test') }}
+    needs: build-and-test-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix job results
+        run: |
+          if [ "${{ needs.build-and-test-matrix.result }}" = "success" ] || [ "${{ needs.build-and-test-matrix.result }}" = "skipped" ]; then
+            echo "All matrix jobs passed or were skipped"
+            exit 0
+          else
+            echo "One or more matrix jobs failed: ${{ needs.build-and-test-matrix.result }}"
+            exit 1
+          fi

@@ -3,7 +3,10 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 #include "sys/epoll.h"
+
+#include <algorithm>
 
 namespace agnocast
 {
@@ -62,12 +65,26 @@ bool AgnocastExecutor::get_next_ready_agnocast_executable(AgnocastExecutable & a
     // node. If the executor has added the node, its construction is complete.
     //
     // If the executor->add_node() is not called for the node that has this callback_group,
-    // get_node_by_group() returns nullptr.
+    // the callback group won't be in the executor's list.
+    // rclcpp 28+ (Jazzy) removed get_node_by_group() and weak_groups_to_nodes_ from public API.
+    // Use get_all_callback_groups() instead to check if the callback group is registered.
+#if RCLCPP_VERSION_MAJOR >= 28
+    auto all_groups = get_all_callback_groups();
+    bool group_found = std::any_of(
+      all_groups.begin(), all_groups.end(),
+      [&it](const rclcpp::CallbackGroup::WeakPtr & weak_group) {
+        return weak_group.lock() == it->callback_group;
+      });
+    if (!group_found) {
+      continue;
+    }
+#else
     if (
       rclcpp::Executor::get_node_by_group(
         rclcpp::Executor::weak_groups_to_nodes_, it->callback_group) == nullptr) {
       continue;
     }
+#endif
 
     if (
       it->callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive &&

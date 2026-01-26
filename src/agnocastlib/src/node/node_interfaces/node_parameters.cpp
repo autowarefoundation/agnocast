@@ -750,7 +750,11 @@ rcl_interfaces::msg::ListParametersResult NodeParameters::list_parameters(
 }
 
 rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+#if RCLCPP_VERSION_MAJOR >= 28
+NodeParameters::add_on_set_parameters_callback(OnSetParametersCallbackType callback)
+#else
 NodeParameters::add_on_set_parameters_callback(OnParametersSetCallbackType callback)
+#endif
 {
   std::lock_guard<std::recursive_mutex> lock(parameters_mutex_);
   ParameterMutationRecursionGuard guard(parameter_modification_enabled_);
@@ -783,5 +787,33 @@ const std::map<std::string, rclcpp::ParameterValue> & NodeParameters::get_parame
 {
   return parameter_overrides_;
 }
+
+// rclcpp 28+ (Jazzy) added pre/post set parameters callbacks to NodeParametersInterface.
+// These are stub implementations - the callbacks are not yet integrated into parameter setting.
+#if RCLCPP_VERSION_MAJOR >= 28
+rclcpp::node_interfaces::PreSetParametersCallbackHandle::SharedPtr
+NodeParameters::add_pre_set_parameters_callback(PreSetParametersCallbackType /*callback*/)
+{
+  throw std::runtime_error("add_pre_set_parameters_callback is not yet implemented");
+}
+
+rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr
+NodeParameters::add_post_set_parameters_callback(PostSetParametersCallbackType /*callback*/)
+{
+  throw std::runtime_error("add_post_set_parameters_callback is not yet implemented");
+}
+
+void NodeParameters::remove_pre_set_parameters_callback(
+  const rclcpp::node_interfaces::PreSetParametersCallbackHandle * const /*handler*/)
+{
+  throw std::runtime_error("remove_pre_set_parameters_callback is not yet implemented");
+}
+
+void NodeParameters::remove_post_set_parameters_callback(
+  const rclcpp::node_interfaces::PostSetParametersCallbackHandle * const /*handler*/)
+{
+  throw std::runtime_error("remove_post_set_parameters_callback is not yet implemented");
+}
+#endif
 
 }  // namespace agnocast::node_interfaces
