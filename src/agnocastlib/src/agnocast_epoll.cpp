@@ -32,40 +32,72 @@ void wait_and_handle_epoll_event(
     return;
   }
 
-  const uint32_t callback_info_id = event.data.u32;
-  CallbackInfo callback_info;
+  const uint32_t event_id = event.data.u32;
 
-  {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+  if ((event_id & TIMER_EVENT_FLAG) != 0U) {
+    // Timer event
+    const uint32_t timer_id = event_id & ~TIMER_EVENT_FLAG;
+    rclcpp::CallbackGroup::SharedPtr callback_group;
 
-    const auto it = id2_callback_info.find(callback_info_id);
-    if (it == id2_callback_info.end()) {
-      RCLCPP_ERROR(logger, "Agnocast internal implementation error: callback info cannot be found");
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+    std::shared_ptr<TimerInfo> timer_info;
+    {
+      std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+      const auto it = id2_timer_info.find(timer_id);
+      if (it == id2_timer_info.end()) {
+        RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+      timer_info = it->second;
+      callback_group = timer_info->callback_group;
     }
 
-    callback_info = it->second;
-  }
+    // Create a callable that handles the timer event
+    const std::shared_ptr<std::function<void()>> callable =
+      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
 
-  MqMsgAgnocast mq_msg = {};
+    {
+      std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};
+      ready_agnocast_executables.emplace_back(AgnocastExecutable{callable, callback_group});
+    }
+  } else {
+    // Subscription callback event
+    const uint32_t callback_info_id = event_id;
+    CallbackInfo callback_info;
 
-  // non-blocking
-  auto ret =
-    mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
-  if (ret < 0) {
-    if (errno != EAGAIN) {
-      RCLCPP_ERROR(logger, "mq_receive failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+    {
+      std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+
+      const auto it = id2_callback_info.find(callback_info_id);
+      if (it == id2_callback_info.end()) {
+        RCLCPP_ERROR(
+          logger, "Agnocast internal implementation error: callback info cannot be found");
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+
+      callback_info = it->second;
     }
 
-    return;
-  }
+    MqMsgAgnocast mq_msg = {};
 
-  agnocast::receive_message(
-    callback_info_id, my_pid, callback_info, ready_agnocast_executables_mutex,
-    ready_agnocast_executables);
+    // non-blocking
+    auto ret =
+      mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
+    if (ret < 0) {
+      if (errno != EAGAIN) {
+        RCLCPP_ERROR(logger, "mq_receive failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+
+      return;
+    }
+
+    agnocast::receive_message(
+      callback_info_id, my_pid, callback_info, ready_agnocast_executables_mutex,
+      ready_agnocast_executables);
+  }
 }
 
 }  // namespace agnocast

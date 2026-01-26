@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
@@ -16,6 +17,7 @@
 #include "rclcpp/version.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -310,6 +312,20 @@ public:
     return std::make_shared<Subscription<MessageT>>(
       this, topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), std::forward<Func>(callback),
       options);
+  }
+
+  template <typename Func>
+  uint32_t create_wall_timer(
+    std::chrono::nanoseconds period, Func && callback,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    static_assert(std::is_invocable_v<Func>, "Callback must be callable with void()");
+
+    if (!group) {
+      group = node_base_->get_default_callback_group();
+    }
+
+    return register_timer(std::forward<Func>(callback), period, group);
   }
 
 private:

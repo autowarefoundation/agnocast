@@ -75,7 +75,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `add_publisher()` | ✗ | **Throws Exception** | No | Uses agnocast's own Publisher management |
 | `create_subscription()` | ✗ | **Throws Exception** | No | Use `agnocast::create_subscription()` or `agnocast::Node::create_subscription()` |
 | `add_subscription()` | ✗ | **Throws Exception** | No | Uses agnocast's own Subscription management |
-| `get_node_timers_interface()` | ✗ | **Throws Exception** | TBD | Timer interface is not supported |
+| `get_node_timers_interface()` | ✗ | **Throws Exception** | TBD | Use `agnocast::Node::create_wall_timer()` instead |
 
 ---
 
@@ -302,7 +302,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
-| `create_wall_timer()` | ✓ | ✗ | |
+| `create_wall_timer()` | ✓ | ✓ | Return type differs (`uint32_t` timer_id vs `rclcpp::TimerBase::SharedPtr`) |
 | `create_client<ServiceT>()` | ✓ | ✗ | Use `agnocast::create_client()` |
 | `create_service<ServiceT>()` | ✓ | ✗ | Use `agnocast::create_service()` |
 
