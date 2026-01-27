@@ -35,7 +35,7 @@ def calc_expect_pub_sub_num(config: dict) -> None:
     if config['sub_transient_local']:
         EXPECT_INIT_ROS2_SUB_NUM = min(
             EXPECT_INIT_PUB_NUM, config['sub_qos_depth']) if config['pub_transient_local'] else 0
-        EXPECT_INIT_SUB_NUM = 0 if config['use_take_sub'] else min(
+        EXPECT_INIT_SUB_NUM = min(
             EXPECT_INIT_PUB_NUM, config['sub_qos_depth'])
     else:
         EXPECT_INIT_ROS2_SUB_NUM = 0
@@ -64,6 +64,9 @@ def generate_test_description():
                 namespace='',
                 package='agnocastlib',
                 executable='agnocast_component_container',
+                parameters=[
+                    {"get_next_timeout_ms": 1},
+                ],
                 composable_node_descriptions=[
                     ComposableNode(
                         package='agnocast_e2e_test',
@@ -104,8 +107,8 @@ def generate_test_description():
                             {
                                 "qos_depth": config['sub_qos_depth'],
                                 "transient_local": config['sub_transient_local'] if config['pub_transient_local'] else False,
-                                "sub_num": EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM,
-                                "forever": FOREVER
+                                "forever": FOREVER,
+                                "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
                             }
                         ],
                     )
@@ -200,8 +203,11 @@ class Test1To1(unittest.TestCase):
         with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_pub) as cm:
             proc_output = "".join(cm._output)
 
+            total_expected_count = EXPECT_INIT_PUB_NUM + EXPECT_PUB_NUM
+            self.assertGreater(total_expected_count, 0, "Expected publisher count must be greater than 0.")
+
             # The display order is not guaranteed, so the message order is not checked.
-            for i in range(EXPECT_INIT_PUB_NUM + EXPECT_PUB_NUM):
+            for i in range(total_expected_count):
                 self.assertEqual(proc_output.count(f"Publishing {i}."), 1)
             self.assertEqual(proc_output.count("All messages published. Shutting down."), 1)
 
@@ -209,8 +215,12 @@ class Test1To1(unittest.TestCase):
         with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_sub) as cm:
             proc_output = "".join(cm._output)
 
+            start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
+            total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
+            self.assertGreater(total_expected_count, 0, "Expected count must be greater than 0.")
+
             # The display order is not guaranteed, so the message order is not checked.
-            for i in range(EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM, EXPECT_SUB_NUM):
+            for i in range(start_index, start_index + total_expected_count):
                 self.assertEqual(proc_output.count(f"Receiving {i}."), 1)
             self.assertEqual(proc_output.count("All messages received. Shutting down."), 1)
 
@@ -218,7 +228,17 @@ class Test1To1(unittest.TestCase):
         with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_ros2_sub) as cm:
             proc_output = "".join(cm._output)
 
-            # The display order is not guaranteed, so the message order is not checked.
-            for i in range(EXPECT_INIT_PUB_NUM - EXPECT_INIT_ROS2_SUB_NUM, EXPECT_ROS2_SUB_NUM):
+            # [Note: ROS 2 Transient Local behavior with depth mismatch]
+            # In ROS 2, "depth" defines the queue size, not a limit on the total number of received messages.
+            # Therefore, when both are Transient Local and the Publisher's depth is significantly larger than the Subscriber's,
+            # the subscriber may receive multiple messages due to the burst transmission of history data.
+            actual_init_count = sum(
+                1 for i in range(EXPECT_INIT_PUB_NUM)
+                if proc_output.count(f"Receiving {i}.") > 0
+            )
+            self.assertGreaterEqual(actual_init_count, EXPECT_INIT_ROS2_SUB_NUM)
+
+            self.assertGreater(EXPECT_ROS2_SUB_NUM, 0, "Expected live message count must be greater than 0.")
+            for i in range(EXPECT_INIT_PUB_NUM, EXPECT_INIT_PUB_NUM + EXPECT_ROS2_SUB_NUM):
                 self.assertEqual(proc_output.count(f"Receiving {i}."), 1)
             self.assertEqual(proc_output.count("All messages received. Shutting down."), 1)

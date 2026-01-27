@@ -9,21 +9,26 @@ using namespace std::chrono_literals;
 
 class TestPublisher : public rclcpp::Node
 {
+  enum class State {
+    WaitingForConnection,      // Waiting for subscriber connections
+    WaitingForTransientLocal,  // Waiting for transient local messages (5 seconds)
+    Publishing                 // Normal publishing
+  };
+
   rclcpp::TimerBase::SharedPtr timer_;
   agnocast::Publisher<std_msgs::msg::Int64>::SharedPtr publisher_;
   int64_t count_;
   int64_t target_pub_num_;
   int64_t planned_sub_count_;
   size_t planned_pub_count_;
-  bool is_ready_ = false;
+
+  State state_ = State::WaitingForConnection;
+  rclcpp::Time connection_detected_time_;
+
   bool forever_;
 
-  bool is_ready()
+  bool check_connection_counts()
   {
-    if (is_ready_) {
-      return true;
-    }
-
     const auto total_sub_count =
       publisher_->get_subscription_count() + publisher_->get_intra_subscription_count();
     if (
@@ -32,17 +37,35 @@ class TestPublisher : public rclcpp::Node
       return false;
     }
 
-    sleep(5);  // HACK: wait subscribing transient local messages
-    is_ready_ = true;
     return true;
   }
 
   void timer_callback()
   {
-    if (!is_ready()) {
-      return;
-    }
+    switch (state_) {
+      case State::WaitingForConnection:
+        if (check_connection_counts()) {
+          connection_detected_time_ = this->now();
+          state_ = State::WaitingForTransientLocal;
+        }
+        break;
 
+      case State::WaitingForTransientLocal:
+        // HACK: wait subscribing transient local messages
+        if ((this->now() - connection_detected_time_) >= rclcpp::Duration::from_seconds(5.0)) {
+          state_ = State::Publishing;
+          publish_message();
+        }
+        break;
+
+      case State::Publishing:
+        publish_message();
+        break;
+    }
+  }
+
+  void publish_message()
+  {
     agnocast::ipc_shared_ptr<std_msgs::msg::Int64> message = publisher_->borrow_loaned_message();
     message->data = count_;
     publisher_->publish(std::move(message));
@@ -95,7 +118,7 @@ public:
       count_++;
     }
 
-    timer_ = this->create_wall_timer(10ms, std::bind(&TestPublisher::timer_callback, this));
+    timer_ = this->create_wall_timer(100ms, std::bind(&TestPublisher::timer_callback, this));
   }
 };
 
