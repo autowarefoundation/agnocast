@@ -31,10 +31,9 @@ $ ros2 topic list_agnocast | grep Agnocast
 To show the topic info including Agnocast, use `ros2 topic info_agnocast /topic_name`.
 
 ```bash
-$ ros2 topic info_agnocast -v /my_topic
+$ ros2 topic info_agnocast /my_topic
 Type: agnocast_sample_interfaces/msg/DynamicSizeArray
-
-ROS 2 Publisher count: 1
+ROS 2 Publisher count: 0
 Agnocast Publisher count: 1
 ROS 2 Subscription count: 0
 Agnocast Subscription count: 1
@@ -43,17 +42,92 @@ Agnocast Subscription count: 1
 For more details, use `--verbose` or `-v`.
 
 ```bash
-$ ros2 topic info_agnocast -v /my_topic
+$ ros2 topic info_agnocast /my_topic -v
 Type: agnocast_sample_interfaces/msg/DynamicSizeArray
 
-ROS 2 Publisher count: 1
+ROS 2 Publisher count: 0
 Agnocast Publisher count: 1
 
 Node name: talker_node
 Node namespace: /
 Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
 Endpoint type: PUBLISHER (Agnocast enabled)
-GID: 01.10.6f.78.ef.cc.19.22.6a.d5.d6.8a.00.00.15.03.00.00.00.00.00.00.00.00
+QoS profile:
+  History (Depth): KEEP_LAST (1)
+  Durability: VOLATILE
+
+ROS 2 Subscription count: 0
+Agnocast Subscription count: 1
+
+Node name: listener_node
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: SUBSCRIPTION (Agnocast enabled)
+QoS profile:
+  History (Depth): KEEP_LAST (1)
+  Durability: VOLATILE
+```
+
+### Topic Debug Mode
+
+By default, `ros2 topic info_agnocast` hides internal bridge nodes and endpoints to provide a cleaner view. To include these internal details, use the `--debug` or `-d` flag.
+
+```bash
+$ ros2 topic info_agnocast /my_topic -d
+Type: agnocast_sample_interfaces/msg/DynamicSizeArray
+ROS 2 Publisher count: 1
+Agnocast Publisher count: 2
+ROS 2 Subscription count: 1
+Agnocast Subscription count: 2
+```
+
+You can combine `-d` with `-v` for full verbose output including bridge node details:
+
+```bash
+$ ros2 topic info_agnocast /my_topic -v -d
+Type: agnocast_sample_interfaces/msg/DynamicSizeArray
+
+ROS 2 Publisher count: 1
+Agnocast Publisher count: 2
+
+Node name: agnocast_bridge_node_86050
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: PUBLISHER
+GID: 01.10.b2.d2.ef.55.13.0d.74.cc.0c.e6.00.00.16.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): KEEP_LAST (10)
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: agnocast_bridge_node_86050
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: PUBLISHER (Agnocast enabled)
+QoS profile:
+  History (Depth): KEEP_LAST (10)
+  Durability: TRANSIENT_LOCAL
+
+Node name: talker_node
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: PUBLISHER (Agnocast enabled)
+QoS profile:
+  History (Depth): KEEP_LAST (1)
+  Durability: VOLATILE
+
+ROS 2 Subscription count: 1
+Agnocast Subscription count: 2
+
+Node name: agnocast_bridge_node_86050
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: SUBSCRIPTION
+GID: 01.10.b2.d2.ef.55.13.0d.74.cc.0c.e6.00.00.15.04.00.00.00.00.00.00.00.00
 QoS profile:
   Reliability: RELIABLE
   History (Depth): KEEP_LAST (1)
@@ -63,10 +137,15 @@ QoS profile:
   Liveliness: AUTOMATIC
   Liveliness lease duration: Infinite
 
-ROS 2 Subscription count: 0
-Agnocast Subscription count: 1
-
 Node name: listener_node
+Node namespace: /
+Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
+Endpoint type: SUBSCRIPTION (Agnocast enabled)
+QoS profile:
+  History (Depth): KEEP_LAST (1)
+  Durability: VOLATILE
+
+Node name: agnocast_bridge_node_86050
 Node namespace: /
 Topic type: agnocast_sample_interfaces/msg/DynamicSizeArray
 Endpoint type: SUBSCRIPTION (Agnocast enabled)
@@ -81,21 +160,46 @@ To show the node info including Agnocast, use `ros2 node info_agnocast /node_nam
 
 ```bash
 $ ros2 node info_agnocast /listener_node
-  Subscribers :
+  Subscribers:
     /parameter_events: rcl_interfaces/msg/ParameterEvent
-    /my_topic: sample_interfaces/msg/DynamicSizeArray (Agnocast enabled)
-  Publishers :
-    /my_topic2: sample_interfaces/msg/DynamicSizeArray (Agnocast enabled)
+    /my_topic: agnocast_sample_interfaces/msg/DynamicSizeArray (Agnocast enabled)
+  Publishers:
+    /my_topic2: agnocast_sample_interfaces/msg/DynamicSizeArray (Agnocast enabled)
     /parameter_events: rcl_interfaces/msg/ParameterEvent
     /rosout: rcl_interfaces/msg/Log
-  Service Servers :
+  Service Servers:
     /listener_node/describe_parameters: rcl_interfaces/srv/DescribeParameters
     /listener_node/get_parameter_types: rcl_interfaces/srv/GetParameterTypes
     /listener_node/get_parameters: rcl_interfaces/srv/GetParameters
     /listener_node/list_parameters: rcl_interfaces/srv/ListParameters
     /listener_node/set_parameters: rcl_interfaces/srv/SetParameters
     /listener_node/set_parameters_atomically: rcl_interfaces/srv/SetParametersAtomically
-  Service Clients :
-  Action Servers :
-  Action Clients :
+  Service Clients:
+  Action Servers:
+  Action Clients:
+```
+
+### Node Debug Mode
+
+Use the `--debug` or `-d` flag to show additional information about bridged endpoints. When enabled, topics that are connected through a bridge node will display "(Agnocast enabled, bridged)".
+
+```bash
+$ ros2 node info_agnocast /listener_node -d
+  Subscribers:
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+    /my_topic: agnocast_sample_interfaces/msg/DynamicSizeArray (Agnocast enabled, bridged)
+  Publishers:
+    /my_topic2: agnocast_sample_interfaces/msg/DynamicSizeArray (Agnocast enabled)
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+    /rosout: rcl_interfaces/msg/Log
+  Service Servers:
+    /listener_node/describe_parameters: rcl_interfaces/srv/DescribeParameters
+    /listener_node/get_parameter_types: rcl_interfaces/srv/GetParameterTypes
+    /listener_node/get_parameters: rcl_interfaces/srv/GetParameters
+    /listener_node/list_parameters: rcl_interfaces/srv/ListParameters
+    /listener_node/set_parameters: rcl_interfaces/srv/SetParameters
+    /listener_node/set_parameters_atomically: rcl_interfaces/srv/SetParametersAtomically
+  Service Clients:
+  Action Servers:
+  Action Clients:
 ```
