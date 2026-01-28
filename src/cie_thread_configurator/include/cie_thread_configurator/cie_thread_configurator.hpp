@@ -8,6 +8,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
@@ -70,12 +71,29 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
       "/cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(1000).keep_all());
     auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
-    auto message = std::make_shared<cie_config_msgs::msg::NonRosThreadInfo>();
-    message->thread_id = tid;
-    message->thread_name = thread_name;
-    publisher->publish(*message);
+    // Wait for subscriber to connect before publishing (timeout: 1 second)
+    constexpr int max_subscriber_wait_iterations = 100;  // 100 * 10ms = 1 second
+    int wait_count = 0;
+    while (publisher->get_subscription_count() == 0 &&
+           wait_count < max_subscriber_wait_iterations) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      ++wait_count;
+    }
 
-    context->shutdown("Thread info published successfully.");
+    if (publisher->get_subscription_count() > 0) {
+      auto message = std::make_shared<cie_config_msgs::msg::NonRosThreadInfo>();
+      message->thread_id = tid;
+      message->thread_name = thread_name;
+      publisher->publish(*message);
+    } else {
+      RCLCPP_WARN(
+        node->get_logger(),
+        "No subscriber for NonRosThreadInfo (thread '%s'). "
+        "Please run thread_configurator_node if you want to configure thread scheduling.",
+        thread_name.c_str());
+    }
+
+    context->shutdown("cie_thread_client finished.");
 
     std::apply(std::move(func), std::move(captured_args));
   });
