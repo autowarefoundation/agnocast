@@ -14,14 +14,14 @@ namespace agnocast
 using BridgeFn =
   std::shared_ptr<void> (*)(rclcpp::Node::SharedPtr, const BridgeTargetInfo &, const rclcpp::QoS &);
 
-class BridgeLoader
+class StandardBridgeLoader
 {
 public:
-  explicit BridgeLoader(const rclcpp::Logger & logger);
-  ~BridgeLoader();
+  explicit StandardBridgeLoader(const rclcpp::Logger & logger);
+  ~StandardBridgeLoader();
 
-  BridgeLoader(const BridgeLoader &) = delete;
-  BridgeLoader & operator=(const BridgeLoader &) = delete;
+  StandardBridgeLoader(const StandardBridgeLoader &) = delete;
+  StandardBridgeLoader & operator=(const StandardBridgeLoader &) = delete;
 
   std::shared_ptr<void> create(
     const MqMsgBridge & req, const std::string & topic_name_with_direction,

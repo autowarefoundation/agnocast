@@ -1,4 +1,4 @@
-#include "agnocast/bridge/agnocast_bridge_manager.hpp"
+#include "agnocast/bridge/agnocast_standard_bridge_manager.hpp"
 
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
@@ -13,9 +13,9 @@
 namespace agnocast
 {
 
-BridgeManager::BridgeManager(pid_t target_pid)
+StandardBridgeManager::StandardBridgeManager(pid_t target_pid)
 : target_pid_(target_pid),
-  logger_(rclcpp::get_logger("agnocast_bridge_manager")),
+  logger_(rclcpp::get_logger("agnocast_standard_bridge_manager")),
   event_loop_(logger_),
   loader_(logger_)
 {
@@ -34,7 +34,7 @@ BridgeManager::BridgeManager(pid_t target_pid)
   rclcpp::init(0, nullptr, init_options);
 }
 
-BridgeManager::~BridgeManager()
+StandardBridgeManager::~StandardBridgeManager()
 {
   if (executor_) {
     executor_->cancel();
@@ -43,9 +43,11 @@ BridgeManager::~BridgeManager()
     try {
       executor_thread_.join();
     } catch (const std::exception & e) {
-      RCLCPP_ERROR(rclcpp::get_logger("BridgeManager"), "Failed to join thread: %s", e.what());
+      RCLCPP_ERROR(
+        rclcpp::get_logger("StandardBridgeManager"), "Failed to join thread: %s", e.what());
     } catch (...) {
-      RCLCPP_ERROR(rclcpp::get_logger("BridgeManager"), "Failed to join thread: unknown error");
+      RCLCPP_ERROR(
+        rclcpp::get_logger("StandardBridgeManager"), "Failed to join thread: unknown error");
     }
   }
 
@@ -58,7 +60,7 @@ BridgeManager::~BridgeManager()
   }
 }
 
-void BridgeManager::run()
+void StandardBridgeManager::run()
 {
   constexpr int EVENT_LOOP_TIMEOUT_MS = 1000;
 
@@ -82,7 +84,7 @@ void BridgeManager::run()
   }
 }
 
-void BridgeManager::start_ros_execution()
+void StandardBridgeManager::start_ros_execution()
 {
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
@@ -100,7 +102,7 @@ void BridgeManager::start_ros_execution()
   });
 }
 
-void BridgeManager::on_mq_request(mqd_t fd)
+void StandardBridgeManager::on_mq_request(mqd_t fd)
 {
   MqMsgBridge req{};
   while (mq_receive(fd, reinterpret_cast<char *>(&req), sizeof(req), nullptr) > 0) {
@@ -111,7 +113,7 @@ void BridgeManager::on_mq_request(mqd_t fd)
   }
 }
 
-void BridgeManager::on_signal()
+void StandardBridgeManager::on_signal()
 {
   shutdown_requested_ = true;
   if (executor_) {
@@ -119,7 +121,7 @@ void BridgeManager::on_signal()
   }
 }
 
-void BridgeManager::register_request(const MqMsgBridge & req)
+void StandardBridgeManager::register_request(const MqMsgBridge & req)
 {
   // Locally, unique keys include the direction. However, we register the raw topic name (without
   // direction) to the kernel to enforce single-process ownership for the entire topic.
@@ -133,7 +135,7 @@ void BridgeManager::register_request(const MqMsgBridge & req)
   (is_r2a ? info.req_r2a : info.req_a2r) = req;
 }
 
-BridgeManager::BridgeKernelResult BridgeManager::try_add_bridge_to_kernel(
+StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_to_kernel(
   const std::string & topic_name, bool is_r2a)
 {
   struct ioctl_add_bridge_args add_bridge_args
@@ -154,7 +156,7 @@ BridgeManager::BridgeKernelResult BridgeManager::try_add_bridge_to_kernel(
   return BridgeKernelResult{AddBridgeResult::ERROR, 0, false, false};
 }
 
-void BridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
+void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
 {
   bool is_r2a = (req.direction == BridgeDirection::ROS2_TO_AGNOCAST);
   std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
@@ -197,7 +199,7 @@ void BridgeManager::activate_bridge(const MqMsgBridge & req, const std::string &
   }
 }
 
-void BridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)
+void StandardBridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)
 {
   std::string mq_name = create_mq_name_for_bridge(owner_pid);
 
@@ -220,7 +222,7 @@ void BridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)
   mq_close(mq);
 }
 
-void BridgeManager::process_managed_bridge(
+void StandardBridgeManager::process_managed_bridge(
   const std::string & topic_name, const std::optional<MqMsgBridge> & req)
 {
   if (!req) {
@@ -249,7 +251,7 @@ void BridgeManager::process_managed_bridge(
   }
 }
 
-void BridgeManager::check_parent_alive()
+void StandardBridgeManager::check_parent_alive()
 {
   if (!is_parent_alive_) {
     return;
@@ -260,7 +262,7 @@ void BridgeManager::check_parent_alive()
   }
 }
 
-void BridgeManager::check_active_bridges()
+void StandardBridgeManager::check_active_bridges()
 {
   std::vector<std::string> to_remove;
   to_remove.reserve(active_bridges_.size());
@@ -301,7 +303,7 @@ void BridgeManager::check_active_bridges()
   }
 }
 
-void BridgeManager::check_managed_bridges()
+void StandardBridgeManager::check_managed_bridges()
 {
   for (auto & managed_bridge : managed_bridges_) {
     if (shutdown_requested_) {
@@ -316,7 +318,7 @@ void BridgeManager::check_managed_bridges()
   }
 }
 
-void BridgeManager::check_should_exit()
+void StandardBridgeManager::check_should_exit()
 {
   if (!is_parent_alive_ && active_bridges_.empty()) {
     shutdown_requested_ = true;
@@ -326,7 +328,7 @@ void BridgeManager::check_should_exit()
   }
 }
 
-bool BridgeManager::update_ros2_subscriber_num(const std::string & topic_name)
+bool StandardBridgeManager::update_ros2_subscriber_num(const std::string & topic_name)
 {
   size_t ros2_count = container_node_->count_subscribers(topic_name);
 
@@ -341,7 +343,7 @@ bool BridgeManager::update_ros2_subscriber_num(const std::string & topic_name)
   return true;
 }
 
-void BridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)
+void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)
 {
   if (topic_name_with_direction.size() <= SUFFIX_LEN) {
     return;
@@ -388,7 +390,8 @@ void BridgeManager::remove_active_bridge(const std::string & topic_name_with_dir
   }
 }
 
-std::pair<std::string, std::string> BridgeManager::extract_topic_info(const MqMsgBridge & req)
+std::pair<std::string, std::string> StandardBridgeManager::extract_topic_info(
+  const MqMsgBridge & req)
 {
   std::string raw_name(
     &req.target.topic_name[0], strnlen(&req.target.topic_name[0], sizeof(req.target.topic_name)));
