@@ -180,20 +180,18 @@ public:
 
 template <typename MessageT>
 std::shared_ptr<void> start_ros_to_agno_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info)
+  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
-  return std::make_shared<RosToAgnocastBridge<MessageT>>(
-    node, topic_name, get_subscriber_qos(topic_name, info.target_id));
+  return std::make_shared<RosToAgnocastBridge<MessageT>>(node, topic_name, qos);
 }
 
 template <typename MessageT>
 std::shared_ptr<void> start_agno_to_ros_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info)
+  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
-  return std::make_shared<AgnocastToRosBridge<MessageT>>(
-    node, topic_name, get_publisher_qos(topic_name, info.target_id));
+  return std::make_shared<AgnocastToRosBridge<MessageT>>(node, topic_name, qos);
 }
 
 template <typename MsgStruct>

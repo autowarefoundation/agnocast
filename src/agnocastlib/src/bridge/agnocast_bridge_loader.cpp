@@ -25,7 +25,7 @@ BridgeLoader::~BridgeLoader()
 
 std::shared_ptr<void> BridgeLoader::create(
   const MqMsgBridge & req, const std::string & topic_name_with_direction,
-  const rclcpp::Node::SharedPtr & node)
+  const rclcpp::Node::SharedPtr & node, const rclcpp::QoS & qos)
 {
   auto [entry_func, lib_handle] = resolve_factory_function(req, topic_name_with_direction);
 
@@ -37,15 +37,15 @@ std::shared_ptr<void> BridgeLoader::create(
     return nullptr;
   }
 
-  return create_bridge_instance(entry_func, lib_handle, node, req.target);
+  return create_bridge_instance(entry_func, lib_handle, node, req.target, qos);
 }
 
 std::shared_ptr<void> BridgeLoader::create_bridge_instance(
   BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
-  const rclcpp::Node::SharedPtr & node, const BridgeTargetInfo & target)
+  const rclcpp::Node::SharedPtr & node, const BridgeTargetInfo & target, const rclcpp::QoS & qos)
 {
   try {
-    auto bridge_resource = entry_func(node, target);
+    auto bridge_resource = entry_func(node, target, qos);
     if (!bridge_resource) {
       return nullptr;
     }
