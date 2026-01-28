@@ -10,6 +10,30 @@
 namespace agnocast
 {
 
+BridgeMode get_bridge_mode()
+{
+  const char * env_val = std::getenv("AGNOCAST_BRIDGE_MODE");
+  if (env_val == nullptr) {
+    return BridgeMode::Standard;
+  }
+
+  std::string val = env_val;
+  std::transform(val.begin(), val.end(), val.begin(), ::tolower);
+
+  if (val == "0" || val == "off") {
+    return BridgeMode::Off;
+  }
+  if (val == "1" || val == "standard") {
+    return BridgeMode::Standard;
+  }
+  if (val == "2" || val == "performance") {
+    return BridgeMode::Performance;
+  }
+
+  RCLCPP_WARN(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to STANDARD.", env_val);
+  return BridgeMode::Standard;
+}
+
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id)
 {
   struct ioctl_get_subscriber_qos_args get_subscriber_qos_args = {};

@@ -9,6 +9,12 @@
 namespace agnocast
 {
 
+inline constexpr std::string_view SUFFIX_R2A = "_R2A";
+inline constexpr std::string_view SUFFIX_A2R = "_A2R";
+inline constexpr size_t SUFFIX_LEN = SUFFIX_R2A.length();
+
+enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };
+
 class BridgeBase
 {
 public:
@@ -28,6 +34,7 @@ struct PublisherCountResult
   bool bridge_exist;  // true if R2A bridge exists
 };
 
+BridgeMode get_bridge_mode();
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id);
 rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t publisher_id);
 PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name);

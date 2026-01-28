@@ -29,8 +29,6 @@ PerformanceBridgeManager::PerformanceBridgeManager()
   rclcpp::InitOptions init_options{};
   init_options.shutdown_on_signal = false;
   rclcpp::init(0, nullptr, init_options);
-
-  RCLCPP_INFO(logger_, "Performance Bridge Manager initialized (PID: %d).", getpid());
 }
 
 PerformanceBridgeManager::~PerformanceBridgeManager()
@@ -54,9 +52,6 @@ void PerformanceBridgeManager::run()
 
   std::string proc_name = "agno_pbr_" + std::to_string(getpid());
   prctl(PR_SET_NAME, proc_name.c_str(), 0, 0, 0);
-
-  // TODO(yutarokobayashi): For debugging. Remove later.
-  RCLCPP_INFO(logger_, "Performance Bridge Manager started.");
 
   start_ros_execution();
 
@@ -112,9 +107,6 @@ void PerformanceBridgeManager::on_mq_request(int fd)
   topic_local_id_t target_id = msg->target.target_id;
   std::string message_type = static_cast<const char *>(msg->message_type);
 
-  // TODO(yutarokobayashi): For debugging. Remove later.
-  RCLCPP_INFO(logger_, "Processing MQ Request: %s (Target ID: %d)", topic_name.c_str(), target_id);
-
   request_cache_[topic_name][target_id] = *msg;
 
   create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg->direction);
@@ -122,7 +114,6 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
 void PerformanceBridgeManager::on_signal()
 {
-  RCLCPP_INFO(logger_, "Shutdown signal received.");
   shutdown_requested_ = true;
   if (executor_) {
     executor_->cancel();
@@ -328,9 +319,6 @@ void PerformanceBridgeManager::remove_invalid_requests(
       }
       ++req_it;
     } catch (...) {
-      // TODO(yutarokobayashi): For debugging. Remove later.
-      RCLCPP_INFO(
-        logger_, "Removed dead ID %d from cache for topic %s", target_id, topic_name.c_str());
       req_it = request_map.erase(req_it);
     }
   }

@@ -51,7 +51,7 @@ private:
   void create_bridge_if_needed(
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
-  void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
+  static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 
 }  // namespace agnocast
