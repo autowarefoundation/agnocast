@@ -8,6 +8,7 @@ class NoRclcppPublisher : public agnocast::Node
 {
   int64_t count_;
   agnocast::Publisher<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr pub_;
+  agnocast::TimerBase::SharedPtr timer_;
 
   void timer_callback()
   {
@@ -31,7 +32,7 @@ public:
     pub_ =
       this->create_publisher<agnocast_sample_interfaces::msg::DynamicSizeArray>("/my_topic", 1);
 
-    this->create_wall_timer(100ms, std::bind(&NoRclcppPublisher::timer_callback, this));
+    timer_ = this->create_wall_timer(100ms, std::bind(&NoRclcppPublisher::timer_callback, this));
   }
 };
 

@@ -17,6 +17,13 @@ std::mutex id2_timer_info_mtx;
 std::unordered_map<uint32_t, std::shared_ptr<TimerInfo>> id2_timer_info;
 std::atomic<uint32_t> next_timer_id{0};
 
+TimerInfo::~TimerInfo()
+{
+  if (timer_fd >= 0) {
+    close(timer_fd);
+  }
+}
+
 int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period)
 {
   int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -50,14 +57,19 @@ int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period)
   return timer_fd;
 }
 
-uint32_t register_timer(
-  std::function<void()> callback, std::chrono::nanoseconds period,
-  const rclcpp::CallbackGroup::SharedPtr & callback_group)
+uint32_t allocate_timer_id()
 {
   const uint32_t timer_id = next_timer_id.fetch_add(1);
   if ((timer_id & TIMER_EVENT_FLAG) != 0U) {
     throw std::runtime_error("Timer ID overflow: too many timers created");
   }
+  return timer_id;
+}
+
+void register_timer_info(
+  uint32_t timer_id, const std::shared_ptr<TimerBase> & timer, std::chrono::nanoseconds period,
+  const rclcpp::CallbackGroup::SharedPtr & callback_group)
+{
   const int timer_fd = create_timer_fd(timer_id, period);
   const auto now = std::chrono::steady_clock::now();
 
@@ -66,7 +78,7 @@ uint32_t register_timer(
     const int64_t now_ns = to_nanoseconds(now);
     auto timer_info = std::make_shared<TimerInfo>();
     timer_info->timer_fd = timer_fd;
-    timer_info->callback = std::move(callback);
+    timer_info->timer = timer;
     timer_info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
     timer_info->next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
     timer_info->period = period;
@@ -76,8 +88,6 @@ uint32_t register_timer(
   }
 
   need_epoll_updates.store(true);
-
-  return timer_id;
 }
 
 void handle_timer_event(TimerInfo & timer_info)
@@ -96,6 +106,11 @@ void handle_timer_event(TimerInfo & timer_info)
   }
 
   if (expirations > 0) {
+    auto timer = timer_info.timer.lock();
+    if (!timer) {
+      return;  // Timer object has been destroyed
+    }
+
     const auto now = std::chrono::steady_clock::now();
     const int64_t now_ns = to_nanoseconds(now);
 
@@ -120,10 +135,14 @@ void handle_timer_event(TimerInfo & timer_info)
     }
     timer_info.next_call_time_ns.store(next_call_time_ns, std::memory_order_relaxed);
 
-    if (timer_info.callback) {
-      timer_info.callback();
-    }
+    timer->execute_callback();
   }
+}
+
+void unregister_timer_info(uint32_t timer_id)
+{
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+  id2_timer_info.erase(timer_id);
 }
 
 }  // namespace agnocast
