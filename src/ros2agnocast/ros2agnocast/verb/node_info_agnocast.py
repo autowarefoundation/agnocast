@@ -7,6 +7,17 @@ from ros2node.api import (
 from ros2topic.api import get_topic_names_and_types
 from ros2node.verb import VerbExtension
 
+class TopicInfoRet(ctypes.Structure):
+    _fields_ = [
+        ("node_name", ctypes.c_char * 256),
+        ("qos_depth", ctypes.c_uint32),
+        ("qos_is_transient_local", ctypes.c_bool),
+        # Agnocast does not natively support reliability configuration,
+        # but this field is required to pass the QoS profile to the ROS 2 bridge.
+        ("qos_is_reliable", ctypes.c_bool),
+        ("is_bridge", ctypes.c_bool),
+    ]
+
 def service_name_from_request_topic(topic_name):
     prefix = '/AGNOCAST_SRV_REQUEST'
     if not topic_name.startswith(prefix):
@@ -26,6 +37,11 @@ class NodeInfoAgnocastVerb(VerbExtension):
         parser.add_argument(
             'node_name',
             help='Fully qualified node name to request information with Agnocast topics')
+        parser.add_argument(
+            '--debug',
+            '-d',
+            action='store_true',
+            help='Show additional debug information (e.g., whether topic is bridged)')
 
     def main(self, *, args):
         node_name = args.node_name
@@ -43,6 +59,47 @@ class NodeInfoAgnocastVerb(VerbExtension):
             lib.get_agnocast_pub_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
             lib.free_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
             lib.free_agnocast_topics.restype = None
+
+            # For bridge detection, we need to get nodes by topic
+            lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+            lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(TopicInfoRet)
+            lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+            lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
+            lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
+            lib.free_agnocast_topic_info_ret.restype = None
+
+            def is_topic_bridged(topic_name):
+                topic_name_bytes = topic_name.encode('utf-8')
+
+                # Check Agnocast subscribers
+                sub_count = ctypes.c_int()
+                sub_array = lib.get_agnocast_sub_nodes(topic_name_bytes, ctypes.byref(sub_count))
+                
+                try:
+                    if any(sub_array[i].is_bridge for i in range(sub_count.value)):
+                        return True
+                finally:
+                    if sub_count.value > 0 and sub_array:
+                        lib.free_agnocast_topic_info_ret(sub_array)
+
+                # Check Agnocast publishers
+                pub_count = ctypes.c_int()
+                pub_array = lib.get_agnocast_pub_nodes(topic_name_bytes, ctypes.byref(pub_count))
+                
+                try:
+                    if any(pub_array[i].is_bridge for i in range(pub_count.value)):
+                        return True
+                finally:
+                    if pub_count.value > 0 and pub_array:
+                        lib.free_agnocast_topic_info_ret(pub_array)
+
+                return False
+
+            def get_agnocast_label(topic_name):
+                """Get the appropriate label for an Agnocast-enabled topic."""
+                if args.debug and is_topic_bridged(topic_name):
+                    return "(Agnocast enabled, bridged)"
+                return "(Agnocast enabled)"
 
             node_name_bytes = args.node_name.encode('utf-8')
 
@@ -106,25 +163,37 @@ class NodeInfoAgnocastVerb(VerbExtension):
             print("  Subscribers:")
             for sub in subscribers:
                 if sub.name in agnocast_subscribers:
-                    print(f"    {sub.name}: {', '.join(sub.types)} (Agnocast enabled)")
+                    print(f"    {sub.name}: {', '.join(sub.types)} {get_agnocast_label(sub.name)}")
                 else:
                     print(f"    {sub.name}: {', '.join(sub.types)}")
 
             for agnocast_sub in agnocast_subscribers:
+                if agnocast_sub in [sub.name for sub in subscribers]:
+                    continue
                 matching_topics = [topic for topic in all_topics if topic['name'] == agnocast_sub]
                 if matching_topics:
                     topic_types = '; '.join([', '.join(topic['types']) for topic in matching_topics])
-                    print(f"    {agnocast_sub}: {topic_types} (Agnocast enabled)")
+                    print(f"    {agnocast_sub}: {topic_types} {get_agnocast_label(agnocast_sub)}")
                 else:
-                    print(f"    {agnocast_sub}: <UNKNOWN> (No publisher)(Agnocast enabled)")
+                    print(f"    {agnocast_sub}: <UNKNOWN> {get_agnocast_label(agnocast_sub)}")
 
             # ======== Publishers ========
             print("  Publishers:")
             for pub in publishers:
                 if pub.name in agnocast_publishers:
-                    print(f"    {pub.name}: {', '.join(pub.types)} (Agnocast enabled)")
+                    print(f"    {pub.name}: {', '.join(pub.types)} {get_agnocast_label(pub.name)}")
                 else:
                     print(f"    {pub.name}: {', '.join(pub.types)}")
+
+            for agnocast_pub in agnocast_publishers:
+                if agnocast_pub in [pub.name for pub in publishers]:
+                    continue
+                matching_topics = [topic for topic in all_topics if topic['name'] == agnocast_pub]
+                if matching_topics:
+                    topic_types = '; '.join([', '.join(topic['types']) for topic in matching_topics])
+                    print(f"    {agnocast_pub}: {topic_types} {get_agnocast_label(agnocast_pub)}")
+                else:
+                    print(f"    {agnocast_pub}: <UNKNOWN> {get_agnocast_label(agnocast_pub)}")
 
             # ======== Service ========
             print("  Service Servers:")
@@ -133,7 +202,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 print(f"    {service.name}: {', '.join(service.types)}")
 
             for service_name in agnocast_servers:
-                print(f"    {service_name}: <UNKNOWN> (Agnocast enabled)")
+                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name)}")
 
             print("  Service Clients:")
             service_clients = get_service_client_info(node=node, remote_node_name=node_name)
@@ -141,7 +210,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 print(f"    {client.name}: {', '.join(client.types)}")
 
             for service_name in agnocast_clients:
-                print(f"    {service_name}: <UNKNOWN> (Agnocast enabled)")
+                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name)}")
 
             # ======== Action ========
             print("  Action Servers:")

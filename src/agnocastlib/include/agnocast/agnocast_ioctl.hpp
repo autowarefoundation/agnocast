@@ -202,6 +202,7 @@ struct topic_info_ret
   uint32_t qos_depth;
   bool qos_is_transient_local;
   bool qos_is_reliable;
+  bool is_bridge;
 };
 
 #pragma GCC diagnostic push

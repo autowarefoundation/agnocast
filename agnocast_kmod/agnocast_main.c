@@ -1433,6 +1433,7 @@ static int get_topic_subscriber_info(
     temp_info->qos_depth = sub_info->qos_depth;
     temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
     temp_info->qos_is_reliable = sub_info->qos_is_reliable;
+    temp_info->is_bridge = sub_info->is_bridge;
 
     subscriber_num++;
   }
@@ -1492,6 +1493,8 @@ static int get_topic_publisher_info(
     strncpy(temp_info->node_name, pub_info->node_name, strlen(pub_info->node_name));
     temp_info->qos_depth = pub_info->qos_depth;
     temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
+    temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
+    temp_info->is_bridge = pub_info->is_bridge;
 
     publisher_num++;
   }
