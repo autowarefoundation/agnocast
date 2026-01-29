@@ -1,21 +1,22 @@
-#include "agnocast/bridge/agnocast_performance_bridge_ipc_event_loop.hpp"
+#include "agnocast/bridge/standard/agnocast_standard_bridge_ipc_event_loop.hpp"
 
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"
 
-#include <utility>
+#include <unistd.h>
+
 #include <vector>
 
 namespace agnocast
 {
 
-PerformanceBridgeIpcEventLoop::PerformanceBridgeIpcEventLoop(const rclcpp::Logger & logger)
+StandardBridgeIpcEventLoop::StandardBridgeIpcEventLoop(const rclcpp::Logger & logger)
 : IpcEventLoopBase(
     logger,
     // 1. MQ Name
-    create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID),
+    create_mq_name_for_bridge(getpid()),
     // 2. Message Size
-    PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE,
+    BRIDGE_MQ_MESSAGE_SIZE,
     // 3. Block Signals
     {SIGTERM, SIGINT},
     // 4. Ignore Signals

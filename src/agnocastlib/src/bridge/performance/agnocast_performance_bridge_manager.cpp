@@ -1,5 +1,5 @@
 
-#include "agnocast/bridge/agnocast_performance_bridge_manager.hpp"
+#include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_mq.hpp"

@@ -1,4 +1,4 @@
-#include "agnocast/bridge/agnocast_performance_bridge_loader.hpp"
+#include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 

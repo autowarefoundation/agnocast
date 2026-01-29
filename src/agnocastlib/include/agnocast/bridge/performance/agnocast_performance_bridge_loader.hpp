@@ -1,7 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/bridge/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
