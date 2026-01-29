@@ -72,18 +72,19 @@ void register_timer_info(
 {
   const int timer_fd = create_timer_fd(timer_id, period);
   const auto now = std::chrono::steady_clock::now();
+  const int64_t now_ns = to_nanoseconds(now);
+
+  auto timer_info = std::make_shared<TimerInfo>();
+  timer_info->timer_fd = timer_fd;
+  timer_info->timer = timer;
+  timer_info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
+  timer_info->next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
+  timer_info->period = period;
+  timer_info->callback_group = callback_group;
+  timer_info->need_epoll_update = true;
 
   {
     std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-    const int64_t now_ns = to_nanoseconds(now);
-    auto timer_info = std::make_shared<TimerInfo>();
-    timer_info->timer_fd = timer_fd;
-    timer_info->timer = timer;
-    timer_info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
-    timer_info->next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
-    timer_info->period = period;
-    timer_info->callback_group = callback_group;
-    timer_info->need_epoll_update = true;
     id2_timer_info[timer_id] = std::move(timer_info);
   }
 
