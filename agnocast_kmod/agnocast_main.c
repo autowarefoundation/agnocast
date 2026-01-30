@@ -1859,489 +1859,526 @@ int get_process_num(const struct ipc_namespace * ipc_ns)
 
 static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 {
-  mutex_lock(&global_mutex);
   int ret = 0;
   const pid_t pid = current->tgid;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
   if (cmd == AGNOCAST_GET_VERSION_CMD) {
     struct ioctl_get_version_args get_version_args;
+    mutex_lock(&global_mutex);
     ret = get_version(&get_version_args);
+    mutex_unlock(&global_mutex);
     if (copy_to_user(
           (struct ioctl_get_version_args __user *)arg, &get_version_args, sizeof(get_version_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_ADD_PROCESS_CMD) {
     union ioctl_add_process_args add_process_args;
     if (copy_from_user(
           &add_process_args, (union ioctl_add_process_args __user *)arg, sizeof(add_process_args)))
-      goto return_EFAULT;
+      return -EFAULT;
+    mutex_lock(&global_mutex);
     ret = add_process(pid, ipc_ns, &add_process_args);
+    mutex_unlock(&global_mutex);
     if (copy_to_user(
           (union ioctl_add_process_args __user *)arg, &add_process_args, sizeof(add_process_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_ADD_SUBSCRIBER_CMD) {
     union ioctl_add_subscriber_args sub_args;
     if (copy_from_user(&sub_args, (union ioctl_add_subscriber_args __user *)arg, sizeof(sub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
     if (
       sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE ||
       sub_args.node_name.len >= NODE_NAME_BUFFER_SIZE)
-      goto return_EINVAL;
+      return -EINVAL;
     char * combined_buf = kmalloc(sub_args.topic_name.len + sub_args.node_name.len + 2, GFP_KERNEL);
-    if (!combined_buf) goto return_ENOMEM;
+    if (!combined_buf) return -ENOMEM;
     char * topic_name_buf = combined_buf;
     char * node_name_buf = combined_buf + sub_args.topic_name.len + 1;
     if (copy_from_user(
           topic_name_buf, (char __user *)sub_args.topic_name.ptr, sub_args.topic_name.len)) {
       kfree(combined_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[sub_args.topic_name.len] = '\0';
     if (copy_from_user(
           node_name_buf, (char __user *)sub_args.node_name.ptr, sub_args.node_name.len)) {
       kfree(combined_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     node_name_buf[sub_args.node_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = add_subscriber(
       topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth,
       sub_args.qos_is_transient_local, sub_args.qos_is_reliable, sub_args.is_take_sub,
       sub_args.ignore_local_publications, sub_args.is_bridge, &sub_args);
+    mutex_unlock(&global_mutex);
     kfree(combined_buf);
     if (copy_to_user((union ioctl_add_subscriber_args __user *)arg, &sub_args, sizeof(sub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_ADD_PUBLISHER_CMD) {
     union ioctl_add_publisher_args pub_args;
     if (copy_from_user(&pub_args, (union ioctl_add_publisher_args __user *)arg, sizeof(pub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
     if (
       pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE ||
       pub_args.node_name.len >= NODE_NAME_BUFFER_SIZE)
-      goto return_EINVAL;
+      return -EINVAL;
     char * combined_buf = kmalloc(pub_args.topic_name.len + pub_args.node_name.len + 2, GFP_KERNEL);
-    if (!combined_buf) goto return_ENOMEM;
+    if (!combined_buf) return -ENOMEM;
     char * topic_name_buf = combined_buf;
     char * node_name_buf = combined_buf + pub_args.topic_name.len + 1;
     if (copy_from_user(
           topic_name_buf, (char __user *)pub_args.topic_name.ptr, pub_args.topic_name.len)) {
       kfree(combined_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[pub_args.topic_name.len] = '\0';
     if (copy_from_user(
           node_name_buf, (char __user *)pub_args.node_name.ptr, pub_args.node_name.len)) {
       kfree(combined_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     node_name_buf[pub_args.node_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = add_publisher(
       topic_name_buf, ipc_ns, node_name_buf, pid, pub_args.qos_depth,
       pub_args.qos_is_transient_local, pub_args.is_bridge, &pub_args);
+    mutex_unlock(&global_mutex);
     kfree(combined_buf);
     if (copy_to_user((union ioctl_add_publisher_args __user *)arg, &pub_args, sizeof(pub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_INCREMENT_RC_CMD) {
     struct ioctl_update_entry_args entry_args;
     if (copy_from_user(
           &entry_args, (struct ioctl_update_entry_args __user *)arg, sizeof(entry_args)))
-      goto return_EFAULT;
-    if (entry_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (entry_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(entry_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)entry_args.topic_name.ptr, entry_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[entry_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret =
       increment_message_entry_rc(topic_name_buf, ipc_ns, entry_args.pubsub_id, entry_args.entry_id);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_DECREMENT_RC_CMD) {
     struct ioctl_update_entry_args entry_args;
     if (copy_from_user(
           &entry_args, (struct ioctl_update_entry_args __user *)arg, sizeof(entry_args)))
-      goto return_EFAULT;
-    if (entry_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (entry_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(entry_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)entry_args.topic_name.ptr, entry_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[entry_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret =
       decrement_message_entry_rc(topic_name_buf, ipc_ns, entry_args.pubsub_id, entry_args.entry_id);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_RECEIVE_MSG_CMD) {
     union ioctl_receive_msg_args receive_msg_args;
     if (copy_from_user(
           &receive_msg_args, (union ioctl_receive_msg_args __user *)arg, sizeof(receive_msg_args)))
-      goto return_EFAULT;
-    if (receive_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (receive_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(receive_msg_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)receive_msg_args.topic_name.ptr,
           receive_msg_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[receive_msg_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = receive_msg(topic_name_buf, ipc_ns, receive_msg_args.subscriber_id, &receive_msg_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_receive_msg_args __user *)arg, &receive_msg_args, sizeof(receive_msg_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_PUBLISH_MSG_CMD) {
     union ioctl_publish_msg_args publish_msg_args;
     if (copy_from_user(
           &publish_msg_args, (union ioctl_publish_msg_args __user *)arg, sizeof(publish_msg_args)))
-      goto return_EFAULT;
-    if (publish_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (publish_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(publish_msg_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)publish_msg_args.topic_name.ptr,
           publish_msg_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[publish_msg_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = publish_msg(
       topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
       &publish_msg_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_publish_msg_args __user *)arg, &publish_msg_args, sizeof(publish_msg_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_TAKE_MSG_CMD) {
     union ioctl_take_msg_args take_args;
     if (copy_from_user(&take_args, (union ioctl_take_msg_args __user *)arg, sizeof(take_args)))
-      goto return_EFAULT;
-    if (take_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (take_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(take_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)take_args.topic_name.ptr, take_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[take_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = take_msg(
       topic_name_buf, ipc_ns, take_args.subscriber_id, take_args.allow_same_message, &take_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user((union ioctl_take_msg_args __user *)arg, &take_args, sizeof(take_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_SUBSCRIBER_NUM_CMD) {
     union ioctl_get_subscriber_num_args get_subscriber_num_args;
     if (copy_from_user(
           &get_subscriber_num_args, (union ioctl_get_subscriber_num_args __user *)arg,
           sizeof(get_subscriber_num_args)))
-      goto return_EFAULT;
-    if (get_subscriber_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (get_subscriber_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(get_subscriber_num_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)get_subscriber_num_args.topic_name.ptr,
           get_subscriber_num_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[get_subscriber_num_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_subscriber_num(topic_name_buf, ipc_ns, pid, &get_subscriber_num_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_get_subscriber_num_args __user *)arg, &get_subscriber_num_args,
           sizeof(get_subscriber_num_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_PUBLISHER_NUM_CMD) {
     union ioctl_get_publisher_num_args get_publisher_num_args;
     if (copy_from_user(
           &get_publisher_num_args, (union ioctl_get_publisher_num_args __user *)arg,
           sizeof(get_publisher_num_args)))
-      goto return_EFAULT;
-    if (get_publisher_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (get_publisher_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(get_publisher_num_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)get_publisher_num_args.topic_name.ptr,
           get_publisher_num_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[get_publisher_num_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_publisher_num(topic_name_buf, ipc_ns, &get_publisher_num_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_get_publisher_num_args __user *)arg, &get_publisher_num_args,
           sizeof(get_publisher_num_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_EXIT_PROCESS_CMD) {
     struct ioctl_get_exit_process_args get_exit_process_args;
+    mutex_lock(&global_mutex);
     ret = get_exit_process(ipc_ns, &get_exit_process_args);
+    mutex_unlock(&global_mutex);
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
           sizeof(get_exit_process_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_TOPIC_LIST_CMD) {
     union ioctl_topic_list_args topic_list_args;
     if (copy_from_user(
           &topic_list_args, (union ioctl_topic_list_args __user *)arg, sizeof(topic_list_args)))
-      goto return_EFAULT;
+      return -EFAULT;
+    mutex_lock(&global_mutex);
     ret = get_topic_list(ipc_ns, &topic_list_args);
+    mutex_unlock(&global_mutex);
     if (copy_to_user(
           (union ioctl_topic_list_args __user *)arg, &topic_list_args, sizeof(topic_list_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD) {
     union ioctl_node_info_args node_info_sub_args;
     if (copy_from_user(
           &node_info_sub_args, (union ioctl_node_info_args __user *)arg,
           sizeof(node_info_sub_args)))
-      goto return_EFAULT;
-    if (node_info_sub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (node_info_sub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) return -EINVAL;
     char * node_name_buf = kmalloc(node_info_sub_args.node_name.len + 1, GFP_KERNEL);
-    if (!node_name_buf) goto return_ENOMEM;
+    if (!node_name_buf) return -ENOMEM;
     if (copy_from_user(
           node_name_buf, (char __user *)node_info_sub_args.node_name.ptr,
           node_info_sub_args.node_name.len)) {
       kfree(node_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     node_name_buf[node_info_sub_args.node_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_node_subscriber_topics(ipc_ns, node_name_buf, &node_info_sub_args);
+    mutex_unlock(&global_mutex);
     kfree(node_name_buf);
     if (copy_to_user(
           (union ioctl_node_info_args __user *)arg, &node_info_sub_args,
           sizeof(node_info_sub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD) {
     union ioctl_node_info_args node_info_pub_args;
     if (copy_from_user(
           &node_info_pub_args, (union ioctl_node_info_args __user *)arg,
           sizeof(node_info_pub_args)))
-      goto return_EFAULT;
-    if (node_info_pub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (node_info_pub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) return -EINVAL;
     char * node_name_buf = kmalloc(node_info_pub_args.node_name.len + 1, GFP_KERNEL);
-    if (!node_name_buf) goto return_ENOMEM;
+    if (!node_name_buf) return -ENOMEM;
     if (copy_from_user(
           node_name_buf, (char __user *)node_info_pub_args.node_name.ptr,
           node_info_pub_args.node_name.len)) {
       kfree(node_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     node_name_buf[node_info_pub_args.node_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_node_publisher_topics(ipc_ns, node_name_buf, &node_info_pub_args);
+    mutex_unlock(&global_mutex);
     kfree(node_name_buf);
     if (copy_to_user(
           (union ioctl_node_info_args __user *)arg, &node_info_pub_args,
           sizeof(node_info_pub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD) {
     union ioctl_topic_info_args topic_info_sub_args;
     if (copy_from_user(
           &topic_info_sub_args, (union ioctl_topic_info_args __user *)arg,
           sizeof(topic_info_sub_args)))
-      goto return_EFAULT;
-    if (topic_info_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (topic_info_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(topic_info_sub_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)topic_info_sub_args.topic_name.ptr,
           topic_info_sub_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[topic_info_sub_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_topic_subscriber_info(topic_name_buf, ipc_ns, &topic_info_sub_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_topic_info_args __user *)arg, &topic_info_sub_args,
           sizeof(topic_info_sub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD) {
     union ioctl_topic_info_args topic_info_pub_args;
     if (copy_from_user(
           &topic_info_pub_args, (union ioctl_topic_info_args __user *)arg,
           sizeof(topic_info_pub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
+    if (topic_info_pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(topic_info_pub_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)topic_info_pub_args.topic_name.ptr,
           topic_info_pub_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[topic_info_pub_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = get_topic_publisher_info(topic_name_buf, ipc_ns, &topic_info_pub_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (copy_to_user(
           (union ioctl_topic_info_args __user *)arg, &topic_info_pub_args,
           sizeof(topic_info_pub_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_GET_SUBSCRIBER_QOS_CMD) {
     struct ioctl_get_subscriber_qos_args get_sub_qos_args;
     if (copy_from_user(
           &get_sub_qos_args, (struct ioctl_get_subscriber_qos_args __user *)arg,
           sizeof(get_sub_qos_args)))
-      goto return_EFAULT;
-    if (get_sub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (get_sub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(get_sub_qos_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)get_sub_qos_args.topic_name.ptr,
           get_sub_qos_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[get_sub_qos_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret =
       get_subscriber_qos(topic_name_buf, ipc_ns, get_sub_qos_args.subscriber_id, &get_sub_qos_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (ret == 0) {
       if (copy_to_user(
             (struct ioctl_get_subscriber_qos_args __user *)arg, &get_sub_qos_args,
             sizeof(get_sub_qos_args)))
-        goto return_EFAULT;
+        return -EFAULT;
     }
   } else if (cmd == AGNOCAST_GET_PUBLISHER_QOS_CMD) {
     struct ioctl_get_publisher_qos_args get_pub_qos_args;
     if (copy_from_user(
           &get_pub_qos_args, (struct ioctl_get_publisher_qos_args __user *)arg,
           sizeof(get_pub_qos_args)))
-      goto return_EFAULT;
-    if (get_pub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (get_pub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(get_pub_qos_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)get_pub_qos_args.topic_name.ptr,
           get_pub_qos_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[get_pub_qos_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret =
       get_publisher_qos(topic_name_buf, ipc_ns, get_pub_qos_args.publisher_id, &get_pub_qos_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (ret == 0) {
       if (copy_to_user(
             (struct ioctl_get_publisher_qos_args __user *)arg, &get_pub_qos_args,
             sizeof(get_pub_qos_args)))
-        goto return_EFAULT;
+        return -EFAULT;
     }
   } else if (cmd == AGNOCAST_REMOVE_SUBSCRIBER_CMD) {
     struct ioctl_remove_subscriber_args remove_subscriber_args;
     if (copy_from_user(
           &remove_subscriber_args, (void __user *)arg, sizeof(remove_subscriber_args))) {
-      goto return_EFAULT;
+      return -EFAULT;
     }
-    if (remove_subscriber_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+    if (remove_subscriber_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(remove_subscriber_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)remove_subscriber_args.topic_name.ptr,
           remove_subscriber_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[remove_subscriber_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = remove_subscriber(topic_name_buf, ipc_ns, remove_subscriber_args.subscriber_id);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_REMOVE_PUBLISHER_CMD) {
     struct ioctl_remove_publisher_args remove_publisher_args;
     if (copy_from_user(&remove_publisher_args, (void __user *)arg, sizeof(remove_publisher_args))) {
-      goto return_EFAULT;
+      return -EFAULT;
     }
-    if (remove_publisher_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+    if (remove_publisher_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(remove_publisher_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)remove_publisher_args.topic_name.ptr,
           remove_publisher_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[remove_publisher_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = remove_publisher(topic_name_buf, ipc_ns, remove_publisher_args.publisher_id);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_ADD_BRIDGE_CMD) {
     struct ioctl_add_bridge_args bridge_args;
-    if (copy_from_user(&bridge_args, (void __user *)arg, sizeof(bridge_args))) goto return_EFAULT;
-    if (bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+    if (copy_from_user(&bridge_args, (void __user *)arg, sizeof(bridge_args))) return -EFAULT;
+    if (bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(bridge_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)bridge_args.topic_name.ptr, bridge_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[bridge_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = add_bridge(topic_name_buf, bridge_args.pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
     if (ret == 0 || ret == -EEXIST) {
       if (copy_to_user(
             (struct ioctl_add_bridge_args __user *)arg, &bridge_args, sizeof(bridge_args)))
-        goto return_EFAULT;
+        return -EFAULT;
     }
   } else if (cmd == AGNOCAST_REMOVE_BRIDGE_CMD) {
     struct ioctl_remove_bridge_args remove_bridge_args;
     if (copy_from_user(&remove_bridge_args, (void __user *)arg, sizeof(remove_bridge_args)))
-      goto return_EFAULT;
-    if (remove_bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (remove_bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(remove_bridge_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)remove_bridge_args.topic_name.ptr,
           remove_bridge_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = remove_bridge(topic_name_buf, remove_bridge_args.pid, remove_bridge_args.is_r2a, ipc_ns);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
     struct ioctl_get_process_num_args get_process_num_args;
+    mutex_lock(&global_mutex);
     get_process_num_args.ret_process_num = get_process_num(ipc_ns);
+    mutex_unlock(&global_mutex);
     if (copy_to_user(
           (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
           sizeof(get_process_num_args)))
-      goto return_EFAULT;
+      return -EFAULT;
   } else if (cmd == AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD) {
     struct ioctl_set_ros2_subscriber_num_args set_ros2_sub_args;
     if (copy_from_user(&set_ros2_sub_args, (void __user *)arg, sizeof(set_ros2_sub_args)))
-      goto return_EFAULT;
-    if (set_ros2_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) goto return_EINVAL;
+      return -EFAULT;
+    if (set_ros2_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
     char * topic_name_buf = kmalloc(set_ros2_sub_args.topic_name.len + 1, GFP_KERNEL);
-    if (!topic_name_buf) goto return_ENOMEM;
+    if (!topic_name_buf) return -ENOMEM;
     if (copy_from_user(
           topic_name_buf, (char __user *)set_ros2_sub_args.topic_name.ptr,
           set_ros2_sub_args.topic_name.len)) {
       kfree(topic_name_buf);
-      goto return_EFAULT;
+      return -EFAULT;
     }
     topic_name_buf[set_ros2_sub_args.topic_name.len] = '\0';
+    mutex_lock(&global_mutex);
     ret = set_ros2_subscriber_num(topic_name_buf, ipc_ns, set_ros2_sub_args.ros2_subscriber_num);
+    mutex_unlock(&global_mutex);
     kfree(topic_name_buf);
   } else {
-    goto return_EINVAL;
+    return -EINVAL;
   }
 
-  mutex_unlock(&global_mutex);
   return ret;
-
-return_EFAULT:
-  mutex_unlock(&global_mutex);
-  return -EFAULT;
-
-return_EINVAL:
-  mutex_unlock(&global_mutex);
-  return -EINVAL;
-
-return_ENOMEM:
-  mutex_unlock(&global_mutex);
-  return -ENOMEM;
 }
 
 // =========================================
