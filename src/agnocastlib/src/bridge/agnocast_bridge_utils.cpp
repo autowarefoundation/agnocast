@@ -120,4 +120,23 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
   });
 }
 
+bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & topic_name)
+{
+  if (node == nullptr) {
+    return false;
+  }
+
+  size_t ros2_count = node->count_subscribers(topic_name);
+
+  struct ioctl_set_ros2_subscriber_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.ros2_subscriber_num = static_cast<uint32_t>(ros2_count);
+
+  if (ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+    return false;
+  }
+  return true;
+}
+
 }  // namespace agnocast

@@ -184,6 +184,12 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
       return;
     }
 
+    if (!is_r2a) {
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+      }
+    }
     active_bridges_[topic_name_with_direction] = bridge;
 
     auto cast_bridge = std::static_pointer_cast<agnocast::BridgeBase>(bridge);
@@ -283,7 +289,7 @@ void StandardBridgeManager::check_active_bridges()
       count = get_agnocast_subscriber_count(std::string(topic_name_view)).count;
     } else {
       count = get_agnocast_publisher_count(std::string(topic_name_view)).count;
-      if (!update_ros2_subscriber_num(std::string(topic_name_view))) {
+      if (!update_ros2_subscriber_num(container_node_.get(), std::string(topic_name_view))) {
         to_remove.push_back(key);
         continue;
       }
@@ -326,21 +332,6 @@ void StandardBridgeManager::check_should_exit()
       executor_->cancel();
     }
   }
-}
-
-bool StandardBridgeManager::update_ros2_subscriber_num(const std::string & topic_name)
-{
-  size_t ros2_count = container_node_->count_subscribers(topic_name);
-
-  struct ioctl_set_ros2_subscriber_num_args args = {};
-  args.topic_name = {topic_name.c_str(), topic_name.size()};
-  args.ros2_subscriber_num = static_cast<uint32_t>(ros2_count);
-
-  if (ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &args) < 0) {
-    RCLCPP_ERROR(logger_, "AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
-    return false;
-  }
-  return true;
 }
 
 void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)
