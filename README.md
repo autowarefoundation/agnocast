@@ -31,6 +31,7 @@ The paper has been accepted to [IEEE ISORC 2025](https://ieeexplore.ieee.org/doc
   - [Setup](#setup)
   - [Build](#build)
   - [Run](#run)
+  - [Bridge Feature](#bridge-feature)
 - [For Developers](#for-developers)
   - [Clone the repository](#clone-the-repository-1)
   - [Setup pre-commit](#setup-pre-commit)
@@ -153,6 +154,52 @@ Stop applications and unload kernel module.
 ```bash
 sudo modprobe -r agnocast
 ```
+
+### Bridge Feature
+
+The Agnocast Bridge enables communication between Agnocast nodes and standard ROS 2 nodes by automatically forwarding messages between shared memory (Agnocast) and DDS (ROS 2).
+
+#### Bridge Modes
+
+Configuration for the Agnocast bridge manager. The mode can be specified using strings (case-insensitive) or integers.
+
+| Mode | Accepted Values | Description |
+| :--- | :--- | :--- |
+| **Standard** (Default) | `standard`, `1` | One bridge manager per process. Used if the variable is unset or invalid. |
+| **Performance** | `performance`, `2` | Single global bridge manager. |
+| **Off** | `off`, `0` | Bridge disabled. |
+
+**Note:**
+
+- Values are **case-insensitive** (e.g., `Standard`, `OFF`, `Performance` are valid).
+- If an unknown value is provided, it falls back to **Standard** mode with a warning.
+
+#### Usage
+
+```bash
+# Standard mode (Default)
+export AGNOCAST_BRIDGE_MODE=standard
+# OR
+export AGNOCAST_BRIDGE_MODE=1
+
+# Performance mode
+export AGNOCAST_BRIDGE_MODE=performance
+# OR
+export AGNOCAST_BRIDGE_MODE=2
+
+# Disable bridge
+export AGNOCAST_BRIDGE_MODE=off
+```
+
+### Performance Mode Setup
+
+Performance mode requires pre-compiled bridge plugins. Build with:
+
+```bash
+BUILD_GENERIC_BRIDGE=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+For detailed information, see [Bridge Documentation](./docs/agnocast_ros2_bridge.md).
 
 ---
 
@@ -302,3 +349,4 @@ rm /dev/mqueue/agnocast_bridge_manager_daemon@*
 - [ros2 command extension](./docs/ros2_command_extension.md)
 - [agnocast::Node and rclcpp::Node interface comparison](./docs/agnocast_node_interface_comparison.md)
 - [Callback Isolated Executor for Agnocast](./docs/callback_isolated_executor_for_agnocast.md)
+- [Agnocast-ROS 2 Bridge](./docs/agnocast_ros2_bridge.md)
