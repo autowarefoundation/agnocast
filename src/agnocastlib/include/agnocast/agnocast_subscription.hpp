@@ -101,7 +101,7 @@ class BasicSubscription : public SubscriptionBase
   std::pair<mqd_t, std::string> mq_subscription_;
 
   template <typename NodeT, typename Func>
-  uint32_t constructor_impl(
+  std::pair<uint32_t, rclcpp::QoS> constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, Func && callback,
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
     const bool is_bridge)
@@ -130,7 +130,7 @@ class BasicSubscription : public SubscriptionBase
     uint32_t callback_info_id = agnocast::register_callback<MessageT>(
       std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq, callback_group);
 
-    return callback_info_id;
+    return {callback_info_id, actual_qos};
   }
 
 public:
@@ -144,7 +144,7 @@ public:
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
-    [[maybe_unused]] uint32_t callback_info_id =
+    const auto [callback_info_id, actual_qos] =
       constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, is_bridge);
 
     {
@@ -154,7 +154,8 @@ public:
         static_cast<const void *>(
           node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
         static_cast<const void *>(&callback), static_cast<const void *>(callback_group.get()),
-        tracetools::get_symbol(callback), topic_name_.c_str(), qos.depth(), pid_callback_info_id);
+        tracetools::get_symbol(callback), topic_name_.c_str(), actual_qos.depth(),
+        pid_callback_info_id);
     }
   }
 
@@ -166,7 +167,7 @@ public:
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
-    [[maybe_unused]] uint32_t callback_info_id =
+    [[maybe_unused]] const auto [callback_info_id, actual_qos] =
       constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, false);
 
     // TODO(atsushi421): CARET tracepoint for agnocast::Node
