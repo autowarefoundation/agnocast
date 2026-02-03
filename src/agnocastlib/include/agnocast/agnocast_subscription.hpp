@@ -179,13 +179,10 @@ public:
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicTakeSubscription : public SubscriptionBase
 {
-public:
-  using SharedPtr = std::shared_ptr<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>;
-
-  BasicTakeSubscription(
-    rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
-  : SubscriptionBase(node, topic_name)
+private:
+  template <typename NodeT>
+  rclcpp::QoS constructor_impl(
+    NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
   {
     auto node_parameters = node->get_node_parameters_interface();
     const rclcpp::QoS actual_qos =
@@ -196,6 +193,25 @@ public:
         : qos;
 
     validate_qos(actual_qos);
+
+    union ioctl_add_subscriber_args add_subscriber_args = initialize(
+      actual_qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
+
+    id_ = add_subscriber_args.ret_id;
+    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+
+    return actual_qos;
+  }
+
+public:
+  using SharedPtr = std::shared_ptr<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>;
+
+  BasicTakeSubscription(
+    rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+  : SubscriptionBase(node, topic_name)
+  {
+    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options);
 
     {
       auto dummy_cbg = node->get_node_base_interface()->create_callback_group(
@@ -209,13 +225,16 @@ public:
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(dummy_cbg.get()),
         dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos.depth(), 0);
     }
+  }
 
-    union ioctl_add_subscriber_args add_subscriber_args = initialize(
-      actual_qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
+  BasicTakeSubscription(
+    agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+  : SubscriptionBase(node, topic_name)
+  {
+    constructor_impl(node, qos, options);
 
-    id_ = add_subscriber_args.ret_id;
-
-    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+    // TODO(atsushi421): CARET tracepoint for agnocast::Node
   }
 
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
@@ -267,6 +286,14 @@ public:
 
   explicit BasicPollingSubscriber(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+  {
+    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>(
+      node, topic_name, qos, options);
+  };
+
+  explicit BasicPollingSubscriber(
+    agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
   {
     subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>(
