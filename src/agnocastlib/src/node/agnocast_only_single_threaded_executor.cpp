@@ -40,8 +40,14 @@ void AgnocastOnlySingleThreadedExecutor::spin()
     }
 
     agnocast::AgnocastExecutable agnocast_executable;
-    if (get_next_agnocast_executable(agnocast_executable, next_exec_timeout_ms_)) {
+    bool shutdown_detected = false;
+    if (get_next_agnocast_executable(
+          agnocast_executable, next_exec_timeout_ms_, shutdown_detected)) {
       execute_agnocast_executable(agnocast_executable);
+    }
+
+    if (shutdown_detected) {
+      break;
     }
   }
 }
