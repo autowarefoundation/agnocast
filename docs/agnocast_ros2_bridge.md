@@ -142,10 +142,10 @@ def generate_launch_description():
 Performance mode requires pre-compiled bridge plugins. Build with:
 
 ```bash
-BUILD_GENERIC_BRIDGE=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+AGNOCAST_BUILD_BRIDGE_PLUGINS=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
-When `BUILD_GENERIC_BRIDGE=ON` is set, the build system automatically:
+When `AGNOCAST_BUILD_BRIDGE_PLUGINS=ON` is set, the build system automatically:
 
 1. Retrieves all available message types via `ros2 interface list -m`
 2. Generates R2A and A2R bridge plugins for each message type

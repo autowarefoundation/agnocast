@@ -196,7 +196,7 @@ export AGNOCAST_BRIDGE_MODE=off
 Performance mode requires pre-compiled bridge plugins. Build with:
 
 ```bash
-BUILD_GENERIC_BRIDGE=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+AGNOCAST_BUILD_BRIDGE_PLUGINS=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 For detailed information, see [Bridge Documentation](./docs/agnocast_ros2_bridge.md).

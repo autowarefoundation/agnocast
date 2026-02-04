@@ -59,16 +59,16 @@ target_include_directories(agnocast PUBLIC
   ${LTTNGUST_INCLUDE_DIRS}
 )
 
-# Start of generic bridge plugin
+# Start of bridge plugin build
 
-if("$ENV{BUILD_GENERIC_BRIDGE}" STREQUAL "ON")
-  set(BUILD_GENERIC_BRIDGE ON)
+if("$ENV{AGNOCAST_BUILD_BRIDGE_PLUGINS}" STREQUAL "ON")
+  set(AGNOCAST_BUILD_BRIDGE_PLUGINS ON)
 else()
-  set(BUILD_GENERIC_BRIDGE OFF)
+  set(AGNOCAST_BUILD_BRIDGE_PLUGINS OFF)
 endif()
 
-if(BUILD_GENERIC_BRIDGE)
-  message(STATUS "BUILD_GENERIC_BRIDGE is ON. Generating bridge plugins...")
+if(AGNOCAST_BUILD_BRIDGE_PLUGINS)
+  message(STATUS "AGNOCAST_BUILD_BRIDGE_PLUGINS is ON. Generating bridge plugins...")
   set(MESSAGE_TYPES_FILE "${CMAKE_CURRENT_BINARY_DIR}/ros2_interfaces.txt")
   execute_process(
     COMMAND ros2 interface list -m
