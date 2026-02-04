@@ -46,7 +46,7 @@ extern "C" uint32_t agnocast_get_borrowed_publisher_num();
 struct PublisherOptions
 {
   bool do_always_ros2_publish = false;
-  rclcpp::QosOverridingOptions qos_overriding_options;
+  rclcpp::QosOverridingOptions qos_overriding_options{};
 };
 
 template <typename MessageT, typename BridgeRequestPolicy>

@@ -37,7 +37,7 @@ struct SubscriptionOptions
 {
   rclcpp::CallbackGroup::SharedPtr callback_group{nullptr};
   bool ignore_local_publications{false};
-  rclcpp::QosOverridingOptions qos_overriding_options;
+  rclcpp::QosOverridingOptions qos_overriding_options{};
 };
 
 // These are cut out of the class for information hiding.
