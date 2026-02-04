@@ -65,6 +65,7 @@ if [ "$RUN_SINGLE" = true ]; then
         exit 1
     fi
 else
+    USE_AGNOCAST_PUB=(true false)
     LAUNCH_PUB_BEFORE_SUB=(true false)
     PUB_QOS_DEPTH=(1 10)
     PUB_TRANSIENT_LOCAL=(true false)
@@ -73,33 +74,36 @@ else
     USE_TAKE_SUB=(true false)
 
     COUNT=0
-    for launch_pub_before_sub in ${LAUNCH_PUB_BEFORE_SUB[@]}; do
-        for pub_qos_depth in ${PUB_QOS_DEPTH[@]}; do
-            for pub_transient_local in ${PUB_TRANSIENT_LOCAL[@]}; do
-                for sub_qos_depth in ${SUB_QOS_DEPTH[@]}; do
-                    for sub_transient_local in ${SUB_TRANSIENT_LOCAL[@]}; do
-                        for use_take_sub in ${USE_TAKE_SUB[@]}; do
-                            COUNT=$((COUNT + 1))
-                            sed -i "s/launch_pub_before_sub:.*/launch_pub_before_sub: $launch_pub_before_sub/g" $CONFIG_FILE
-                            sed -i "s/pub_qos_depth:.*/pub_qos_depth: $pub_qos_depth/g" $CONFIG_FILE
-                            sed -i "s/pub_transient_local:.*/pub_transient_local: $pub_transient_local/g" $CONFIG_FILE
-                            sed -i "s/sub_qos_depth:.*/sub_qos_depth: $sub_qos_depth/g" $CONFIG_FILE
-                            sed -i "s/sub_transient_local:.*/sub_transient_local: $sub_transient_local/g" $CONFIG_FILE
-                            sed -i "s/use_take_sub:.*/use_take_sub: $use_take_sub/g" $CONFIG_FILE
-                            echo "====================== $COUNT / 64 ======================" | sudo tee /dev/kmsg
-                            show_config
-                            launch_test src/agnocast_e2e_test/test/test_1to1_with_ros2sub.py
+    for use_agnocast_pub in ${USE_AGNOCAST_PUB[@]}; do
+        for launch_pub_before_sub in ${LAUNCH_PUB_BEFORE_SUB[@]}; do
+            for pub_qos_depth in ${PUB_QOS_DEPTH[@]}; do
+                for pub_transient_local in ${PUB_TRANSIENT_LOCAL[@]}; do
+                    for sub_qos_depth in ${SUB_QOS_DEPTH[@]}; do
+                        for sub_transient_local in ${SUB_TRANSIENT_LOCAL[@]}; do
+                            for use_take_sub in ${USE_TAKE_SUB[@]}; do
+                                COUNT=$((COUNT + 1))
+                                sed -i "s/use_agnocast_pub:.*/use_agnocast_pub: $use_agnocast_pub/g" $CONFIG_FILE
+                                sed -i "s/launch_pub_before_sub:.*/launch_pub_before_sub: $launch_pub_before_sub/g" $CONFIG_FILE
+                                sed -i "s/pub_qos_depth:.*/pub_qos_depth: $pub_qos_depth/g" $CONFIG_FILE
+                                sed -i "s/pub_transient_local:.*/pub_transient_local: $pub_transient_local/g" $CONFIG_FILE
+                                sed -i "s/sub_qos_depth:.*/sub_qos_depth: $sub_qos_depth/g" $CONFIG_FILE
+                                sed -i "s/sub_transient_local:.*/sub_transient_local: $sub_transient_local/g" $CONFIG_FILE
+                                sed -i "s/use_take_sub:.*/use_take_sub: $use_take_sub/g" $CONFIG_FILE
+                                echo "====================== $COUNT / 128 ======================" | sudo tee /dev/kmsg
+                                show_config
+                                launch_test src/agnocast_e2e_test/test/test_1to1_with_ros2sub.py
 
-                            if [ $? -ne 0 ]; then
-                                echo "Test failed." | sudo tee /dev/kmsg
-                                if [ "$CONTINUE_ON_FAILURE" = true ]; then
-                                    FAILURE_COUNT=$((FAILURE_COUNT + 1))
-                                else
-                                    exit 1
+                                if [ $? -ne 0 ]; then
+                                    echo "Test failed." | sudo tee /dev/kmsg
+                                    if [ "$CONTINUE_ON_FAILURE" = true ]; then
+                                        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+                                    else
+                                        exit 1
+                                    fi
                                 fi
-                            fi
-                            # Add a 2s safety margin to account for bridge cleanup (expected max ~1s).
-                            sleep 2
+                                # Add a 2s safety margin to account for bridge cleanup (expected max ~1s).
+                                sleep 2
+                            done
                         done
                     done
                 done

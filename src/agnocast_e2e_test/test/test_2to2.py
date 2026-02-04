@@ -58,8 +58,9 @@ def generate_test_description():
                             {
                                 "qos_depth": QOS_DEPTH,
                                 "transient_local": False,
-                                "sub_num": QOS_DEPTH,
                                 "forever": FOREVER,
+                                "target_end_id" : PUB_NUM - 1,
+                                "target_end_count": 2,  # Number of external Agnocast.
                             }
                         ],
                     )
