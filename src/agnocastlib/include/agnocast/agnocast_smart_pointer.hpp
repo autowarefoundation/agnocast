@@ -14,7 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <utility>
+#include <type_traits>
 
 namespace agnocast
 {
@@ -30,6 +30,9 @@ extern int agnocast_fd;
 template <typename T>
 class ipc_shared_ptr
 {
+  template <typename U>
+  friend class ipc_shared_ptr;
+
   T * ptr_ = nullptr;
   std::string topic_name_;
   topic_local_id_t pubsub_id_ = -1;
@@ -107,6 +110,52 @@ public:
 
       r.ptr_ = nullptr;
     }
+    return *this;
+  }
+
+  // Converting copy constructor (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
+  ipc_shared_ptr(const ipc_shared_ptr<U> & r)  // NOLINT(google-explicit-constructor)
+  : ptr_(r.ptr_), topic_name_(r.topic_name_), pubsub_id_(r.pubsub_id_), entry_id_(r.entry_id_)
+  {
+    if (ptr_ != nullptr) {
+      increment_rc(topic_name_, pubsub_id_, entry_id_);
+    }
+  }
+
+  // Converting move constructor (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
+  ipc_shared_ptr(ipc_shared_ptr<U> && r)  // NOLINT(google-explicit-constructor)
+  : ptr_(r.ptr_), topic_name_(r.topic_name_), pubsub_id_(r.pubsub_id_), entry_id_(r.entry_id_)
+  {
+    r.ptr_ = nullptr;
+  }
+
+  // Converting copy assignment (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
+  ipc_shared_ptr & operator=(const ipc_shared_ptr<U> & r)
+  {
+    reset();
+    ptr_ = r.ptr_;
+    topic_name_ = r.topic_name_;
+    pubsub_id_ = r.pubsub_id_;
+    entry_id_ = r.entry_id_;
+    if (ptr_ != nullptr) {
+      increment_rc(topic_name_, pubsub_id_, entry_id_);
+    }
+    return *this;
+  }
+
+  // Converting move assignment (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
+  ipc_shared_ptr & operator=(ipc_shared_ptr<U> && r)
+  {
+    reset();
+    ptr_ = r.ptr_;
+    topic_name_ = r.topic_name_;
+    pubsub_id_ = r.pubsub_id_;
+    entry_id_ = r.entry_id_;
+    r.ptr_ = nullptr;
     return *this;
   }
 

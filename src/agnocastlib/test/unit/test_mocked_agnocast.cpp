@@ -420,3 +420,94 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_invalid_type)
     erased_callback(std::move(int_arg)), ::testing::ExitedWithCode(EXIT_FAILURE),
     "Agnocast internal implementation error: bad allocation when callback is called");
 }
+
+TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
+{
+  // Arrange
+  bool callback_called = false;
+  int data = 0;
+  agnocast::TypedMessagePtr<int> int_arg{
+    agnocast::ipc_shared_ptr<int>(&data, dummy_tn, dummy_pubsub_id)};
+  auto const_callback = [&](const agnocast::ipc_shared_ptr<const int> & /*unused_arg*/) {
+    callback_called = true;
+  };
+
+  // Act
+  agnocast::TypeErasedCallback erased_callback = agnocast::get_erased_callback<int>(const_callback);
+  erased_callback(std::move(int_arg));
+
+  // Assert
+  EXPECT_TRUE(callback_called);
+}
+
+TEST_F(AgnocastSmartPointerTest, converting_copy_constructor)
+{
+  // Arrange
+  int * ptr = new int(0);
+  agnocast::ipc_shared_ptr<int> sut{ptr, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+
+  // Act
+  agnocast::ipc_shared_ptr<const int> sut2 = sut;
+
+  // Assert
+  EXPECT_EQ(increment_rc_mock_called_count, 1);
+  EXPECT_EQ(decrement_rc_mock_called_count, 0);
+  EXPECT_EQ(ptr, sut2.get());
+  EXPECT_EQ(dummy_tn, sut2.get_topic_name());
+  EXPECT_EQ(dummy_entry_id, sut2.get_entry_id());
+}
+
+TEST_F(AgnocastSmartPointerTest, converting_move_constructor)
+{
+  // Arrange
+  int * ptr = new int(0);
+  agnocast::ipc_shared_ptr<int> sut{ptr, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+
+  // Act
+  agnocast::ipc_shared_ptr<const int> sut2 = std::move(sut);
+
+  // Assert
+  EXPECT_EQ(increment_rc_mock_called_count, 0);
+  EXPECT_EQ(decrement_rc_mock_called_count, 0);
+  EXPECT_EQ(nullptr, sut.get());
+  EXPECT_EQ(ptr, sut2.get());
+  EXPECT_EQ(dummy_tn, sut2.get_topic_name());
+  EXPECT_EQ(dummy_entry_id, sut2.get_entry_id());
+}
+
+TEST_F(AgnocastSmartPointerTest, converting_copy_assignment)
+{
+  // Arrange
+  int * ptr = new int(0);
+  agnocast::ipc_shared_ptr<int> sut{ptr, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+  agnocast::ipc_shared_ptr<const int> sut2;
+
+  // Act
+  sut2 = sut;
+
+  // Assert
+  EXPECT_EQ(increment_rc_mock_called_count, 1);
+  EXPECT_EQ(decrement_rc_mock_called_count, 0);
+  EXPECT_EQ(ptr, sut2.get());
+  EXPECT_EQ(dummy_tn, sut2.get_topic_name());
+  EXPECT_EQ(dummy_entry_id, sut2.get_entry_id());
+}
+
+TEST_F(AgnocastSmartPointerTest, converting_move_assignment)
+{
+  // Arrange
+  int * ptr = new int(0);
+  agnocast::ipc_shared_ptr<int> sut{ptr, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+  agnocast::ipc_shared_ptr<const int> sut2;
+
+  // Act
+  sut2 = std::move(sut);
+
+  // Assert
+  EXPECT_EQ(increment_rc_mock_called_count, 0);
+  EXPECT_EQ(decrement_rc_mock_called_count, 0);
+  EXPECT_EQ(nullptr, sut.get());
+  EXPECT_EQ(ptr, sut2.get());
+  EXPECT_EQ(dummy_tn, sut2.get_topic_name());
+  EXPECT_EQ(dummy_entry_id, sut2.get_entry_id());
+}
