@@ -254,6 +254,8 @@ if(BUILD_TESTING)
   # Message filters unit tests (with ioctl mock)
   ament_add_gmock(test_unit_message_filters_${PROJECT_NAME}
     test/unit/message_filters/test_simple.cpp
+    test/unit/message_filters/test_exact_time.cpp
+    test/unit/message_filters/test_synchronizer.cpp
     test/unit/message_filters/ioctl_mock_for_mf.cpp)
   target_include_directories(test_unit_message_filters_${PROJECT_NAME} PRIVATE include)
   target_link_libraries(test_unit_message_filters_${PROJECT_NAME} agnocast)
