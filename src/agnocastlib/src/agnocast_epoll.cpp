@@ -78,10 +78,8 @@ bool wait_and_handle_epoll_event(
 
       const auto it = id2_callback_info.find(callback_info_id);
       if (it == id2_callback_info.end()) {
-        RCLCPP_ERROR(
-          logger, "Agnocast internal implementation error: callback info cannot be found");
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        // Callback was unregistered (subscription destroyed) - this is normal
+        return false;
       }
 
       callback_info = it->second;
