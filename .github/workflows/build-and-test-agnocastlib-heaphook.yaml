@@ -172,7 +172,7 @@ jobs:
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
         # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
-        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_integration_agnocastlib|test_integration_test_agnocast_component_container_cie_launch"
+        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_unit_message_filters_agnocastlib|test_integration_agnocastlib|test_integration_test_agnocast_component_container_cie_launch"
 
     - name: Display coverage report in PR comment
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
