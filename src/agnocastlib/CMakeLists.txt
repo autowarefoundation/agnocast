@@ -264,6 +264,18 @@ if(BUILD_TESTING)
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
 
+  # Message filters integration tests (requires kernel module, no mock)
+  ament_add_gmock(test_integration_message_filters_${PROJECT_NAME}
+    test/integration/message_filters/test_subscriber.cpp
+    test/integration/message_filters/test_synchronizer.cpp)
+  target_include_directories(test_integration_message_filters_${PROJECT_NAME} PRIVATE include)
+  target_link_libraries(test_integration_message_filters_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_message_filters_${PROJECT_NAME} std_msgs message_filters)
+  set_tests_properties(test_integration_message_filters_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
+    LABELS "requires_kernel_module"
+  )
+
   # Integration tests
   ament_add_gmock(test_integration_${PROJECT_NAME}
     test/integration/test_agnocast_single_threaded_executor.cpp
