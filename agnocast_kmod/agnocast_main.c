@@ -206,7 +206,7 @@ static int add_topic(
   (*wrapper)->topic.ros2_subscriber_num = 0;
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
-  dev_info(agnocast_device, "Topic (topic_name=%s) added. (add_topic)\n", topic_name);
+  dev_dbg(agnocast_device, "Topic (topic_name=%s) added. (add_topic)\n", topic_name);
 
   return 0;
 }
@@ -1516,14 +1516,13 @@ int get_subscriber_qos(
 {
   const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (get_subscriber_qos)\n", topic_name);
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (get_subscriber_qos)\n", topic_name);
     return -EINVAL;
   }
 
   const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
-    dev_warn(
+    dev_dbg(
       agnocast_device,
       "Subscriber (id=%d) for the topic (topic_name=%s) not found. (get_subscriber_qos)\n",
       subscriber_id, topic_name);
@@ -1543,13 +1542,13 @@ int get_publisher_qos(
 {
   const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(agnocast_device, "Topic (topic_name=%s) not found. (get_publisher_qos)\n", topic_name);
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (get_publisher_qos)\n", topic_name);
     return -EINVAL;
   }
 
   const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
   if (!pub_info) {
-    dev_warn(
+    dev_dbg(
       agnocast_device,
       "Publisher (id=%d) for the topic (topic_name=%s) not found. (get_publisher_qos)\n",
       publisher_id, topic_name);
@@ -1637,7 +1636,7 @@ int remove_subscriber(
     hash_del(&wrapper->node);
     kfree(wrapper->key);
     kfree(wrapper);
-    dev_info(agnocast_device, "Topic %s removed (empty).\n", topic_name);
+    dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 
   return 0;
@@ -1695,7 +1694,7 @@ int remove_publisher(
     hash_del(&wrapper->node);
     kfree(wrapper->key);
     kfree(wrapper);
-    dev_info(agnocast_device, "Topic %s removed (empty).\n", topic_name);
+    dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 
   return 0;
