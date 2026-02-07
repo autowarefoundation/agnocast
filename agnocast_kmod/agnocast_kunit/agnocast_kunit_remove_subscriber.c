@@ -131,7 +131,7 @@ void test_case_remove_subscriber_clears_references(struct kunit * test)
 
   int ret = increment_message_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, sub_id, entry_id);
   KUNIT_ASSERT_EQ(test, ret, 0);
-  KUNIT_ASSERT_EQ(test, get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, pub_id), 1);
+  // Only subscribers hold references; publishers do not participate in reference counting.
   KUNIT_ASSERT_EQ(test, get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, sub_id), 1);
 
   // Act
@@ -141,7 +141,7 @@ void test_case_remove_subscriber_clears_references(struct kunit * test)
   // Assert
   KUNIT_EXPECT_TRUE(test, is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
   KUNIT_EXPECT_TRUE(test, is_in_topic_entries(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id));
-  KUNIT_EXPECT_EQ(test, get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, pub_id), 1);
+  // Subscriber's reference was cleared by remove_subscriber.
   KUNIT_EXPECT_EQ(test, get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, sub_id), 0);
 }
 

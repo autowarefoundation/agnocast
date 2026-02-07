@@ -152,7 +152,9 @@ void test_case_publish_msg_simple_publish_without_any_release(struct kunit * tes
 
 void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
 {
-  // Arrange
+  // Arrange: Two different publishers each publish one message.
+  // Publishers do not hold reference counts, but GC only releases entries from the same publisher
+  // when qos_depth is exceeded. Since each publisher has only one entry, nothing is released.
   topic_local_id_t publisher_id1, publisher_id2;
   uint64_t ret_addr1, ret_addr2;
   setup_one_publisher(test, &publisher_id1, &ret_addr1);
@@ -161,49 +163,13 @@ void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret1;
   int ret1 = publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id1, ret_addr1, &ioctl_publish_msg_ret1);
-  int ret2 = decrement_message_entry_rc(
-    topic_name, current->nsproxy->ipc_ns, publisher_id1, ioctl_publish_msg_ret1.ret_entry_id);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-
-  union ioctl_publish_msg_args ioctl_publish_msg_ret2;
-
-  // Act
-  int ret3 = publish_msg(
-    topic_name, current->nsproxy->ipc_ns, publisher_id2, ret_addr2, &ioctl_publish_msg_ret2);
-
-  // Assert
-  KUNIT_EXPECT_EQ(test, ret3, 0);
-  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_released_num, 0);
-  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 0);
-  KUNIT_EXPECT_EQ(
-    test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
-    true);
-  KUNIT_EXPECT_EQ(
-    test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
-    true);
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
-}
-
-void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
-{
-  // Arrange
-  topic_local_id_t publisher_id;
-  uint64_t ret_addr;
-  setup_one_publisher(test, &publisher_id, &ret_addr);
-
-  union ioctl_publish_msg_args ioctl_publish_msg_ret1;
-  int ret1 = publish_msg(
-    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret1);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret2;
 
   // Act
   int ret2 = publish_msg(
-    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 1, &ioctl_publish_msg_ret2);
+    topic_name, current->nsproxy->ipc_ns, publisher_id2, ret_addr2, &ioctl_publish_msg_ret2);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret2, 0);
@@ -220,9 +186,52 @@ void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
   KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 
+void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
+{
+  // Arrange: A subscriber holds a reference to entry1, preventing it from being GC'd
+  // when entry2 is published (even though qos_depth=1 would normally trigger GC).
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  topic_local_id_t subscriber_id;
+  setup_one_subscriber(test, &subscriber_id, false);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret1;
+  int ret1 = publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret1);
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+
+  // Subscriber takes a reference to entry1
+  int ret_inc = increment_message_entry_rc(
+    topic_name, current->nsproxy->ipc_ns, subscriber_id, ioctl_publish_msg_ret1.ret_entry_id);
+  KUNIT_ASSERT_EQ(test, ret_inc, 0);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret2;
+
+  // Act
+  int ret2 = publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 1, &ioctl_publish_msg_ret2);
+
+  // Assert: entry1 is not released because subscriber holds a reference
+  KUNIT_EXPECT_EQ(test, ret2, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_released_num, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 1);
+  KUNIT_EXPECT_EQ(
+    test,
+    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
+    true);
+  KUNIT_EXPECT_EQ(
+    test,
+    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
+    true);
+  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
+}
+
 void test_case_publish_msg_single_release_return(struct kunit * test)
 {
-  // Arrange
+  // Arrange: With qos_depth=1 and no subscriber references, entry1 is automatically released
+  // when entry2 is published (GC is triggered to meet qos_depth).
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
   setup_one_publisher(test, &publisher_id, &ret_addr);
@@ -230,19 +239,16 @@ void test_case_publish_msg_single_release_return(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret1;
   int ret1 = publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret1);
-  int ret2 = decrement_message_entry_rc(
-    topic_name, current->nsproxy->ipc_ns, publisher_id, ioctl_publish_msg_ret1.ret_entry_id);
   KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret2;
 
-  // Act
-  int ret3 = publish_msg(
+  // Act: entry1 should be released to meet qos_depth=1
+  int ret2 = publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 1, &ioctl_publish_msg_ret2);
 
   // Assert
-  KUNIT_EXPECT_EQ(test, ret3, 0);
+  KUNIT_EXPECT_EQ(test, ret2, 0);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_released_num, 1);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_released_addrs[0], ret_addr);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 0);
@@ -259,10 +265,16 @@ void test_case_publish_msg_single_release_return(struct kunit * test)
 
 void test_case_publish_msg_excessive_release_count(struct kunit * test)
 {
-  // Arrange
+  // Arrange: Test that GC is limited to MAX_RELEASE_NUM entries per publish call.
+  // We use a subscriber to hold references to entries, then release them all before final publish.
+  // Note: With qos_depth=1, entries without references are released immediately.
+  // We need the subscriber to hold references during the initial publish loop.
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
   setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  topic_local_id_t subscriber_id;
+  setup_one_subscriber(test, &subscriber_id, false);
 
   int64_t entry_ids[MAX_RELEASE_NUM + 1];
   for (int i = 0; i < MAX_RELEASE_NUM + 1; i++) {
@@ -270,26 +282,31 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test)
     int ret = publish_msg(
       topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, &ioctl_publish_msg_ret);
     entry_ids[i] = ioctl_publish_msg_ret.ret_entry_id;
+    KUNIT_ASSERT_EQ(test, ret, 0);
 
+    // Subscriber holds a reference to each entry to prevent immediate GC
+    ret =
+      increment_message_entry_rc(topic_name, current->nsproxy->ipc_ns, subscriber_id, entry_ids[i]);
     KUNIT_ASSERT_EQ(test, ret, 0);
   }
 
+  // Release all subscriber references so entries become eligible for GC
   for (int i = 0; i < MAX_RELEASE_NUM + 1; i++) {
-    int ret =
-      decrement_message_entry_rc(topic_name, current->nsproxy->ipc_ns, publisher_id, entry_ids[i]);
+    int ret = release_message_entry_reference(
+      topic_name, current->nsproxy->ipc_ns, subscriber_id, entry_ids[i]);
     KUNIT_ASSERT_EQ(test, ret, 0);
   }
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
-  // Act
+  // Act: Publish one more message; GC should release up to MAX_RELEASE_NUM entries
   int ret = publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
 
-  // Assert
+  // Assert: GC is limited to MAX_RELEASE_NUM entries per publish call
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, MAX_RELEASE_NUM);
-  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 0);
+  // Remaining entries: (MAX_RELEASE_NUM + 1) - MAX_RELEASE_NUM + 1 (new) = 2
   KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 

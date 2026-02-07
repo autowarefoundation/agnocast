@@ -20,7 +20,8 @@ template <typename T>
 agnocast::ipc_shared_ptr<T> make_test_ipc_shared_ptr(T * ptr)
 {
   // Create ipc_shared_ptr with dummy values for testing
-  return agnocast::ipc_shared_ptr<T>(ptr, "test_topic", 0, -1);
+  // Use entry_id=0 (subscriber-side) to avoid triggering publisher-side cleanup logic
+  return agnocast::ipc_shared_ptr<T>(ptr, "test_topic", 0, 0);
 }
 
 struct Filter : public SimpleFilter<Msg>

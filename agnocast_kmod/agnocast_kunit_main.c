@@ -3,16 +3,15 @@
 #include "agnocast_kunit/agnocast_kunit_add_process.h"
 #include "agnocast_kunit/agnocast_kunit_add_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_add_subscriber.h"
-#include "agnocast_kunit/agnocast_kunit_decrement_rc.h"
 #include "agnocast_kunit/agnocast_kunit_do_exit.h"
 #include "agnocast_kunit/agnocast_kunit_get_process_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_qos.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_qos.h"
-#include "agnocast_kunit/agnocast_kunit_increment_rc.h"
 #include "agnocast_kunit/agnocast_kunit_publish_msg.h"
 #include "agnocast_kunit/agnocast_kunit_receive_msg.h"
+#include "agnocast_kunit/agnocast_kunit_release_sub_ref.h"
 #include "agnocast_kunit/agnocast_kunit_remove_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_remove_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_remove_subscriber.h"
@@ -29,8 +28,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_ADD_PUBLISHER,
   TEST_CASES_REMOVE_SUBSCRIBER,
   TEST_CASES_REMOVE_PUBLISHER,
-  TEST_CASES_INCREMENT_RC,
-  TEST_CASES_DECREMENT_RC,
+  TEST_CASES_RELEASE_SUB_REF,
   TEST_CASES_RECEIVE_MSG,
   TEST_CASES_PUBLISH_MSG,
   TEST_CASES_TAKE_MSG,

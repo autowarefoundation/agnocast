@@ -150,12 +150,17 @@ public:
       exit(EXIT_FAILURE);
     }
 
+    // Capture raw pointer BEFORE invalidation (get() returns nullptr after invalidation).
+    const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(message.get());
+
+    // Invalidate all references sharing this handle's control block.
+    // Any remaining copies held elsewhere will fail-fast on dereference.
+    message.invalidate_all_references();
+
     decrement_borrowed_publisher_num();
 
     const union ioctl_publish_msg_args publish_msg_args =
-      publish_core(this, topic_name_, id_, reinterpret_cast<uint64_t>(message.get()), opened_mqs_);
-
-    message.set_entry_id(publish_msg_args.ret_entry_id);
+      publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
