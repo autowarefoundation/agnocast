@@ -32,7 +32,9 @@ public:
     pub_ =
       this->create_publisher<agnocast_sample_interfaces::msg::DynamicSizeArray>("/my_topic", 1);
 
-    timer_ = this->create_wall_timer(100ms, std::bind(&NoRclcppPublisher::timer_callback, this));
+    timer_ = this->create_timer(
+      100ms, std::bind(&NoRclcppPublisher::timer_callback, this), nullptr,
+      std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME));
   }
 };
 

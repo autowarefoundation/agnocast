@@ -68,11 +68,16 @@ uint32_t allocate_timer_id()
 
 void register_timer_info(
   uint32_t timer_id, const std::shared_ptr<TimerBase> & timer, std::chrono::nanoseconds period,
-  const rclcpp::CallbackGroup::SharedPtr & callback_group)
+  const rclcpp::CallbackGroup::SharedPtr & callback_group, const rclcpp::Clock::SharedPtr & clock)
 {
+  if (clock->get_clock_type() != RCL_STEADY_TIME) {
+    throw std::runtime_error(
+      "Only RCL_STEADY_TIME is currently supported. "
+      "RCL_SYSTEM_TIME and RCL_ROS_TIME are not yet implemented.");
+  }
+
   const int timer_fd = create_timer_fd(timer_id, period);
-  const auto now = std::chrono::steady_clock::now();
-  const int64_t now_ns = to_nanoseconds(now);
+  const int64_t now_ns = clock->now().nanoseconds();
 
   auto timer_info = std::make_shared<TimerInfo>();
   timer_info->timer_fd = timer_fd;
@@ -82,6 +87,7 @@ void register_timer_info(
   timer_info->period = period;
   timer_info->callback_group = callback_group;
   timer_info->need_epoll_update = true;
+  timer_info->clock = clock;
 
   {
     std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
@@ -112,8 +118,7 @@ void handle_timer_event(TimerInfo & timer_info)
       return;  // Timer object has been destroyed
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const int64_t now_ns = to_nanoseconds(now);
+    const int64_t now_ns = timer_info.clock->now().nanoseconds();
 
     timer_info.last_call_time_ns.store(now_ns, std::memory_order_relaxed);
 
