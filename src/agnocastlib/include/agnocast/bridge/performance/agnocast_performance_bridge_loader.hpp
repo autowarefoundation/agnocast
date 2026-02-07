@@ -34,9 +34,9 @@ private:
   std::unordered_map<std::string, void *> loaded_libraries_;
 
   static std::string convert_type_to_snake_case(const std::string & message_type);
-  std::string generate_library_path(
-    const std::string & snake_type, const std::string & plugin_suffix) const;
-  void * load_library(const std::string & library_path);
+  static std::vector<std::string> generate_library_paths(
+    const std::string & snake_type, const std::string & plugin_suffix);
+  void * load_library_from_paths(const std::vector<std::string> & paths);
   void * get_bridge_factory_symbol(
     const std::string & message_type, const std::string & direction,
     const std::string & symbol_name);

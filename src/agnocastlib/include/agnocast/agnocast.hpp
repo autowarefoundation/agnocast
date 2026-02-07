@@ -9,6 +9,7 @@
 #include "agnocast/agnocast_single_threaded_executor.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_executor.hpp"

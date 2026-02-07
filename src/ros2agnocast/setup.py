@@ -11,7 +11,18 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
     ],
+    package_data={
+        'ros2agnocast.templates': [
+            '*.em',
+        ],
+    },
     entry_points={
+        'ros2cli.command': [
+            'agnocast = ros2agnocast.command.agnocast:AgnocastCommand',
+        ],
+        'ros2agnocast.verb': [
+            'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
+        ],
         'ros2topic.verb': [
             'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.topic_info_agnocast:TopicInfoAgnocastVerb',
@@ -19,6 +30,6 @@ setup(
         'ros2node.verb': [
             'list_agnocast = ros2agnocast.verb.node_list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.node_info_agnocast:NodeInfoAgnocastVerb',
-        ]
-    }
+        ],
+    },
 )

@@ -5,6 +5,8 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <sstream>
 
 namespace agnocast
 {
@@ -56,49 +58,80 @@ std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::strin
   return result;
 }
 
-std::string PerformanceBridgeLoader::generate_library_path(
-  const std::string & snake_type, const std::string & plugin_suffix) const
+std::vector<std::string> PerformanceBridgeLoader::generate_library_paths(
+  const std::string & snake_type, const std::string & plugin_suffix)
 {
-  try {
-    const std::string package_prefix = ament_index_cpp::get_package_prefix("agnocastlib");
-    return package_prefix + "/lib/agnocastlib/bridge_plugins/lib" + plugin_suffix +
-           "_bridge_plugin_" + snake_type + ".so";
+  std::vector<std::string> paths;
+  const std::string lib_name = "lib" + plugin_suffix + "_bridge_plugin_" + snake_type + ".so";
 
-  } catch (const ament_index_cpp::PackageNotFoundError & e) {
-    RCLCPP_ERROR(
-      logger_, "Could not find package 'agnocastlib' to locate plugins. Error: %s", e.what());
-    return "";
+  // 1. Check environment variable AGNOCAST_BRIDGE_PLUGINS_PATH (colon-separated)
+  const char * env_path = std::getenv("AGNOCAST_BRIDGE_PLUGINS_PATH");
+  if (env_path != nullptr) {
+    std::string env_str(env_path);
+    std::istringstream iss(env_str);
+    std::string path;
+    while (std::getline(iss, path, ':')) {
+      if (!path.empty()) {
+        std::string full_path;
+        full_path.reserve(path.size() + 1 + lib_name.size());
+        full_path += path;
+        full_path += '/';
+        full_path += lib_name;
+        paths.push_back(std::move(full_path));
+      }
+    }
   }
+
+  // 2. Check user-generated agnocast_bridge_plugins package
+  try {
+    const std::string user_prefix = ament_index_cpp::get_package_prefix("agnocast_bridge_plugins");
+    paths.push_back(user_prefix + "/lib/agnocast_bridge_plugins/" + lib_name);
+  } catch (const ament_index_cpp::PackageNotFoundError &) {
+    // Package not found, continue
+  }
+
+  return paths;
 }
 
-void * PerformanceBridgeLoader::load_library(const std::string & library_path)
+void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::string> & paths)
 {
-  if (library_path.empty()) {
+  if (paths.empty()) {
+    RCLCPP_ERROR(logger_, "No plugin paths available. Have you generated bridge plugins?");
     return nullptr;
   }
 
-  if (loaded_libraries_.find(library_path) != loaded_libraries_.end()) {
-    return loaded_libraries_[library_path];
+  for (const auto & path : paths) {
+    // Check cache first
+    if (loaded_libraries_.find(path) != loaded_libraries_.end()) {
+      return loaded_libraries_[path];
+    }
+
+    // Try to load
+    void * handle = dlopen(path.c_str(), RTLD_LAZY);
+    if (handle != nullptr) {
+      loaded_libraries_[path] = handle;
+      return handle;
+    }
   }
 
-  void * handle = dlopen(library_path.c_str(), RTLD_LAZY);
-
-  if (handle == nullptr) {
-    RCLCPP_ERROR(logger_, "Failed to load plugin '%s'. Error: %s", library_path.c_str(), dlerror());
-    return nullptr;
+  // All paths failed - log the error
+  std::string tried_paths;
+  for (const auto & path : paths) {
+    tried_paths += "\n  - " + path;
   }
-
-  loaded_libraries_[library_path] = handle;
-  return handle;
+  RCLCPP_ERROR(
+    logger_, "Failed to load plugin. Tried paths:%s\nLast error: %s", tried_paths.c_str(),
+    dlerror());
+  return nullptr;
 }
 
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const std::string & message_type, const std::string & direction, const std::string & symbol_name)
 {
   std::string snake_type = convert_type_to_snake_case(message_type);
-  std::string lib_path = generate_library_path(snake_type, direction);
+  std::vector<std::string> lib_paths = generate_library_paths(snake_type, direction);
 
-  void * handle = load_library(lib_path);
+  void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
     return nullptr;
   }
@@ -109,16 +142,17 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const char * dlsym_error = dlerror();
   if (dlsym_error != nullptr) {
     RCLCPP_ERROR(
-      logger_, "Failed to find symbol '%s' in %s: %s", symbol_name.c_str(), lib_path.c_str(),
-      dlsym_error);
+      logger_, "Failed to find symbol '%s' for message type '%s': %s", symbol_name.c_str(),
+      message_type.c_str(), dlsym_error);
     return nullptr;
   }
 
   if (symbol == nullptr) {
     RCLCPP_ERROR(
       logger_,
-      "Symbol '%s' was found in %s but returned NULL, which is invalid for a factory function.",
-      symbol_name.c_str(), lib_path.c_str());
+      "Symbol '%s' was found for message type '%s' but returned NULL, which is invalid for a "
+      "factory function.",
+      symbol_name.c_str(), message_type.c_str());
     return nullptr;
   }
 

@@ -193,10 +193,30 @@ export AGNOCAST_BRIDGE_MODE=off
 
 ### Performance Mode Setup
 
-Performance mode requires pre-compiled bridge plugins. Build with:
+Performance mode requires pre-compiled bridge plugins for each message type used. Generate and build them using the following steps:
+
+**1. Generate the plugin package:**
 
 ```bash
-AGNOCAST_BUILD_BRIDGE_PLUGINS=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+# For specific message types
+ros2 agnocast generate-bridge-plugins --message-types std_msgs/msg/String geometry_msgs/msg/Pose
+
+# Or for all available message types
+ros2 agnocast generate-bridge-plugins --all
+```
+
+**2. Build the generated package:**
+
+```bash
+colcon build --packages-select agnocast_bridge_plugins
+```
+
+**3. Source and run:**
+
+```bash
+source install/setup.bash
+export AGNOCAST_BRIDGE_MODE=performance
+# Run your application
 ```
 
 For detailed information, see [Bridge Documentation](./docs/agnocast_ros2_bridge.md).

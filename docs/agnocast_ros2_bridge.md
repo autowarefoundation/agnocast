@@ -56,7 +56,7 @@ Standard Mode and Performance Mode have distinct trade-offs regarding resource u
 | Resource Usage | High: Increases linearly with the number of processes. | Low: Minimal overhead. Efficient for systems with many nodes. |
 | Activation Strategy | Eager: Starts immediately regardless of ROS 2 status. | Lazy: Starts only when a counterpart exists ([See Conditions](#bridge-activation-conditions)). |
 | Isolation & Safety | High: Bridges are isolated. If one bridge crashes, others are unaffected. | Low: Shared process. A crash in the manager affects all bridged topics. |
-| Setup | Easy: No preparation needed. Works dynamically. | Complex: Requires pre-compiled plugins ([See Build](#performance-mode-build)). |
+| Setup | Easy: No preparation needed. Works dynamically. | Complex: Requires pre-compiled plugins ([See Setup](#performance-mode-setup)). |
 
 ### Standard Mode (Default)
 
@@ -137,22 +137,47 @@ def generate_launch_description():
     ])
 ```
 
-### Performance Mode Build
+### Performance Mode Setup
 
-Performance mode requires pre-compiled bridge plugins. Build with:
+Performance mode requires pre-compiled bridge plugins for each message type used. Generate and build them using the following steps:
+
+**1. Generate the plugin package:**
 
 ```bash
-AGNOCAST_BUILD_BRIDGE_PLUGINS=ON colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+# For specific message types
+ros2 agnocast generate-bridge-plugins --message-types std_msgs/msg/String geometry_msgs/msg/Pose
+
+# Or for all available message types
+ros2 agnocast generate-bridge-plugins --all
+
+# Optionally specify output directory (default: ./agnocast_bridge_plugins)
+ros2 agnocast generate-bridge-plugins --all --output-dir ~/my_ws/src/agnocast_bridge_plugins
 ```
 
-When `AGNOCAST_BUILD_BRIDGE_PLUGINS=ON` is set, the build system automatically:
+**2. Build the generated package:**
 
-1. Retrieves all available message types via `ros2 interface list -m`
-2. Generates R2A and A2R bridge plugins for each message type
-3. Installs plugins to `lib/agnocastlib/bridge_plugins/`
+```bash
+colcon build --packages-select agnocast_bridge_plugins
+```
+
+**3. Source and run:**
+
+```bash
+source install/setup.bash
+export AGNOCAST_BRIDGE_MODE=performance
+# Run your application
+```
 
 > [!NOTE]
-> Since plugins are generated at build time, any new custom message types added after the build will not be supported in Performance Mode until agnocastlib is rebuilt.
+> If you add new custom message types later, regenerate and rebuild the plugins to support them in Performance Mode.
+
+#### Advanced: Custom Plugin Path
+
+You can specify custom plugin search paths using the `AGNOCAST_BRIDGE_PLUGINS_PATH` environment variable (colon-separated):
+
+```bash
+export AGNOCAST_BRIDGE_PLUGINS_PATH=/path/to/plugins:/another/path
+```
 
 ## Bridge Activation Conditions
 
