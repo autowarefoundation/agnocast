@@ -28,6 +28,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <type_traits>
 
 namespace agnocast
 {
@@ -41,55 +42,73 @@ struct initialize_agnocast_result
 extern "C" struct initialize_agnocast_result initialize_agnocast(
   const unsigned char * heaphook_version_ptr, const size_t heaphook_version_str_len);
 
-template <typename MessageT>
+template <typename MessageT, typename NodeT>
 typename Publisher<MessageT>::SharedPtr create_publisher(
-  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
   const PublisherOptions & options = PublisherOptions{})
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
     node, topic_name, qos, options);
 }
 
-template <typename MessageT>
+template <typename MessageT, typename NodeT>
 typename Publisher<MessageT>::SharedPtr create_publisher(
-  rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth,
+  NodeT * node, const std::string & topic_name, const size_t qos_history_depth,
   const PublisherOptions & options = PublisherOptions{})
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicPublisher<MessageT, AgnocastToRosRequestPolicy>>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
 }
 
-template <typename MessageT, typename Func>
+template <typename MessageT, typename NodeT, typename Func>
 typename Subscription<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
   agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, qos, std::forward<Func>(callback), options);
 }
 
-template <typename MessageT, typename Func>
+template <typename MessageT, typename NodeT, typename Func>
 typename Subscription<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth,
-  Func && callback, agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  NodeT * node, const std::string & topic_name, const size_t qos_history_depth, Func && callback,
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicSubscription<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
     std::forward<Func>(callback), options);
 }
 
-template <typename MessageT>
+template <typename MessageT, typename NodeT>
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const size_t qos_history_depth)
+  NodeT * node, const std::string & topic_name, const size_t qos_history_depth)
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicPollingSubscriber<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)));
 }
 
-template <typename MessageT>
+template <typename MessageT, typename NodeT>
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
-  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
   return std::make_shared<BasicPollingSubscriber<MessageT, RosToAgnocastRequestPolicy>>(
     node, topic_name, qos);
 }
