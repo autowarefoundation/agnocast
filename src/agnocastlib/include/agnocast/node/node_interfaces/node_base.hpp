@@ -73,7 +73,8 @@ private:
   std::string fqn_;
 
   // When loaded as a composable node, a valid context is passed from the component manager.
-  // For standalone agnocast nodes (without rclcpp::init()), this will be nullptr.
+  // For standalone agnocast nodes (without rclcpp::init()), context_ is always non-null
+  // (from rclcpp::NodeOptions default) but context_->is_valid() returns false.
   rclcpp::Context::SharedPtr context_;
   rclcpp::CallbackGroup::SharedPtr default_callback_group_;
   std::vector<rclcpp::CallbackGroup::WeakPtr> callback_groups_;
