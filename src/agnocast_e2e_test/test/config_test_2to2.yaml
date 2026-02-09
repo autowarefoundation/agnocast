@@ -1,4 +1,5 @@
-container0: [p]
-container1: [p]
-container2: [s]
-container3: [s]
+test_mode: "agno2agno"
+container0: [p,p,s,s]
+container1: []
+container2: []
+container3: []

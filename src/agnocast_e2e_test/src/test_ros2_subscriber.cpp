@@ -9,17 +9,24 @@ class TestROS2Subscriber : public rclcpp::Node
   rclcpp::Subscription<std_msgs::msg::Int64>::SharedPtr sub_;
   bool forever_;
   int64_t target_end_id_;
+  int target_end_count_;
+  int received_end_count_ = 0;
 
   void callback(const std_msgs::msg::Int64 & message)
   {
     RCLCPP_INFO(this->get_logger(), "Receiving %ld.", message.data);
 
     if (message.data == target_end_id_) {
-      RCLCPP_INFO(this->get_logger(), "All messages received. Shutting down.");
-      std::cout << std::flush;
+      received_end_count_++;
 
-      if (!forever_) {
-        rclcpp::shutdown();
+      if (received_end_count_ >= target_end_count_) {
+        RCLCPP_INFO(this->get_logger(), "All messages received. Shutting down.");
+        std::cout << std::flush;
+        sleep(3);
+
+        if (!forever_) {
+          rclcpp::shutdown();
+        }
       }
     }
   }
@@ -32,10 +39,12 @@ public:
     this->declare_parameter<bool>("transient_local", true);
     this->declare_parameter<bool>("forever", false);
     this->declare_parameter<int64_t>("target_end_id", 0);
+    this->declare_parameter<int>("target_end_count", 1);
     int64_t qos_depth = this->get_parameter("qos_depth").as_int();
     bool transient_local = this->get_parameter("transient_local").as_bool();
     forever_ = this->get_parameter("forever").as_bool();
     target_end_id_ = this->get_parameter("target_end_id").as_int();
+    target_end_count_ = this->get_parameter("target_end_count").as_int();
 
     rclcpp::QoS qos = rclcpp::QoS(rclcpp::KeepLast(qos_depth));
     if (transient_local) {

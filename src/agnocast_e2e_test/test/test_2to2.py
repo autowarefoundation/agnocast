@@ -13,58 +13,107 @@ from launch_ros.descriptions import ComposableNode
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config_test_2to2.yaml')
 with open(CONFIG_PATH, 'r') as f:
     CONFIG = yaml.safe_load(f)
+
+TEST_MODE = CONFIG.get('test_mode', os.environ.get('TEST_MODE', 'agno2agno'))
 QOS_DEPTH = 10
 PUB_NUM = int(QOS_DEPTH / 2)
 TIMEOUT = float(os.environ.get('STRESS_TEST_TIMEOUT', 8.0))
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 
+BRIDGE_MODE = os.environ.get('AGNOCAST_BRIDGE_MODE', 'off').lower()
+IS_STANDARD_BRIDGE = (BRIDGE_MODE == '1' or BRIDGE_MODE == 'standard')
 
 def generate_test_description():
     pub_i = 0
     sub_i = 0
     containers = []
     testing_processes = {}
-    for i, nodes in enumerate(CONFIG.values()):
+    for i in range(4):
+        container_key = f'container{i}'
+        nodes = CONFIG.get(container_key, [])
+        
         composable_nodes = []
         for node in nodes:
             if node == 'p':
-                composable_nodes.append(
-                    ComposableNode(
-                        package='agnocast_e2e_test',
-                        plugin='TestPublisher',
-                        name=f'test_talker_node_{pub_i}',
-                        parameters=[
-                            {
-                                "qos_depth": QOS_DEPTH,
-                                "transient_local": False,
-                                "init_pub_num": 0,
-                                "pub_num": PUB_NUM,
-                                "planned_pub_count": 1, # Number of ROS 2 inside the bridge.
-                                "planned_sub_count": 2, # Number of external Agnocast.
-                                "forever": FOREVER,
-                            }
-                        ],
+                if TEST_MODE == 'ros2agno':
+                    composable_nodes.append(
+                        ComposableNode(
+                            package='agnocast_e2e_test',
+                            plugin='TestROS2Publisher',
+                            name=f'test_talker_node_{pub_i}',
+                            parameters=[
+                                {
+                                    "qos_depth": QOS_DEPTH,
+                                    "transient_local": False,
+                                    "init_pub_num": 0,
+                                    "pub_num": PUB_NUM,
+                                    # Standard DDS discovery detects both ROS 2 talker nodes (publishers).
+                                    "planned_pub_count": 2,
+                                    # The Bridge Manager creates a single ROS 2 Subscriber (ROS 2 cannot detect Agnocast subscribers).
+                                    "planned_sub_count": 1,
+                                    "forever": FOREVER,
+                                }
+                            ],
+                        )
                     )
-                )
+                else:
+                    composable_nodes.append(
+                        ComposableNode(
+                            package='agnocast_e2e_test',
+                            plugin='TestPublisher',
+                            name=f'test_talker_node_{pub_i}',
+                            parameters=[
+                                {
+                                    "qos_depth": QOS_DEPTH,
+                                    "transient_local": False,
+                                    "init_pub_num": 0,
+                                    "pub_num": PUB_NUM,
+                                    #If not in Standard mode (e.g., Performance or Off), the Bridge does not instantiate a ROS 2 Publisher.
+                                    "planned_pub_count": 1 if IS_STANDARD_BRIDGE else 0,
+                                     # Number of external Agnocast.
+                                    "planned_sub_count": 2,
+                                    "forever": FOREVER,
+                                }
+                            ],
+                        )
+                    )
                 pub_i += 1
-            else:  # s
-                composable_nodes.insert(
-                    0,
-                    ComposableNode(
-                        package='agnocast_e2e_test',
-                        plugin='TestSubscriber',
-                        name=f'test_listener_node_{sub_i}',
-                        parameters=[
-                            {
-                                "qos_depth": QOS_DEPTH,
-                                "transient_local": False,
-                                "forever": FOREVER,
-                                "target_end_id" : PUB_NUM - 1,
-                                "target_end_count": 2,  # Number of external Agnocast.
-                            }
-                        ],
+            else: # s
+                if TEST_MODE == 'agno2ros':
+                    composable_nodes.append(
+                        ComposableNode(
+                            package='agnocast_e2e_test',
+                            plugin='TestROS2Subscriber',
+                            name=f'test_listener_node_{sub_i}',
+                            parameters=[
+                                {
+                                    "qos_depth": QOS_DEPTH,
+                                    "transient_local": False,
+                                    "forever": FOREVER,
+                                    "target_end_id": PUB_NUM - 1, # Target the last publisher id (PUB_NUM - 1).
+                                    "target_end_count": 2, # Number of external Agnocast.
+                                }
+                            ],
+                        )
                     )
-                )
+                else:
+                    composable_nodes.insert(
+                        0,
+                        ComposableNode(
+                            package='agnocast_e2e_test',
+                            plugin='TestSubscriber',
+                            name=f'test_listener_node_{sub_i}',
+                            parameters=[
+                                {
+                                    "qos_depth": QOS_DEPTH,
+                                    "transient_local": False,
+                                    "forever": FOREVER,
+                                    "target_end_id": PUB_NUM - 1, # Target the last publisher id (PUB_NUM - 1).
+                                    "target_end_count": 2, # Number of external Agnocast.
+                                }
+                            ],
+                        )
+                    )
                 sub_i += 1
 
         container = ComposableNodeContainer(
