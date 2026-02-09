@@ -100,6 +100,9 @@ public:
     node_base_(node->get_node_base_interface()),
     service_name_(node->get_node_services_interface()->resolve_service_name(service_name))
   {
+    static_assert(
+      std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
+      "NodeT must be either rclcpp::Node or agnocast::Node");
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options);

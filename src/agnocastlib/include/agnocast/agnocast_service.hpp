@@ -54,6 +54,9 @@ public:
     qos_(qos)
   {
     static_assert(
+      std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
+      "NodeT must be either rclcpp::Node or agnocast::Node");
+    static_assert(
       std::is_invocable_v<
         std::decay_t<Func>, ipc_shared_ptr<typename ServiceT::Request> &&,
         ipc_shared_ptr<typename ServiceT::Response> &&>,
