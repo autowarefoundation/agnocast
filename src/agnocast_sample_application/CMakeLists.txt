@@ -13,6 +13,7 @@ find_package(std_msgs REQUIRED)
 
 find_package(agnocastlib REQUIRED)
 find_package(agnocast_sample_interfaces REQUIRED)
+find_package(agnocast_components REQUIRED)
 
 add_executable(talker src/minimal_publisher.cpp)
 ament_target_dependencies(talker rclcpp agnocastlib agnocast_sample_interfaces)
@@ -30,16 +31,21 @@ add_library(cie_listener_component SHARED src/cie_subscriber.cpp)
 ament_target_dependencies(cie_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
 target_include_directories(cie_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
-rclcpp_components_register_node(
+agnocast_components_register_node(
   cie_listener_component
   PLUGIN "CieSubscriber"
   EXECUTABLE cie_listener
 )
 
-add_executable(no_rclcpp_listener src/no_rclcpp_subscriber.cpp)
-ament_target_dependencies(no_rclcpp_listener agnocastlib agnocast_sample_interfaces)
-target_include_directories(no_rclcpp_listener PRIVATE
-  ${agnocastlib_INCLUDE_DIRS}
+add_library(no_rclcpp_listener_component SHARED src/no_rclcpp_subscriber.cpp)
+ament_target_dependencies(no_rclcpp_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(no_rclcpp_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+
+agnocast_components_register_node(
+  no_rclcpp_listener_component
+  PLUGIN "NoRclcppSubscriber"
+  EXECUTABLE no_rclcpp_listener
+  EXECUTOR AgnocastOnlySingleThreadedExecutor
 )
 
 add_executable(no_rclcpp_pubsub src/no_rclcpp_pubsub.cpp)
@@ -88,7 +94,7 @@ add_library(listener_component SHARED src/minimal_subscriber.cpp)
 ament_target_dependencies(listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
 target_include_directories(listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
-rclcpp_components_register_node(
+agnocast_components_register_node(
   listener_component
   PLUGIN "MinimalSubscriber"
   EXECUTABLE listener
@@ -116,8 +122,13 @@ install(TARGETS talker
 install(TARGETS cie_talker
   DESTINATION lib/${PROJECT_NAME})
 
-install(TARGETS no_rclcpp_listener
-  DESTINATION lib/${PROJECT_NAME})
+ament_export_targets(export_no_rclcpp_listener_component)
+install(TARGETS no_rclcpp_listener_component
+        EXPORT export_no_rclcpp_listener_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
 
 install(TARGETS no_rclcpp_pubsub
   DESTINATION lib/${PROJECT_NAME})

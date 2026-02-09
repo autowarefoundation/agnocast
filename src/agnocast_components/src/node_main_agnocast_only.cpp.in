@@ -1,0 +1,72 @@
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
+#include "agnocast/agnocast.hpp"
+#include "class_loader/class_loader.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_components/node_factory.hpp"
+#include "rclcpp_components/node_factory_template.hpp"
+
+#define NODE_MAIN_LOGGER_NAME "@node@"
+
+int main(int argc, char * argv[])
+{
+  // Use agnocast::init for agnocast::Node
+  agnocast::init(argc, argv);
+  auto args = rclcpp::remove_ros_arguments(argc, argv);
+
+  rclcpp::Logger logger = rclcpp::get_logger(NODE_MAIN_LOGGER_NAME);
+
+  // Use Agnocast-only executor
+  agnocast::@executor@ exec;
+
+  rclcpp::NodeOptions options;
+  options.arguments(args);
+
+  std::string library_name = "@library_name@";
+  std::string class_name = "rclcpp_components::NodeFactoryTemplate<@component@>";
+
+  RCLCPP_DEBUG(logger, "Load library %s", library_name.c_str());
+  auto loader = std::make_unique<class_loader::ClassLoader>(library_name);
+  auto classes = loader->getAvailableClasses<rclcpp_components::NodeFactory>();
+
+  if (std::find(classes.begin(), classes.end(), class_name) == classes.end()) {
+    RCLCPP_ERROR(
+      logger, "Class %s not found in library %s", class_name.c_str(), library_name.c_str());
+    close(agnocast::agnocast_fd);
+    return 1;
+  }
+
+  RCLCPP_DEBUG(logger, "Instantiate class %s", class_name.c_str());
+  std::shared_ptr<rclcpp_components::NodeFactory> node_factory = nullptr;
+  try {
+    node_factory = loader->createInstance<rclcpp_components::NodeFactory>(class_name);
+  } catch (const std::exception & ex) {
+    RCLCPP_ERROR(logger, "Failed to load library: %s", ex.what());
+    close(agnocast::agnocast_fd);
+    return 1;
+  } catch (...) {
+    RCLCPP_ERROR(logger, "Failed to load library");
+    close(agnocast::agnocast_fd);
+    return 1;
+  }
+
+  auto wrapper = node_factory->create_node_instance(options);
+  // For agnocast::Node, cast the void pointer to agnocast::Node
+  auto node = std::static_pointer_cast<agnocast::Node>(wrapper.get_node_instance());
+  exec.add_node(node);
+
+  try {
+    exec.spin();
+  } catch (const std::exception & ex) {
+    RCLCPP_ERROR(logger, "Exception during spin: %s", ex.what());
+    close(agnocast::agnocast_fd);
+    return 1;
+  }
+
+  // TODO(Koichi98): Add agnocast::shutdown() here
+  return 0;
+}

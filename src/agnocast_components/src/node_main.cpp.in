@@ -1,0 +1,66 @@
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
+#include "agnocast/agnocast.hpp"
+#include "class_loader/class_loader.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_components/node_factory.hpp"
+#include "rclcpp_components/node_factory_template.hpp"
+
+#define NODE_MAIN_LOGGER_NAME "@node@"
+
+int main(int argc, char * argv[])
+{
+  auto args = rclcpp::init_and_remove_ros_arguments(argc, argv);
+  rclcpp::Logger logger = rclcpp::get_logger(NODE_MAIN_LOGGER_NAME);
+
+  // Use Agnocast executor instead of rclcpp executor
+  agnocast::@executor@ exec;
+
+  rclcpp::NodeOptions options;
+  options.arguments(args);
+
+  std::string library_name = "@library_name@";
+  std::string class_name = "rclcpp_components::NodeFactoryTemplate<@component@>";
+
+  RCLCPP_DEBUG(logger, "Load library %s", library_name.c_str());
+  auto loader = std::make_unique<class_loader::ClassLoader>(library_name);
+  auto classes = loader->getAvailableClasses<rclcpp_components::NodeFactory>();
+
+  if (std::find(classes.begin(), classes.end(), class_name) == classes.end()) {
+    RCLCPP_ERROR(
+      logger, "Class %s not found in library %s", class_name.c_str(), library_name.c_str());
+    close(agnocast::agnocast_fd);
+    return 1;
+  }
+
+  RCLCPP_DEBUG(logger, "Instantiate class %s", class_name.c_str());
+  std::shared_ptr<rclcpp_components::NodeFactory> node_factory = nullptr;
+  try {
+    node_factory = loader->createInstance<rclcpp_components::NodeFactory>(class_name);
+  } catch (const std::exception & ex) {
+    RCLCPP_ERROR(logger, "Failed to load library: %s", ex.what());
+    close(agnocast::agnocast_fd);
+    return 1;
+  } catch (...) {
+    RCLCPP_ERROR(logger, "Failed to load library");
+    close(agnocast::agnocast_fd);
+    return 1;
+  }
+
+  // Scope to destruct node_wrapper before shutdown
+  {
+    auto wrapper = node_factory->create_node_instance(options);
+    auto node = wrapper.get_node_base_interface();
+    exec.add_node(node);
+    exec.spin();
+    exec.remove_node(wrapper.get_node_base_interface());
+  }
+
+  rclcpp::shutdown();
+
+  return 0;
+}

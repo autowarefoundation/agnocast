@@ -1,0 +1,15 @@
+macro(_agnocast_components_register_package_hook)
+  if(NOT DEFINED _AGNOCAST_COMPONENTS_PACKAGE_HOOK_REGISTERED)
+    set(_AGNOCAST_COMPONENTS_PACKAGE_HOOK_REGISTERED TRUE)
+
+    find_package(ament_cmake_core QUIET REQUIRED)
+    ament_register_extension("ament_package" "agnocast_components"
+      "agnocast_components_package_hook.cmake")
+  endif()
+endmacro()
+
+get_filename_component(@PROJECT_NAME@_SHARE_DIR "${@PROJECT_NAME@_DIR}" DIRECTORY)
+set(@PROJECT_NAME@_NODE_TEMPLATE "${@PROJECT_NAME@_SHARE_DIR}/src/node_main.cpp.in")
+set(@PROJECT_NAME@_NODE_TEMPLATE_AGNOCAST_ONLY "${@PROJECT_NAME@_SHARE_DIR}/src/node_main_agnocast_only.cpp.in")
+
+include("${@PROJECT_NAME@_DIR}/agnocast_components_register_node.cmake")
