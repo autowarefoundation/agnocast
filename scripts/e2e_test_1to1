@@ -42,30 +42,51 @@ while true; do
     esac
 done
 
+# Check bridge mode
+LOWER_BRIDGE_MODE=$(echo "$AGNOCAST_BRIDGE_MODE" | tr '[:upper:]' '[:lower:]')
+if [[ "$LOWER_BRIDGE_MODE" =~ ^(0|off)$ ]]; then
+    BRIDGE_OFF=true
+else
+    BRIDGE_OFF=false
+fi
+
 # Setup
 rm -rf build/agnocast_e2e_test install/e2e_test
 source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
+CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
+echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
+
 # Run test
-CONFIG_FILE="src/agnocast_e2e_test/test/config_test_1to1_with_ros2sub.yaml"
+CONFIG_FILE="src/agnocast_e2e_test/test/config_test_1to1.yaml"
 show_config() {
     echo "----------------------------------------------" | sudo tee /dev/kmsg
-    cat $CONFIG_FILE | sudo tee /dev/kmsg
+    if [ "$BRIDGE_OFF" = true ]; then
+        grep -v "use_agnocast_pub" "$CONFIG_FILE" | sudo tee /dev/kmsg
+    else
+        cat "$CONFIG_FILE" | sudo tee /dev/kmsg
+    fi
     echo "----------------------------------------------" | sudo tee /dev/kmsg
 }
 
 FAILURE_COUNT=0
 if [ "$RUN_SINGLE" = true ]; then
     show_config
-    launch_test src/agnocast_e2e_test/test/test_1to1_with_ros2sub.py
+    launch_test src/agnocast_e2e_test/test/test_1to1.py
     if [ $? -ne 0 ]; then
         echo "Test failed" | sudo tee /dev/kmsg
         exit 1
     fi
 else
-    USE_AGNOCAST_PUB=(true false)
+    # When bridge is OFF, only test Agnocast publisher
+    if [ "$BRIDGE_OFF" = true ]; then
+        USE_AGNOCAST_PUB=(true)
+    else
+        USE_AGNOCAST_PUB=(true false)
+    fi
+    
     LAUNCH_PUB_BEFORE_SUB=(true false)
     PUB_QOS_DEPTH=(1 10)
     PUB_TRANSIENT_LOCAL=(true false)
@@ -74,6 +95,8 @@ else
     USE_TAKE_SUB=(true false)
 
     COUNT=0
+    TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
+    
     for use_agnocast_pub in ${USE_AGNOCAST_PUB[@]}; do
         for launch_pub_before_sub in ${LAUNCH_PUB_BEFORE_SUB[@]}; do
             for pub_qos_depth in ${PUB_QOS_DEPTH[@]}; do
@@ -89,9 +112,9 @@ else
                                 sed -i "s/sub_qos_depth:.*/sub_qos_depth: $sub_qos_depth/g" $CONFIG_FILE
                                 sed -i "s/sub_transient_local:.*/sub_transient_local: $sub_transient_local/g" $CONFIG_FILE
                                 sed -i "s/use_take_sub:.*/use_take_sub: $use_take_sub/g" $CONFIG_FILE
-                                echo "====================== $COUNT / 128 ======================" | sudo tee /dev/kmsg
+                                echo "====================== $COUNT / $TOTAL_TESTS ======================" | sudo tee /dev/kmsg
                                 show_config
-                                launch_test src/agnocast_e2e_test/test/test_1to1_with_ros2sub.py
+                                launch_test src/agnocast_e2e_test/test/test_1to1.py
 
                                 if [ $? -ne 0 ]; then
                                     echo "Test failed." | sudo tee /dev/kmsg

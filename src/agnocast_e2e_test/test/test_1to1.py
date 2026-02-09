@@ -10,7 +10,11 @@ from launch.actions import SetEnvironmentVariable, TimerAction
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config_test_1to1_with_ros2sub.yaml')
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config_test_1to1.yaml')
+
+def check_bridge_mode() -> bool:
+    bridge_mode = os.environ.get('AGNOCAST_BRIDGE_MODE', '').lower()
+    return bridge_mode == '0' or bridge_mode == 'off'
 
 USE_AGNOCAST_PUB: bool
 EXPECT_INIT_PUB_NUM: int
@@ -20,6 +24,7 @@ EXPECT_SUB_NUM: int
 EXPECT_INIT_ROS2_SUB_NUM: int
 EXPECT_ROS2_SUB_NUM: int
 
+BRIDGE_OFF = check_bridge_mode()
 TIMEOUT = os.environ.get('STRESS_TEST_TIMEOUT')
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 
@@ -88,6 +93,7 @@ def generate_test_description():
                             "transient_local": config['pub_transient_local'],
                             "init_pub_num": EXPECT_INIT_PUB_NUM,
                             "pub_num": EXPECT_PUB_NUM,
+                            "planned_pub_count": 0 if BRIDGE_OFF else 1, # Check ROS2 sub connection. Create ROS2 subscriber only if bridge is ON.
                             "forever": FOREVER
                         }
                     ],
@@ -131,30 +137,35 @@ def generate_test_description():
         actions=[pub_container]
     )
 
-    sub_nodes_actions = [
-        ComposableNodeContainer(
-            name='test_ros2_listener_container',
-            namespace='',
-            package='rclcpp_components',
-            executable='component_container',
-            composable_node_descriptions=[
-                    ComposableNode(
-                        package='agnocast_e2e_test',
-                        plugin='TestROS2Subscriber',
-                        name='test_ros2_listener_node',
-                        parameters=[
-                            {
-                                "qos_depth": config['sub_qos_depth'],
-                                "transient_local": config['sub_transient_local'],
-                                "forever": FOREVER,
-                                "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
-                            }
-                        ],
-                    )
-            ],
-            output='screen',
+    sub_nodes_actions = []
+    
+    # Only add ROS2 subscriber if bridge is ON
+    if not BRIDGE_OFF:
+        sub_nodes_actions.append(
+            ComposableNodeContainer(
+                name='test_ros2_listener_container',
+                namespace='',
+                package='rclcpp_components',
+                executable='component_container',
+                composable_node_descriptions=[
+                        ComposableNode(
+                            package='agnocast_e2e_test',
+                            plugin='TestROS2Subscriber',
+                            name='test_ros2_listener_node',
+                            parameters=[
+                                {
+                                    "qos_depth": config['sub_qos_depth'],
+                                    "transient_local": config['sub_transient_local'],
+                                    "forever": FOREVER,
+                                    "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
+                                }
+                            ],
+                        )
+                ],
+                output='screen',
+            )
         )
-    ]
+    
     if config['use_take_sub']:
         sub_nodes_actions.append(
             ComposableNodeContainer(
@@ -219,6 +230,16 @@ def generate_test_description():
         actions=sub_nodes_actions
     )
 
+    # Bridge OFF: only Agnocast subscriber
+    # Bridge ON: ROS2 subscriber and Agnocast subscriber
+    context = {
+        'test_pub': pub_node.actions[0],
+        'test_sub': sub_nodes.actions[-1],
+    }
+
+    if not BRIDGE_OFF:
+        context['test_ros2_sub'] = sub_nodes.actions[0]
+
     return (
         LaunchDescription(
             [
@@ -228,11 +249,7 @@ def generate_test_description():
                 TimerAction(period=ready_delay, actions=[launch_testing.actions.ReadyToTest()])
             ]
         ),
-        {
-            'test_pub': pub_node.actions[0],
-            'test_ros2_sub': sub_nodes.actions[0],
-            'test_sub': sub_nodes.actions[1],
-        }
+        context
     )
 
 
@@ -354,3 +371,5 @@ class Test1To1(unittest.TestCase):
                 ])
                 self.assertIn("incompatible QoS", full_log)
 
+if BRIDGE_OFF:
+    del Test1To1.test_ros2_sub
