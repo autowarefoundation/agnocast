@@ -29,6 +29,7 @@ find_package(rosgraph_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(glog REQUIRED)
 
 add_library(agnocast SHARED
   src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
@@ -64,6 +65,7 @@ add_executable(agnocast_component_container src/agnocast_component_container.cpp
 
 target_link_libraries(agnocast_component_container
   agnocast
+  glog::glog
 )
 
 ament_target_dependencies(agnocast_component_container rclcpp rclcpp_components)
@@ -72,6 +74,7 @@ add_executable(agnocast_component_container_mt src/agnocast_component_container_
 
 target_link_libraries(agnocast_component_container_mt
   agnocast
+  glog::glog
 )
 
 ament_target_dependencies(agnocast_component_container_mt rclcpp rclcpp_components)
@@ -80,6 +83,7 @@ add_executable(agnocast_component_container_cie src/agnocast_component_container
 
 target_link_libraries(agnocast_component_container_cie
   agnocast
+  glog::glog
 )
 
 ament_target_dependencies(agnocast_component_container_cie rclcpp rclcpp_components cie_thread_configurator)

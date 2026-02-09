@@ -18,6 +18,10 @@
   <depend>class_loader</depend>
   <depend>agnocastlib</depend>
 
+  <build_depend>libgoogle-glog-dev</build_depend>
+  <build_export_depend>libgoogle-glog-dev</build_export_depend>
+  <exec_depend>libgoogle-glog-dev</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>

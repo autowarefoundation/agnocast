@@ -2,8 +2,13 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/component_manager.hpp"
 
+#include <glog/logging.h>
+
 int main(int argc, char * argv[])
 {
+  google::InitGoogleLogging(argv[0]);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  google::InstallFailureSignalHandler();
+
   try {
     rclcpp::init(argc, argv);
 

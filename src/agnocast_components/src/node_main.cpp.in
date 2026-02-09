@@ -3,6 +3,7 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
+#include <glog/logging.h>
 
 #include "agnocast/agnocast.hpp"
 #include "class_loader/class_loader.hpp"
@@ -14,6 +15,9 @@
 
 int main(int argc, char * argv[])
 {
+  google::InitGoogleLogging(argv[0]);
+  google::InstallFailureSignalHandler();
+
   auto args = rclcpp::init_and_remove_ros_arguments(argc, argv);
   rclcpp::Logger logger = rclcpp::get_logger(NODE_MAIN_LOGGER_NAME);
 
