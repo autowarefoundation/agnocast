@@ -6,7 +6,7 @@
   <name>agnocast_bridge_plugins</name>
   <version>0.0.0</version>
   <description>Bridge plugins for Agnocast Performance Bridge mode</description>
-  <maintainer email="maintainer@example.com">Maintainer Name</maintainer>
+  <maintainer email="maintainer@@example.com">Maintainer Name</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
