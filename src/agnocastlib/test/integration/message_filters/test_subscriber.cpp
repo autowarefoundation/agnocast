@@ -241,3 +241,70 @@ TEST_F(AgnocastSubscriberTest, multipleCallbacks)
   h1.reset();
   h2.reset();
 }
+
+// ============================================================================
+// Tests for agnocast::Node
+// ============================================================================
+
+class AgnocastNodeSubscriberTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    agnocast::init(0, nullptr);
+    node_ = std::make_shared<agnocast::Node>("test_agnocast_node");
+    executor_ = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+    executor_->add_node(node_);
+
+    // Start spinning in a background thread
+    spin_thread_ = std::thread([this]() { executor_->spin(); });
+  }
+
+  void TearDown() override
+  {
+    executor_->cancel();
+    if (spin_thread_.joinable()) {
+      spin_thread_.join();
+    }
+    executor_.reset();
+    node_.reset();
+    // TODO(Koichi98): Call agnocast::shutdown() once available.
+    // See https://github.com/tier4/agnocast/issues/1019
+  }
+
+  void waitFor(
+    std::function<bool()> condition,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+  {
+    auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < timeout) {
+      if (condition()) {
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+
+  std::shared_ptr<agnocast::Node> node_;
+  std::shared_ptr<agnocast::AgnocastOnlySingleThreadedExecutor> executor_;
+  std::thread spin_thread_;
+};
+
+TEST_F(AgnocastNodeSubscriberTest, simple)
+{
+  Helper h;
+  Subscriber<Msg, agnocast::Node> sub(node_, "test_topic_an");
+  sub.registerCallback(std::bind(&Helper::cb, &h, _1));
+
+  auto pub = node_->create_publisher<Msg>("test_topic_an", rclcpp::QoS(10));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  auto msg = pub->borrow_loaned_message();
+  msg->data = 42;
+  pub->publish(std::move(msg));
+
+  waitFor([&h]() { return h.count_ > 0; });
+
+  EXPECT_GT(h.count_, 0);
+}
