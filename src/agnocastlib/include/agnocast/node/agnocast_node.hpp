@@ -1,6 +1,8 @@
 #pragma once
 
+#include "agnocast/agnocast_client.hpp"
 #include "agnocast/agnocast_publisher.hpp"
+#include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/node/agnocast_arguments.hpp"
@@ -381,6 +383,24 @@ public:
     register_timer_info(timer_id, timer, period_ns, group, clock);
 
     return timer;
+  }
+
+  template <typename ServiceT>
+  typename agnocast::Client<ServiceT>::SharedPtr create_client(
+    const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return std::make_shared<Client<ServiceT>>(this, service_name, qos, group);
+  }
+
+  template <typename ServiceT, typename Func>
+  typename agnocast::Service<ServiceT>::SharedPtr create_service(
+    const std::string & service_name, Func && callback,
+    const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return std::make_shared<Service<ServiceT>>(
+      this, service_name, std::forward<Func>(callback), qos, group);
   }
 
 private:

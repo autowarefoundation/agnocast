@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <atomic>
@@ -18,6 +19,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 namespace agnocast
 {
@@ -79,17 +81,24 @@ private:
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
-  rclcpp::Node * node_;
+  std::variant<rclcpp::Node *, agnocast::Node *> node_;
+  rclcpp::Logger logger_;
+  const std::string node_name_;
+  rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
   const std::string service_name_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename BasicSubscription<ResponseT, NoBridgeRequestPolicy>::SharedPtr subscriber_;
 
 public:
+  template <typename NodeT>
   Client(
-    rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos,
+    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos,
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
-    service_name_(node_->get_node_services_interface()->resolve_service_name(service_name))
+    logger_(node->get_logger()),
+    node_name_(node->get_fully_qualified_name()),
+    node_base_(node->get_node_base_interface()),
+    service_name_(node->get_node_services_interface()->resolve_service_name(service_name))
   {
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
@@ -102,7 +111,7 @@ public:
       auto it = seqno2_response_call_info_.find(response->_sequence_number);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(node_->get_logger(), "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(logger_, "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
@@ -118,16 +127,19 @@ public:
     };
 
     SubscriptionOptions options{group};
-    std::string topic_name =
-      create_service_response_topic_name(service_name_, node->get_fully_qualified_name());
-    subscriber_ = std::make_shared<BasicSubscription<ResponseT, NoBridgeRequestPolicy>>(
-      node_, topic_name, qos, std::move(subscriber_callback), options);
+    std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
+    std::visit(
+      [this, &topic_name, &qos, cb = std::move(subscriber_callback), &options](auto * node) {
+        subscriber_ = std::make_shared<BasicSubscription<ResponseT, NoBridgeRequestPolicy>>(
+          node, topic_name, qos, std::move(cb), options);
+      },
+      node_);
   }
 
   ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
-    ipc_shared_ptr<RequestT> request = publisher_->borrow_loaned_message();
-    request->_node_name = node_->get_fully_qualified_name();
+    auto request = publisher_->borrow_loaned_message();
+    request->_node_name = node_name_;
     request->_sequence_number = next_sequence_number_.fetch_add(1);
     return static_ipc_shared_ptr_cast<typename ServiceT::Request>(std::move(request));
   }
@@ -141,7 +153,7 @@ public:
     std::chrono::duration<RepT, RatioT> timeout = std::chrono::nanoseconds(-1)) const
   {
     return wait_for_service_nanoseconds(
-      node_->get_node_base_interface()->get_context(), service_name_,
+      node_base_->get_context(), service_name_,
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
 

@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_client.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/node/agnocast_context.hpp"
 
 #include <array>
 #include <chrono>
@@ -57,7 +58,8 @@ bool wait_for_service_nanoseconds(
   nanoseconds time_to_wait =
     timeout > nanoseconds(0) ? timeout - (steady_clock::now() - start) : nanoseconds::max();
   do {
-    if (!rclcpp::ok(context)) {
+    // TODO(Koichi98): agnocast::ok and agnocast::shutdown are planned to be implemented.
+    if (context ? !rclcpp::ok(context) : false) {
       return false;
     }
     nanoseconds interval = std::min(time_to_wait, duration_cast<nanoseconds>(100ms));

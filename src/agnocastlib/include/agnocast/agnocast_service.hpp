@@ -11,6 +11,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace agnocast
 {
@@ -34,7 +35,7 @@ private:
   using ServiceResponsePublisher =
     agnocast::BasicPublisher<ResponseT, agnocast::NoBridgeRequestPolicy>;
 
-  rclcpp::Node * node_;
+  std::variant<rclcpp::Node *, agnocast::Node *> node_;
   const std::string service_name_;
   const rclcpp::QoS qos_;
   std::mutex publishers_mtx_;
@@ -44,12 +45,12 @@ private:
 public:
   using SharedPtr = std::shared_ptr<Service<ServiceT>>;
 
-  template <typename Func>
+  template <typename Func, typename NodeT>
   Service(
-    rclcpp::Node * node, const std::string & service_name, Func && callback,
-    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group)
+    NodeT * node, const std::string & service_name, Func && callback, const rclcpp::QoS & qos,
+    rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
-    service_name_(node_->get_node_services_interface()->resolve_service_name(service_name)),
+    service_name_(node->get_node_services_interface()->resolve_service_name(service_name)),
     qos_(qos)
   {
     static_assert(
@@ -69,9 +70,13 @@ public:
           if (it == publishers_.end()) {
             std::string topic_name =
               create_service_response_topic_name(service_name_, request->_node_name);
-            agnocast::PublisherOptions pub_options;
-            publisher =
-              std::make_shared<ServiceResponsePublisher>(node_, topic_name, qos_, pub_options);
+            std::visit(
+              [this, &publisher, &topic_name](auto * node) {
+                agnocast::PublisherOptions pub_options;
+                publisher =
+                  std::make_shared<ServiceResponsePublisher>(node, topic_name, qos_, pub_options);
+              },
+              node_);
             publishers_[request->_node_name] = publisher;
           } else {
             publisher = it->second;

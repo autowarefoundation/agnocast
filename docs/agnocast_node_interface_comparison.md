@@ -149,8 +149,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 | Feature | agnocast::Node | Support Level | Planned | Notes |
 |---------|----------------|---------------|---------|-------|
-| `add_client()` | ✗ | **Throws Exception** | No | Use `agnocast::create_client()` |
-| `add_service()` | ✗ | **Throws Exception** | No | Use `agnocast::create_service()` |
+| `add_client()` | ✗ | **Throws Exception** | No | Use `agnocast::create_client()` or `agnocast::Node::create_client()` |
+| `add_service()` | ✗ | **Throws Exception** | No | Use `agnocast::create_service()` or `agnocast::Node::create_service()` |
 | `resolve_service_name()` | ✓ | **Full Support** | - | |
 
 ---
@@ -303,8 +303,8 @@ The following tables compare methods that are **directly defined** in each class
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
 | `create_wall_timer()` | ✓ | ✓ | Return type differs (`uint32_t` timer_id vs `rclcpp::TimerBase::SharedPtr`) |
-| `create_client<ServiceT>()` | ✓ | ✗ | Use `agnocast::create_client()` |
-| `create_service<ServiceT>()` | ✓ | ✗ | Use `agnocast::create_service()` |
+| `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client) |
+| `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service) |
 
 #### Graph API (ROS Network Discovery)
 
