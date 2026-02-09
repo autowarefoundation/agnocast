@@ -189,7 +189,7 @@ jobs:
         fi
         gcovr -r . --exclude ".*/test/.*" --exclude ".*/_deps/.*" $GCOVR_EXTRA_ARGS --txt > coverage.txt
         coverage_text=$(<coverage.txt)
-        gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e '## Coverage Report (${{ env.ROS_DISTRO }})\n```\n'"$coverage_text"'\n```')"
+        gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e '<details>\n<summary>Coverage Report (${{ env.ROS_DISTRO }})</summary>\n\n```\n'"$coverage_text"'\n```\n</details>')"
 
     # ===== agnocast_heaphook =====
 
