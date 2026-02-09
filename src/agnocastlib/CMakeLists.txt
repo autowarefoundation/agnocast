@@ -141,6 +141,7 @@ if(BUILD_TESTING)
   # Message filters unit tests (with ioctl mock)
   ament_add_gmock(test_unit_message_filters_${PROJECT_NAME}
     test/unit/message_filters/test_simple.cpp
+    test/unit/message_filters/test_pass_through.cpp
     test/unit/message_filters/test_exact_time.cpp
     test/unit/message_filters/test_approximate_time.cpp
     test/unit/message_filters/test_synchronizer.cpp
