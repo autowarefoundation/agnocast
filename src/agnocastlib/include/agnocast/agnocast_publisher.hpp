@@ -117,7 +117,8 @@ public:
     for (auto & [_, t] : opened_mqs_) {
       mqd_t mq = std::get<0>(t);
       if (mq_close(mq) == -1) {
-        RCLCPP_ERROR(logger, "mq_close failed: %s", strerror(errno));
+        RCLCPP_ERROR_STREAM(
+          logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
       }
     }
 

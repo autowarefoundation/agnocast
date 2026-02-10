@@ -48,6 +48,8 @@ public:
   void set_mq_handler(EventCallback cb);
   void set_signal_handler(SignalCallback cb);
 
+  const std::string & get_mq_name() const { return mq_name_; }
+
 protected:
   rclcpp::Logger logger_;
   virtual void handle_signal();
@@ -257,7 +259,8 @@ inline void IpcEventLoopBase::cleanup_resources()
 
   if (mq_fd_ != -1) {
     if (mq_close(mq_fd_) == -1) {
-      RCLCPP_WARN(logger_, "Failed to close mq_fd: %s", strerror(errno));
+      RCLCPP_WARN_STREAM(
+        logger_, "Failed to close mq_fd for mq_name='" << mq_name_ << "': " << strerror(errno));
     }
     mq_fd_ = -1;
   }

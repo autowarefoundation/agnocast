@@ -45,16 +45,19 @@ NodeForExecutorTest::~NodeForExecutorTest()
 {
   for (auto & mq_sender : mq_senders_) {
     if (mq_close(mq_sender.second) == -1) {
-      std::cerr << "mq_close failed: " << strerror(errno) << std::endl;
+      std::cerr << "mq_close failed for mq_name='" << mq_sender.first << "': " << strerror(errno)
+                << std::endl;
     }
   }
 
   for (auto & mq_receiver : mq_receivers_) {
     if (mq_close(mq_receiver.first) == -1) {
-      std::cerr << "mq_close failed: " << strerror(errno) << std::endl;
+      std::cerr << "mq_close failed for mq_name='" << mq_receiver.second << "': " << strerror(errno)
+                << std::endl;
     }
     if (mq_unlink(mq_receiver.second.c_str()) == -1) {
-      std::cerr << "mq_unlink failed: " << strerror(errno) << std::endl;
+      std::cerr << "mq_unlink failed for mq_name='" << mq_receiver.second
+                << "': " << strerror(errno) << std::endl;
     }
   }
 }
@@ -91,7 +94,7 @@ mqd_t NodeForExecutorTest::open_mq_for_receiver(const int64_t cb_i)
   const int mq_mode = 0666;
   mqd_t mq = mq_open(mq_name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK, mq_mode, &attr);
   if (mq == -1) {
-    std::cerr << "mq_open failed: " << strerror(errno) << std::endl;
+    std::cerr << "mq_open failed for mq_name='" << mq_name << "': " << strerror(errno) << std::endl;
     exit(EXIT_FAILURE);
   }
   mq_receivers_.push_back(std::make_pair(mq, mq_name));
@@ -118,7 +121,8 @@ void NodeForExecutorTest::agnocast_timer_cb()
     } else {
       mq = mq_open(mq_receiver.second.c_str(), O_WRONLY | O_NONBLOCK);
       if (mq == -1) {
-        std::cerr << "mq_open failed: " << strerror(errno) << std::endl;
+        std::cerr << "mq_open failed for mq_name='" << mq_receiver.second
+                  << "': " << strerror(errno) << std::endl;
         exit(EXIT_FAILURE);
       }
       mq_senders_.insert({mq_receiver.second, mq});
@@ -127,7 +131,8 @@ void NodeForExecutorTest::agnocast_timer_cb()
     agnocast::MqMsgAgnocast mq_msg = {};
     if (mq_send(mq, reinterpret_cast<char *>(&mq_msg), 0 /*msg_len*/, 0) == -1) {
       if (errno != EAGAIN) {
-        std::cerr << "mq_send failed: " << strerror(errno) << std::endl;
+        std::cerr << "mq_send failed for mq_name='" << mq_receiver.second
+                  << "': " << strerror(errno) << std::endl;
         exit(EXIT_FAILURE);
       }
     }

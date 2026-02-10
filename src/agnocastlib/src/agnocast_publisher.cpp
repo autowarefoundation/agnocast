@@ -94,7 +94,10 @@ union ioctl_publish_msg_args publish_core(
         // Right after a subscriber is added, its message queue has not been created yet. Therefore,
         // the `mq_open` call above might fail. In that case, we log a warning and continue, but if
         // the warning keeps appearing, something must be wrong.
-        RCLCPP_WARN(logger, "mq_open failed: %s", strerror(errno));
+        RCLCPP_WARN_STREAM(
+          logger, "mq_open failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
+                                               << ", mq_name='" << mq_name
+                                               << "'): " << strerror(errno));
         continue;
       }
       opened_mqs.insert({subscriber_id, {mq, true}});
@@ -107,7 +110,9 @@ union ioctl_publish_msg_args publish_core(
       // hasn't received it yet. Thus, there's no need to send it again since the notification has
       // already been sent.
       if (errno != EAGAIN) {
-        RCLCPP_ERROR(logger, "mq_send failed: %s", strerror(errno));
+        RCLCPP_ERROR_STREAM(
+          logger, "mq_send failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
+                                               << "): " << strerror(errno));
       }
     }
   }
@@ -118,7 +123,9 @@ union ioctl_publish_msg_args publish_core(
     if (!keep) {
       mqd_t mq = std::get<0>(it->second);
       if (mq_close(mq) == -1) {
-        RCLCPP_ERROR(logger, "mq_close failed: %s", strerror(errno));
+        RCLCPP_ERROR_STREAM(
+          logger, "mq_close failed for topic '" << topic_name << "' (subscriber_id=" << it->first
+                                                << "): " << strerror(errno));
       }
       it = opened_mqs.erase(it);
     } else {
