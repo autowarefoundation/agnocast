@@ -20,6 +20,8 @@
 ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
 : Node("thread_configurator_node"), unapplied_num_(0), cgroup_num_(0)
 {
+  apply_rt_throttling(yaml);
+
   YAML::Node callback_groups = yaml["callback_groups"];
   YAML::Node non_ros_threads = yaml["non_ros_threads"];
 
@@ -135,6 +137,45 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     subs_for_each_domain_.push_back(sub);
 
     RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
+  }
+}
+
+void ThreadConfiguratorNode::apply_rt_throttling(const YAML::Node & yaml)
+{
+  if (!yaml["rt_throttling"]) {
+    return;
+  }
+
+  const auto & rt_bw = yaml["rt_throttling"];
+
+  // Set period first: if the new runtime exceeds the current period,
+  // writing runtime will fail unless the period is expanded first.
+  if (rt_bw["period_us"]) {
+    int period_us = rt_bw["period_us"].as<int>();
+    std::ofstream period_file("/proc/sys/kernel/sched_rt_period_us");
+    if (!period_file) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to open /proc/sys/kernel/sched_rt_period_us: %s",
+        strerror(errno));
+    } else if (!(period_file << period_us)) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to write sched_rt_period_us: %s", strerror(errno));
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Set sched_rt_period_us to %d", period_us);
+    }
+  }
+
+  if (rt_bw["runtime_us"]) {
+    int runtime_us = rt_bw["runtime_us"].as<int>();
+    std::ofstream runtime_file("/proc/sys/kernel/sched_rt_runtime_us");
+    if (!runtime_file) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to open /proc/sys/kernel/sched_rt_runtime_us: %s",
+        strerror(errno));
+    } else if (!(runtime_file << runtime_us)) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to write sched_rt_runtime_us: %s", strerror(errno));
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Set sched_rt_runtime_us to %d", runtime_us);
+    }
   }
 }
 

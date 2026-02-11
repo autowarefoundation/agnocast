@@ -105,6 +105,13 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
 
   out << YAML::EndMap;
 
+  // Add rt_throttling section
+  out << YAML::Key << "rt_throttling";
+  out << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "runtime_us" << YAML::Value << 950000;
+  out << YAML::Key << "period_us" << YAML::Value << 1000000;
+  out << YAML::EndMap;
+
   // Add callback_groups section
   out << YAML::Key << "callback_groups";
   out << YAML::Value << YAML::BeginSeq;

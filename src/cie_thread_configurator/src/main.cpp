@@ -70,6 +70,8 @@ static void spin_thread_configurator_node(const std::string & config_filename)
               << std::endl;
   }
 
+  std::cout << "rt_throttling:" << std::endl;
+  std::cout << config["rt_throttling"] << std::endl;
   std::cout << "callback_groups:" << std::endl;
   std::cout << config["callback_groups"] << std::endl;
   std::cout << "non_ros_threads:" << std::endl;
