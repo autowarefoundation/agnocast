@@ -40,7 +40,7 @@ public:
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
 private:
-  void apply_rt_throttling(const YAML::Node & yaml);
+  void validate_rt_throttling(const YAML::Node & yaml);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
   bool issue_syscalls(const ThreadConfig & config);
   void callback_group_callback(

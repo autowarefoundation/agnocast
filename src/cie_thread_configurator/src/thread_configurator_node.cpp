@@ -14,13 +14,14 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
 ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
 : Node("thread_configurator_node"), unapplied_num_(0), cgroup_num_(0)
 {
-  apply_rt_throttling(yaml);
+  validate_rt_throttling(yaml);
 
   YAML::Node callback_groups = yaml["callback_groups"];
   YAML::Node non_ros_threads = yaml["non_ros_threads"];
@@ -140,7 +141,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   }
 }
 
-void ThreadConfiguratorNode::apply_rt_throttling(const YAML::Node & yaml)
+void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
 {
   if (!yaml["rt_throttling"]) {
     return;
@@ -148,34 +149,72 @@ void ThreadConfiguratorNode::apply_rt_throttling(const YAML::Node & yaml)
 
   const auto & rt_bw = yaml["rt_throttling"];
 
-  // Set period first: if the new runtime exceeds the current period,
-  // writing runtime will fail unless the period is expanded first.
+  // Writing to /proc/sys/kernel/sched_rt_{period,runtime}_us requires root (uid 0).
+  // Linux capabilities (CAP_SYS_ADMIN etc.) cannot bypass the proc sysctl DAC check.
+  // Instead, we validate that the current kernel values match the config and guide the
+  // user to apply them via /etc/sysctl.d/ if they differ.
+
+  auto read_sysctl = [this](const std::string & path) -> std::optional<int> {
+    std::ifstream file(path);
+    if (!file) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to open %s: %s", path.c_str(), strerror(errno));
+      return std::nullopt;
+    }
+    int value;
+    if (!(file >> value)) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to read integer from %s", path.c_str());
+      return std::nullopt;
+    }
+    return value;
+  };
+
+  bool mismatch = false;
+
   if (rt_bw["period_us"]) {
-    int period_us = rt_bw["period_us"].as<int>();
-    std::ofstream period_file("/proc/sys/kernel/sched_rt_period_us");
-    if (!period_file) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to open /proc/sys/kernel/sched_rt_period_us: %s",
-        strerror(errno));
-    } else if (!(period_file << period_us)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to write sched_rt_period_us: %s", strerror(errno));
-    } else {
-      RCLCPP_INFO(this->get_logger(), "Set sched_rt_period_us to %d", period_us);
+    int expected = rt_bw["period_us"].as<int>();
+    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_period_us");
+    if (actual.has_value()) {
+      if (actual.value() != expected) {
+        RCLCPP_ERROR(
+          this->get_logger(), "sched_rt_period_us mismatch: expected %d, actual %d", expected,
+          actual.value());
+        mismatch = true;
+      } else {
+        RCLCPP_INFO(this->get_logger(), "sched_rt_period_us is already set to %d", expected);
+      }
     }
   }
 
   if (rt_bw["runtime_us"]) {
-    int runtime_us = rt_bw["runtime_us"].as<int>();
-    std::ofstream runtime_file("/proc/sys/kernel/sched_rt_runtime_us");
-    if (!runtime_file) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to open /proc/sys/kernel/sched_rt_runtime_us: %s",
-        strerror(errno));
-    } else if (!(runtime_file << runtime_us)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to write sched_rt_runtime_us: %s", strerror(errno));
-    } else {
-      RCLCPP_INFO(this->get_logger(), "Set sched_rt_runtime_us to %d", runtime_us);
+    int expected = rt_bw["runtime_us"].as<int>();
+    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_runtime_us");
+    if (actual.has_value()) {
+      if (actual.value() != expected) {
+        RCLCPP_ERROR(
+          this->get_logger(), "sched_rt_runtime_us mismatch: expected %d, actual %d", expected,
+          actual.value());
+        mismatch = true;
+      } else {
+        RCLCPP_INFO(this->get_logger(), "sched_rt_runtime_us is already set to %d", expected);
+      }
     }
+  }
+
+  if (mismatch) {
+    std::string message =
+      "rt_throttling values do not match the configuration. "
+      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
+      "(or run 'sudo sysctl --system'):\n";
+
+    if (rt_bw["period_us"]) {
+      message +=
+        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
+    }
+    if (rt_bw["runtime_us"]) {
+      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
+    }
+
+    RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
   }
 }
 
