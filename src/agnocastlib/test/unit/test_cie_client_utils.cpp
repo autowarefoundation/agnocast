@@ -1,4 +1,4 @@
-#include "cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast/cie_client_utils.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -31,7 +31,7 @@ TEST_F(CreateCallbackGroupIdTest, EmptyGroup)
   std::vector<std::string> agnocast_topics;
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node");
@@ -49,7 +49,7 @@ TEST_F(CreateCallbackGroupIdTest, SubscriptionOnly)
   std::vector<std::string> agnocast_topics;
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)");
@@ -64,7 +64,7 @@ TEST_F(CreateCallbackGroupIdTest, TimerOnly)
   std::vector<std::string> agnocast_topics;
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node@Timer(1000000000)");
@@ -85,7 +85,7 @@ TEST_F(CreateCallbackGroupIdTest, MultipleEntriesSorted)
   std::vector<std::string> agnocast_topics;
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert: entries should be sorted alphabetically
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)@Subscription(/topic_b)@Timer(1000000000)");
@@ -98,7 +98,7 @@ TEST_F(CreateCallbackGroupIdTest, AgnocastSubscription)
   std::vector<std::string> agnocast_topics = {"/topic_a"};
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)");
@@ -111,7 +111,7 @@ TEST_F(CreateCallbackGroupIdTest, AgnocastService)
   std::vector<std::string> agnocast_topics = {"/AGNOCAST_SRV_REQUEST/my_service"};
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node@Service(/my_service)");
@@ -124,7 +124,7 @@ TEST_F(CreateCallbackGroupIdTest, AgnocastClient)
   std::vector<std::string> agnocast_topics = {"/AGNOCAST_SRV_RESPONSE/my_service_SEP_client_node"};
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id, "/test_node@Client(/my_service)");
@@ -145,10 +145,8 @@ TEST_F(CreateCallbackGroupIdTest, AgnocastAndRclcppProduceSameOutput)
   std::vector<std::string> agnocast_topics = {"/topic_a"};
 
   // Act
-  auto id_rclcpp =
-    cie_thread_configurator::create_callback_group_id(group_rclcpp, node_, empty_agnocast_topics);
-  auto id_agnocast =
-    cie_thread_configurator::create_callback_group_id(group_agnocast, node_, agnocast_topics);
+  auto id_rclcpp = agnocast::create_callback_group_id(group_rclcpp, node_, empty_agnocast_topics);
+  auto id_agnocast = agnocast::create_callback_group_id(group_agnocast, node_, agnocast_topics);
 
   // Assert
   EXPECT_EQ(id_rclcpp, id_agnocast);
@@ -165,8 +163,22 @@ TEST_F(CreateCallbackGroupIdTest, MixedAgnocastAndRclcppSorted)
   std::vector<std::string> agnocast_topics = {"/topic_a"};
 
   // Act
-  auto id = cie_thread_configurator::create_callback_group_id(group, node_, agnocast_topics);
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
 
   // Assert: both labeled "Subscription" and sorted alphabetically
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)@Subscription(/topic_b)");
+}
+
+TEST_F(CreateCallbackGroupIdTest, NodeBaseInterfaceOverload)
+{
+  // Arrange
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  std::vector<std::string> agnocast_topics;
+
+  // Act: Call the NodeBaseInterface overload directly
+  auto id =
+    agnocast::create_callback_group_id(group, node_->get_node_base_interface(), agnocast_topics);
+
+  // Assert
+  EXPECT_EQ(id, "/test_node");
 }

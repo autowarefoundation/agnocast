@@ -1,7 +1,7 @@
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
 #include <agnocast/agnocast_single_threaded_executor.hpp>
-#include <cie_thread_configurator/cie_thread_configurator.hpp>
+#include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 namespace agnocast
@@ -63,7 +63,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }  // guard mutex_
 
   std::mutex client_publisher_mutex;
-  auto client_publisher = cie_thread_configurator::create_client_publisher();
+  auto client_publisher = agnocast::create_rclcpp_client_publisher();
   threads.reserve(groups_and_nodes.size());
 
   {
@@ -71,8 +71,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
     for (auto & [group, node] : groups_and_nodes) {
       std::shared_ptr<rclcpp::Executor> executor;
       auto agnocast_topics = agnocast::get_agnocast_topics_by_group(group);
-      auto callback_group_id =
-        cie_thread_configurator::create_callback_group_id(group, node, agnocast_topics);
+      auto callback_group_id = agnocast::create_callback_group_id(group, node, agnocast_topics);
 
       if (agnocast_topics.empty()) {
         executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -93,8 +92,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
 
         {
           std::lock_guard<std::mutex> lock{client_publisher_mutex};
-          cie_thread_configurator::publish_callback_group_info(
-            client_publisher, tid, callback_group_id);
+          agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
         }
 
         executor->spin();
