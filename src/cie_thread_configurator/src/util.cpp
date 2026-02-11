@@ -3,12 +3,14 @@
 
 #include "cie_config_msgs/msg/callback_group_info.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace cie_thread_configurator
 {
@@ -18,34 +20,32 @@ std::string create_callback_group_id(
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node,
   const std::vector<std::string> & agnocast_topics)
 {
-  std::stringstream ss;
-
   std::string ns = std::string(node->get_namespace());
   if (ns != "/") {
     ns = ns + "/";
   }
 
-  ss << ns << node->get_name() << "@";
+  std::vector<std::string> entries;
 
-  auto sub_func = [&ss](const rclcpp::SubscriptionBase::SharedPtr & sub) {
-    ss << "Subscription(" << sub->get_topic_name() << ")@";
+  auto sub_func = [&entries](const rclcpp::SubscriptionBase::SharedPtr & sub) {
+    entries.push_back("Subscription(" + std::string(sub->get_topic_name()) + ")");
   };
 
-  auto service_func = [&ss](const rclcpp::ServiceBase::SharedPtr & service) {
-    ss << "Service(" << service->get_service_name() << ")@";
+  auto service_func = [&entries](const rclcpp::ServiceBase::SharedPtr & service) {
+    entries.push_back("Service(" + std::string(service->get_service_name()) + ")");
   };
 
-  auto client_func = [&ss](const rclcpp::ClientBase::SharedPtr & client) {
-    ss << "Client(" << client->get_service_name() << ")@";
+  auto client_func = [&entries](const rclcpp::ClientBase::SharedPtr & client) {
+    entries.push_back("Client(" + std::string(client->get_service_name()) + ")");
   };
 
-  auto timer_func = [&ss](const rclcpp::TimerBase::SharedPtr & timer) {
+  auto timer_func = [&entries](const rclcpp::TimerBase::SharedPtr & timer) {
     std::shared_ptr<const rcl_timer_t> timer_handle = timer->get_timer_handle();
     int64_t period;
     rcl_ret_t ret = rcl_timer_get_period(timer_handle.get(), &period);
     (void)ret;
 
-    ss << "Timer(" << period << ")@";
+    entries.push_back("Timer(" + std::to_string(period) + ")");
   };
 
   auto waitable_func = [](auto &&) {};
@@ -53,22 +53,29 @@ std::string create_callback_group_id(
   group->collect_all_ptrs(sub_func, service_func, client_func, timer_func, waitable_func);
 
   // Agnocast Callbacks
-  {
-    for (const auto & topic : agnocast_topics) {
-      if (topic.rfind("/AGNOCAST_SRV_REQUEST", 0) == 0) {
-        ss << "AgnocastService(" << topic << ")@";
-      } else if (topic.rfind("/AGNOCAST_SRV_RESPONSE", 0) == 0) {
-        ss << "AgnocastClient(" << topic << ")@";
-      } else {
-        ss << "AgnocastSubscription(" << topic << ")@";
-      }
+  static constexpr size_t SRV_REQUEST_PREFIX_LEN = sizeof("/AGNOCAST_SRV_REQUEST") - 1;    // 21
+  static constexpr size_t SRV_RESPONSE_PREFIX_LEN = sizeof("/AGNOCAST_SRV_RESPONSE") - 1;  // 22
+  for (const auto & topic : agnocast_topics) {
+    if (topic.rfind("/AGNOCAST_SRV_REQUEST", 0) == 0) {
+      entries.push_back("Service(" + topic.substr(SRV_REQUEST_PREFIX_LEN) + ")");
+    } else if (topic.rfind("/AGNOCAST_SRV_RESPONSE", 0) == 0) {
+      auto service_part = topic.substr(SRV_RESPONSE_PREFIX_LEN);
+      auto sep_pos = service_part.find("_SEP_");
+      entries.push_back("Client(" + service_part.substr(0, sep_pos) + ")");
+    } else {
+      entries.push_back("Subscription(" + topic + ")");
     }
   }
 
-  std::string ret = ss.str();
-  ret.pop_back();
+  std::sort(entries.begin(), entries.end());
 
-  return ret;
+  std::stringstream ss;
+  ss << ns << node->get_name();
+  for (const auto & entry : entries) {
+    ss << "@" << entry;
+  }
+
+  return ss.str();
 }
 
 std::string create_callback_group_id(
