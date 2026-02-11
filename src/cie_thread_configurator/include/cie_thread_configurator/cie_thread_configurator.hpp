@@ -48,12 +48,12 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
       std::make_shared<rclcpp::Node>("cie_thread_client", "/cie_thread_configurator", options);
 
     auto publisher = node->create_publisher<cie_config_msgs::msg::NonRosThreadInfo>(
-      "/cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(1000).reliable());
+      "/cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(5000).reliable());
     auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
-    // Wait for subscriber to connect before publishing (timeout: 3 seconds)
+    // Wait for subscriber to connect before publishing (timeout: 5 seconds)
     // DDS discovery with a fresh rclcpp context can be slow on loaded CI machines.
-    constexpr int max_subscriber_wait_iterations = 300;  // 300 * 10ms = 3 seconds
+    constexpr int max_subscriber_wait_iterations = 500;  // 500 * 10ms = 5 seconds
     int wait_count = 0;
     while (publisher->get_subscription_count() == 0 &&
            wait_count < max_subscriber_wait_iterations) {

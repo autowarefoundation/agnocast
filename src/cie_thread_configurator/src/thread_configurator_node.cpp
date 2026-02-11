@@ -103,7 +103,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   }
 
   auto qos =
-    rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 1000)).reliable();
+    rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000)).reliable();
 
   // Create subscription for non-ROS thread info
   non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
@@ -377,8 +377,12 @@ void ThreadConfiguratorNode::callback_group_callback(
     // delayed applying
     deadline_configs_.push_back(config);
   } else {
-    bool success = issue_syscalls(*config);
-    if (!success) {
+    if (!issue_syscalls(*config)) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Skipping configuration for callback group (domain=%zu, id=%s, tid=%ld) due to syscall "
+        "failure.",
+        domain_id, msg->callback_group_id.c_str(), msg->thread_id);
       return;
     }
   }
@@ -417,8 +421,11 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     // delayed applying
     deadline_configs_.push_back(config);
   } else {
-    bool success = issue_syscalls(*config);
-    if (!success) {
+    if (!issue_syscalls(*config)) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall failure.",
+        msg->thread_name.c_str(), msg->thread_id);
       return;
     }
   }
