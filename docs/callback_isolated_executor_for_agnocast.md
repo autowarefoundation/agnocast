@@ -14,6 +14,24 @@
 
 ### Features
 
+#### `agnocast_components_register_node` Macro
+
+Instead of manually configuring component containers and launch files, you can use the `agnocast_components_register_node()` CMake macro (provided by the [`agnocast_components`](../src/agnocast_components) package) as a drop-in replacement for `rclcpp_components_register_node()`. This macro generates a standalone executable that uses the specified Agnocast executor.
+
+```cmake
+find_package(agnocast_components REQUIRED)
+
+add_library(my_component SHARED src/my_node.cpp)
+ament_target_dependencies(my_component rclcpp rclcpp_components agnocastlib ...)
+
+agnocast_components_register_node(
+  my_component
+  PLUGIN "MyNode"
+  EXECUTABLE my_node
+  EXECUTOR CallbackIsolatedAgnocastExecutor
+)
+```
+
 #### Multiple ROS domain support
 
 `cie_thread_configurator` can handle callback groups from multiple ROS domains. Use the `--domains` option to specify domain IDs you use:
