@@ -419,13 +419,20 @@ static bool is_referenced(struct entry_node * en)
   return (en->referencing_ids[0] != -1);
 }
 
-static void remove_reference_by_index(struct entry_node * en, int index)
+// Remove subscriber reference from entry.
+// Returns true if the reference was found and removed, false if the subscriber was not referencing.
+static bool remove_subscriber_reference(struct entry_node * en, const topic_local_id_t id)
 {
-  for (int i = index; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY - 1; i++) {
-    en->referencing_ids[i] = en->referencing_ids[i + 1];
+  for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
+    if (en->referencing_ids[i] == id) {
+      for (int j = i; j < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY - 1; j++) {
+        en->referencing_ids[j] = en->referencing_ids[j + 1];
+      }
+      en->referencing_ids[MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY - 1] = -1;
+      return true;
+    }
   }
-
-  en->referencing_ids[MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY - 1] = -1;
+  return false;
 }
 
 // Add subscriber reference to entry (set boolean flag to true).
@@ -433,9 +440,14 @@ static void remove_reference_by_index(struct entry_node * en, int index)
 static int add_subscriber_reference(struct entry_node * en, const topic_local_id_t id)
 {
   for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
-    // Already referenced by this subscriber - no-op
+    // Already referenced by this subscriber - unexpected
     if (en->referencing_ids[i] == id) {
-      return 0;
+      dev_warn(
+        agnocast_device,
+        "subscriber id=%d already holds a reference for entry_id=%lld. "
+        "(add_subscriber_reference)\n",
+        id, en->entry_id);
+      return -EALREADY;
     }
 
     // Empty slot found - add reference
@@ -541,21 +553,16 @@ int release_message_entry_reference(
     return -EINVAL;
   }
 
-  // Remove subscriber reference
-  for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
-    if (en->referencing_ids[i] == pubsub_id) {
-      remove_reference_by_index(en, i);
-      return 0;
-    }
+  if (!remove_subscriber_reference(en, pubsub_id)) {
+    dev_warn(
+      agnocast_device,
+      "pubsub_id %d does not hold a reference for entry (topic_name=%s entry_id=%lld). "
+      "(release_message_entry_reference)\n",
+      pubsub_id, topic_name, entry_id);
+    return -EINVAL;
   }
 
-  dev_warn(
-    agnocast_device,
-    "Try to release reference of Subscriber (pubsub_id=%d) for message entry "
-    "(topic_name=%s entry_id=%lld), but it is not found. (release_message_entry_reference)\n",
-    pubsub_id, topic_name, entry_id);
-
-  return -EINVAL;
+  return 0;
 }
 
 static int insert_message_entry(
@@ -1126,9 +1133,23 @@ int take_msg(
   }
 
   if (candidate_en) {
-    int ret = add_subscriber_reference(candidate_en, subscriber_id);
-    if (ret < 0) {
-      return ret;
+    // When allow_same_message is true and the subscriber already holds a reference,
+    // skip adding a duplicate reference.
+    bool already_referenced = false;
+    if (allow_same_message) {
+      for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
+        if (candidate_en->referencing_ids[i] == subscriber_id) {
+          already_referenced = true;
+          break;
+        }
+      }
+    }
+
+    if (!already_referenced) {
+      int ret = add_subscriber_reference(candidate_en, subscriber_id);
+      if (ret < 0) {
+        return ret;
+      }
     }
 
     ioctl_ret->ret_addr = candidate_en->msg_virtual_address;
@@ -1590,12 +1611,8 @@ int remove_subscriber(
     struct entry_node * en = rb_entry(node, struct entry_node, node);
     node = rb_next(node);
 
-    for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
-      if (en->referencing_ids[i] == subscriber_id) {
-        remove_reference_by_index(en, i);
-        break;
-      }
-    }
+    // The subscriber may not have referenced this entry.
+    remove_subscriber_reference(en, subscriber_id);
 
     if (is_referenced(en)) continue;
 
@@ -2573,11 +2590,8 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       struct entry_node * en = rb_entry(node, struct entry_node, node);
       node = rb_next(node);
 
-      for (int i = 0; i < MAX_REFERENCING_SUBSCRIBERS_PER_ENTRY; i++) {
-        if (en->referencing_ids[i] == subscriber_id) {
-          remove_reference_by_index(en, i);
-        }
-      }
+      // The subscriber may not have referenced this entry.
+      remove_subscriber_reference(en, subscriber_id);
 
       if (is_referenced(en)) continue;
 

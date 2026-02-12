@@ -193,6 +193,12 @@ template <typename MessageT, typename BridgeRequestPolicy>
 class BasicTakeSubscription : public SubscriptionBase
 {
 private:
+  // Cached pointer from the most recent take(allow_same_message=true) call.
+  // When the same entry is returned again, a copy sharing the same control_block is returned
+  // so that the kernel-side reference is not released until all userspace copies are destroyed.
+  agnocast::ipc_shared_ptr<const MessageT> last_taken_ptr_;
+  std::mutex last_taken_ptr_mtx_;
+
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
@@ -282,6 +288,29 @@ public:
     TRACEPOINT(
       agnocast_take, static_cast<void *>(this), reinterpret_cast<void *>(take_args.ret_addr),
       take_args.ret_entry_id);
+
+    if (allow_same_message) {
+      // Declared outside the lock scope so that its destructor (which may call ioctl to release
+      // the kernel reference) runs after the mutex is released, avoiding unnecessary contention.
+      agnocast::ipc_shared_ptr<const MessageT> old_ptr;
+      {
+        std::lock_guard<std::mutex> lock(last_taken_ptr_mtx_);
+
+        // When the kernel returned the same entry as last time, return a copy of the cached
+        // pointer (sharing the same control_block) instead of creating a new one.
+        // This keeps the kernel-side reference alive until all copies are destroyed.
+        if (last_taken_ptr_ && last_taken_ptr_.get_entry_id() == take_args.ret_entry_id) {
+          return last_taken_ptr_;
+        }
+
+        MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
+        auto result =
+          agnocast::ipc_shared_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
+        old_ptr = std::move(last_taken_ptr_);
+        last_taken_ptr_ = result;
+        return result;
+      }
+    }
 
     MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
     return agnocast::ipc_shared_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
