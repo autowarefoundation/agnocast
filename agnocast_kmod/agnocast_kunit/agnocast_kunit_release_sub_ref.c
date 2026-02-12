@@ -195,3 +195,48 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
       add_subscriber_args2.ret_id),
     1);
 }
+
+// NOTE: This test targets increment_message_entry_rc, not release_message_entry_reference.
+// In normal operation, this -EALREADY path is unreachable because receive_msg and take_msg have
+// guards preventing duplicate references. This test is included here for regression protection
+// against potential future bugs in those guards.
+void test_case_increment_rc_already_referenced(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 0);
+
+  // Arrange: Publisher publishes a message, subscriber receives it via receive_msg.
+  topic_local_id_t ret_publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &ret_publisher_id, &ret_addr);
+
+  union ioctl_publish_msg_args publish_msg_args;
+  int ret1 = publish_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+
+  const pid_t subscriber_pid = 1000;
+  union ioctl_add_process_args add_process_args;
+  int ret2 = add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret2, 0);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret3 = add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret3, 0);
+
+  union ioctl_receive_msg_args receive_msg_args;
+  int ret4 = receive_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, &receive_msg_args);
+  KUNIT_ASSERT_EQ(test, ret4, 0);
+  KUNIT_ASSERT_EQ(test, receive_msg_args.ret_entry_num, 1);
+
+  // Act: Attempt to add a duplicate reference via increment_message_entry_rc.
+  int ret_sut = increment_message_entry_rc(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id,
+    publish_msg_args.ret_entry_id);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret_sut, -EALREADY);
+}
