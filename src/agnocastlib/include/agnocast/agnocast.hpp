@@ -12,6 +12,7 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "agnocast/node/agnocast_only_callback_isolated_executor.hpp"
 #include "agnocast/node/agnocast_only_executor.hpp"
 #include "agnocast/node/agnocast_only_multi_threaded_executor.hpp"
 #include "agnocast/node/agnocast_only_single_threaded_executor.hpp"

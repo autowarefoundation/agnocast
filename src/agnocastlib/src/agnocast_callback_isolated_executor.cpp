@@ -68,6 +68,9 @@ void CallbackIsolatedAgnocastExecutor::spin()
 
   {
     std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    if (!spinning.load()) {
+      return;
+    }
     for (auto & [group, node] : groups_and_nodes) {
       std::shared_ptr<rclcpp::Executor> executor;
       auto agnocast_topics = agnocast::get_agnocast_topics_by_group(group);

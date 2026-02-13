@@ -21,6 +21,7 @@
 #   For agnocast::Node (uses agnocast::init):
 #     - AgnocastOnlySingleThreadedExecutor
 #     - AgnocastOnlyMultiThreadedExecutor
+#     - AgnocastOnlyCallbackIsolatedExecutor
 # :param RESOURCE_INDEX: the ament resource index to register the components (default: rclcpp_components)
 # :type RESOURCE_INDEX: string
 #
@@ -53,7 +54,7 @@ macro(agnocast_components_register_node target)
   if(NOT "${ARGS_EXECUTOR}" STREQUAL "")
     # Validate executor type
     set(_rclcpp_executors "SingleThreadedAgnocastExecutor;MultiThreadedAgnocastExecutor;CallbackIsolatedAgnocastExecutor")
-    set(_agnocast_only_executors "AgnocastOnlySingleThreadedExecutor;AgnocastOnlyMultiThreadedExecutor")
+    set(_agnocast_only_executors "AgnocastOnlySingleThreadedExecutor;AgnocastOnlyMultiThreadedExecutor;AgnocastOnlyCallbackIsolatedExecutor")
     set(_valid_executors "${_rclcpp_executors};${_agnocast_only_executors}")
     if(NOT "${ARGS_EXECUTOR}" IN_LIST _valid_executors)
       message(FATAL_ERROR "agnocast_components_register_node: Invalid EXECUTOR '${ARGS_EXECUTOR}'. "
