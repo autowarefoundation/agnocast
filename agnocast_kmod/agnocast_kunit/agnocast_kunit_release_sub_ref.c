@@ -12,6 +12,8 @@ static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const uint32_t QOS_DEPTH = 1;
 static const bool IS_BRIDGE = false;
 
+static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
+
 static void setup_one_publisher(
   struct kunit * test, topic_local_id_t * ret_publisher_id, uint64_t * ret_addr)
 {
@@ -66,12 +68,13 @@ void test_case_release_sub_ref_no_pubsub_id(struct kunit * test)
 
   union ioctl_publish_msg_args publish_msg_args;
   int ret0 = publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret0, 0);
 
   // Act: Attempt to release a reference using the publisher's local ID.
-  // This should fail with -EINVAL because only subscriber IDs are tracked
-  // in the referencing_ids array for reference counting, not publisher IDs.
+  // Publishers do not participate in reference counting, so their bit is never set.
+  // test_and_clear_bit detects the missing reference and returns -EINVAL.
   int ret_sut = release_message_entry_reference(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, publish_msg_args.ret_entry_id);
 
@@ -90,7 +93,8 @@ void test_case_release_sub_ref_last_reference(struct kunit * test)
 
   union ioctl_publish_msg_args publish_msg_args;
   int ret = publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   const pid_t subscriber_pid = 1000;
@@ -136,7 +140,8 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
 
   union ioctl_publish_msg_args publish_msg_args;
   int ret1 = publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   // First subscriber
@@ -211,7 +216,8 @@ void test_case_increment_rc_already_referenced(struct kunit * test)
 
   union ioctl_publish_msg_args publish_msg_args;
   int ret1 = publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   const pid_t subscriber_pid = 1000;

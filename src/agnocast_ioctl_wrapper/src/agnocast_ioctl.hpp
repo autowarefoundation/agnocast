@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cstdint>
 
-#define MAX_PUBLISHER_NUM 4    // Maximum number of publishers per topic
-#define MAX_SUBSCRIBER_NUM 16  // Maximum number of subscribers per topic
+#define MAX_PUBLISHER_NUM 4      // Maximum number of publishers per topic
+#define MAX_TOPIC_LOCAL_ID 1024  // Bitmap size for per-entry subscriber reference tracking
+#define MAX_SUBSCRIBER_NUM \
+  (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 
 #define MAX_TOPIC_NUM 1024
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)

@@ -94,8 +94,9 @@ void test_case_get_subscriber_num_normal(struct kunit * test)
 
 void test_case_get_subscriber_num_many(struct kunit * test)
 {
+  const int num_subscribers = 8;
   char * topic_name = "/kunit_test_topic";
-  for (int i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
+  for (int i = 0; i < num_subscribers; i++) {
     setup_one_subscriber(test, topic_name);
   }
 
@@ -104,7 +105,7 @@ void test_case_get_subscriber_num_many(struct kunit * test)
     get_subscriber_num(topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, MAX_SUBSCRIBER_NUM);
+  KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, num_subscribers);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_same_process_subscriber_num, 0);
 }
 
