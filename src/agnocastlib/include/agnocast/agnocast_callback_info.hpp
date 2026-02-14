@@ -110,10 +110,14 @@ uint32_t register_callback(
   return callback_info_id;
 }
 
-void receive_message(
-  [[maybe_unused]] const uint32_t callback_info_id,  // for CARET
-  [[maybe_unused]] const pid_t my_pid,               // for CARET
-  const CallbackInfo & callback_info, std::mutex & ready_agnocast_executables_mutex,
+void receive_and_execute_message(
+  uint32_t callback_info_id, pid_t my_pid, const CallbackInfo & callback_info,
+  std::mutex & ready_agnocast_executables_mutex,
+  std::vector<AgnocastExecutable> & ready_agnocast_executables);
+
+void enqueue_receive_and_execute(
+  uint32_t callback_info_id, pid_t my_pid, const CallbackInfo & callback_info,
+  std::mutex & ready_agnocast_executables_mutex,
   std::vector<AgnocastExecutable> & ready_agnocast_executables);
 
 }  // namespace agnocast

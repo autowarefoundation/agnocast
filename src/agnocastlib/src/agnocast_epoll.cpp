@@ -103,7 +103,7 @@ bool wait_and_handle_epoll_event(
       return false;
     }
 
-    agnocast::receive_message(
+    agnocast::enqueue_receive_and_execute(
       callback_info_id, my_pid, callback_info, ready_agnocast_executables_mutex,
       ready_agnocast_executables);
   }

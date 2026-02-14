@@ -132,10 +132,7 @@ bool AgnocastOnlyExecutor::get_next_ready_agnocast_executable(
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void AgnocastOnlyExecutor::execute_agnocast_executable(AgnocastExecutable & agnocast_executable)
 {
-  TRACEPOINT(
-    agnocast_callable_start, static_cast<const void *>(agnocast_executable.callable.get()));
   (*agnocast_executable.callable)();
-  TRACEPOINT(agnocast_callable_end, static_cast<const void *>(agnocast_executable.callable.get()));
 
   if (agnocast_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
     agnocast_executable.callback_group->can_be_taken_from().store(true);
