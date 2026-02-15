@@ -174,10 +174,8 @@ jobs:
         # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
         colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_unit_agnocastlib|test_unit_message_filters_agnocastlib|test_integration_agnocastlib|test_integration_test_agnocast_component_container_cie_launch"
 
-    - name: Display coverage report in PR comment
+    - name: Generate coverage report
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # Jazzy (Ubuntu 24.04, GCC 13) needs --gcov-ignore-parse-errors=negative_hits.warn
         # as a workaround for GCC Bug 68080 where gcov produces negative branch counts
@@ -188,8 +186,16 @@ jobs:
           GCOVR_EXTRA_ARGS="--gcov-ignore-parse-errors=negative_hits.warn"
         fi
         gcovr -r . --exclude ".*/test/.*" --exclude ".*/_deps/.*" $GCOVR_EXTRA_ARGS --txt > coverage.txt
-        coverage_text=$(<coverage.txt)
-        gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e '<details>\n<summary>Coverage Report (${{ env.ROS_DISTRO }})</summary>\n\n```\n'"$coverage_text"'\n```\n</details>')"
+        echo "${{ github.event.pull_request.number }}" > pr_number.txt
+
+    - name: Upload coverage report
+      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ matrix.ros_distro }}
+        path: |
+          coverage.txt
+          pr_number.txt
 
     # ===== agnocast_heaphook =====
 
