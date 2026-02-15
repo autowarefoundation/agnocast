@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -55,6 +56,31 @@ class BasicPublisher
   topic_local_id_t id_ = -1;
   std::string topic_name_;
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
+  rmw_gid_t gid_;
+
+  void generate_gid()
+  {
+    std::memset(gid_.data, 0, RMW_GID_STORAGE_SIZE);
+
+    // [0-1]: Agnocast identifier
+    gid_.data[0] = 'A';
+    gid_.data[1] = 'G';
+
+    // [2-5]: Process ID
+    pid_t pid = getpid();
+    std::memcpy(gid_.data + 2, &pid, sizeof(pid));
+
+    // [6-11]: topic_name hash (upper 6 bytes)
+    size_t topic_hash = std::hash<std::string>{}(topic_name_);
+    std::memcpy(gid_.data + 6, &topic_hash, 6);
+
+    // [12-15]: publisher id
+    std::memcpy(gid_.data + 12, &id_, sizeof(id_));
+
+    // [16-23]: reserved
+
+    gid_.implementation_identifier = "agnocast";
+  }
 
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
@@ -82,6 +108,7 @@ class BasicPublisher
 
     id_ =
       initialize_publisher(topic_name_, node->get_fully_qualified_name(), actual_qos, is_bridge);
+    generate_gid();
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
 
     return actual_qos;
@@ -176,6 +203,8 @@ public:
   // TODO(Koichi98): It just returns the number of Agnocast subscribers for performance bridge.
   uint32_t get_subscription_count() const { return get_subscription_count_core(topic_name_); }
 
+  // Returns the GID of this publisher which is unique across both Agnocast and ROS 2 publishers.
+  const rmw_gid_t & get_gid() const { return gid_; }
   // Returns the number of Agnocast intra-process subscribers only; ROS 2 subscribers are not
   // included.
   uint32_t get_intra_subscription_count() const
