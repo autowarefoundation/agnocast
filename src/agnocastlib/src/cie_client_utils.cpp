@@ -7,11 +7,9 @@
 #include "cie_config_msgs/msg/callback_group_info.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <thread>
 
 namespace agnocast
 {
@@ -90,7 +88,7 @@ create_rclcpp_client_publisher()
     "client_node" + std::to_string(idx++), "/cie_thread_configurator");
   auto publisher = node->create_publisher<cie_config_msgs::msg::CallbackGroupInfo>(
     "/cie_thread_configurator/callback_group_info",
-    rclcpp::QoS(CIE_QOS_DEPTH).keep_all().reliable());
+    rclcpp::QoS(CIE_QOS_DEPTH).keep_all().reliable().transient_local());
   return publisher;
 }
 
@@ -104,7 +102,8 @@ create_agnocast_client_publisher()
   auto publisher = node->create_publisher<cie_config_msgs::msg::CallbackGroupInfo>(
     // Note: agnocast Publisher does not support keep_all(), so KeepLast is used here
     // (unlike the rclcpp variant which uses keep_all()).
-    "/cie_thread_configurator/callback_group_info", rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)));
+    "/cie_thread_configurator/callback_group_info",
+    rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).transient_local());
   return publisher;
 }
 
@@ -112,23 +111,6 @@ void publish_callback_group_info(
   const rclcpp::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr & publisher,
   int64_t tid, const std::string & callback_group_id)
 {
-  // Wait for subscriber to connect before publishing (timeout: 5 seconds)
-  constexpr int subscriber_wait_interval_ms = 10;
-  constexpr int max_subscriber_wait_iterations = 500;  // 500 * 10ms = 5 seconds
-  int wait_count = 0;
-  while (publisher->get_subscription_count() == 0 && wait_count < max_subscriber_wait_iterations) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(subscriber_wait_interval_ms));
-    ++wait_count;
-  }
-
-  if (publisher->get_subscription_count() == 0) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("cie_thread_configurator"),
-      "No subscriber for CallbackGroupInfo. "
-      "Please run thread_configurator_node if you want to configure thread scheduling.");
-    return;
-  }
-
   auto message = std::make_shared<cie_config_msgs::msg::CallbackGroupInfo>();
   message->thread_id = tid;
   message->callback_group_id = callback_group_id;
@@ -139,24 +121,6 @@ void publish_callback_group_info(
   const agnocast::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr & publisher,
   int64_t tid, const std::string & callback_group_id)
 {
-  // Wait for bridge to be established before publishing (timeout: 5 seconds)
-  // The agnocast-to-ROS2 bridge setup is asynchronous and may take time.
-  constexpr int subscriber_wait_interval_ms = 10;
-  constexpr int max_subscriber_wait_iterations = 500;  // 500 * 10ms = 5 seconds
-  int wait_count = 0;
-  while (publisher->get_subscription_count() == 0 && wait_count < max_subscriber_wait_iterations) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(subscriber_wait_interval_ms));
-    ++wait_count;
-  }
-
-  if (publisher->get_subscription_count() == 0) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("cie_thread_configurator"),
-      "No subscriber for CallbackGroupInfo. "
-      "Please run thread_configurator_node if you want to configure thread scheduling.");
-    return;
-  }
-
   auto message = publisher->borrow_loaned_message();
   message->thread_id = tid;
   message->callback_group_id = callback_group_id;

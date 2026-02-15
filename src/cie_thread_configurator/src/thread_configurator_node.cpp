@@ -103,8 +103,9 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
-  auto qos =
-    rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000)).reliable();
+  auto qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000))
+               .reliable()
+               .transient_local();
 
   // Create subscription for non-ROS thread info
   non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
