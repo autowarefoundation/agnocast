@@ -356,6 +356,8 @@ pid_t spawn_daemon_process(Func && func)
     exit(EXIT_FAILURE);
   }
   if (pid == 0) {
+    agnocast::is_bridge_process = true;
+    unsetenv("LD_PRELOAD");
     func();
     exit(0);
   }

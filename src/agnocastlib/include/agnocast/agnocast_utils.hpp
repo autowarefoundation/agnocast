@@ -10,6 +10,7 @@ namespace agnocast
 
 extern rclcpp::Logger logger;
 extern int agnocast_fd;
+extern bool is_bridge_process;
 
 inline void validate_qos(const rclcpp::QoS & qos)
 {

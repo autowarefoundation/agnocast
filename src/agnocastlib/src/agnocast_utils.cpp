@@ -5,9 +5,16 @@
 namespace agnocast
 {
 rclcpp::Logger logger = rclcpp::get_logger("Agnocast");
+bool is_bridge_process = false;
 
 void validate_ld_preload()
 {
+  if (is_bridge_process) {
+    // The bridge process is spawned with an empty LD_PRELOAD to avoid loading the heaphook library
+    // in its descendant processes.
+    return;
+  }
+
   const char * ld_preload_cstr = getenv("LD_PRELOAD");
   if (
     ld_preload_cstr == nullptr ||
