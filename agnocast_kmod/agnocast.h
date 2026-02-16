@@ -318,13 +318,13 @@ void agnocast_exit_kthread(void);
 void agnocast_exit_kprobe(void);
 void agnocast_exit_device(void);
 
-int add_subscriber(
+int ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
   const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
 
-int add_publisher(
+int ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
@@ -333,62 +333,62 @@ int increment_message_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 
-int release_message_entry_reference(
+int ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 
-int receive_msg(
+int ioctl_receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, union ioctl_receive_msg_args * ioctl_ret);
 
-int publish_msg(
+int ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
   const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
   uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret);
 
-int take_msg(
+int ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, bool allow_same_message,
   union ioctl_take_msg_args * ioctl_ret);
 
-int add_process(
+int ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret);
 
-int get_subscriber_num(
+int ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   union ioctl_get_subscriber_num_args * ioctl_ret);
 
-int get_publisher_num(
+int ioctl_get_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_get_publisher_num_args * ioctl_ret);
 
-int get_topic_list(
+int ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
 
-int get_subscriber_qos(
+int ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct ioctl_get_subscriber_qos_args * args);
 
-int get_publisher_qos(
+int ioctl_get_publisher_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
   struct ioctl_get_publisher_qos_args * args);
 
-int remove_subscriber(
+int ioctl_remove_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, topic_local_id_t subscriber_id);
 
-int remove_publisher(
+int ioctl_remove_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, topic_local_id_t publisher_id);
 
-int add_bridge(
+int ioctl_add_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns,
   struct ioctl_add_bridge_args * ioctl_ret);
 
-int remove_bridge(
+int ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
-int get_process_num(const struct ipc_namespace * ipc_ns);
+int ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 
-int set_ros2_subscriber_num(
+int ioctl_set_ros2_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
 void process_exit_cleanup(const pid_t pid);

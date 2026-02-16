@@ -12,11 +12,12 @@ void test_case_remove_bridge_normal(struct kunit * test)
 {
   // Arrange
   struct ioctl_add_bridge_args args = {0};
-  int ret_setup = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  int ret_setup =
+    ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
   KUNIT_ASSERT_EQ(test, ret_setup, 0);
 
   // Act
-  int ret = remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
+  int ret = ioctl_remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -27,18 +28,18 @@ void test_case_remove_bridge_partial(struct kunit * test)
 {
   // Arrange
   struct ioctl_add_bridge_args args = {0};
-  add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
-  add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns, &args);
+  ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns, &args);
 
   // Act
-  int ret1 = remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
+  int ret1 = ioctl_remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret1, 0);
   KUNIT_EXPECT_TRUE(test, is_in_bridge_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
 
   // Act
-  int ret2 = remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns);
+  int ret2 = ioctl_remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret2, 0);
@@ -51,7 +52,8 @@ void test_case_remove_bridge_not_found(struct kunit * test)
   const char * NON_EXISTENT_TOPIC = "/kunit_non_existent_topic";
 
   // Act
-  int ret = remove_bridge(NON_EXISTENT_TOPIC, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
+  int ret =
+    ioctl_remove_bridge(NON_EXISTENT_TOPIC, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -ENOENT);
@@ -61,11 +63,12 @@ void test_case_remove_bridge_pid_mismatch(struct kunit * test)
 {
   // Arrange
   struct ioctl_add_bridge_args args = {0};
-  int ret_setup = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  int ret_setup =
+    ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
   KUNIT_ASSERT_EQ(test, ret_setup, 0);
 
   // Act
-  int ret = remove_bridge(TOPIC_NAME, OTHER_PID, true, current->nsproxy->ipc_ns);
+  int ret = ioctl_remove_bridge(TOPIC_NAME, OTHER_PID, true, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -EPERM);
@@ -74,5 +77,5 @@ void test_case_remove_bridge_pid_mismatch(struct kunit * test)
     test, get_bridge_owner_pid(TOPIC_NAME, current->nsproxy->ipc_ns), BRIDGE_OWNER_PID);
 
   // Clean-up
-  remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
+  ioctl_remove_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns);
 }

@@ -13,7 +13,7 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret = ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -25,12 +25,13 @@ static void verify_publisher_qos(struct kunit * test, bool is_transient)
 
   setup_process(test, PUBLISHER_PID);
 
-  ret = add_publisher(
+  ret = ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, is_transient,
     IS_BRIDGE, &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  ret = get_publisher_qos(TOPIC_NAME, current->nsproxy->ipc_ns, add_pub_args.ret_id, &get_qos_args);
+  ret = ioctl_get_publisher_qos(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_pub_args.ret_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ_MSG(test, get_qos_args.ret_depth, QOS_DEPTH, "Depth mismatch");
@@ -59,7 +60,8 @@ void test_case_pub_error_topic_not_found(struct kunit * test)
 
   dummy_id = 0;
 
-  ret = get_publisher_qos("/non_existent_topic", current->nsproxy->ipc_ns, dummy_id, &get_qos_args);
+  ret = ioctl_get_publisher_qos(
+    "/non_existent_topic", current->nsproxy->ipc_ns, dummy_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
@@ -72,14 +74,14 @@ void test_case_error_publisher_not_found(struct kunit * test)
 
   setup_process(test, PUBLISHER_PID);
 
-  ret = add_publisher(
+  ret = ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false, IS_BRIDGE,
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_local_id_t invalid_id = add_pub_args.ret_id + 999;
 
-  ret = get_publisher_qos(TOPIC_NAME, current->nsproxy->ipc_ns, invalid_id, &get_qos_args);
+  ret = ioctl_get_publisher_qos(TOPIC_NAME, current->nsproxy->ipc_ns, invalid_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }

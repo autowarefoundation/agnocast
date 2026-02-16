@@ -16,10 +16,10 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 = ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = add_subscriber(
+  int ret2 = ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
@@ -33,12 +33,12 @@ void test_case_set_ros2_subscriber_num_normal(struct kunit * test)
   char * topic_name = "/kunit_test_topic";
   setup_one_subscriber(test, topic_name);
 
-  int ret = set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 5);
+  int ret = ioctl_set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 5);
   KUNIT_EXPECT_EQ(test, ret, 0);
 
   union ioctl_get_subscriber_num_args subscriber_num_args;
-  int ret2 =
-    get_subscriber_num(topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
+  int ret2 = ioctl_get_subscriber_num(
+    topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
   KUNIT_EXPECT_EQ(test, ret2, 0);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, 1);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_ros2_subscriber_num, 5);
@@ -48,7 +48,7 @@ void test_case_set_ros2_subscriber_num_topic_not_exist(struct kunit * test)
 {
   char * topic_name = "/kunit_nonexistent_topic";
 
-  int ret = set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 5);
+  int ret = ioctl_set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 5);
   KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 }
 
@@ -57,22 +57,22 @@ void test_case_set_ros2_subscriber_num_update(struct kunit * test)
   char * topic_name = "/kunit_test_topic";
   setup_one_subscriber(test, topic_name);
 
-  int ret1 = set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 3);
+  int ret1 = ioctl_set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 3);
   KUNIT_EXPECT_EQ(test, ret1, 0);
 
   union ioctl_get_subscriber_num_args subscriber_num_args;
-  int ret2 =
-    get_subscriber_num(topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
+  int ret2 = ioctl_get_subscriber_num(
+    topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
   KUNIT_EXPECT_EQ(test, ret2, 0);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, 1);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_ros2_subscriber_num, 3);
 
   // Update to new value
-  int ret3 = set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 7);
+  int ret3 = ioctl_set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 7);
   KUNIT_EXPECT_EQ(test, ret3, 0);
 
-  int ret4 =
-    get_subscriber_num(topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
+  int ret4 = ioctl_get_subscriber_num(
+    topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
   KUNIT_EXPECT_EQ(test, ret4, 0);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, 1);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_ros2_subscriber_num, 7);

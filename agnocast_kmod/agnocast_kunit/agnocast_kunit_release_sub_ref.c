@@ -20,9 +20,9 @@ static void setup_one_publisher(
   const pid_t PUBLISHER_PID = 2000;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = add_process(PUBLISHER_PID, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 = ioctl_add_process(PUBLISHER_PID, current->nsproxy->ipc_ns, &add_process_args);
   union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = add_publisher(
+  int ret2 = ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
 
@@ -37,7 +37,8 @@ void test_case_release_sub_ref_no_topic(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 0);
   KUNIT_EXPECT_EQ(
-    test, release_message_entry_reference(TOPIC_NAME, current->nsproxy->ipc_ns, 0, 0), -EINVAL);
+    test, ioctl_release_message_entry_reference(TOPIC_NAME, current->nsproxy->ipc_ns, 0, 0),
+    -EINVAL);
 }
 
 void test_case_release_sub_ref_no_message(struct kunit * test)
@@ -50,8 +51,8 @@ void test_case_release_sub_ref_no_message(struct kunit * test)
   setup_one_publisher(test, &ret_publisher_id, &ret_addr);
 
   // Act
-  int ret =
-    release_message_entry_reference(TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, 0);
+  int ret = ioctl_release_message_entry_reference(
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, 0);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
@@ -67,7 +68,7 @@ void test_case_release_sub_ref_no_pubsub_id(struct kunit * test)
   setup_one_publisher(test, &ret_publisher_id, &ret_addr);
 
   union ioctl_publish_msg_args publish_msg_args;
-  int ret0 = publish_msg(
+  int ret0 = ioctl_publish_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret0, 0);
@@ -75,7 +76,7 @@ void test_case_release_sub_ref_no_pubsub_id(struct kunit * test)
   // Act: Attempt to release a reference using the publisher's local ID.
   // Publishers do not participate in reference counting, so their bit is never set.
   // test_and_clear_bit detects the missing reference and returns -EINVAL.
-  int ret_sut = release_message_entry_reference(
+  int ret_sut = ioctl_release_message_entry_reference(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, publish_msg_args.ret_entry_id);
 
   // Assert
@@ -92,18 +93,18 @@ void test_case_release_sub_ref_last_reference(struct kunit * test)
   setup_one_publisher(test, &ret_publisher_id, &ret_addr);
 
   union ioctl_publish_msg_args publish_msg_args;
-  int ret = publish_msg(
+  int ret = ioctl_publish_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   const pid_t subscriber_pid = 1000;
   union ioctl_add_process_args add_process_args;
-  int ret2 = add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret2 = ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret3 = add_subscriber(
+  int ret3 = ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
@@ -115,7 +116,7 @@ void test_case_release_sub_ref_last_reference(struct kunit * test)
   KUNIT_ASSERT_EQ(test, ret4, 0);
 
   // Act: Subscriber releases its reference.
-  int ret_sut = release_message_entry_reference(
+  int ret_sut = ioctl_release_message_entry_reference(
     TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id,
     publish_msg_args.ret_entry_id);
 
@@ -139,7 +140,7 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   setup_one_publisher(test, &ret_publisher_id, &ret_addr);
 
   union ioctl_publish_msg_args publish_msg_args;
-  int ret1 = publish_msg(
+  int ret1 = ioctl_publish_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -147,11 +148,11 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   // First subscriber
   const pid_t subscriber_pid1 = 1000;
   union ioctl_add_process_args add_process_args1;
-  int ret2 = add_process(subscriber_pid1, current->nsproxy->ipc_ns, &add_process_args1);
+  int ret2 = ioctl_add_process(subscriber_pid1, current->nsproxy->ipc_ns, &add_process_args1);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args1;
-  int ret3 = add_subscriber(
+  int ret3 = ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid1, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args1);
@@ -165,11 +166,11 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   // Second subscriber
   const pid_t subscriber_pid2 = 1001;
   union ioctl_add_process_args add_process_args2;
-  int ret5 = add_process(subscriber_pid2, current->nsproxy->ipc_ns, &add_process_args2);
+  int ret5 = ioctl_add_process(subscriber_pid2, current->nsproxy->ipc_ns, &add_process_args2);
   KUNIT_ASSERT_EQ(test, ret5, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args2;
-  int ret6 = add_subscriber(
+  int ret6 = ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid2, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args2);
@@ -181,7 +182,7 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   KUNIT_ASSERT_EQ(test, ret7, 0);
 
   // Act: First subscriber releases its reference.
-  int ret_sut = release_message_entry_reference(
+  int ret_sut = ioctl_release_message_entry_reference(
     TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args1.ret_id,
     publish_msg_args.ret_entry_id);
 
@@ -201,39 +202,39 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
     1);
 }
 
-// NOTE: This test targets increment_message_entry_rc, not release_message_entry_reference.
-// In normal operation, this -EALREADY path is unreachable because receive_msg and take_msg have
-// guards preventing duplicate references. This test is included here for regression protection
-// against potential future bugs in those guards.
+// NOTE: This test targets increment_message_entry_rc, not ioctl_release_message_entry_reference.
+// In normal operation, this -EALREADY path is unreachable because ioctl_receive_msg and
+// ioctl_take_msg have guards preventing duplicate references. This test is included here for
+// regression protection against potential future bugs in those guards.
 void test_case_increment_rc_already_referenced(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(test, get_topic_num(current->nsproxy->ipc_ns), 0);
 
-  // Arrange: Publisher publishes a message, subscriber receives it via receive_msg.
+  // Arrange: Publisher publishes a message, subscriber receives it via ioctl_receive_msg.
   topic_local_id_t ret_publisher_id;
   uint64_t ret_addr;
   setup_one_publisher(test, &ret_publisher_id, &ret_addr);
 
   union ioctl_publish_msg_args publish_msg_args;
-  int ret1 = publish_msg(
+  int ret1 = ioctl_publish_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   const pid_t subscriber_pid = 1000;
   union ioctl_add_process_args add_process_args;
-  int ret2 = add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret2 = ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret3 = add_subscriber(
+  int ret3 = ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
   KUNIT_ASSERT_EQ(test, ret3, 0);
 
   union ioctl_receive_msg_args receive_msg_args;
-  int ret4 = receive_msg(
+  int ret4 = ioctl_receive_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, &receive_msg_args);
   KUNIT_ASSERT_EQ(test, ret4, 0);
   KUNIT_ASSERT_EQ(test, receive_msg_args.ret_entry_num, 1);

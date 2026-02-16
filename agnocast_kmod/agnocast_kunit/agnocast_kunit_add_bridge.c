@@ -13,7 +13,7 @@ void test_case_add_bridge_normal(struct kunit * test)
   // Arrange
   struct ioctl_add_bridge_args args = {0};
 
-  int ret = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  int ret = ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -26,12 +26,12 @@ void test_case_add_bridge_normal(struct kunit * test)
 void test_case_add_bridge_update_flags(struct kunit * test)
 {
   struct ioctl_add_bridge_args args = {0};
-  int ret = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  int ret = ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_EXPECT_TRUE(test, args.ret_has_r2a);
   KUNIT_EXPECT_FALSE(test, args.ret_has_a2r);
 
-  int ret1 = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns, &args);
+  int ret1 = ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, false, current->nsproxy->ipc_ns, &args);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret1, 0);
@@ -43,11 +43,11 @@ void test_case_add_bridge_update_flags(struct kunit * test)
 void test_case_add_bridge_already_exists_diff_pid(struct kunit * test)
 {
   struct ioctl_add_bridge_args args = {0};
-  int ret = add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
+  int ret = ioctl_add_bridge(TOPIC_NAME, BRIDGE_OWNER_PID, true, current->nsproxy->ipc_ns, &args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   memset(&args, 0, sizeof(args));
-  int ret1 = add_bridge(TOPIC_NAME, OTHER_PID, false, current->nsproxy->ipc_ns, &args);
+  int ret1 = ioctl_add_bridge(TOPIC_NAME, OTHER_PID, false, current->nsproxy->ipc_ns, &args);
   // Assert
   KUNIT_EXPECT_EQ(test, ret1, -EEXIST);
   KUNIT_EXPECT_EQ(test, args.ret_pid, BRIDGE_OWNER_PID);
