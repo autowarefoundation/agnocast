@@ -1,4 +1,6 @@
 import ctypes
+from enum import Enum
+from contextlib import contextmanager
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import (
     get_action_client_info, get_action_server_info, get_node_names,
@@ -6,6 +8,12 @@ from ros2node.api import (
 )
 from ros2topic.api import get_topic_names_and_types
 from ros2node.verb import VerbExtension
+
+class BridgeStatus(Enum):
+    NONE = 0
+    ROS2_TO_AGNOCAST = 1
+    AGNOCAST_TO_ROS2= 2
+    BIDIRECTION = 3
 
 class TopicInfoRet(ctypes.Structure):
     _fields_ = [
@@ -37,11 +45,6 @@ class NodeInfoAgnocastVerb(VerbExtension):
         parser.add_argument(
             'node_name',
             help='Fully qualified node name to request information with Agnocast topics')
-        parser.add_argument(
-            '--debug',
-            '-d',
-            action='store_true',
-            help='Show additional debug information (e.g., whether topic is bridged)')
 
     def main(self, *, args):
         node_name = args.node_name
@@ -68,38 +71,55 @@ class NodeInfoAgnocastVerb(VerbExtension):
             lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
             lib.free_agnocast_topic_info_ret.restype = None
 
-            def is_topic_bridged(topic_name):
-                topic_name_bytes = topic_name.encode('utf-8')
-
-                # Check Agnocast subscribers
-                sub_count = ctypes.c_int()
-                sub_array = lib.get_agnocast_sub_nodes(topic_name_bytes, ctypes.byref(sub_count))
-                
+            @contextmanager
+            def agnocast_info_array(lib_func, topic_name_bytes):
+                count = ctypes.c_int()
+                array = lib_func(topic_name_bytes, ctypes.byref(count))
                 try:
-                    if any(sub_array[i].is_bridge for i in range(sub_count.value)):
-                        return True
+                    yield array[:count.value] if array else []
                 finally:
-                    if sub_count.value > 0 and sub_array:
-                        lib.free_agnocast_topic_info_ret(sub_array)
+                    if array:
+                        lib.free_agnocast_topic_info_ret(array)
 
-                # Check Agnocast publishers
-                pub_count = ctypes.c_int()
-                pub_array = lib.get_agnocast_pub_nodes(topic_name_bytes, ctypes.byref(pub_count))
+            def get_bridge_status(topic_name): 
+                name_b = topic_name.encode('utf-8')
+
+                has_sub_bridge = False
+                has_pub_bridge = False
+
+                with agnocast_info_array(lib.get_agnocast_sub_nodes, name_b) as nodes:
+                    has_sub_bridge = any(n.is_bridge for n in nodes)
+                with agnocast_info_array(lib.get_agnocast_pub_nodes, name_b) as nodes:
+                    has_pub_bridge = any(n.is_bridge for n in nodes)
+
+                mapping = {
+                    (True, True):   BridgeStatus.BIDIRECTION,
+                    (True, False):  BridgeStatus.AGNOCAST_TO_ROS2,
+                    (False, True):  BridgeStatus.ROS2_TO_AGNOCAST,
+                    (False, False): BridgeStatus.NONE,
+                }
                 
-                try:
-                    if any(pub_array[i].is_bridge for i in range(pub_count.value)):
-                        return True
-                finally:
-                    if pub_count.value > 0 and pub_array:
-                        lib.free_agnocast_topic_info_ret(pub_array)
+                return mapping[(has_sub_bridge, has_pub_bridge)]
 
-                return False
-
-            def get_agnocast_label(topic_name):
+            def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):
                 """Get the appropriate label for an Agnocast-enabled topic."""
-                if args.debug and is_topic_bridged(topic_name):
-                    return "(Agnocast enabled, bridged)"
-                return "(Agnocast enabled)"
+
+                suffix = "(Agnocast enabled)"
+                if topic_name not in ros2_sub_topics and topic_name not in ros2_pub_topics:
+                    return suffix  # No bridge info if only one endpoint exists
+
+                match get_bridge_status(topic_name):
+                    case BridgeStatus.BIDIRECTION:
+                        suffix = "(Agnocast enabled, bridged)"
+                    case BridgeStatus.ROS2_TO_AGNOCAST:
+                        if topic_name in ros2_pub_topics:
+                            suffix = "(Agnocast enabled, bridged)"
+                    case BridgeStatus.AGNOCAST_TO_ROS2:
+                        if topic_name in ros2_sub_topics:
+                            suffix = "(Agnocast enabled, bridged)"
+                    case BridgeStatus.NONE:
+                        suffix = "(WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
+                return suffix
             
             def get_agnocast_node_info(topic_list, node_name):
                 sub_topic_set = set()
@@ -195,6 +215,22 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 
                 return sub_topic_list, pub_topic_list, server_list, client_list
 
+            def divide_ros2_topic_into_pubsub(topic_names):
+                pub_topics = []
+                sub_topics = []
+                for name in topic_names:
+                    pubs_info = node.get_publishers_info_by_topic(name)
+                    subs_info = node.get_subscriptions_info_by_topic(name)
+
+                    # Remove Agnocast bridge nodes from the list
+                    pubs_info = [info for info in pubs_info if not info.node_name.startswith("agnocast_bridge_node_")]
+                    subs_info = [info for info in subs_info if not info.node_name.startswith("agnocast_bridge_node_")]
+
+                    if pubs_info:
+                        pub_topics.append(name)
+                    if subs_info:
+                        sub_topics.append(name)
+                return pub_topics, sub_topics
 
             # Topic names of the owned Agnocast subscribers
             agnocast_subscribers = []
@@ -252,44 +288,40 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 print(f"Error: The node '{node_name}' does not exist.")
                 return
 
-            all_topics_raw = get_topic_names_and_types(node=node)
-            all_topics = [{'name': topic_name, 'types': topic_types} for topic_name, topic_types in all_topics_raw]
+            ros2_topic_raw = get_topic_names_and_types(node=node)
+            ros2_topic_dir = [{'name': topic_name, 'types': topic_types} for topic_name, topic_types in ros2_topic_raw]
+            ros2_topic_name_list = [topic['name'] for topic in ros2_topic_dir]
+            ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(ros2_topic_name_list)
 
             # ======== Subscribers ========
             print("  Subscribers:")
             for sub in subscribers:
-                if sub.name in agnocast_subscribers:
-                    print(f"    {sub.name}: {', '.join(sub.types)} {get_agnocast_label(sub.name)}")
-                else:
-                    print(f"    {sub.name}: {', '.join(sub.types)}")
+                print(f"    {sub.name}: {', '.join(sub.types)}")
 
             for agnocast_sub in agnocast_subscribers:
                 if agnocast_sub in [sub.name for sub in subscribers]:
                     continue
-                matching_topics = [topic for topic in all_topics if topic['name'] == agnocast_sub]
+                matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_sub]
                 if matching_topics:
                     topic_types = '; '.join([', '.join(topic['types']) for topic in matching_topics])
-                    print(f"    {agnocast_sub}: {topic_types} {get_agnocast_label(agnocast_sub)}")
+                    print(f"    {agnocast_sub}: {topic_types} {get_agnocast_label(agnocast_sub, ros2_sub_topics, ros2_pub_topics)}")
                 else:
-                    print(f"    {agnocast_sub}: <UNKNOWN> {get_agnocast_label(agnocast_sub)}")
+                    print(f"    {agnocast_sub}: <UNKNOWN> {get_agnocast_label(agnocast_sub, ros2_sub_topics, ros2_pub_topics)}")
 
             # ======== Publishers ========
             print("  Publishers:")
             for pub in publishers:
-                if pub.name in agnocast_publishers:
-                    print(f"    {pub.name}: {', '.join(pub.types)} {get_agnocast_label(pub.name)}")
-                else:
-                    print(f"    {pub.name}: {', '.join(pub.types)}")
+                print(f"    {pub.name}: {', '.join(pub.types)}")
 
             for agnocast_pub in agnocast_publishers:
                 if agnocast_pub in [pub.name for pub in publishers]:
                     continue
-                matching_topics = [topic for topic in all_topics if topic['name'] == agnocast_pub]
+                matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_pub]
                 if matching_topics:
                     topic_types = '; '.join([', '.join(topic['types']) for topic in matching_topics])
-                    print(f"    {agnocast_pub}: {topic_types} {get_agnocast_label(agnocast_pub)}")
+                    print(f"    {agnocast_pub}: {topic_types} {get_agnocast_label(agnocast_pub, ros2_sub_topics, ros2_pub_topics)}")
                 else:
-                    print(f"    {agnocast_pub}: <UNKNOWN> {get_agnocast_label(agnocast_pub)}")
+                    print(f"    {agnocast_pub}: <UNKNOWN> {get_agnocast_label(agnocast_pub, ros2_sub_topics, ros2_pub_topics)}")
 
             # ======== Service ========
             print("  Service Servers:")
@@ -297,14 +329,14 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 print(f"    {service.name}: {', '.join(service.types)}")
 
             for service_name in agnocast_servers:
-                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name)}")
+                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name, ros2_sub_topics, ros2_pub_topics)}")
 
             print("  Service Clients:")
             for client in service_clients:
                 print(f"    {client.name}: {', '.join(client.types)}")
 
             for service_name in agnocast_clients:
-                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name)}")
+                print(f"    {service_name}: <UNKNOWN> {get_agnocast_label(service_name, ros2_sub_topics, ros2_pub_topics)}")
 
             # ======== Action ========
             print("  Action Servers:")
