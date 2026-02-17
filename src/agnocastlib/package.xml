@@ -30,8 +30,7 @@
   <depend>rosgraph_msgs</depend>
   <depend>ament_index_cpp</depend>
 
-  <build_depend>libgoogle-glog-dev</build_depend>
-  <exec_depend>libgoogle-glog-dev</exec_depend>
+  <depend>glog</depend>
 
   <depend>cie_config_msgs</depend>
   <depend>cie_thread_configurator</depend>
