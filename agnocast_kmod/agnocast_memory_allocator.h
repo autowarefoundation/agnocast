@@ -5,7 +5,7 @@
 // Maximum number of processes that can be mapped to a memory pool
 #define MAX_PROCESS_NUM_PER_MEMPOOL 32
 
-#define MEMPOOL_NUM 1000
+#define MEMPOOL_NUM 1024
 
 // Default is 8GB, can be overridden by insmod parameter mempool_size_gb
 extern int mempool_size_gb;
