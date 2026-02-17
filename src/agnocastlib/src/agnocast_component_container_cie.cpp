@@ -42,7 +42,6 @@ class ComponentManagerCallbackIsolated : public rclcpp_components::ComponentMana
 
 public:
   static constexpr int DEFALUT_GET_NEXT = 50;
-  static constexpr int DEFAULT_QOS_DEPTH = 1000;
 
   template <typename... Args>
   explicit ComponentManagerCallbackIsolated(Args &&... args)
@@ -50,8 +49,7 @@ public:
   : rclcpp_components::ComponentManager(std::forward<Args>(args)...)
   {
     get_next_timeout_ms_ = this->get_parameter_or("get_next_timeout_ms", DEFALUT_GET_NEXT);
-    client_publisher_ = create_publisher<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", rclcpp::QoS(DEFAULT_QOS_DEPTH).keep_all());
+    client_publisher_ = agnocast::create_rclcpp_client_publisher();
   }
 
   ~ComponentManagerCallbackIsolated() override;
