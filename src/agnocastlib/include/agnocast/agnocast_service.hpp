@@ -56,6 +56,11 @@ public:
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
+    RCLCPP_WARN(
+      node->get_logger(),
+      "Agnocast service/client is not officially supported yet and the API may change in the "
+      "future: %s",
+      service_name_.c_str());
     static_assert(
       std::is_invocable_v<
         std::decay_t<Func>, ipc_shared_ptr<typename ServiceT::Request> &&,

@@ -147,6 +147,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 **Purpose**: Service and Client management
 
+> **Warning**: Agnocast service/client is not officially supported yet and the API may change in the future. Use at your own risk.
+
 | Feature | agnocast::Node | Support Level | Planned | Notes |
 |---------|----------------|---------------|---------|-------|
 | `add_client()` | ✗ | **Throws Exception** | No | Use `agnocast::create_client()` or `agnocast::Node::create_client()` |
@@ -303,8 +305,8 @@ The following tables compare methods that are **directly defined** in each class
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
 | `create_wall_timer()` | ✓ | ✓ | Return type differs (`uint32_t` timer_id vs `rclcpp::TimerBase::SharedPtr`) |
-| `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client) |
-| `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service) |
+| `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client). **Not officially supported yet; API may change.** |
+| `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service). **Not officially supported yet; API may change.** |
 
 #### Graph API (ROS Network Discovery)
 

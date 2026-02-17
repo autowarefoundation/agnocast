@@ -46,6 +46,8 @@ This reflects the current status, and support is expected to expand in the futur
 
 ROS 2 Jazzy (Ubuntu 24.04) is now supported in the main branch and will be included in the v2.2.0 release.
 
+> **Warning**: Agnocast service/client is not officially supported yet and the API may change in the future. Use at your own risk.
+
 ---
 
 ## For Users

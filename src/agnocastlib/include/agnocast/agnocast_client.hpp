@@ -103,6 +103,11 @@ public:
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
+    RCLCPP_WARN(
+      logger_,
+      "Agnocast service/client is not officially supported yet and the API may change in the "
+      "future: %s",
+      service_name_.c_str());
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options);
