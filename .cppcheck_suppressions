@@ -1,6 +1,7 @@
 *:*/test/*
 
 uninitvar:*/agnocast_kmod/*
+nullPointer:*/agnocast_kmod/*
 unusedStructMember:*/agnocast_kmod/*
 
 checkersReport
