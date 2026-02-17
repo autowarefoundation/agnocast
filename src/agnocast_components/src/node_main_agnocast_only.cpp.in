@@ -59,9 +59,10 @@ int main(int argc, char * argv[])
   }
 
   auto wrapper = node_factory->create_node_instance(options);
-  // For agnocast::Node, cast the void pointer to agnocast::Node
-  auto node = std::static_pointer_cast<agnocast::Node>(wrapper.get_node_instance());
-  exec.add_node(node);
+  // Don't use static_pointer_cast<agnocast::Node> from void* — it skips vtable pointer adjustment
+  // when the derived class has virtual functions but agnocast::Node does not.
+  auto node_base = wrapper.get_node_base_interface();
+  exec.add_node(node_base);
 
   try {
     exec.spin();
