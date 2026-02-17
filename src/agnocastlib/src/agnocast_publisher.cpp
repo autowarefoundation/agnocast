@@ -102,9 +102,8 @@ union ioctl_publish_msg_args publish_core(
       mq = mq_open(mq_name.c_str(), O_WRONLY | O_NONBLOCK);
       if (mq == -1) {
         // Right after a subscriber is added, its message queue has not been created yet. Therefore,
-        // the `mq_open` call above might fail. In that case, we log a warning and continue, but if
-        // the warning keeps appearing, something must be wrong.
-        RCLCPP_WARN_STREAM(
+        // the `mq_open` call above might fail. In that case, we just continue.
+        RCLCPP_DEBUG_STREAM(
           logger, "mq_open failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
                                                << ", mq_name='" << mq_name
                                                << "'): " << strerror(errno));
