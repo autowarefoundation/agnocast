@@ -64,19 +64,47 @@ cd agnocast
 
 ### System Configuration
 
+Agnocast uses POSIX message queues for inter-process notification. The following system parameters may need adjustment.
+
+#### `msg_max`: Maximum number of messages per queue (Required)
+
 Agnocast requires increasing the system limit for the maximum number of messages in a queue.
 
 **Temporary setting (Current session only):**
 
 ```bash
 sudo sysctl -w fs.mqueue.msg_max=256
-
 ```
 
 **Permanent setting:**
 
 ```bash
 echo "fs.mqueue.msg_max=256" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+#### `queues_max`: Maximum number of message queues system-wide (Optional)
+
+Agnocast creates a message queue for each subscriber, so the total number of message queues grows with the number of topics and subscribers. The system default for `queues_max` is typically 256, which may not be sufficient for large-scale deployments.
+
+You can check the current limit with:
+
+```bash
+cat /proc/sys/fs/mqueue/queues_max
+```
+
+If you encounter `mq_open failed: No space left on device`, you may need to increase this limit.
+
+**Temporary setting (Current session only):**
+
+```bash
+sudo sysctl -w fs.mqueue.queues_max=1024
+```
+
+**Permanent setting:**
+
+```bash
+echo "fs.mqueue.queues_max=1024" | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
 ```
 
@@ -352,13 +380,15 @@ Although Agnocast includes cleanup procedures for resources like shared memory a
 rm /dev/shm/agnocast@*
 ```
 
-Additionally, if you encounter the error `mq_open failed: No space left on device`, it means that the system has reached the maximum number of message queues. In that case, you may need to remove leftover message queues by running:
+Additionally, if you encounter the error `mq_open failed: No space left on device`, it means that the system has reached the maximum number of message queues. In that case, first try removing leftover message queues by running:
 
 ```bash
 rm /dev/mqueue/agnocast@*
 rm /dev/mqueue/agnocast_bridge_manager_parent@*
 rm /dev/mqueue/agnocast_bridge_manager_daemon@*
 ```
+
+If the error persists after cleanup, you may need to increase the system-wide limit on the number of message queues. See the [System Configuration](#system-configuration) section above for how to increase `queues_max`.
 
 ## Documents
 
