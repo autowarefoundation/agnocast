@@ -1,6 +1,5 @@
 <launch>
     <node pkg="agnocast_sample_application" exec="cie_talker" name="cie_talker_node" output="screen">
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
-        <env name="AGNOCAST_MEMPOOL_SIZE" value="67108864" />  <!-- 64MB-->
     </node>
 </launch>

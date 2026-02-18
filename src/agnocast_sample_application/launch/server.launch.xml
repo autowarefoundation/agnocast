@@ -3,6 +3,5 @@
         <remap from="/sum_int_array" to="/srv/sum_int_array" />
 
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
-        <env name="AGNOCAST_MEMPOOL_SIZE" value="16777216" /> <!-- 16MB-->
     </node>
 </launch>

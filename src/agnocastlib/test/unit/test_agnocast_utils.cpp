@@ -61,7 +61,6 @@ TEST(AgnocastUtilsTest, validate_ld_preload_prefix)
 TEST(AgnocastUtilsTest, validate_ld_preload_only_libagnocast_heaphook)
 {
   setenv("LD_PRELOAD", "libagnocast_heaphook.so", 1);
-  setenv("AGNOCAST_MEMPOOL_SIZE", "10000000", 1);
   EXPECT_NO_THROW(agnocast::validate_ld_preload());
   unsetenv("LD_PRELOAD");
 }

@@ -126,7 +126,6 @@ def generate_test_description():
             parameters=[{'number_of_ros2_threads': 8, 'number_of_agnocast_threads': 8}],
             additional_env={
                 'LD_PRELOAD': f"libagnocast_heaphook.so:{os.getenv('LD_PRELOAD', '')}",
-                'AGNOCAST_MEMPOOL_SIZE': '134217728',
             }
         )
         containers.append(container)

@@ -1,7 +1,6 @@
 <launch>
     <node_container pkg="agnocastlib" exec="agnocast_component_container_cie" name="cie_listener_container" namespace="" output="screen">
       <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
-      <env name="AGNOCAST_MEMPOOL_SIZE" value="67108864" /> <!-- 64MB-->
 
       <composable_node pkg="agnocast_sample_application" plugin="CieSubscriber" name="cie_listener_node" namespace="">
       </composable_node>
