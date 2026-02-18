@@ -108,6 +108,30 @@ echo "fs.mqueue.queues_max=1024" | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
 ```
 
+#### `msgqueue`: Per-user POSIX message queue memory limit (Optional)
+
+Each bridge manager message queue consumes memory proportional to the maximum message size and queue depth.
+When running many Agnocast processes simultaneously, the per-user POSIX message queue memory limit
+(`RLIMIT_MSGQUEUE`) may be exceeded, causing `mq_open` to fail.
+
+To increase the limit, either add the following line to `/etc/security/limits.conf`:
+
+```text
+* - msgqueue unlimited
+```
+
+Or use `prlimit` to change the limit for the current shell:
+
+```bash
+sudo prlimit --pid=$$ --msgqueue=unlimited
+```
+
+You can verify the current limit with:
+
+```bash
+ulimit -q
+```
+
 ### Setup
 
 Run the setup script to install dependencies:
