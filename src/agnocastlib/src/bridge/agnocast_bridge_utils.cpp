@@ -78,7 +78,14 @@ SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_na
     RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     return {-1, false};
   }
-  return {static_cast<int>(args.ret_other_process_subscriber_num), args.ret_a2r_bridge_exist};
+
+  int total_subs =
+    static_cast<int>(args.ret_other_process_subscriber_num + args.ret_same_process_subscriber_num);
+  if (args.ret_a2r_bridge_exist && total_subs > 0) {
+    total_subs--;
+  }
+
+  return {total_subs, args.ret_a2r_bridge_exist};
 }
 
 PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name)
@@ -89,7 +96,13 @@ PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name
     RCLCPP_ERROR(logger, "AGNOCAST_GET_PUBLISHER_NUM_CMD failed: %s", strerror(errno));
     return {-1, false};
   }
-  return {static_cast<int>(args.ret_publisher_num), args.ret_bridge_exist};
+
+  int total_pubs = static_cast<int>(args.ret_publisher_num);
+  if (args.ret_bridge_exist && total_pubs > 0) {
+    total_pubs--;
+  }
+
+  return {total_pubs, args.ret_bridge_exist};
 }
 
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name)
