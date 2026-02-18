@@ -113,8 +113,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
 
         # Generate C++ source files
         for msg_type in message_types:
-            self._generate_plugin_source(src_dir, msg_type, 'r2a', templates_pkg)
-            self._generate_plugin_source(src_dir, msg_type, 'a2r', templates_pkg)
+            self._generate_plugin_source(src_dir, msg_type, templates_pkg)
 
         # Generate CMakeLists.txt
         self._generate_cmake(output_dir, message_types, package_names, templates_pkg)
@@ -122,10 +121,10 @@ class GenerateBridgePluginsVerb(VerbExtension):
         # Generate package.xml
         self._generate_package_xml(output_dir, package_names, templates_pkg)
 
-    def _generate_plugin_source(self, src_dir, msg_type, direction, templates_pkg):
+    def _generate_plugin_source(self, src_dir, msg_type, templates_pkg):
         """Generate a single plugin C++ source file."""
         flat_type = msg_type.replace('/', '_')
-        output_file = os.path.join(src_dir, f'register_{direction}_{flat_type}.cpp')
+        output_file = os.path.join(src_dir, f'bridge_plugin_{flat_type}.cpp')
 
         cpp_type = msg_type.replace('/', '::')
 
@@ -133,16 +132,13 @@ class GenerateBridgePluginsVerb(VerbExtension):
         parts[-1] = camel_to_snake(parts[-1])
         header_path = '/'.join(parts) + '.hpp'
 
-        function_name = f'create_{direction}_bridge'
-
         data = {
             'msg_type': msg_type,
             'cpp_type': cpp_type,
             'header_path': header_path,
-            'function_name': function_name
         }
 
-        template_file = templates_pkg.joinpath(f'{direction}_bridge_plugin.cpp.em')
+        template_file = templates_pkg.joinpath('bridge_plugin.cpp.em')
         template_content = template_file.read_text()
 
         with open(output_file, 'w') as f:

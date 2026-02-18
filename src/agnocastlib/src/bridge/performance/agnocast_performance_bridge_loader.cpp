@@ -29,7 +29,7 @@ PerformanceBridgeResult PerformanceBridgeLoader::create_r2a_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
-  void * symbol = get_bridge_factory_symbol(message_type, "r2a", "create_r2a_bridge");
+  void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_bridge");
   if (symbol == nullptr) {
     return {nullptr, nullptr};
   }
@@ -42,7 +42,7 @@ PerformanceBridgeResult PerformanceBridgeLoader::create_a2r_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
-  void * symbol = get_bridge_factory_symbol(message_type, "a2r", "create_a2r_bridge");
+  void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_bridge");
   if (symbol == nullptr) {
     return {nullptr, nullptr};
   }
@@ -59,10 +59,10 @@ std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::strin
 }
 
 std::vector<std::string> PerformanceBridgeLoader::generate_library_paths(
-  const std::string & snake_type, const std::string & plugin_suffix)
+  const std::string & snake_type)
 {
   std::vector<std::string> paths;
-  const std::string lib_name = "lib" + plugin_suffix + "_bridge_plugin_" + snake_type + ".so";
+  const std::string lib_name = "libbridge_plugin_" + snake_type + ".so";
 
   // 1. Check environment variable AGNOCAST_BRIDGE_PLUGINS_PATH (colon-separated)
   const char * env_path = std::getenv("AGNOCAST_BRIDGE_PLUGINS_PATH");
@@ -126,10 +126,10 @@ void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::s
 }
 
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
-  const std::string & message_type, const std::string & direction, const std::string & symbol_name)
+  const std::string & message_type, const std::string & symbol_name)
 {
   std::string snake_type = convert_type_to_snake_case(message_type);
-  std::vector<std::string> lib_paths = generate_library_paths(snake_type, direction);
+  std::vector<std::string> lib_paths = generate_library_paths(snake_type);
 
   void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
