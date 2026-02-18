@@ -79,8 +79,6 @@ class TestROS2Publisher : public rclcpp::Node
 
       if (!forever_) {
         rclcpp::shutdown();
-      } else {
-        timer_->cancel();
       }
     }
   }

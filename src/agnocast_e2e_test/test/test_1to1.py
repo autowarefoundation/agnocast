@@ -122,7 +122,8 @@ def generate_test_description():
                             "init_pub_num": EXPECT_INIT_PUB_NUM,
                             "pub_num": EXPECT_PUB_NUM,
                             # If 0, skip the connection wait to avoid hanging in incompatible QoS scenarios.
-                            "planned_sub_count": 1 if EXPECT_SUB_NUM > 0 else 0,
+                            # This branch (use_agnocast_pub=false) is only reached when bridge is ON (see scripts/e2e_test_1to1).
+                            "planned_sub_count": 2 if EXPECT_SUB_NUM > 0 else 0,
                             "forever": FOREVER
                         }
                     ],
