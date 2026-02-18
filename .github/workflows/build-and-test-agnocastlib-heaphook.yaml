@@ -49,7 +49,7 @@ jobs:
         echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
         echo "EOF" >> "$GITHUB_OUTPUT"
 
-        if echo "$CHANGED_FILES" | grep -qE '(agnocastlib|agnocast_ioctl_wrapper|cie_thread_configurator)/.*\.(cpp|hpp)$'; then
+        if echo "$CHANGED_FILES" | grep -qE '(agnocastlib|agnocast_ioctl_wrapper|agnocast_cie_thread_configurator)/.*\.(cpp|hpp)$'; then
           echo "cpp_changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "cpp_changed=false" >> "$GITHUB_OUTPUT"

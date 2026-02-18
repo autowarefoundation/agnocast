@@ -1,10 +1,10 @@
-#include "cie_thread_configurator/prerun_node.hpp"
+#include "agnocast_cie_thread_configurator/prerun_node.hpp"
 
-#include "cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
-#include "cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -13,20 +13,21 @@
 
 PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node")
 {
-  size_t default_domain_id = cie_thread_configurator::get_default_domain_id();
+  size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
   // Create subscription for non-ROS thread info
-  non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
-    "/cie_thread_configurator/non_ros_thread_info", 100,
-    [this](const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
+  non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
+    "/agnocast_cie_thread_configurator/non_ros_thread_info", 100,
+    [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
     });
 
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
-    this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", 100,
-      [this, default_domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
+      "/agnocast_cie_thread_configurator/callback_group_info", 100,
+      [this,
+       default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->topic_callback(default_domain_id, msg);
       }));
 
@@ -36,12 +37,12 @@ PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node"
       continue;
     }
 
-    auto node = cie_thread_configurator::create_node_for_domain(domain_id);
+    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
     nodes_for_each_domain_.push_back(node);
 
-    auto sub = node->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", 100,
-      [this, domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
+      "/agnocast_cie_thread_configurator/callback_group_info", 100,
+      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->topic_callback(domain_id, msg);
       });
     subs_for_each_domain_.push_back(sub);
@@ -51,7 +52,7 @@ PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node"
 }
 
 void PrerunNode::topic_callback(
-  size_t domain_id, const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
+  size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
   if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
@@ -66,7 +67,7 @@ void PrerunNode::topic_callback(
 }
 
 void PrerunNode::non_ros_thread_callback(
-  const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+  const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
 {
   if (non_ros_thread_names_.find(msg->thread_name) != non_ros_thread_names_.end()) {
     RCLCPP_ERROR(
@@ -97,7 +98,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Key << "hardware_info";
   out << YAML::Value << YAML::BeginMap;
 
-  auto hw_info = cie_thread_configurator::get_hardware_info();
+  auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
 
   for (const auto & [key, value] : hw_info) {
     out << YAML::Key << key << YAML::Value << value;

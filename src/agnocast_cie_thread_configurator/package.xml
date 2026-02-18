@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>cie_thread_configurator</name>
+  <name>agnocast_cie_thread_configurator</name>
   <version>0.0.0</version>
   <description>A dedicated node that configures the scheduling attributes of each thread in callback_isolated_executor.</description>
 
@@ -22,7 +22,7 @@
   <depend>rclcpp</depend>
   <depend>yaml-cpp</depend>
 
-  <depend>cie_config_msgs</depend>
+  <depend>agnocast_cie_config_msgs</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

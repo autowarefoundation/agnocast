@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(cie_thread_configurator)
+project(agnocast_cie_thread_configurator)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -8,14 +8,14 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 
-find_package(cie_config_msgs REQUIRED)
+find_package(agnocast_cie_config_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 add_library(thread_configurator SHARED src/util.cpp)
-ament_target_dependencies(thread_configurator rclcpp cie_config_msgs)
+ament_target_dependencies(thread_configurator rclcpp agnocast_cie_config_msgs)
 
 add_executable(thread_configurator_node src/main.cpp src/thread_configurator_node.cpp src/prerun_node.cpp)
-ament_target_dependencies(thread_configurator_node rclcpp cie_config_msgs)
+ament_target_dependencies(thread_configurator_node rclcpp agnocast_cie_config_msgs)
 target_link_libraries(thread_configurator_node yaml-cpp thread_configurator)
 
 target_include_directories(thread_configurator_node PRIVATE

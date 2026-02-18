@@ -1,4 +1,4 @@
-#include <cie_thread_configurator/cie_thread_configurator.hpp>
+#include <agnocast_cie_thread_configurator/cie_thread_configurator.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
@@ -37,7 +37,7 @@ public:
       no_exec_callback_group_);
 
     // Test spawn_non_ros2_thread
-    non_ros_thread_ = cie_thread_configurator::spawn_non_ros2_thread(
+    non_ros_thread_ = agnocast_cie_thread_configurator::spawn_non_ros2_thread(
       "test_non_ros_worker", &TestPublisherComponent::non_ros_thread_func, this);
 
     RCLCPP_INFO(this->get_logger(), "TestPublisherComponent initialized");

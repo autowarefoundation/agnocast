@@ -3,8 +3,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
-#include "cie_config_msgs/msg/callback_group_info.hpp"
-#include "cie_config_msgs/msg/non_ros_thread_info.hpp"
+#include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
 #include <filesystem>
 #include <set>
@@ -20,13 +20,15 @@ public:
 
 private:
   void topic_callback(
-    size_t domain_id, const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
-  void non_ros_thread_callback(const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
+    size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
+  void non_ros_thread_callback(
+    const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
 
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
-  std::vector<rclcpp::Subscription<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
+  std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
     subs_for_each_domain_;
-  rclcpp::Subscription<cie_config_msgs::msg::NonRosThreadInfo>::SharedPtr non_ros_thread_sub_;
+  rclcpp::Subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>::SharedPtr
+    non_ros_thread_sub_;
 
   // (domain_id, callback_group_id) pairs
   std::set<std::pair<size_t, std::string>> domain_and_cbg_ids_;

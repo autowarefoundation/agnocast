@@ -1,11 +1,11 @@
-#include "cie_thread_configurator/thread_configurator_node.hpp"
+#include "agnocast_cie_thread_configurator/thread_configurator_node.hpp"
 
-#include "cie_thread_configurator/cie_thread_configurator.hpp"
-#include "cie_thread_configurator/sched_deadline.hpp"
+#include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/sched_deadline.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
-#include "cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
 #include <error.h>
 #include <sys/resource.h>
@@ -30,7 +30,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   callback_group_configs_.resize(callback_groups.size());
   non_ros_thread_configs_.resize(non_ros_threads.size());
 
-  size_t default_domain_id = cie_thread_configurator::get_default_domain_id();
+  size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
   // For backward compatibility: remove trailing "Waitable@"s
   auto remove_trailing_waitable = [](std::string s) {
@@ -108,17 +108,18 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
                .transient_local();
 
   // Create subscription for non-ROS thread info
-  non_ros_thread_sub_ = this->create_subscription<cie_config_msgs::msg::NonRosThreadInfo>(
-    "/cie_thread_configurator/non_ros_thread_info", qos,
-    [this](const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
+  non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
+    "/agnocast_cie_thread_configurator/non_ros_thread_info", qos,
+    [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
     });
 
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
-    this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", qos,
-      [this, default_domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
+      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      [this,
+       default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
       }));
 
@@ -128,12 +129,12 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
       continue;
     }
 
-    auto node = cie_thread_configurator::create_node_for_domain(domain_id);
+    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
     nodes_for_each_domain_.push_back(node);
 
-    auto sub = node->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", qos,
-      [this, domain_id](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
+      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(domain_id, msg);
       });
     subs_for_each_domain_.push_back(sub);
@@ -386,7 +387,7 @@ const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_
 }
 
 void ThreadConfiguratorNode::callback_group_callback(
-  size_t domain_id, const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
+  size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
   auto it = id_to_callback_group_config_.find(key);
@@ -449,7 +450,7 @@ void ThreadConfiguratorNode::callback_group_callback(
 }
 
 void ThreadConfiguratorNode::non_ros_thread_callback(
-  const cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+  const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
 {
   auto it = id_to_non_ros_thread_config_.find(msg->thread_name);
   if (it == id_to_non_ros_thread_config_.end()) {

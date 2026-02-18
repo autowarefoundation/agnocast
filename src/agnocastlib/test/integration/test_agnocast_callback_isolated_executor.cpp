@@ -1,7 +1,7 @@
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
 
-#include <cie_config_msgs/msg/callback_group_info.hpp>
+#include <agnocast_cie_config_msgs/msg/callback_group_info.hpp>
 #include <std_msgs/msg/bool.hpp>
 
 #include <gtest/gtest.h>
@@ -62,26 +62,27 @@ private:
 class CallbackGroupInfoReceiverNode : public rclcpp::Node
 {
 public:
-  CallbackGroupInfoReceiverNode() : Node("callback_group_info_receiver", "/cie_thread_configurator")
+  CallbackGroupInfoReceiverNode()
+  : Node("callback_group_info_receiver", "/agnocast_cie_thread_configurator")
   {
-    subscription_ = this->create_subscription<cie_config_msgs::msg::CallbackGroupInfo>(
-      "/cie_thread_configurator/callback_group_info", rclcpp::QoS(1000).keep_all(),
-      [this](const cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+    subscription_ = this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
+      "/agnocast_cie_thread_configurator/callback_group_info", rclcpp::QoS(1000).keep_all(),
+      [this](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         std::lock_guard<std::mutex> lock(mutex_);
         received_messages_.push_back(*msg);
       });
   }
 
-  std::vector<cie_config_msgs::msg::CallbackGroupInfo> get_received_messages()
+  std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> get_received_messages()
   {
     std::lock_guard<std::mutex> lock(mutex_);
     return received_messages_;
   }
 
 private:
-  rclcpp::Subscription<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr subscription_;
+  rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr subscription_;
   std::mutex mutex_;
-  std::vector<cie_config_msgs::msg::CallbackGroupInfo> received_messages_;
+  std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> received_messages_;
 };
 
 class CallbackIsolatedExecutorTest : public ::testing::Test

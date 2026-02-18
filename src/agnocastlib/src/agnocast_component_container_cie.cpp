@@ -68,7 +68,7 @@ private:
   static bool is_clock_callback_group(const rclcpp::CallbackGroup::SharedPtr & group);
 
   std::unordered_map<uint64_t, std::list<ExecutorWrapper>> node_id_to_executor_wrappers_;
-  rclcpp::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
+  rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
   std::mutex client_publisher_mutex_;
   int get_next_timeout_ms_;
 };

@@ -1,4 +1,4 @@
-#include "cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <array>
@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-namespace cie_thread_configurator
+namespace agnocast_cie_thread_configurator
 {
 
 std::map<std::string, std::string> get_hardware_info()
@@ -90,7 +90,7 @@ rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id)
   node_options.context(context);
 
   return std::make_shared<rclcpp::Node>(
-    "cie_thread_configurator_domain_" + std::to_string(domain_id), node_options);
+    "agnocast_cie_thread_configurator_domain_" + std::to_string(domain_id), node_options);
 }
 
-}  // namespace cie_thread_configurator
+}  // namespace agnocast_cie_thread_configurator

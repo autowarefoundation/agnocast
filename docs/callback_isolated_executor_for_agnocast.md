@@ -34,15 +34,15 @@ agnocast_components_register_node(
 
 #### Multiple ROS domain support
 
-`cie_thread_configurator` can handle callback groups from multiple ROS domains. Use the `--domains` option to specify domain IDs you use:
+`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use the `--domains` option to specify domain IDs you use:
 
 ```bash
-ros2 run cie_thread_configurator thread_configurator_node --prerun --domains 0,1
+ros2 run agnocast_cie_thread_configurator thread_configurator_node --prerun --domains 0,1
 ```
 
 #### RT Throttling
 
-The `rt_throttling` feature configures the kernel's real-time scheduling bandwidth parameters (`sched_rt_period_us` and `sched_rt_runtime_us`). At startup, `cie_thread_configurator` validates that the current kernel values match the configuration and reports an error if they differ.
+The `rt_throttling` feature configures the kernel's real-time scheduling bandwidth parameters (`sched_rt_period_us` and `sched_rt_runtime_us`). At startup, `agnocast_cie_thread_configurator` validates that the current kernel values match the configuration and reports an error if they differ.
 
 Since `/proc/sys/kernel/sched_rt_period_us` and `/proc/sys/kernel/sched_rt_runtime_us` can only be written by root (uid 0) — Linux capabilities such as `CAP_SYS_ADMIN` cannot bypass the `/proc/sys/` permission check — these values must be pre-configured via `/etc/sysctl.d/`:
 

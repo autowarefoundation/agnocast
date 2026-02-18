@@ -23,8 +23,8 @@ find_package(rclcpp_components REQUIRED)
 find_package(rcl_yaml_param_parser REQUIRED)
 find_package(tracetools REQUIRED)
 find_package(LTTngUST REQUIRED)
-find_package(cie_config_msgs REQUIRED)
-find_package(cie_thread_configurator REQUIRED)
+find_package(agnocast_cie_config_msgs REQUIRED)
+find_package(agnocast_cie_thread_configurator REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -45,7 +45,7 @@ add_library(agnocast SHARED
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp)
 
-ament_target_dependencies(agnocast cie_thread_configurator rosgraph_msgs cie_config_msgs ament_index_cpp message_filters)
+ament_target_dependencies(agnocast agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
 
 target_link_libraries(agnocast
   ${rclcpp_LIBRARIES}
@@ -88,7 +88,7 @@ target_link_libraries(agnocast_component_container_cie
   glog::glog
 )
 
-ament_target_dependencies(agnocast_component_container_cie rclcpp rclcpp_components cie_thread_configurator)
+ament_target_dependencies(agnocast_component_container_cie rclcpp rclcpp_components agnocast_cie_thread_configurator)
 
 install(
   TARGETS agnocast_component_container agnocast_component_container_mt agnocast_component_container_cie
@@ -178,7 +178,7 @@ if(BUILD_TESTING)
   target_include_directories(test_integration_${PROJECT_NAME} PRIVATE test/integration/include)
   target_link_libraries(test_integration_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_integration_${PROJECT_NAME}
-    cie_config_msgs
+    agnocast_cie_config_msgs
     std_msgs)
   set_tests_properties(test_integration_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
@@ -190,7 +190,7 @@ if(BUILD_TESTING)
     test/integration/test_agnocast_only_callback_isolated_executor.cpp)
   target_link_libraries(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME}
-    cie_config_msgs)
+    agnocast_cie_config_msgs)
   set_tests_properties(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
     TIMEOUT 120
@@ -201,7 +201,7 @@ if(BUILD_TESTING)
   add_library(test_publisher_component SHARED
     test/integration/src/test_publisher_component.cpp)
   target_link_libraries(test_publisher_component agnocast)
-  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs cie_thread_configurator)
+  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs agnocast_cie_thread_configurator)
   rclcpp_components_register_node(test_publisher_component
     PLUGIN "agnocastlib_test::TestPublisherComponent"
     EXECUTABLE test_publisher_component_node)
@@ -248,5 +248,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(cie_thread_configurator cie_config_msgs message_filters)
+ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters)
 ament_package()

@@ -2,7 +2,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 
-#include "cie_config_msgs/msg/non_ros_thread_info.hpp"
+#include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -14,7 +14,7 @@
 #include <thread>
 #include <tuple>
 
-namespace cie_thread_configurator
+namespace agnocast_cie_thread_configurator
 {
 
 // Get hardware information from lscpu command
@@ -44,11 +44,11 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
 
     rclcpp::NodeOptions options;
     options.context(context);
-    auto node =
-      std::make_shared<rclcpp::Node>("cie_thread_client", "/cie_thread_configurator", options);
+    auto node = std::make_shared<rclcpp::Node>(
+      "cie_thread_client", "/agnocast_cie_thread_configurator", options);
 
-    auto publisher = node->create_publisher<cie_config_msgs::msg::NonRosThreadInfo>(
-      "/cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(5000).reliable());
+    auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
+      "/agnocast_cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(5000).reliable());
     auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
     // Wait for subscriber to connect before publishing (timeout: 5 seconds)
@@ -62,7 +62,7 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
     }
 
     if (publisher->get_subscription_count() > 0) {
-      auto message = std::make_shared<cie_config_msgs::msg::NonRosThreadInfo>();
+      auto message = std::make_shared<agnocast_cie_config_msgs::msg::NonRosThreadInfo>();
       message->thread_id = tid;
       message->thread_name = thread_name;
       publisher->publish(*message);
@@ -88,4 +88,4 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
   return t;
 }
 
-}  // namespace cie_thread_configurator
+}  // namespace agnocast_cie_thread_configurator

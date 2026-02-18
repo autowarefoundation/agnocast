@@ -1,6 +1,6 @@
-#include "cie_thread_configurator/cie_thread_configurator.hpp"
-#include "cie_thread_configurator/prerun_node.hpp"
-#include "cie_thread_configurator/thread_configurator_node.hpp"
+#include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/prerun_node.hpp"
+#include "agnocast_cie_thread_configurator/thread_configurator_node.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
@@ -11,7 +11,7 @@
 static bool validate_hardware_info(const YAML::Node & yaml)
 {
   YAML::Node yaml_hw_info = yaml["hardware_info"];
-  auto current_hw_info = cie_thread_configurator::get_hardware_info();
+  auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
 
   bool all_match = true;
   std::vector<std::string> mismatches;

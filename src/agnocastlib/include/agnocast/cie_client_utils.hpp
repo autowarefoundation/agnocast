@@ -3,7 +3,7 @@
 #include "agnocast/agnocast_publisher.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#include "cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
 #include <memory>
 #include <string>
@@ -27,22 +27,23 @@ std::string create_callback_group_id(
 
 // Caution: Do not call in parallel
 // Caution: Must be called after rclcpp::init() called
-rclcpp::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
+rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
 create_rclcpp_client_publisher();
 
 // Caution: Do not call in parallel
 // Caution: Requires agnocast kernel module
-agnocast::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
+agnocast::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
 create_agnocast_client_publisher();
 
 // `publisher` is assumed to be the return value of create_rclcpp_client_publisher()
 void publish_callback_group_info(
-  const rclcpp::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr & publisher,
+  const rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr & publisher,
   int64_t tid, const std::string & callback_group_id);
 
 // `publisher` is assumed to be the return value of create_agnocast_client_publisher()
 void publish_callback_group_info(
-  const agnocast::Publisher<cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr & publisher,
+  const agnocast::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr &
+    publisher,
   int64_t tid, const std::string & callback_group_id);
 
 }  // namespace agnocast
