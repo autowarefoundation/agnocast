@@ -216,10 +216,24 @@ void send_mq_message(
     return;
   }
 
-  if (mq_send(mq, reinterpret_cast<const char *>(&msg), sizeof(msg), 0) < 0) {
+  constexpr int BRIDGE_MQ_SEND_MAX_RETRIES = 100;
+  constexpr useconds_t BRIDGE_MQ_SEND_RETRY_INTERVAL_US = 100000;  // 100ms
+
+  int send_result = -1;
+  int last_errno = 0;
+  for (int retry = 0; retry <= BRIDGE_MQ_SEND_MAX_RETRIES; ++retry) {
+    send_result = mq_send(mq, reinterpret_cast<const char *>(&msg), sizeof(msg), 0);
+    if (send_result == 0) break;
+    last_errno = errno;
+    if (last_errno != EAGAIN) break;
+    if (retry < BRIDGE_MQ_SEND_MAX_RETRIES) {
+      usleep(BRIDGE_MQ_SEND_RETRY_INTERVAL_US);
+    }
+  }
+  if (send_result < 0) {
     RCLCPP_ERROR(
-      logger, "mq_send failed for name '%s': %s (errno: %d)", mq_name.c_str(), strerror(errno),
-      errno);
+      logger, "mq_send failed for name '%s': %s (errno: %d)", mq_name.c_str(), strerror(last_errno),
+      last_errno);
   }
 
   mq_close(mq);

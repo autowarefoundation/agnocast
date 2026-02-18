@@ -50,6 +50,11 @@ union ioctl_publish_msg_args publish_core(
   publish_core_mock_called_count++;
   return ioctl_publish_msg_args{};  // Dummy value
 }
+
+BridgeMode get_bridge_mode()
+{
+  return BridgeMode::Off;  // Skip MQ sending in tests
+}
 }  // namespace agnocast
 
 // =========================================
