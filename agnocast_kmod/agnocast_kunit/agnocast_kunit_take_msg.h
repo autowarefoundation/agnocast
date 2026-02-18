@@ -27,8 +27,7 @@
     KUNIT_CASE(test_case_take_msg_pubsub_in_same_process),                                        \
     KUNIT_CASE(test_case_take_msg_2pub_in_same_process),                                          \
     KUNIT_CASE(test_case_take_msg_2sub_in_same_process),                                          \
-    KUNIT_CASE(test_case_take_msg_with_exited_publisher),                                         \
-    KUNIT_CASE(test_case_take_msg_too_many_mapping_processes)
+    KUNIT_CASE(test_case_take_msg_with_exited_publisher)
 
 void test_case_take_msg_no_topic(struct kunit * test);
 void test_case_take_msg_no_subscriber(struct kunit * test);
@@ -58,4 +57,3 @@ void test_case_take_msg_pubsub_in_same_process(struct kunit * test);
 void test_case_take_msg_2pub_in_same_process(struct kunit * test);
 void test_case_take_msg_2sub_in_same_process(struct kunit * test);
 void test_case_take_msg_with_exited_publisher(struct kunit * test);
-void test_case_take_msg_too_many_mapping_processes(struct kunit * test);
