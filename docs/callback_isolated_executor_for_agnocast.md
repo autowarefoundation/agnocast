@@ -8,7 +8,7 @@
 
 | | Original | Agnocast Version |
 |--|----------|------------------|
-| Package | `callback_isolated_executor` | `agnocastlib` |
+| Package | `callback_isolated_executor` | `agnocast_components` (recommended) or `agnocastlib` (deprecated) |
 | Executor Class | `CallbackIsolatedExecutor` | `agnocast::CallbackIsolatedAgnocastExecutor` |
 | Container Executable | `component_container_callback_isolated` | `agnocast_component_container_cie` |
 

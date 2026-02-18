@@ -12,11 +12,6 @@ int main(int argc, char * argv[])
   try {
     rclcpp::init(argc, argv);
 
-    RCLCPP_WARN(
-      rclcpp::get_logger("agnocast_component_container"),
-      "agnocastlib::agnocast_component_container is deprecated. "
-      "Please use agnocast_components::agnocast_component_container instead.");
-
     rclcpp::NodeOptions options;
     options.allow_undeclared_parameters(true);
     options.automatically_declare_parameters_from_overrides(true);

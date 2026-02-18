@@ -17,6 +17,8 @@
   <depend>rclcpp_components</depend>
   <depend>class_loader</depend>
   <depend>agnocastlib</depend>
+  <depend>agnocast_cie_thread_configurator</depend>
+  <depend>agnocast_cie_config_msgs</depend>
 
   <build_depend>libgoogle-glog-dev</build_depend>
   <build_export_depend>libgoogle-glog-dev</build_export_depend>

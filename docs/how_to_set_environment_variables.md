@@ -25,6 +25,12 @@ You can set environment variables through ROS 2 launch file systems as follows. 
 ```
 
 ```xml
+<!-- Recommended: use agnocast_components package -->
+<node_container pkg="agnocast_components" exec="agnocast_component_container" name="...">
+  <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+</node_container>
+
+<!-- Deprecated: agnocastlib package (will be removed in future versions) -->
 <node_container pkg="agnocastlib" exec="agnocast_component_container" name="...">
   <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
 </node_container>
