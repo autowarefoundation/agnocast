@@ -16,3 +16,4 @@ __pycache__
 *.changes
 *.build
 *.upload
+*.o.d
