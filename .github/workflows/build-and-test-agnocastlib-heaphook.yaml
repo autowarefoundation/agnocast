@@ -89,7 +89,7 @@ jobs:
         sudo apt-get install -y --no-install-recommends python3-rosdep
         sudo rosdep init
         rosdep update
-        rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO
+        rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO --skip-keys glog
 
     - name: Cache ccache
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
