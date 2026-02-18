@@ -61,6 +61,33 @@ This is because it is not possible to determine exactly when, within this interv
 
 The virtual address space resources are managed in [agnocast_kmod/agnocast_memory_allocator.h](https://github.com/tier4/agnocast/blob/main/agnocast_kmod/agnocast_memory_allocator.h), and the ranges defined in this file are arbitrarily chosen.
 
+## Mempool size configuration (Experimental)
+
+> [!WARNING]
+> The `mempool_size_gb` parameter is experimental and may be removed or changed in future versions.
+
+The mempool size per process can be configured when loading the kernel module using the `mempool_size_gb` parameter.
+
+### Usage
+
+```bash
+# Default: 8GB per process
+sudo modprobe agnocast
+
+# Custom size: 16GB per process
+sudo modprobe agnocast mempool_size_gb=16
+
+# Or with insmod
+sudo insmod agnocast.ko mempool_size_gb=16
+```
+
+### Notes
+
+- The parameter value is in gigabytes (GB)
+- Default value is 8GB
+- The configured size is logged to kernel messages (`dmesg`) when the module is loaded
+- Due to demand paging, physical memory is allocated only upon the first access (first touch) of a page, so the configured size does not consume physical memory immediately
+
 ## Known issues
 
 - When a heaphook fails to allocate a memory due to the lack of enough memory pool, heaphook tries to add a new memory. However, the added area will not be mapped by the subscribers in the current implementation and in turn Agnocast will not work well.

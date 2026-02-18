@@ -134,6 +134,15 @@ Insert kernel module.
 sudo modprobe agnocast
 ```
 
+You can optionally specify the mempool size per process (default: 8GB).
+Note that this parameter is experimental and may be removed or changed in future versions:
+
+```bash
+sudo modprobe agnocast mempool_size_gb=16
+```
+
+See [shared_memory.md](docs/shared_memory.md) for details on mempool configuration.
+
 Run sample app (different window for each script).
 The order does not matter.
 

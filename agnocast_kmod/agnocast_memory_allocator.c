@@ -17,6 +17,9 @@ MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 8)");
 
 uint64_t mempool_size_bytes = 0;
 
+// Default mempool size in GB
+#define DEFAULT_MEMPOOL_SIZE_GB 8
+
 void init_memory_allocator(void)
 {
   uint64_t addr = 0x40000000000;
@@ -26,6 +29,13 @@ void init_memory_allocator(void)
   pr_info(
     "Agnocast: Initializing memory allocator with pool size: %llu bytes (%d GB)\n",
     mempool_size_bytes, mempool_size_gb);
+
+  if (mempool_size_gb != DEFAULT_MEMPOOL_SIZE_GB) {
+    pr_warn(
+      "Agnocast: mempool_size_gb=%d is not the default value (%d). "
+      "This parameter is experimental and may be removed or changed in future versions.\n",
+      mempool_size_gb, DEFAULT_MEMPOOL_SIZE_GB);
+  }
 
   for (int i = 0; i < MEMPOOL_NUM; i++) {
     mempool_entries[i].addr = addr;
