@@ -14,6 +14,9 @@ static const bool IS_BRIDGE = false;
 
 static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
+// Small buffer size for KUnit tests to avoid exceeding kernel stack frame limits.
+#define KUNIT_PUB_SHM_BUF_SIZE 4
+
 static void setup_one_publisher(
   struct kunit * test, topic_local_id_t * ret_publisher_id, uint64_t * ret_addr)
 {
@@ -233,9 +236,11 @@ void test_case_increment_rc_already_referenced(struct kunit * test)
     &add_subscriber_args);
   KUNIT_ASSERT_EQ(test, ret3, 0);
 
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   union ioctl_receive_msg_args receive_msg_args;
   int ret4 = ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, &receive_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
+    KUNIT_PUB_SHM_BUF_SIZE, &receive_msg_args);
   KUNIT_ASSERT_EQ(test, ret4, 0);
   KUNIT_ASSERT_EQ(test, receive_msg_args.ret_entry_num, 1);
 

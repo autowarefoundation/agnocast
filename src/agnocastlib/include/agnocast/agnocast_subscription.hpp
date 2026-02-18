@@ -258,10 +258,14 @@ public:
 
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
   {
+    publisher_shm_info pub_shm_infos[MAX_PUBLISHER_NUM]{};
+
     union ioctl_take_msg_args take_args;
     take_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
     take_args.subscriber_id = id_;
     take_args.allow_same_message = allow_same_message;
+    take_args.pub_shm_info_addr = reinterpret_cast<uint64_t>(pub_shm_infos);
+    take_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
     {
       std::lock_guard<std::mutex> lock(mmap_mtx);
@@ -272,10 +276,10 @@ public:
         exit(EXIT_FAILURE);
       }
 
-      for (uint32_t i = 0; i < take_args.ret_pub_shm_info.publisher_num; i++) {
-        const pid_t pid = take_args.ret_pub_shm_info.publisher_pids[i];
-        const uint64_t addr = take_args.ret_pub_shm_info.shm_addrs[i];
-        const uint64_t size = take_args.ret_pub_shm_info.shm_sizes[i];
+      for (uint32_t i = 0; i < take_args.ret_pub_shm_num; i++) {
+        const pid_t pid = pub_shm_infos[i].pid;
+        const uint64_t addr = pub_shm_infos[i].shm_addr;
+        const uint64_t size = pub_shm_infos[i].shm_size;
         map_read_only_area(pid, addr, size);
       }
     }

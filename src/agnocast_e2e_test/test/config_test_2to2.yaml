@@ -1,4 +1,4 @@
-test_mode: "agno2agno"
+test_mode: "agno2ros"
 container0: [p,p,s,s]
 container1: []
 container2: []

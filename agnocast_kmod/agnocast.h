@@ -3,8 +3,8 @@
 #include <linux/ipc_namespace.h>
 #include <linux/types.h>
 
-#define MAX_PUBLISHER_NUM 4      // Maximum number of publishers per topic
-#define MAX_TOPIC_LOCAL_ID 1024  // Bitmap size for per-entry subscriber reference tracking
+#define MAX_PUBLISHER_NUM 1024   // Maximum number of publishers per topic
+#define MAX_TOPIC_LOCAL_ID 2048  // Bitmap size for per-entry subscriber reference tracking
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 /* Maximum number of entries that can be received at one ioctl. This value is heuristically set to
@@ -18,10 +18,9 @@
 typedef int32_t topic_local_id_t;
 struct publisher_shm_info
 {
-  uint32_t publisher_num;
-  pid_t publisher_pids[MAX_PUBLISHER_NUM];  // Must be local PIDs, not global PIDs
-  uint64_t shm_addrs[MAX_PUBLISHER_NUM];
-  uint64_t shm_sizes[MAX_PUBLISHER_NUM];
+  pid_t pid;  // Must be a local PID, not a global PID
+  uint64_t shm_addr;
+  uint64_t shm_size;
 };
 struct name_info
 {
@@ -88,6 +87,11 @@ union ioctl_receive_msg_args {
   {
     struct name_info topic_name;
     topic_local_id_t subscriber_id;
+    // Unlike ret_* fields which are returned via the union copy, publisher shm info is written
+    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
+    // remains valid until the ioctl returns.
+    uint64_t pub_shm_info_addr;
+    uint32_t pub_shm_info_size;
   };
   struct
   {
@@ -95,7 +99,7 @@ union ioctl_receive_msg_args {
     bool ret_call_again;
     int64_t ret_entry_ids[MAX_RECEIVE_NUM];
     uint64_t ret_entry_addrs[MAX_RECEIVE_NUM];
-    struct publisher_shm_info ret_pub_shm_info;
+    uint32_t ret_pub_shm_num;
   };
 };
 
@@ -126,12 +130,17 @@ union ioctl_take_msg_args {
     struct name_info topic_name;
     topic_local_id_t subscriber_id;
     bool allow_same_message;
+    // Unlike ret_* fields which are returned via the union copy, publisher shm info is written
+    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
+    // remains valid until the ioctl returns.
+    uint64_t pub_shm_info_addr;
+    uint32_t pub_shm_info_size;
   };
   struct
   {
     uint64_t ret_addr;
     int64_t ret_entry_id;
-    struct publisher_shm_info ret_pub_shm_info;
+    uint32_t ret_pub_shm_num;
   };
 };
 
@@ -338,7 +347,8 @@ int ioctl_release_message_entry_reference(
 
 int ioctl_receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
-  const topic_local_id_t subscriber_id, union ioctl_receive_msg_args * ioctl_ret);
+  const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
+  uint32_t pub_shm_infos_size, union ioctl_receive_msg_args * ioctl_ret);
 
 int ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
@@ -348,6 +358,7 @@ int ioctl_publish_msg(
 int ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, bool allow_same_message,
+  struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   union ioctl_take_msg_args * ioctl_ret);
 
 int ioctl_add_process(
