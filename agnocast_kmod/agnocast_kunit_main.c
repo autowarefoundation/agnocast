@@ -72,7 +72,7 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
   ret = agnocast_init_kthread();
   if (ret < 0) return ret;
 
-  ret = agnocast_init_kprobe();
+  ret = agnocast_init_exit_hook();
   if (ret < 0) return ret;
 
   init_memory_allocator();
@@ -83,7 +83,7 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
 static void agnocast_test_suite_exit(struct kunit_suite * test_suite)
 {
   agnocast_exit_kthread();
-  agnocast_exit_kprobe();
+  agnocast_exit_exit_hook();
   agnocast_exit_device();
 }
 
