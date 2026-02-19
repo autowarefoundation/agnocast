@@ -6,14 +6,20 @@ override_dh_auto_configure:
 	true
 
 override_dh_auto_build:
+	rm -f Cargo.lock
 	cargo build --release
 
 override_dh_auto_clean:
 	cargo clean
 
 override_dh_auto_install:
-	# Installation is handled by debhelper via debian/install
-	true
+	if [ "$$(dpkg-parsechangelog -S Distribution)" = "jammy" ]; then \
+		ROS_DISTRO=humble; \
+	else \
+		ROS_DISTRO=jazzy; \
+	fi; \
+	install -D -m 0755 target/release/libagnocast_heaphook.so \
+		debian/agnocast-heaphook-v2.2.0/opt/ros/$$ROS_DISTRO/lib/libagnocast_heaphook.so
 
 override_dh_auto_test:
 	# Skipping tests during package build

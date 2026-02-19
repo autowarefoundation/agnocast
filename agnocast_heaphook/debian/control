@@ -1,4 +1,4 @@
-Source: agnocast-heaphook-v2.1.2
+Source: agnocast-heaphook-v2.2.0
 Section: libs
 Priority: optional
 Maintainer: Takahiro Ishikawa-Aso <sykwer@gmail.com>
@@ -6,11 +6,11 @@ Build-Depends: debhelper (>= 13), cargo, rustc, dh-cargo
 Standards-Version: 4.6.1
 Homepage: https://github.com/tier4/agnocast
 
-Package: agnocast-heaphook-v2.1.2
+Package: agnocast-heaphook-v2.2.0
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Provides: agnocast-heaphook
-Conflicts: agnocast-heaphook, agnocast-heaphook-v2.1.0, agnocast-heaphook-v2.1.1
-Replaces: agnocast-heaphook-v2.1.0, agnocast-heaphook-v2.1.1
+Conflicts: agnocast-heaphook, agnocast-heaphook-v2.1.0, agnocast-heaphook-v2.1.1, agnocast-heaphook-v2.1.2
+Replaces: agnocast-heaphook-v2.1.0, agnocast-heaphook-v2.1.1, agnocast-heaphook-v2.1.2
 Description: A heap runtime replacement for Agnocast.
  To achieve true zero-copy communication with Agnocast, message objects must be placed in shared memory. Therefore, all heap allocation and deallocation operations are intercepted and customized using LD_PRELOAD hooks.

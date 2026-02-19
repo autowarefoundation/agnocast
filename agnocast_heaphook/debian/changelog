@@ -1,3 +1,26 @@
+agnocast-heaphook-v2.2.0 (2.2.0-6) noble; urgency=medium
+
+  * fix(test): fix test failures in cie and heaphook test (#887 <https://github.com/tier4/agnocast/issues/887>)
+  * feat(heaphook)[need-minor-update] :add init_child_allocator  (#798 <https://github.com/tier4/agnocast/issues/798>)
+  * test(heaphook) Refactor heaphook test (#743 <https://github.com/tier4/agnocast/issues/743>)
+  * test(heaphook) Split test_memory_limit into separate tests for each functions (#742 <https://github.com/tier4/agnocast/issues/742>)
+  * fix(heaphook): typo (#737 <https://github.com/tier4/agnocast/issues/737>)
+  * fix(heaphook): distribution architecture from all to any (#735 <https://github.com/tier4/agnocast/issues/735>)
+  * fix(kmod) [needs minor version update]: Remove AGNOCAST_MEMPOOL_SIZE (#719 <https://github.com/tier4/agnocast/issues/719>)
+  * test(heaphook) Add unit tests for zero-sized allocation (#733 <https://github.com/tier4/agnocast/issues/733>)
+  * test(heaphook) Add a unit test to check realloc behaves like malloc when called with a null pointer (#734 <https://github.com/tier4/agnocast/issues/734>)
+  * test(heaphook): Add unit tests for the fundamental alignment (#726 <https://github.com/tier4/agnocast/issues/726>)
+  * fix(heaphook) Fix calloc to return a null pointer when the total size does not fit in size_t (#722 <https://github.com/tier4/agnocast/issues/722>)
+  * fix(heaphook) Fix `aligned_alloc` to always return a `MIN_ALIGN`-byte aligned address when the fundamental alignment is requested. (#713 <https://github.com/tier4/agnocast/issues/713>)
+  * fix(heaphook) Fix `realloc` to call `malloc` when the pointer is `NULL` (#705 <https://github.com/tier4/agnocast/issues/705>)
+  * fix(heaphook): Handle unexpected `realloc` by returning null (#700 <https://github.com/tier4/agnocast/issues/700>)
+  * refactor(heaphook) Refactor test code to use `is_shared` function (#699 <https://github.com/tier4/agnocast/issues/699>)
+  * feat(heaphook) Support Custom Memory Allocators (#691 <https://github.com/tier4/agnocast/issues/691>)
+  * feat(heaphook) Define `AgnocastSharedMemoryAllocator` trait to support custom memory allocators (#686 <https://github.com/tier4/agnocast/issues/686>)
+  * fix: error when upgrading heaphook (#685 <https://github.com/tier4/agnocast/issues/685>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Thu, 19 Feb 2026 2:18:00 +0900
+
 agnocast-heaphook-v2.1.2 (2.1.2-2) jammy; urgency=medium
 
   * fix(heaphook): fix memory-related functions to match C semantics (#657 <https://github.com/tier4/agnocast/issues/657>)

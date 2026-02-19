@@ -17,10 +17,10 @@ sudo chmod 0644 /etc/apt/keyrings/agnocast-ppa.gpg
 cat <<EOF | sudo tee /etc/apt/sources.list.d/agnocast.sources
 Types: deb
 URIs: http://ppa.launchpad.net/t4-system-software/agnocast/ubuntu
-Suites: jammy
+Suites: $(. /etc/os-release && echo $VERSION_CODENAME)
 Components: main
 Signed-By: /etc/apt/keyrings/agnocast-ppa.gpg
 EOF
 
 sudo apt update
-sudo apt install agnocast-heaphook-v2.1.2 agnocast-kmod-v2.1.2
+sudo apt install agnocast-heaphook-v2.2.0 agnocast-kmod-v2.2.0

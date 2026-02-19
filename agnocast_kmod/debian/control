@@ -1,12 +1,12 @@
-Source: agnocast-kmod-v2.1.2
+Source: agnocast-kmod-v2.2.0
 Section: kernel
 Priority: optional
 Maintainer: Takahiro Ishikawa-Aso <sykwer@gmail.com>
 Homepage: https://github.com/tier4/agnocast
 Standards-Version: 4.5.0
-Build-Depends: debhelper (>= 10), dkms, build-essential, fakeroot, rsync, linux-headers-generic | linux-headers
+Build-Depends: debhelper (>= 10), dh-dkms | dkms, fakeroot, rsync, linux-headers-generic | linux-headers
 
-Package: agnocast-kmod-v2.1.2
+Package: agnocast-kmod-v2.2.0
 Architecture: all
 Depends: ${misc:Depends}, dkms, linux-headers-generic | linux-headers
 Description: DKMS-based kernel module package for Agnocast

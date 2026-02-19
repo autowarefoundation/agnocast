@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocast_components</name>
-  <version>1.0.0</version>
+  <version>2.2.0</version>
   <description>
     CMake tools for registering ROS 2 component nodes with Agnocast executor support.
     Provides agnocast_components_register_node macro similar to rclcpp_components_register_node.
