@@ -3102,28 +3102,30 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
-    pid_t pid;
-    unsigned long flags;
-    bool got_pid = false;
-
     wait_event_interruptible(worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
 
-    spin_lock_irqsave(&pid_queue_lock, flags);
+    // Drain all queued PIDs in a single wake-up cycle
+    while (true) {
+      pid_t pid;
+      unsigned long flags;
+      bool got_pid = false;
 
-    if (queue_head != queue_tail) {
-      pid = exit_pid_queue[queue_head];
-      queue_head = (queue_head + 1) & (EXIT_QUEUE_SIZE - 1);
-      got_pid = true;
-    }
+      spin_lock_irqsave(&pid_queue_lock, flags);
 
-    // queue is empty
-    if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
+      if (queue_head != queue_tail) {
+        pid = exit_pid_queue[queue_head];
+        queue_head = (queue_head + 1) & (EXIT_QUEUE_SIZE - 1);
+        got_pid = true;
+      }
 
-    spin_unlock_irqrestore(&pid_queue_lock, flags);
+      if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
-    if (got_pid) {
+      spin_unlock_irqrestore(&pid_queue_lock, flags);
+
+      if (!got_pid) break;
+
       agnocast_process_exit_cleanup(pid);
     }
   }
