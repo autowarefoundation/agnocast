@@ -53,8 +53,8 @@ for i in $(seq 1 $NUM_LOOP); do
     echo "============================================================================" | sudo tee /dev/kmsg
 
     run-stress-ng $(($i - 1))
-    STRESS_TEST_TIMEOUT=$TIMEOUT_EACH_TEST_CASE_S ./scripts/e2e_test_1to1
-    STRESS_TEST_TIMEOUT=$TIMEOUT_EACH_TEST_CASE_S ./scripts/e2e_test_2to2
+    STRESS_TEST_TIMEOUT=$TIMEOUT_EACH_TEST_CASE_S ./scripts/test/e2e_test_1to1
+    STRESS_TEST_TIMEOUT=$TIMEOUT_EACH_TEST_CASE_S ./scripts/test/e2e_test_2to2
 
     wait
 done

@@ -197,8 +197,8 @@ Run sample app (different window for each script).
 The order does not matter.
 
 ```bash
-bash scripts/run_listener
-bash scripts/run_talker
+bash scripts/sample_application/run_listener
+bash scripts/sample_application/run_talker
 ```
 
 Stop applications and unload kernel module.
@@ -329,7 +329,7 @@ sudo lsmod
 You can build, test and generate the coverage report by following:
 
 ```bash
-bash scripts/test_and_create_report
+bash scripts/test/test_and_create_report
 ```
 
 ### Kernel Module Test
@@ -342,7 +342,7 @@ A custom kernel with the following CONFIG enabled is required to run KUnit Test 
 If booting with the custom kernel, the following script can be used to run unit tests on kernel modules and generate coverage reports.
 
 ```bash
-bash scripts/run_kunit
+bash scripts/test/run_kunit
 ```
 
 You can also use [pre-commit](#setup-pre-commit)
