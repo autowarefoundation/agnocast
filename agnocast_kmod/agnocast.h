@@ -316,6 +316,7 @@ union ioctl_topic_info_args {
 // From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10
 #define EXIT_QUEUE_SIZE_BITS 16
 #define EXIT_QUEUE_SIZE (1U << EXIT_QUEUE_SIZE_BITS)
+#define EXIT_QUEUE_MASK (EXIT_QUEUE_SIZE - 1)
 
 int agnocast_init_device(void);
 int agnocast_init_kthread(void);

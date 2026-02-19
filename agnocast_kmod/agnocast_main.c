@@ -3117,7 +3117,7 @@ static int exit_worker_thread(void * data)
 
       if (queue_head != queue_tail) {
         pid = exit_pid_queue[queue_head];
-        queue_head = (queue_head + 1) & (EXIT_QUEUE_SIZE - 1);
+        queue_head = (queue_head + 1) & EXIT_QUEUE_MASK;
         got_pid = true;
       }
 
@@ -3143,8 +3143,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 
   spin_lock_irqsave(&pid_queue_lock, flags);
 
-  // Assumes EXIT_QUEUE_SIZE is 2^N
-  next = (queue_tail + 1) & (EXIT_QUEUE_SIZE - 1);
+  next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
   if (next != queue_head) {  // queue is not full
     exit_pid_queue[queue_tail] = pid;
@@ -3345,7 +3344,7 @@ static void remove_all_process_info(void)
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
-  synchronize_rcu();
+  // No synchronize_rcu needed: the kprobe is already unregistered, so no RCU readers exist.
 }
 
 static void remove_all_bridge_info(void)
