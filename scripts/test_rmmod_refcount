@@ -1,0 +1,51 @@
+#!/bin/bash
+
+set -u
+
+MODULE_NAME="agnocast"
+KMOD_DIR="$(cd "$(dirname "$0")/../agnocast_kmod" && pwd)"
+
+# Check sudo is cached (non-interactive)
+if ! sudo -n true 2>/dev/null; then
+    echo "ERROR: sudo credentials not cached. Run 'sudo true' first, then re-run this script."
+    exit 1
+fi
+
+echo "=== Test: rmmod should fail while /dev/agnocast is open ==="
+
+# Ensure module is loaded
+if ! lsmod | grep -q "^${MODULE_NAME}\b"; then
+    echo "Module not loaded. Loading..."
+    sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko" || { echo "ABORT: failed to load module"; exit 1; }
+fi
+
+# Open /dev/agnocast and hold the fd
+exec 3< /dev/agnocast
+
+# Attempt rmmod — should fail with EBUSY
+if sudo -n rmmod "$MODULE_NAME" 2>/dev/null; then
+    echo "FAIL: rmmod succeeded while /dev/agnocast was open"
+    # Module is now unloaded (the bug!). Reload it before exiting.
+    exec 3<&-
+    sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko" 2>/dev/null
+    exit 1
+else
+    echo "PASS: rmmod correctly refused (module in use)"
+fi
+
+# Close the fd
+exec 3<&-
+
+# Attempt rmmod — should succeed now
+if sudo -n rmmod "$MODULE_NAME"; then
+    echo "PASS: rmmod succeeded after fd was closed"
+else
+    echo "FAIL: rmmod failed even after fd was closed"
+    exit 1
+fi
+
+# Reload for subsequent use
+sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko"
+echo "Module reloaded."
+
+echo "=== All tests passed ==="
