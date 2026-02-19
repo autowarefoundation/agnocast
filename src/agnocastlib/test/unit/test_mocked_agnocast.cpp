@@ -326,7 +326,9 @@ TEST_F(AgnocastSmartPointerTest, move_assignment_self)
 
   // Act
 #pragma GCC diagnostic push
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wself-move"
+#endif
   sut = std::move(sut);
 #pragma GCC diagnostic pop
 
