@@ -6,6 +6,8 @@
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <memory>
 #include <sstream>
@@ -82,10 +84,12 @@ std::string create_callback_group_id(
 rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
 create_rclcpp_client_publisher()
 {
-  static int idx = 1;
-
+  rclcpp::NodeOptions options;
+  // Disable global arguments so that global "__node" remapping cannot override this name
+  // and cause duplicate node names for these per-client nodes.
+  options.use_global_arguments(false);
   auto node = std::make_shared<rclcpp::Node>(
-    "client_node" + std::to_string(idx++), "/agnocast_cie_thread_configurator");
+    "client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator", options);
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
     "/agnocast_cie_thread_configurator/callback_group_info",
     rclcpp::QoS(CIE_QOS_DEPTH).keep_all().reliable().transient_local());
@@ -95,10 +99,13 @@ create_rclcpp_client_publisher()
 agnocast::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr
 create_agnocast_client_publisher()
 {
-  static int idx = 1;
-
+  rclcpp::NodeOptions options;
+  // Disable global arguments so that global "__node" remapping cannot override this name
+  // and cause duplicate node names for these per-client nodes.
+  options.use_global_arguments(false);
   auto node = std::make_shared<agnocast::Node>(
-    "agnocast_client_node" + std::to_string(idx++), "/agnocast_cie_thread_configurator");
+    "agnocast_client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator",
+    options);
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
     // Note: agnocast Publisher does not support keep_all(), so KeepLast is used here
     // (unlike the rclcpp variant which uses keep_all()).

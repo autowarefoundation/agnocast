@@ -19,7 +19,7 @@ namespace agnocast::node_interfaces
 
 NodeBase::NodeBase(
   std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-  const rcl_arguments_t * local_args, bool use_intra_process_default,
+  const rcl_arguments_t * local_args, bool use_global_arguments, bool use_intra_process_default,
   bool enable_topic_statistics_default)
 : node_name_(std::move(node_name)),
   context_(std::move(context)),
@@ -36,7 +36,7 @@ NodeBase::NodeBase(
   }
 
   // Get global arguments from context
-  {
+  if (use_global_arguments) {
     std::lock_guard<std::mutex> lock(g_context_mtx);
     if (g_context.is_initialized()) {
       global_args_ = g_context.get_parsed_arguments();

@@ -27,8 +27,8 @@ public:
 
   NodeBase(
     std::string node_name, const std::string & ns, rclcpp::Context::SharedPtr context,
-    const rcl_arguments_t * local_args, bool use_intra_process_default = false,
-    bool enable_topic_statistics_default = false);
+    const rcl_arguments_t * local_args, bool use_global_arguments = true,
+    bool use_intra_process_default = false, bool enable_topic_statistics_default = false);
 
   virtual ~NodeBase() = default;
 
