@@ -60,7 +60,8 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
 {
   int ret;
 
-  agnocast_init_device();
+  ret = agnocast_init_device();
+  if (ret < 0) return ret;
 
   ret = agnocast_init_kthread();
   if (ret < 0) return ret;
