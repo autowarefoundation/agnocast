@@ -5,9 +5,9 @@
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
-#include <linux/tracepoint.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
+#include <linux/tracepoint.h>
 #include <linux/version.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
@@ -3010,7 +3010,8 @@ static struct task_struct * worker_task;
 static DECLARE_WAIT_QUEUE_HEAD(worker_wait);
 static int has_new_pid = false;
 
-// Called from sched_process_exit tracepoint. Not an ioctl function, so we manage locks here directly.
+// Called from sched_process_exit tracepoint. Not an ioctl function, so we manage locks here
+// directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
   down_read(&global_htables_rwsem);
