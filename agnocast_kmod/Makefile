@@ -25,7 +25,10 @@ else
 	  agnocast_kunit/agnocast_kunit_add_bridge.o \
 	  agnocast_kunit/agnocast_kunit_remove_bridge.o \
 	  agnocast_kunit/agnocast_kunit_set_ros2_subscriber_num.o \
-	  agnocast_kunit/agnocast_kunit_do_exit.o
+	  agnocast_kunit/agnocast_kunit_do_exit.o \
+	  agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.o \
+	  agnocast_kunit/agnocast_kunit_get_node_publisher_topics.o \
+	  agnocast_kunit/agnocast_kunit_get_version.o
 	ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
   else
     $(warning "CONFIG_KUNIT or CONFIG_GCOV_KERNEL is not set")

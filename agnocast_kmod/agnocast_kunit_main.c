@@ -4,11 +4,14 @@
 #include "agnocast_kunit/agnocast_kunit_add_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_add_subscriber.h"
 #include "agnocast_kunit/agnocast_kunit_do_exit.h"
+#include "agnocast_kunit/agnocast_kunit_get_node_publisher_topics.h"
+#include "agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_process_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_qos.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_qos.h"
+#include "agnocast_kunit/agnocast_kunit_get_version.h"
 #include "agnocast_kunit/agnocast_kunit_publish_msg.h"
 #include "agnocast_kunit/agnocast_kunit_receive_msg.h"
 #include "agnocast_kunit/agnocast_kunit_release_sub_ref.h"
@@ -42,6 +45,9 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_REMOVE_BRIDGE,
   TEST_CASES_SET_ROS2_SUBSCRIBER_NUM,
   TEST_CASES_DO_EXIT,
+  TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS,
+  TEST_CASES_GET_NODE_PUBLISHER_TOPICS,
+  TEST_CASES_GET_VERSION,
   {},
 };
 

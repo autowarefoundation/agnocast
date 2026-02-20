@@ -396,6 +396,16 @@ int ioctl_add_bridge(
 int ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
+int ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
+
+int ioctl_get_node_subscriber_topics(
+  const struct ipc_namespace * ipc_ns, const char * node_name,
+  union ioctl_node_info_args * node_info_args);
+
+int ioctl_get_node_publisher_topics(
+  const struct ipc_namespace * ipc_ns, const char * node_name,
+  union ioctl_node_info_args * node_info_args);
+
 int ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 
 int ioctl_set_ros2_subscriber_num(

@@ -728,9 +728,9 @@ static int set_publisher_shm_info(
   return 0;
 }
 
-static int ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
+int ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
 {
-  memcpy(ioctl_ret->ret_version, VERSION, strlen(VERSION) + 1);
+  strscpy(ioctl_ret->ret_version, VERSION, VERSION_BUFFER_LEN);
 
   return 0;
 }
@@ -1455,7 +1455,7 @@ unlock:
   return ret;
 }
 
-static int ioctl_get_node_subscriber_topics(
+int ioctl_get_node_subscriber_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args)
 {
@@ -1480,7 +1480,7 @@ static int ioctl_get_node_subscriber_topics(
     bool found = false;
     hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
     {
-      if (strncmp(sub_info->node_name, node_name, strlen(node_name)) == 0) {
+      if (strcmp(sub_info->node_name, node_name) == 0) {
         found = true;
         break;
       }
@@ -1514,7 +1514,7 @@ unlock:
   return ret;
 }
 
-static int ioctl_get_node_publisher_topics(
+int ioctl_get_node_publisher_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args)
 {
@@ -1539,7 +1539,7 @@ static int ioctl_get_node_publisher_topics(
     bool found = false;
     hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
     {
-      if (strncmp(pub_info->node_name, node_name, strlen(node_name)) == 0) {
+      if (strcmp(pub_info->node_name, node_name) == 0) {
         found = true;
         break;
       }
@@ -1623,7 +1623,7 @@ static int ioctl_get_topic_subscriber_info(
 
     struct topic_info_ret * temp_info = &topic_info_mem[subscriber_num];
 
-    strncpy(temp_info->node_name, sub_info->node_name, strlen(sub_info->node_name));
+    strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
     temp_info->qos_depth = sub_info->qos_depth;
     temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
     temp_info->qos_is_reliable = sub_info->qos_is_reliable;
@@ -1697,7 +1697,7 @@ static int ioctl_get_topic_publisher_info(
 
     struct topic_info_ret * temp_info = &topic_info_mem[publisher_num];
 
-    strncpy(temp_info->node_name, pub_info->node_name, strlen(pub_info->node_name));
+    strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
     temp_info->qos_depth = pub_info->qos_depth;
     temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
     temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
