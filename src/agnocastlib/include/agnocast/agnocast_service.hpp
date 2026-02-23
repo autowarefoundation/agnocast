@@ -72,7 +72,7 @@ public:
       service_name_.c_str());
 
     auto subscriber_callback = [this, callback = std::forward<Func>(callback)](
-                                 const ipc_shared_ptr<RequestT> & request) {
+                                 ipc_shared_ptr<RequestT> && request) {
       typename ServiceResponsePublisher::SharedPtr publisher;
 
       {
