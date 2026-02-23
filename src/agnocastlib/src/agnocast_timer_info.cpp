@@ -40,9 +40,12 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
 
   if (jump.clock_change == RCL_ROS_TIME_ACTIVATED) {
     // ROS time activated: close timerfd (simulation time will use clock_eventfd)
-    if (timer_info.timer_fd >= 0) {
-      close(timer_info.timer_fd);
-      timer_info.timer_fd = -1;
+    {
+      std::unique_lock lock(timer_info.fd_mutex);
+      if (timer_info.timer_fd >= 0) {
+        close(timer_info.timer_fd);
+        timer_info.timer_fd = -1;
+      }
     }
 
     if (now_ns == 0) {
@@ -56,10 +59,13 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
     }
   } else if (jump.clock_change == RCL_ROS_TIME_DEACTIVATED) {
     // ROS time deactivated: recreate timerfd (back to system time)
-    if (timer_info.timer_fd < 0) {
-      timer_info.timer_fd = create_timer_fd(timer_info.timer_id, timer_info.period, RCL_ROS_TIME);
-      timer_info.need_epoll_update = true;
-      need_epoll_updates.store(true);
+    {
+      std::unique_lock lock(timer_info.fd_mutex);
+      if (timer_info.timer_fd < 0) {
+        timer_info.timer_fd = create_timer_fd(timer_info.timer_id, timer_info.period, RCL_ROS_TIME);
+        timer_info.need_epoll_update = true;
+        need_epoll_updates.store(true);
+      }
     }
 
     if (now_ns == 0) {
@@ -218,7 +224,15 @@ void handle_timer_event(TimerInfo & timer_info)
 
   // Read the number of expirations to clear the event
   uint64_t expirations = 0;
-  const ssize_t ret = read(timer_info.timer_fd, &expirations, sizeof(expirations));
+  ssize_t ret = -1;
+
+  {
+    std::shared_lock lock(timer_info.fd_mutex);
+    if (timer_info.timer_fd < 0) {
+      return;  // Timer fd was closed (ROS time activated)
+    }
+    ret = read(timer_info.timer_fd, &expirations, sizeof(expirations));
+  }
 
   if (ret == -1) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -236,7 +250,15 @@ void handle_clock_event(TimerInfo & timer_info)
 {
   // Read eventfd to clear the event
   uint64_t val = 0;
-  const ssize_t ret = read(timer_info.clock_eventfd, &val, sizeof(val));
+  ssize_t ret = -1;
+
+  {
+    std::shared_lock lock(timer_info.fd_mutex);
+    if (timer_info.clock_eventfd < 0) {
+      return;  // Clock eventfd was closed
+    }
+    ret = read(timer_info.clock_eventfd, &val, sizeof(val));
+  }
 
   if (ret == -1) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {

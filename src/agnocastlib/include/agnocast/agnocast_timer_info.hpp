@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace agnocast
@@ -18,6 +19,11 @@ constexpr int64_t NANOSECONDS_PER_SECOND = 1000000000;
 struct TimerInfo
 {
   ~TimerInfo();
+
+  // Mutex to protect timer_fd and clock_eventfd access.
+  // Use shared_lock for read operations (read(), epoll_ctl()).
+  // Use unique_lock for write operations (close(), create_timer_fd()).
+  std::shared_mutex fd_mutex;
 
   uint32_t timer_id = 0;
   int timer_fd = -1;

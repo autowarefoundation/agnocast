@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace agnocast
@@ -81,6 +82,9 @@ void prepare_epoll_impl(
       if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
         continue;
       }
+
+      // Use shared_lock to protect fd access during epoll registration
+      std::shared_lock fd_lock(timer_info.fd_mutex);
 
       // Register timerfd (wall clock based firing)
       if (timer_info.timer_fd >= 0) {
