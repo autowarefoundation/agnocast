@@ -1441,11 +1441,10 @@ int agnocast_ioctl_get_topic_list(
       goto unlock;
     }
 
-    if (
-      copy_to_user(
-        (char
-           __user *)(topic_list_args->topic_name_buffer_addr + topic_num * TOPIC_NAME_BUFFER_SIZE),
-        wrapper->key, strlen(wrapper->key) + 1)) {
+    if (copy_to_user(
+          (char __user *)(topic_list_args->topic_name_buffer_addr +
+                          topic_num * TOPIC_NAME_BUFFER_SIZE),
+          wrapper->key, strlen(wrapper->key) + 1)) {
       ret = -EFAULT;
       goto unlock;
     }
@@ -1500,11 +1499,10 @@ int agnocast_ioctl_get_node_subscriber_topics(
         goto unlock;
       }
 
-      if (
-        copy_to_user(
-          (char
-             __user *)(node_info_args->topic_name_buffer_addr + topic_num * TOPIC_NAME_BUFFER_SIZE),
-          wrapper->key, strlen(wrapper->key) + 1)) {
+      if (copy_to_user(
+            (char __user *)(node_info_args->topic_name_buffer_addr +
+                            topic_num * TOPIC_NAME_BUFFER_SIZE),
+            wrapper->key, strlen(wrapper->key) + 1)) {
         ret = -EFAULT;
         goto unlock;
       }
@@ -1560,11 +1558,10 @@ int agnocast_ioctl_get_node_publisher_topics(
         goto unlock;
       }
 
-      if (
-        copy_to_user(
-          (char
-             __user *)(node_info_args->topic_name_buffer_addr + topic_num * TOPIC_NAME_BUFFER_SIZE),
-          wrapper->key, strlen(wrapper->key) + 1)) {
+      if (copy_to_user(
+            (char __user *)(node_info_args->topic_name_buffer_addr +
+                            topic_num * TOPIC_NAME_BUFFER_SIZE),
+            wrapper->key, strlen(wrapper->key) + 1)) {
         ret = -EFAULT;
         goto unlock;
       }
