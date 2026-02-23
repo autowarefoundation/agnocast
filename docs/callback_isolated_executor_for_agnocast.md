@@ -1,6 +1,6 @@
 # Callback Isolated Executor for Agnocast
 
-[`agnocast::CallbackIsolatedAgnocastExecutor`](../src/agnocastlib/include/agnocast/agnocast_callback_isolated_executor.hpp) and [`agnocast_component_container_cie`](../src/agnocastlib/src/agnocast_component_container_cie.cpp) are the Agnocast versions of the Callback Isolated Executor, which can handle both ROS 2 callbacks and Agnocast callbacks. For basic usage, please refer to the [tier4/callback_isolated_executor README](https://github.com/tier4/callback_isolated_executor/blob/main/README.md).
+[`agnocast::CallbackIsolatedAgnocastExecutor`](../src/agnocastlib/include/agnocast/agnocast_callback_isolated_executor.hpp) and [`agnocast_component_container_cie`](../src/agnocastlib/src/agnocast_component_container_cie.cpp) are the Agnocast versions of the Callback Isolated Executor, which can handle both ROS 2 callbacks and Agnocast callbacks. For basic usage, please refer to the [tier4/callback_isolated_executor README](https://github.com/autowarefoundation/callback_isolated_executor/blob/main/README.md).
 
 ## Differences from the Original
 
