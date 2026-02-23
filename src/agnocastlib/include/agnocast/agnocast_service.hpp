@@ -32,15 +32,15 @@ private:
   };
 
 private:
-  using ServiceResponsePublisher =
-    agnocast::BasicPublisher<ResponseT, agnocast::NoBridgeRequestPolicy>;
+  using ServiceResponsePublisher = BasicPublisher<ResponseT, agnocast::NoBridgeRequestPolicy>;
+  using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRequestPolicy>;
 
   std::variant<rclcpp::Node *, agnocast::Node *> node_;
   const std::string service_name_;
   const rclcpp::QoS qos_;
   std::mutex publishers_mtx_;
   std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
-  typename BasicSubscription<RequestT, NoBridgeRequestPolicy>::SharedPtr subscriber_;
+  typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
 public:
   using SharedPtr = std::shared_ptr<Service<ServiceT>>;
@@ -56,54 +56,60 @@ public:
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
+
+    // TODO(bdm-k): Consider supporting callbacks that take lvalue references.
+    static_assert(
+      std::is_invocable_v<
+        std::decay_t<Func>, ipc_shared_ptr<typename ServiceT::Request> &&,
+        ipc_shared_ptr<typename ServiceT::Response> &&>,
+      "Callback must be callable with ipc_shared_ptr<ServiceT::Request> and "
+      "ipc_shared_ptr<ServiceT::Response> (const&, &&, or by-value)");
+
     RCLCPP_WARN(
       node->get_logger(),
       "Agnocast service/client is not officially supported yet and the API may change in the "
       "future: %s",
       service_name_.c_str());
-    static_assert(
-      std::is_invocable_v<
-        std::decay_t<Func>, ipc_shared_ptr<typename ServiceT::Request> &&,
-        ipc_shared_ptr<typename ServiceT::Response> &&>,
-      "Callback must be callable with ipc_shared_ptr<typename ServiceT::Request> and "
-      "ipc_shared_ptr<typename ServiceT::Response> (const&, &&, or by-value)");
 
-    auto subscriber_callback =
-      [this, callback = std::forward<Func>(callback)](const ipc_shared_ptr<RequestT> & request) {
-        typename ServiceResponsePublisher::SharedPtr publisher;
+    auto subscriber_callback = [this, callback = std::forward<Func>(callback)](
+                                 const ipc_shared_ptr<RequestT> & request) {
+      typename ServiceResponsePublisher::SharedPtr publisher;
 
-        {
-          std::lock_guard<std::mutex> lock(publishers_mtx_);
-          auto it = publishers_.find(request->_node_name);
-          if (it == publishers_.end()) {
-            std::string topic_name =
-              create_service_response_topic_name(service_name_, request->_node_name);
-            std::visit(
-              [this, &publisher, &topic_name](auto * node) {
-                agnocast::PublisherOptions pub_options;
-                publisher =
-                  std::make_shared<ServiceResponsePublisher>(node, topic_name, qos_, pub_options);
-              },
-              node_);
-            publishers_[request->_node_name] = publisher;
-          } else {
-            publisher = it->second;
-          }
+      {
+        std::lock_guard<std::mutex> lock(publishers_mtx_);
+        auto it = publishers_.find(request->_node_name);
+        if (it == publishers_.end()) {
+          std::string topic_name =
+            create_service_response_topic_name(service_name_, request->_node_name);
+          std::visit(
+            [this, &publisher, &topic_name](auto * node) {
+              agnocast::PublisherOptions pub_options;
+              publisher =
+                std::make_shared<ServiceResponsePublisher>(node, topic_name, qos_, pub_options);
+            },
+            node_);
+          publishers_[request->_node_name] = publisher;
+        } else {
+          publisher = it->second;
         }
+      }
 
-        ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
-        response->_sequence_number = request->_sequence_number;
+      ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
+      response->_sequence_number = request->_sequence_number;
 
-        typename ServiceT::Response * response_raw_ptr = response.get();  // upcasting
-        ipc_shared_ptr<typename ServiceT::Response> response_double{
-          response_raw_ptr, response.get_topic_name(), response.get_pubsub_id()};
+      ipc_shared_ptr<typename ServiceT::Response> response_double(response);
 
-        callback(
-          static_ipc_shared_ptr_cast<typename ServiceT::Request>(std::move(request)),
-          std::move(response_double));
+      callback(
+        ipc_shared_ptr<typename ServiceT::Request>(std::move(request)), std::move(response_double));
 
-        publisher->publish(std::move(response));
-      };
+      publisher->publish(std::move(response));
+
+      // Safety regarding response_double
+      //   When `response` is published, all references that share its control block are
+      //   invalidated. Since `response_double` shares its control block with `response`,
+      //   dereferencing `response_double` after publication is disallowed, preventing accidental
+      //   (and erroneous) writes to the response via `response_double`.
+    };
 
     SubscriptionOptions options{group};
     std::string topic_name = create_service_request_topic_name(service_name_);
