@@ -17,8 +17,8 @@ const std::string use_sim_time_name = "use_sim_time";
 
 NodeTimeSource::NodeTimeSource(
   const rclcpp::node_interfaces::NodeClockInterface::SharedPtr & node_clock, agnocast::Node * node,
-  const rclcpp::QoS & qos)
-: qos_(qos)
+  const rclcpp::QoS & qos, bool use_clock_thread)
+: use_clock_thread_(use_clock_thread), qos_(qos)
 {
   attachNode(node);
   attachClock(node_clock->get_clock());
@@ -154,14 +154,46 @@ void NodeTimeSource::create_clock_sub()
     return;
   }
 
+  agnocast::SubscriptionOptions options;
+  options.qos_overriding_options = rclcpp::QosOverridingOptions({
+    rclcpp::QosPolicyKind::Depth,
+    rclcpp::QosPolicyKind::Durability,
+    rclcpp::QosPolicyKind::History,
+    rclcpp::QosPolicyKind::Reliability,
+  });
+
+  if (use_clock_thread_) {
+    clock_callback_group_ =
+      agnocast_node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    options.callback_group = clock_callback_group_;
+
+    // TODO(Koichi98): rclcpp passes ExecutorOptions with node's context to the executor.
+    // AgnocastOnlySingleThreadedExecutor does not support ExecutorOptions yet.
+    clock_executor_ = std::make_unique<AgnocastOnlySingleThreadedExecutor>();
+    // rclcpp uses spin_until_future_complete() with a promise/future pair, but spin() + cancel()
+    // is sufficient here since the executor is recreated each time, not reused.
+    if (!clock_executor_thread_.joinable()) {
+      clock_executor_thread_ = std::thread([this]() {
+        clock_executor_->add_callback_group(clock_callback_group_, node_base_);
+        clock_executor_->spin();
+      });
+    }
+  }
+
   clock_subscription_ = agnocast_node_->create_subscription<rosgraph_msgs::msg::Clock>(
     "/clock", qos_,
-    [this](const agnocast::ipc_shared_ptr<rosgraph_msgs::msg::Clock> & msg) { clock_cb(msg); });
+    [this](const agnocast::ipc_shared_ptr<rosgraph_msgs::msg::Clock> & msg) { clock_cb(msg); },
+    options);
 }
 
 void NodeTimeSource::destroy_clock_sub()
 {
   std::lock_guard<std::mutex> guard(clock_sub_lock_);
+  if (clock_executor_thread_.joinable()) {
+    clock_executor_->cancel();
+    clock_executor_thread_.join();
+    clock_executor_->remove_callback_group(clock_callback_group_);
+  }
   clock_subscription_.reset();
 }
 
