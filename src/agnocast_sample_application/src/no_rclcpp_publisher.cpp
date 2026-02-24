@@ -12,6 +12,10 @@ class NoRclcppPublisher : public agnocast::Node
 
   void timer_callback()
   {
+    if (count_ > 29) {
+      return;
+    }
+
     auto message = pub_->borrow_loaned_message();
 
     message->id = count_;

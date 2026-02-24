@@ -27,6 +27,14 @@ target_include_directories(cie_talker PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
+# ======== 今回追加・修正した部分 (ビルド設定) ========
+add_executable(minimal_take_listener src/minimal_take_subscriber.cpp)
+ament_target_dependencies(minimal_take_listener rclcpp agnocastlib agnocast_sample_interfaces)
+target_include_directories(minimal_take_listener PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+# =====================================================
+
 add_library(cie_listener_component SHARED src/cie_subscriber.cpp)
 ament_target_dependencies(cie_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
 target_include_directories(cie_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
@@ -121,6 +129,11 @@ install(TARGETS talker
 
 install(TARGETS cie_talker
   DESTINATION lib/${PROJECT_NAME})
+
+# ======== 今回追加・修正した部分 (インストール設定) ========
+install(TARGETS minimal_take_listener
+  DESTINATION lib/${PROJECT_NAME})
+# ===========================================================
 
 ament_export_targets(export_no_rclcpp_listener_component)
 install(TARGETS no_rclcpp_listener_component

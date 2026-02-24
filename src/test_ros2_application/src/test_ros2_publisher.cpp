@@ -12,6 +12,11 @@ class Ros2Publisher : public rclcpp::Node
 
   void timer_callback()
   {
+    if (count_ > 29) {
+      rclcpp::shutdown();
+      return;
+    }
+
     auto message = agnocast_sample_interfaces::msg::DynamicSizeArray();
 
     message.id = count_;
