@@ -112,6 +112,13 @@ bool wait_and_handle_epoll_event(
       return false;
     }
 
+    // Check if timer is ready (corresponds to rcl_timer_is_ready)
+    const int64_t now_ns = timer_info->clock->now().nanoseconds();
+    const int64_t next_call_ns = timer_info->next_call_time_ns.load(std::memory_order_relaxed);
+    if (now_ns < next_call_ns) {
+      return false;
+    }
+
     // Create a callable that handles the clock event
     const std::shared_ptr<std::function<void()>> callable =
       std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });

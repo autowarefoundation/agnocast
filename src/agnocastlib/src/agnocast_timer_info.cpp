@@ -19,10 +19,9 @@ std::unordered_map<uint32_t, std::shared_ptr<TimerInfo>> id2_timer_info;
 std::atomic<uint32_t> next_timer_id{0};
 
 // Corresponds to _rcl_timer_time_jump (before_jump=true) in rcl/src/rcl/timer.c.
-// Note: RCL checks clock_change == ACTIVATED || DEACTIVATED in the pre-jump phase,
-// but rclcpp's pre_callback has void() signature and doesn't receive jump info.
-// Saving time_credit unconditionally is harmless because it is only consumed in
-// post_jump for ACTIVATED/DEACTIVATED cases.
+// Unlike RCL, we save time_credit unconditionally because rclcpp's pre_callback
+// doesn't receive jump info. This is safe as time_credit is only consumed in
+// post_jump for clock_change cases.
 void handle_pre_time_jump(TimerInfo & timer_info)
 {
   int64_t now_ns;
@@ -92,7 +91,7 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
       rclcpp::get_logger("Agnocast"),
       "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
   } else if (next_call_ns <= now_ns) {
-    // Post forward jump and timer is ready - wake up epoll
+    // Post forward jump and timer is ready
     if (timer_info.clock_eventfd >= 0) {
       const uint64_t val = 1;
       [[maybe_unused]] auto _ = write(timer_info.clock_eventfd, &val, sizeof(val));
@@ -248,11 +247,6 @@ void handle_timer_event(TimerInfo & timer_info)
   const int64_t now_ns = timer_info.clock->now().nanoseconds();
   const int64_t next_call_ns = timer_info.next_call_time_ns.load(std::memory_order_relaxed);
   const int64_t period_ns = timer_info.period.count();
-
-  // Check if timer is ready (for simulation time support)
-  if (now_ns < next_call_ns) {
-    return;  // Not ready yet
-  }
 
   // Update timing
   timer_info.last_call_time_ns.store(now_ns, std::memory_order_relaxed);
