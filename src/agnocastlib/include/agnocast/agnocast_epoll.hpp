@@ -92,11 +92,9 @@ void prepare_epoll_impl(
         clock_ev.data.u32 = timer_id | CLOCK_EVENT_FLAG;
 
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.clock_eventfd, &clock_ev) == -1) {
-          if (errno != EEXIST) {  // EEXIST means already registered, which is fine
-            RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
-            close(agnocast_fd);
-            exit(EXIT_FAILURE);
-          }
+          RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
+          close(agnocast_fd);
+          exit(EXIT_FAILURE);
         }
       }
 

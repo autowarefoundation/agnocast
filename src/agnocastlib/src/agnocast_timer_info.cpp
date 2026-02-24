@@ -18,22 +18,46 @@ std::mutex id2_timer_info_mtx;
 std::unordered_map<uint32_t, std::shared_ptr<TimerInfo>> id2_timer_info;
 std::atomic<uint32_t> next_timer_id{0};
 
+// Corresponds to _rcl_timer_time_jump (before_jump=true) in rcl/src/rcl/timer.c.
+// Note: RCL checks clock_change == ACTIVATED || DEACTIVATED in the pre-jump phase,
+// but rclcpp's pre_callback has void() signature and doesn't receive jump info.
+// Saving time_credit unconditionally is harmless because it is only consumed in
+// post_jump for ACTIVATED/DEACTIVATED cases.
 void handle_pre_time_jump(TimerInfo & timer_info)
 {
-  const int64_t now_ns = timer_info.clock->now().nanoseconds();
+  int64_t now_ns;
+  try {
+    now_ns = timer_info.clock->now().nanoseconds();
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("Agnocast"), "Failed to get current time in pre jump callback: %s",
+      e.what());
+    return;
+  }
+
   if (now_ns == 0) {
     // No time credit if clock is uninitialized
     return;
   }
-  // Source of time may be changing, save elapsed duration pre jump
-  // so the timer only waits the remainder in the new epoch (if clock_change occurs)
+  // Source of time is changing, but the timer has elapsed some portion of its period.
+  // Save elapsed duration pre jump so the timer only waits the remainder in the new epoch.
   const int64_t next_call_ns = timer_info.next_call_time_ns.load(std::memory_order_relaxed);
   timer_info.time_credit.store(next_call_ns - now_ns, std::memory_order_relaxed);
 }
 
+// Corresponds to _rcl_timer_time_jump (before_jump=false) in rcl/src/rcl/timer.c
 void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
 {
-  const int64_t now_ns = timer_info.clock->now().nanoseconds();
+  int64_t now_ns;
+  try {
+    now_ns = timer_info.clock->now().nanoseconds();
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("Agnocast"), "Failed to get current time in post jump callback: %s",
+      e.what());
+    return;
+  }
+
   const int64_t last_call_ns = timer_info.last_call_time_ns.load(std::memory_order_relaxed);
   const int64_t next_call_ns = timer_info.next_call_time_ns.load(std::memory_order_relaxed);
   const int64_t period_ns = timer_info.period.count();
@@ -49,10 +73,12 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
     }
 
     if (now_ns == 0) {
+      // Can't apply time credit if clock is uninitialized
       return;
     }
     const int64_t time_credit = timer_info.time_credit.exchange(0, std::memory_order_relaxed);
     if (time_credit != 0) {
+      // Set times in new epoch so timer only waits the remainder of the period
       timer_info.next_call_time_ns.store(
         now_ns - time_credit + period_ns, std::memory_order_relaxed);
       timer_info.last_call_time_ns.store(now_ns - time_credit, std::memory_order_relaxed);
@@ -67,7 +93,6 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
       "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
   } else if (next_call_ns <= now_ns) {
     // Post forward jump and timer is ready - wake up epoll
-    timer_info.time_credit.store(0, std::memory_order_relaxed);  // Clear unused time_credit
     if (timer_info.clock_eventfd >= 0) {
       const uint64_t val = 1;
       [[maybe_unused]] auto _ = write(timer_info.clock_eventfd, &val, sizeof(val));
@@ -75,12 +100,8 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
   } else if (now_ns < last_call_ns) {
     // Post backwards time jump that went further back than 1 period
     // Next callback should happen after 1 period
-    timer_info.time_credit.store(0, std::memory_order_relaxed);  // Clear unused time_credit
     timer_info.next_call_time_ns.store(now_ns + period_ns, std::memory_order_relaxed);
     timer_info.last_call_time_ns.store(now_ns, std::memory_order_relaxed);
-  } else {
-    // Other cases (small forward jump where timer is not ready)
-    timer_info.time_credit.store(0, std::memory_order_relaxed);  // Clear unused time_credit
   }
 }
 
