@@ -42,6 +42,7 @@ class ComponentManagerCallbackIsolated : public rclcpp_components::ComponentMana
 
 public:
   static constexpr int DEFAULT_GET_NEXT = 50;
+  static constexpr int DEFAULT_MONITOR_POLLING_INTERVAL_MS = 100;
 
   template <typename... Args>
   explicit ComponentManagerCallbackIsolated(Args &&... args)
@@ -49,13 +50,15 @@ public:
   : rclcpp_components::ComponentManager(std::forward<Args>(args)...)
   {
     get_next_timeout_ms_ = this->get_parameter_or("get_next_timeout_ms", DEFAULT_GET_NEXT);
+    monitor_polling_interval_ms_ =
+      this->get_parameter_or("monitor_polling_interval_ms", DEFAULT_MONITOR_POLLING_INTERVAL_MS);
     client_publisher_ = agnocast::create_rclcpp_client_publisher();
 
     monitor_callback_group_ =
       this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     monitor_timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(100), [this]() { check_for_new_callback_groups(); },
-      monitor_callback_group_);
+      std::chrono::milliseconds(monitor_polling_interval_ms_),
+      [this]() { check_for_new_callback_groups(); }, monitor_callback_group_);
   }
 
   ~ComponentManagerCallbackIsolated() override;
@@ -82,6 +85,7 @@ private:
   rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
   std::mutex client_publisher_mutex_;
   int get_next_timeout_ms_;
+  int monitor_polling_interval_ms_;
   rclcpp::CallbackGroup::SharedPtr monitor_callback_group_;
   rclcpp::TimerBase::SharedPtr monitor_timer_;
 };
@@ -212,12 +216,8 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
 void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
 {
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
-  for (auto & [node_id, executor_wrappers] : node_id_to_executor_wrappers_) {
-    auto wrapper_it = node_wrappers_.find(node_id);
-    if (wrapper_it == node_wrappers_.end()) {
-      continue;
-    }
-    auto node = wrapper_it->second.get_node_base_interface();
+  for (auto & [node_id, node_wrapper] : node_wrappers_) {
+    auto node = node_wrapper.get_node_base_interface();
 
     node->for_each_callback_group(
       [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
