@@ -56,7 +56,7 @@ Since ROS packages under `src/` such as `agnocastlib` are not yet distributed fr
 Therefore, to perform the source build, first check out the specific version as follows:
 
 ```bash
-git clone --branch 2.2.0 https://github.com/tier4/agnocast.git
+git clone --branch 2.2.0 https://github.com/autowarefoundation/agnocast.git
 cd agnocast
 ```
 
@@ -282,7 +282,7 @@ For detailed information, see [Bridge Documentation](./docs/agnocast_ros2_bridge
 Clone the latest main branch for development:
 
 ```bash
-git clone https://github.com/tier4/agnocast.git
+git clone https://github.com/autowarefoundation/agnocast.git
 cd agnocast
 ```
 
