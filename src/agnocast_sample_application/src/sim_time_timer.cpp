@@ -39,9 +39,13 @@ public:
     // This timer will respect use_sim_time parameter
     timer_ = this->create_timer(500ms, std::bind(&SimTimeTimerNode::timer_callback, this));
 
+    const auto clock_type = timer_->get_clock()->get_clock_type();
+    const char * clock_type_str = (clock_type == RCL_STEADY_TIME)   ? "STEADY_TIME"
+                                  : (clock_type == RCL_ROS_TIME)    ? "ROS_TIME"
+                                  : (clock_type == RCL_SYSTEM_TIME) ? "SYSTEM_TIME"
+                                                                    : "UNKNOWN";
     RCLCPP_INFO(
-      this->get_logger(), "Timer created with period 500ms, clock type: %s",
-      timer_->is_steady() ? "STEADY_TIME" : "ROS_TIME");
+      this->get_logger(), "Timer created with period 500ms, clock type: %s", clock_type_str);
   }
 
 private:
