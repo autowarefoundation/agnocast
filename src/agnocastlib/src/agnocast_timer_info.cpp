@@ -94,7 +94,11 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
     // Post forward jump and timer is ready
     if (timer_info.clock_eventfd >= 0) {
       const uint64_t val = 1;
-      [[maybe_unused]] auto _ = write(timer_info.clock_eventfd, &val, sizeof(val));
+      if (write(timer_info.clock_eventfd, &val, sizeof(val)) == -1) {
+        RCLCPP_WARN(
+          rclcpp::get_logger("Agnocast"), "Failed to write to clock_eventfd: %s",
+          std::strerror(errno));
+      }
     }
   } else if (now_ns < last_call_ns) {
     // Post backwards time jump that went further back than 1 period
