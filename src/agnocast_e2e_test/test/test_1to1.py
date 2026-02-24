@@ -10,7 +10,7 @@ from launch.actions import SetEnvironmentVariable, TimerAction
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config_test_1to1.yaml')
+CONFIG_PATH = os.environ.get('E2E_CONFIG_PATH', os.path.join(os.path.dirname(__file__), 'config_test_1to1.yaml'))
 
 def check_bridge_mode() -> bool:
     bridge_mode = os.environ.get('AGNOCAST_BRIDGE_MODE', '').lower()
@@ -25,6 +25,7 @@ EXPECT_INIT_ROS2_SUB_NUM: int
 EXPECT_ROS2_SUB_NUM: int
 
 BRIDGE_OFF = check_bridge_mode()
+TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
 TIMEOUT = os.environ.get('STRESS_TEST_TIMEOUT')
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 
@@ -89,6 +90,7 @@ def generate_test_description():
                     name='test_talker_node',
                     parameters=[
                         {
+                            "topic_name": TOPIC_NAME,
                             "qos_depth": config['pub_qos_depth'],
                             "transient_local": config['pub_transient_local'],
                             "init_pub_num": EXPECT_INIT_PUB_NUM,
@@ -117,6 +119,7 @@ def generate_test_description():
                     name='test_ros2_talker_node',
                     parameters=[
                         {
+                            "topic_name": TOPIC_NAME,
                             "qos_depth": config['pub_qos_depth'],
                             "transient_local": config['pub_transient_local'],
                             "init_pub_num": EXPECT_INIT_PUB_NUM,
@@ -154,6 +157,7 @@ def generate_test_description():
                             name='test_ros2_listener_node',
                             parameters=[
                                 {
+                                    "topic_name": TOPIC_NAME,
                                     "qos_depth": config['sub_qos_depth'],
                                     "transient_local": config['sub_transient_local'],
                                     "forever": FOREVER,
@@ -180,6 +184,7 @@ def generate_test_description():
                         name='test_taker_node',
                         parameters=[
                             {
+                                "topic_name": TOPIC_NAME,
                                 "qos_depth": config['sub_qos_depth'],
                                 "transient_local": config['sub_transient_local'],
                                 "forever": FOREVER,
@@ -208,6 +213,7 @@ def generate_test_description():
                         name='test_listener_node',
                         parameters=[
                             {
+                                "topic_name": TOPIC_NAME,
                                 "qos_depth": config['sub_qos_depth'],
                                 "transient_local": config['sub_transient_local'],
                                 "forever": FOREVER,
