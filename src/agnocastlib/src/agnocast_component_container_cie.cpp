@@ -50,6 +50,12 @@ public:
   {
     get_next_timeout_ms_ = this->get_parameter_or("get_next_timeout_ms", DEFAULT_GET_NEXT);
     client_publisher_ = agnocast::create_rclcpp_client_publisher();
+
+    monitor_callback_group_ =
+      this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    monitor_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(100), [this]() { check_for_new_callback_groups(); },
+      monitor_callback_group_);
   }
 
   ~ComponentManagerCallbackIsolated() override;
@@ -66,19 +72,29 @@ protected:
 private:
   void cancel_executor(ExecutorWrapper & executor_wrapper);
   static bool is_clock_callback_group(const rclcpp::CallbackGroup::SharedPtr & group);
+  void start_executor_for_callback_group(
+    uint64_t node_id, const rclcpp::CallbackGroup::SharedPtr & callback_group,
+    const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node);
+  void check_for_new_callback_groups();
 
+  std::mutex executor_wrappers_mutex_;
   std::unordered_map<uint64_t, std::list<ExecutorWrapper>> node_id_to_executor_wrappers_;
   rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
   std::mutex client_publisher_mutex_;
   int get_next_timeout_ms_;
+  rclcpp::CallbackGroup::SharedPtr monitor_callback_group_;
+  rclcpp::TimerBase::SharedPtr monitor_timer_;
 };
 
 ComponentManagerCallbackIsolated::~ComponentManagerCallbackIsolated()
 {
+  monitor_timer_->cancel();
+
   if (node_wrappers_.empty()) {
     return;
   }
 
+  std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
   for (auto & p : node_id_to_executor_wrappers_) {
     auto & executor_wrappers = p.second;
 
@@ -129,62 +145,103 @@ bool ComponentManagerCallbackIsolated::is_clock_callback_group(
   return sub_num == 1 && clock_sub_exists && service_num == 0 && client_num == 0 && timer_num == 0;
 }
 
+void ComponentManagerCallbackIsolated::start_executor_for_callback_group(
+  uint64_t node_id, const rclcpp::CallbackGroup::SharedPtr & callback_group,
+  const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node)
+{
+  auto agnocast_topics = agnocast::get_agnocast_topics_by_group(callback_group);
+  std::string group_id = agnocast::create_callback_group_id(callback_group, node, agnocast_topics);
+
+  std::shared_ptr<rclcpp::Executor> executor;
+
+  if (agnocast_topics.empty()) {
+    auto rclcpp_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+    rclcpp_executor->add_callback_group(callback_group, node);
+    executor = std::move(rclcpp_executor);
+  } else {
+    auto agnocast_executor = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>(
+      rclcpp::ExecutorOptions{}, get_next_timeout_ms_);
+    agnocast_executor->dedicate_to_callback_group(callback_group, node);
+    executor = std::move(agnocast_executor);
+  }
+
+  auto it = node_id_to_executor_wrappers_[node_id].begin();
+  it = node_id_to_executor_wrappers_[node_id].emplace(it, executor);
+  auto & executor_wrapper = *it;
+
+  executor_wrapper.thread_ =
+    std::thread([&executor_wrapper, group_id = std::move(group_id), this]() {
+      auto tid = syscall(SYS_gettid);
+
+      {
+        std::lock_guard<std::mutex> lock{this->client_publisher_mutex_};
+        agnocast::publish_callback_group_info(this->client_publisher_, tid, group_id);
+      }
+
+      executor_wrapper.thread_initialized_ = true;
+      executor_wrapper.executor_->spin();
+    });
+}
+
 void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
 {
   auto node = node_wrappers_[node_id].get_node_base_interface();
 
+  std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
   node->for_each_callback_group(
     [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
       if (!callback_group->automatically_add_to_executor_with_node()) {
         return;
       }
 
-      auto agnocast_topics = agnocast::get_agnocast_topics_by_group(callback_group);
-      std::string group_id =
-        agnocast::create_callback_group_id(callback_group, node, agnocast_topics);
       std::atomic_bool & has_executor = callback_group->get_associated_with_executor_atomic();
 
       if (is_clock_callback_group(callback_group) /* workaround */ || has_executor.load()) {
+        auto agnocast_topics = agnocast::get_agnocast_topics_by_group(callback_group);
+        auto group_id = agnocast::create_callback_group_id(callback_group, node, agnocast_topics);
         RCLCPP_WARN(
           this->get_logger(), "A callback group (%s) has already been added to an executor. skip.",
           group_id.c_str());
         return;
       }
 
-      std::shared_ptr<rclcpp::Executor> executor;
-
-      if (agnocast_topics.empty()) {
-        auto rclcpp_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-        rclcpp_executor->add_callback_group(callback_group, node);
-        executor = std::move(rclcpp_executor);
-      } else {
-        auto agnocast_executor = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>(
-          rclcpp::ExecutorOptions{}, get_next_timeout_ms_);
-        agnocast_executor->dedicate_to_callback_group(callback_group, node);
-        executor = std::move(agnocast_executor);
-      }
-
-      auto it = node_id_to_executor_wrappers_[node_id].begin();
-      it = node_id_to_executor_wrappers_[node_id].emplace(it, executor);
-      auto & executor_wrapper = *it;
-
-      executor_wrapper.thread_ =
-        std::thread([&executor_wrapper, group_id = std::move(group_id), this]() {
-          auto tid = syscall(SYS_gettid);
-
-          {
-            std::lock_guard<std::mutex> lock{this->client_publisher_mutex_};
-            agnocast::publish_callback_group_info(this->client_publisher_, tid, group_id);
-          }
-
-          executor_wrapper.thread_initialized_ = true;
-          executor_wrapper.executor_->spin();
-        });
+      start_executor_for_callback_group(node_id, callback_group, node);
     });
+}
+
+void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
+{
+  std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
+  for (auto & [node_id, executor_wrappers] : node_id_to_executor_wrappers_) {
+    auto wrapper_it = node_wrappers_.find(node_id);
+    if (wrapper_it == node_wrappers_.end()) {
+      continue;
+    }
+    auto node = wrapper_it->second.get_node_base_interface();
+
+    node->for_each_callback_group(
+      [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
+        if (!callback_group->automatically_add_to_executor_with_node()) {
+          return;
+        }
+
+        if (is_clock_callback_group(callback_group) /* workaround */) {
+          return;
+        }
+
+        std::atomic_bool & has_executor = callback_group->get_associated_with_executor_atomic();
+        if (has_executor.load()) {
+          return;
+        }
+
+        start_executor_for_callback_group(node_id, callback_group, node);
+      });
+  }
 }
 
 void ComponentManagerCallbackIsolated::remove_node_from_executor(uint64_t node_id)
 {
+  std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
   auto it = node_id_to_executor_wrappers_.find(node_id);
   if (it == node_id_to_executor_wrappers_.end()) {
     return;
