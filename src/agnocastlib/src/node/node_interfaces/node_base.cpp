@@ -167,9 +167,25 @@ rclcpp::CallbackGroup::SharedPtr NodeBase::create_callback_group(
     std::make_shared<rclcpp::CallbackGroup>(group_type, automatically_add_to_executor_with_node);
 #endif
 
-  std::lock_guard<std::mutex> lock(callback_groups_mutex_);
-  callback_groups_.push_back(group);
+  {
+    std::lock_guard<std::mutex> lock(callback_groups_mutex_);
+    callback_groups_.push_back(group);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(on_callback_group_created_mutex_);
+    if (on_callback_group_created_) {
+      on_callback_group_created_();
+    }
+  }
+
   return group;
+}
+
+void NodeBase::set_on_callback_group_created(std::function<void()> callback)
+{
+  std::lock_guard<std::mutex> lock(on_callback_group_created_mutex_);
+  on_callback_group_created_ = std::move(callback);
 }
 
 rclcpp::CallbackGroup::SharedPtr NodeBase::get_default_callback_group()
