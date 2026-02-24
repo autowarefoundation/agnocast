@@ -45,10 +45,9 @@ add_library(agnocast SHARED
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp)
 
-ament_target_dependencies(agnocast agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
+ament_target_dependencies(agnocast rclcpp agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
 
 target_link_libraries(agnocast
-  ${rclcpp_LIBRARIES}
   ${rcl_yaml_param_parser_LIBRARIES}
   ${tracetools_LIBRARIES}
   ${LTTNGUST_LIBRARIES}
@@ -57,7 +56,6 @@ target_link_libraries(agnocast
 target_include_directories(agnocast PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${rclcpp_INCLUDE_DIRS}
   ${rcl_yaml_param_parser_INCLUDE_DIRS}
   ${tracetools_INCLUDE_DIRS}
   ${LTTNGUST_INCLUDE_DIRS}
