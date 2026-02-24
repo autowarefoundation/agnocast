@@ -1,0 +1,20 @@
+<launch>
+    <!-- Agnocast server -->
+    <node pkg="agnocast_sample_application" exec="server" name="server_node" output="screen">
+        <remap from="/sum_int_array" to="/srv/sum_int_array" />
+
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <!-- R2A service bridge -->
+    <node pkg="agnocast_sample_application" exec="r2a_service_bridge" name="r2a_service_bridge_node" output="screen">
+        <remap from="/sum_int_array" to="/srv/sum_int_array" />
+
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <!-- ROS client  -->
+    <node pkg="agnocast_sample_application" exec="ros_client" name="ros_client_node" output="screen">
+        <remap from="/sum_int_array" to="/srv/sum_int_array" />
+    </node>
+</launch>
