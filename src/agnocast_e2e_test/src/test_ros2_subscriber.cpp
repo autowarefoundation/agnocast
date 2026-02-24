@@ -35,11 +35,13 @@ public:
   explicit TestROS2Subscriber(const rclcpp::NodeOptions & options)
   : Node("test_ros2_subscription", options)
   {
+    this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
     this->declare_parameter<bool>("transient_local", true);
     this->declare_parameter<bool>("forever", false);
     this->declare_parameter<int64_t>("target_end_id", 0);
     this->declare_parameter<int>("target_end_count", 1);
+    std::string topic_name = this->get_parameter("topic_name").as_string();
     int64_t qos_depth = this->get_parameter("qos_depth").as_int();
     bool transient_local = this->get_parameter("transient_local").as_bool();
     forever_ = this->get_parameter("forever").as_bool();
@@ -52,7 +54,7 @@ public:
     }
 
     sub_ = this->create_subscription<std_msgs::msg::Int64>(
-      "/test_topic", qos, std::bind(&TestROS2Subscriber::callback, this, _1));
+      topic_name, qos, std::bind(&TestROS2Subscriber::callback, this, _1));
   }
 };
 
