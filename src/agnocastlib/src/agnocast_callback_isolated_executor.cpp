@@ -147,6 +147,9 @@ void CallbackIsolatedAgnocastExecutor::spin()
     }
 
     std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    if (!spinning.load()) {
+      break;
+    }
     for (auto & [group, node] : new_groups) {
       if (group->get_associated_with_executor_atomic().load()) {
         continue;
@@ -375,6 +378,12 @@ void CallbackIsolatedAgnocastExecutor::cancel()
     }
   }
   weak_child_executors_.clear();
+  for (auto & thread : child_threads_) {
+    if (thread.joinable()) {
+      thread.join();
+    }
+  }
+  child_threads_.clear();
 }
 
 }  // namespace agnocast
