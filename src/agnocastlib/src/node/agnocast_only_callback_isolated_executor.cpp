@@ -97,14 +97,14 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
     };
 
   {
-    std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
     if (!spinning_.load()) {
       return;
     }
     for (auto & [group, node] : groups_and_nodes) {
       spawn_child_executor(group, node);
     }
-  }  // guard weak_child_executors_mutex_
+  }  // guard child_resources_mutex_
 
   // Monitoring loop: periodically scan for new callback groups from nodes
   while (spinning_.load()) {
@@ -141,7 +141,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
       continue;
     }
 
-    std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
     if (!spinning_.load()) {
       break;
     }
@@ -154,7 +154,12 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   }
 
   // Join all child threads after monitoring loop exits
-  std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+  std::lock_guard<std::mutex> guard{child_resources_mutex_};
+  for (auto & weak_child_executor : weak_child_executors_) {
+    if (auto child_executor = weak_child_executor.lock()) {
+      child_executor->cancel();
+    }
+  }
   for (auto & thread : child_threads_) {
     if (thread.joinable()) {
       thread.join();
@@ -166,19 +171,12 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
 void AgnocastOnlyCallbackIsolatedExecutor::cancel()
 {
   spinning_.store(false);
-  std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+  std::lock_guard<std::mutex> guard{child_resources_mutex_};
   for (auto & weak_child_executor : weak_child_executors_) {
     if (auto child_executor = weak_child_executor.lock()) {
       child_executor->cancel();
     }
   }
-  weak_child_executors_.clear();
-  for (auto & thread : child_threads_) {
-    if (thread.joinable()) {
-      thread.join();
-    }
-  }
-  child_threads_.clear();
 }
 
 void AgnocastOnlyCallbackIsolatedExecutor::add_node(

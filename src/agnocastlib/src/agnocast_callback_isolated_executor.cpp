@@ -102,14 +102,14 @@ void CallbackIsolatedAgnocastExecutor::spin()
     };
 
   {
-    std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
     if (!spinning.load()) {
       return;
     }
     for (auto & [group, node] : groups_and_nodes) {
       spawn_child_executor(group, node);
     }
-  }  // guard weak_child_executors_mutex_
+  }  // guard child_resources_mutex_
 
   // Monitoring loop: periodically scan for new callback groups from nodes
   while (spinning.load()) {
@@ -146,7 +146,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
       continue;
     }
 
-    std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
     if (!spinning.load()) {
       break;
     }
@@ -159,7 +159,12 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }
 
   // Join all child threads after monitoring loop exits
-  std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+  std::lock_guard<std::mutex> guard{child_resources_mutex_};
+  for (auto & weak_child_executor : weak_child_executors_) {
+    if (auto child_executor = weak_child_executor.lock()) {
+      child_executor->cancel();
+    }
+  }
   for (auto & thread : child_threads_) {
     if (thread.joinable()) {
       thread.join();
@@ -371,19 +376,12 @@ void CallbackIsolatedAgnocastExecutor::remove_node(rclcpp::Node::SharedPtr node_
 void CallbackIsolatedAgnocastExecutor::cancel()
 {
   spinning.store(false);
-  std::lock_guard<std::mutex> guard{weak_child_executors_mutex_};
+  std::lock_guard<std::mutex> guard{child_resources_mutex_};
   for (auto & weak_child_executor : weak_child_executors_) {
     if (auto child_executor = weak_child_executor.lock()) {
       child_executor->cancel();
     }
   }
-  weak_child_executors_.clear();
-  for (auto & thread : child_threads_) {
-    if (thread.joinable()) {
-      thread.join();
-    }
-  }
-  child_threads_.clear();
 }
 
 }  // namespace agnocast

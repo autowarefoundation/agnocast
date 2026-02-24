@@ -22,15 +22,15 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   const int next_exec_timeout_ms_;
   const int monitor_polling_interval_ms_;
 
-  // Mutex to protect weak_child_executors_
-  mutable std::mutex weak_child_executors_mutex_;
+  // Mutex to protect weak_child_executors_ and child_threads_
+  mutable std::mutex child_resources_mutex_;
 
   // Child executors created during spin()
   std::vector<std::weak_ptr<AgnocastOnlyExecutor>> weak_child_executors_
-    RCPPUTILS_TSA_GUARDED_BY(weak_child_executors_mutex_);
+    RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
   // Child threads created during spin()
-  std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(weak_child_executors_mutex_);
+  std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
 public:
   RCLCPP_PUBLIC
