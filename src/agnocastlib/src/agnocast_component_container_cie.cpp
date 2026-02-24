@@ -56,6 +56,7 @@ public:
 
     monitor_callback_group_ =
       this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     monitor_timer_ = this->create_wall_timer(
       std::chrono::milliseconds(monitor_polling_interval_ms_),
       [this]() { check_for_new_callback_groups(); }, monitor_callback_group_);
@@ -193,7 +194,7 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
 
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
   node->for_each_callback_group(
-    [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
+    [nid = node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
       if (!callback_group->automatically_add_to_executor_with_node()) {
         return;
       }
@@ -209,7 +210,7 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
         return;
       }
 
-      start_executor_for_callback_group(node_id, callback_group, node);
+      start_executor_for_callback_group(nid, callback_group, node);
     });
 }
 
@@ -220,7 +221,7 @@ void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
     auto node = node_wrapper.get_node_base_interface();
 
     node->for_each_callback_group(
-      [node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
+      [nid = node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
         if (!callback_group->automatically_add_to_executor_with_node()) {
           return;
         }
@@ -234,7 +235,7 @@ void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
           return;
         }
 
-        start_executor_for_callback_group(node_id, callback_group, node);
+        start_executor_for_callback_group(nid, callback_group, node);
       });
   }
 }
