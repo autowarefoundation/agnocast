@@ -173,8 +173,8 @@ void AgnocastOnlyExecutor::add_callback_group(
 
   const auto group_type_enum = group_ptr->type();
   const char * group_type_str = (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive)
-                                  ? "MutuallyExclusive"
-                                  : "Reentrant";
+                                  ? "mutually_exclusive"
+                                  : "reentrant";
 
   TRACEPOINT(
     agnocast_add_callback_group, static_cast<const void *>(this),
@@ -272,8 +272,8 @@ void AgnocastOnlyExecutor::add_callback_groups_from_nodes_associated_to_executor
 
           const auto group_type_enum = group_ptr->type();
           const char * group_type_str =
-            (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "MutuallyExclusive"
-                                                                              : "Reentrant";
+            (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "mutually_exclusive"
+                                                                              : "reentrant";
 
           TRACEPOINT(
             agnocast_add_callback_group, static_cast<const void *>(this),
@@ -308,8 +308,8 @@ void AgnocastOnlyExecutor::add_node(
 
         const auto group_type_enum = group_ptr->type();
         const char * group_type_str =
-          (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "MutuallyExclusive"
-                                                                            : "Reentrant";
+          (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "mutually_exclusive"
+                                                                            : "reentrant";
 
         TRACEPOINT(
           agnocast_add_callback_group, static_cast<const void *>(this),
