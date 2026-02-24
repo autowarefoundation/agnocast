@@ -67,6 +67,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
   std::mutex client_publisher_mutex;
   auto client_publisher = agnocast::create_rclcpp_client_publisher();
 
+  // Note: spawn_child_executor must be called while holding child_resources_mutex_.
   auto spawn_child_executor =
     [this, &client_publisher, &client_publisher_mutex](
       const rclcpp::CallbackGroup::SharedPtr & group,
@@ -171,6 +172,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
     }
   }
   child_threads_.clear();
+  weak_child_executors_.clear();
 }
 
 void CallbackIsolatedAgnocastExecutor::add_callback_group(
