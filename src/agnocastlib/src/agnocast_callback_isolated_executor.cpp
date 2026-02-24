@@ -8,8 +8,11 @@ namespace agnocast
 {
 
 CallbackIsolatedAgnocastExecutor::CallbackIsolatedAgnocastExecutor(
-  const rclcpp::ExecutorOptions & options, int next_exec_timeout_ms)
-: rclcpp::Executor(options), next_exec_timeout_ms_(next_exec_timeout_ms)
+  const rclcpp::ExecutorOptions & options, int next_exec_timeout_ms,
+  int monitor_polling_interval_ms)
+: rclcpp::Executor(options),
+  next_exec_timeout_ms_(next_exec_timeout_ms),
+  monitor_polling_interval_ms_(monitor_polling_interval_ms)
 {
 }
 
@@ -110,7 +113,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
 
   // Monitoring loop: periodically scan for new callback groups from nodes
   while (spinning.load()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(monitor_polling_interval_ms_));
 
     if (!spinning.load()) {
       break;

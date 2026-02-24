@@ -20,6 +20,7 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   RCLCPP_DISABLE_COPY(AgnocastOnlyCallbackIsolatedExecutor)
 
   const int next_exec_timeout_ms_;
+  const int monitor_polling_interval_ms_;
 
   // Mutex to protect weak_child_executors_
   mutable std::mutex weak_child_executors_mutex_;
@@ -33,7 +34,8 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
 
 public:
   RCLCPP_PUBLIC
-  explicit AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms = 50);
+  explicit AgnocastOnlyCallbackIsolatedExecutor(
+    int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
 
   RCLCPP_PUBLIC
   void spin() override;

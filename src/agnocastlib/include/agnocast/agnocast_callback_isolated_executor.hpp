@@ -10,6 +10,7 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
   RCLCPP_DISABLE_COPY(CallbackIsolatedAgnocastExecutor)
 
   const int next_exec_timeout_ms_;
+  const int monitor_polling_interval_ms_;
 
   // Nodes associated with this AgnocastCallbackIsolatedExecutor, appended by add_node() and removed
   // by remove_node()
@@ -47,7 +48,7 @@ public:
   RCLCPP_PUBLIC
   explicit CallbackIsolatedAgnocastExecutor(
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
-    int next_exec_timeout_ms = 50);
+    int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
 
   RCLCPP_PUBLIC
   void spin() override;
