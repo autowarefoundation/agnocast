@@ -6,16 +6,16 @@
  * /clock topic time instead of wall clock time.
  *
  * Usage:
- *   # Terminal 1: Run with use_sim_time enabled
- *   ros2 run agnocast_sample_application sim_time_timer --ros-args -p use_sim_time:=true
+ *   # Terminal 1: Run with use_sim_time enabled (default)
+ *   ros2 launch agnocast_sample_application sim_time_timer.launch.xml
  *
  *   # Terminal 2: Publish clock messages
- *   ros2 topic pub /clock rosgraph_msgs/msg/Clock "{clock: {sec: 0, nanosec: 0}}" --once
  *   ros2 topic pub /clock rosgraph_msgs/msg/Clock "{clock: {sec: 1, nanosec: 0}}" --once
  *   ros2 topic pub /clock rosgraph_msgs/msg/Clock "{clock: {sec: 2, nanosec: 0}}" --once
+ *   ros2 topic pub /clock rosgraph_msgs/msg/Clock "{clock: {sec: 3, nanosec: 0}}" --once
  *
  *   # Or run without use_sim_time (uses wall clock)
- *   ros2 run agnocast_sample_application sim_time_timer
+ *   ros2 launch agnocast_sample_application sim_time_timer.launch.xml use_sim_time:=false
  */
 
 #include "agnocast/agnocast.hpp"
