@@ -15,8 +15,18 @@ namespace agnocast
 AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(
   int next_exec_timeout_ms, int monitor_polling_interval_ms)
 : next_exec_timeout_ms_(next_exec_timeout_ms),
-  monitor_polling_interval_ms_(monitor_polling_interval_ms)
+  monitor_polling_interval_ms_(monitor_polling_interval_ms > 0 ? monitor_polling_interval_ms : 1)
 {
+}
+
+AgnocastOnlyCallbackIsolatedExecutor::~AgnocastOnlyCallbackIsolatedExecutor()
+{
+  std::lock_guard<std::mutex> guard{mutex_};
+  for (auto & weak_node : registered_agnocast_nodes_) {
+    if (auto node = weak_node.lock()) {
+      node->set_on_callback_group_created({});
+    }
+  }
 }
 
 void AgnocastOnlyCallbackIsolatedExecutor::spin()
@@ -228,6 +238,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::add_node(
   if (agnocast_node_base) {
     agnocast_node_base->set_on_callback_group_created(
       [this]() { callback_group_created_cv_.notify_one(); });
+    registered_agnocast_nodes_.push_back(agnocast_node_base);
   }
 }
 

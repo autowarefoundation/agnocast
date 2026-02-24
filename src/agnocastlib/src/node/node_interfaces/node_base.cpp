@@ -172,11 +172,13 @@ rclcpp::CallbackGroup::SharedPtr NodeBase::create_callback_group(
     callback_groups_.push_back(group);
   }
 
+  std::function<void()> on_created;
   {
     std::lock_guard<std::mutex> lock(on_callback_group_created_mutex_);
-    if (on_callback_group_created_) {
-      on_callback_group_created_();
-    }
+    on_created = on_callback_group_created_;
+  }
+  if (on_created) {
+    on_created();
   }
 
   return group;

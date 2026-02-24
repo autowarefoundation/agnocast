@@ -10,6 +10,11 @@
 #include <thread>
 #include <vector>
 
+namespace agnocast::node_interfaces
+{
+class NodeBase;
+}  // namespace agnocast::node_interfaces
+
 namespace agnocast
 {
 
@@ -37,10 +42,17 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   // Child threads created during spin()
   std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
+  // Nodes that have registered callback-group-created callbacks, used for cleanup.
+  std::vector<std::weak_ptr<agnocast::node_interfaces::NodeBase>> registered_agnocast_nodes_
+    RCPPUTILS_TSA_GUARDED_BY(mutex_);
+
 public:
   RCLCPP_PUBLIC
   explicit AgnocastOnlyCallbackIsolatedExecutor(
     int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
+
+  RCLCPP_PUBLIC
+  ~AgnocastOnlyCallbackIsolatedExecutor() override;
 
   RCLCPP_PUBLIC
   void spin() override;
