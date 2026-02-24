@@ -35,11 +35,13 @@ class TestSubscriber : public rclcpp::Node
 public:
   explicit TestSubscriber(const rclcpp::NodeOptions & options) : Node("test_subscription", options)
   {
+    this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
     this->declare_parameter<bool>("transient_local", true);
     this->declare_parameter<bool>("forever", false);
     this->declare_parameter<int64_t>("target_end_id", 0);
     this->declare_parameter<int>("target_end_count", 1);
+    std::string topic_name = this->get_parameter("topic_name").as_string();
     forever_ = this->get_parameter("forever").as_bool();
     target_end_id_ = this->get_parameter("target_end_id").as_int();
     target_end_count_ = this->get_parameter("target_end_count").as_int();
@@ -54,7 +56,7 @@ public:
     agnocast::SubscriptionOptions sub_options;
     sub_options.callback_group = cbg;
     sub_ = agnocast::create_subscription<std_msgs::msg::Int64>(
-      this, "/test_topic", qos, std::bind(&TestSubscriber::callback, this, _1), sub_options);
+      this, topic_name, qos, std::bind(&TestSubscriber::callback, this, _1), sub_options);
   }
 };
 
