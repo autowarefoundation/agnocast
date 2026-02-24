@@ -112,7 +112,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }  // guard child_resources_mutex_
 
   // Monitoring loop: periodically scan for new callback groups from nodes
-  while (spinning.load()) {
+  while (spinning.load() && rclcpp::ok()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(monitor_polling_interval_ms_));
 
     if (!spinning.load()) {
