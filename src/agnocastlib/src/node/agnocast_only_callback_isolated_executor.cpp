@@ -111,7 +111,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   while (spinning_.load() && rclcpp::ok()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(monitor_polling_interval_ms_));
 
-    if (!spinning_.load()) {
+    if (!spinning_.load() || !rclcpp::ok()) {
       break;
     }
 
@@ -143,7 +143,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
     }
 
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    if (!spinning_.load()) {
+    if (!spinning_.load() || !rclcpp::ok()) {
       break;
     }
     for (auto & [group, node] : new_groups) {
