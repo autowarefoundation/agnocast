@@ -21,8 +21,8 @@ struct TimerInfo
   ~TimerInfo();
 
   // Mutex to protect timer_fd access.
-  // Use shared_lock for read operations (read(), epoll_ctl()).
-  // Use unique_lock for write operations (close(), create_timer_fd()).
+  // - shared_lock: for reading timer_fd (read(), epoll_ctl()).
+  // - unique_lock: for writing timer_fd (close()).
   std::shared_mutex fd_mutex;
 
   uint32_t timer_id = 0;
@@ -32,8 +32,7 @@ struct TimerInfo
   rclcpp::CallbackGroup::SharedPtr callback_group;
   std::atomic<int64_t> last_call_time_ns;
   std::atomic<int64_t> next_call_time_ns;
-  std::atomic<int64_t> time_credit{
-    0};  // Credit for time elapsed before ROS time is activated/deactivated
+  std::atomic<int64_t> time_credit{0};  // Credit for time elapsed before ROS time is activated
   std::chrono::nanoseconds period;
   bool need_epoll_update = true;
 

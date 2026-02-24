@@ -58,25 +58,13 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
       timer_info.last_call_time_ns.store(now_ns - time_credit, std::memory_order_relaxed);
     }
   } else if (jump.clock_change == RCL_ROS_TIME_DEACTIVATED) {
-    // ROS time deactivated: recreate timerfd (back to system time)
-    {
-      std::unique_lock lock(timer_info.fd_mutex);
-      if (timer_info.timer_fd < 0) {
-        timer_info.timer_fd = create_timer_fd(timer_info.timer_id, timer_info.period, RCL_ROS_TIME);
-        timer_info.need_epoll_update = true;
-        need_epoll_updates.store(true);
-      }
-    }
-
-    if (now_ns == 0) {
-      return;
-    }
-    const int64_t time_credit = timer_info.time_credit.exchange(0, std::memory_order_relaxed);
-    if (time_credit != 0) {
-      timer_info.next_call_time_ns.store(
-        now_ns - time_credit + period_ns, std::memory_order_relaxed);
-      timer_info.last_call_time_ns.store(now_ns - time_credit, std::memory_order_relaxed);
-    }
+    // TODO: Support dynamic ROS time deactivation (use_sim_time changed from true to false at
+    // runtime). This requires recreating timerfd and re-registering it with epoll, which involves
+    // writing need_epoll_update under unique_lock and needs careful synchronization with the
+    // shared_lock reader in prepare_epoll_impl.
+    RCLCPP_WARN(
+      rclcpp::get_logger("Agnocast"),
+      "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
   } else if (next_call_ns <= now_ns) {
     // Post forward jump and timer is ready - wake up epoll
     timer_info.time_credit.store(0, std::memory_order_relaxed);  // Clear unused time_credit
@@ -96,7 +84,8 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
   }
 }
 
-void setup_time_jump_callback(TimerInfo & timer_info, const rclcpp::Clock::SharedPtr & clock)
+void setup_time_jump_callback(
+  const std::shared_ptr<TimerInfo> & timer_info, const rclcpp::Clock::SharedPtr & clock)
 {
   if (clock->get_clock_type() != RCL_ROS_TIME) {
     return;
@@ -107,9 +96,19 @@ void setup_time_jump_callback(TimerInfo & timer_info, const rclcpp::Clock::Share
   threshold.min_forward.nanoseconds = 1;
   threshold.min_backward.nanoseconds = -1;
 
-  timer_info.jump_handler = clock->create_jump_callback(
-    [&timer_info]() { handle_pre_time_jump(timer_info); },
-    [&timer_info](const rcl_time_jump_t & jump) { handle_post_time_jump(timer_info, jump); },
+  std::weak_ptr<TimerInfo> weak_timer_info = timer_info;
+
+  timer_info->jump_handler = clock->create_jump_callback(
+    [weak_timer_info]() {
+      auto ti = weak_timer_info.lock();
+      if (!ti) return;
+      handle_pre_time_jump(*ti);
+    },
+    [weak_timer_info](const rcl_time_jump_t & jump) {
+      auto ti = weak_timer_info.lock();
+      if (!ti) return;
+      handle_post_time_jump(*ti, jump);
+    },
     threshold);
 }
 
@@ -206,7 +205,7 @@ void register_timer_info(
     timer_info->timer_fd = create_timer_fd(timer_id, period, clock->get_clock_type());
   }
 
-  setup_time_jump_callback(*timer_info, clock);
+  setup_time_jump_callback(timer_info, clock);
 
   {
     std::lock_guard<std::mutex> lock(id2_timer_info_mtx);

@@ -79,9 +79,7 @@ bool wait_and_handle_epoll_event(
     // For tracepoints.
     const void * callable_ptr = callable.get();
     // Create a callable that handles the timer event
-    *callable = [timer_info, callable_ptr]() {
-      handle_timer_event(*timer_info);
-    };
+    *callable = [timer_info, callable_ptr]() { handle_timer_event(*timer_info); };
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};
