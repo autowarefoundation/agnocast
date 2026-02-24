@@ -36,7 +36,7 @@ extern std::atomic<uint32_t> next_timer_id;
 
 int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period);
 
-void handle_timer_event(TimerInfo & timer_info);
+void handle_timer_event(TimerInfo & timer_info, uint64_t expirations);
 
 uint32_t allocate_timer_id();
 
