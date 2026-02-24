@@ -52,14 +52,14 @@ The restriction for the name is the same as the shared memory.
 ## Memory allocation for shared memory
 
 In the [original paper](https://www.arxiv.org/pdf/2506.16882) and its corresponding prototype implementation ([sykwer/agnocast](https://github.com/sykwer/agnocast)), all heap allocations are redirected to shared memory.
-In contrast, in the [tier4/agnocast](https://github.com/tier4/agnocast) implementation, not all heap allocations are redirected to shared memory.
+In contrast, in the [autowarefoundation/agnocast](https://github.com/autowarefoundation/agnocast) implementation, not all heap allocations are redirected to shared memory.
 Ideally, only objects referenced by `agnocast::ipc_shared_ptr` should be placed in shared memory, while all other allocations should reside in the process-private heap.
 However, since it is difficult to fully achieve this in practice, the implementation is designed to approximate this ideal as closely as possible.
 Those interested may refer to the `agnocast_get_borrowed_publisher_num()` function in `agnocastlib` and `agnocast_heaphook`.
 The current approach is that heap allocations occurring between the `AgnocastPublisher::borrow_loaned_message()` call and the subsequent `AgnocastPublisher::publish()` call are redirected to shared memory.
 This is because it is not possible to determine exactly when, within this interval, a heap allocation for an object referenced by `agnocast::ipc_shared_ptr` will occur.
 
-The virtual address space resources are managed in [agnocast_kmod/agnocast_memory_allocator.h](https://github.com/tier4/agnocast/blob/main/agnocast_kmod/agnocast_memory_allocator.h), and the ranges defined in this file are arbitrarily chosen.
+The virtual address space resources are managed in [agnocast_kmod/agnocast_memory_allocator.h](https://github.com/autowarefoundation/agnocast/blob/main/agnocast_kmod/agnocast_memory_allocator.h), and the ranges defined in this file are arbitrarily chosen.
 
 ## Mempool size configuration (Experimental)
 
