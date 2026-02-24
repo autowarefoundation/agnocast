@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace agnocast
@@ -26,6 +27,9 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   // Child executors created during spin()
   std::vector<std::weak_ptr<AgnocastOnlyExecutor>> weak_child_executors_
     RCPPUTILS_TSA_GUARDED_BY(weak_child_executors_mutex_);
+
+  // Child threads created during spin()
+  std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(weak_child_executors_mutex_);
 
 public:
   RCLCPP_PUBLIC
