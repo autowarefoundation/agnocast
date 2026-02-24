@@ -67,7 +67,7 @@ bool wait_and_handle_epoll_event(
     // Read the number of expirations to clear the event
     uint64_t expirations = 0;
     const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
-    if (ret == -1 || expirations == 0) {
+    if (ret == -1) {
       return false;
     }
 
