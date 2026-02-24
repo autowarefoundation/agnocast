@@ -2,6 +2,8 @@
 
 #include "agnocast/agnocast.hpp"
 
+#include <unistd.h>
+
 namespace agnocast
 {
 
@@ -60,9 +62,26 @@ bool wait_and_handle_epoll_event(
       callback_group = timer_info->callback_group;
     }
 
+    // Read the number of expirations to clear the event
+    uint64_t expirations = 0;
+    {
+      std::shared_lock fd_lock(timer_info->fd_mutex);
+      if (timer_info->timer_fd < 0) {
+        return false;  // Timer fd was closed (ROS time activated)
+      }
+      const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
+      if (ret == -1) {
+        return false;
+      }
+    }
+
+    auto callable = std::make_shared<std::function<void()>>();
+    // For tracepoints.
+    const void * callable_ptr = callable.get();
     // Create a callable that handles the timer event
-    const std::shared_ptr<std::function<void()>> callable =
-      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
+    *callable = [timer_info, expirations, callable_ptr]() {
+      handle_timer_event(*timer_info, expirations);
+    };
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};

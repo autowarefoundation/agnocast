@@ -216,30 +216,9 @@ void register_timer_info(
   need_epoll_updates.store(true);
 }
 
-bool check_and_execute_timer(TimerInfo & timer_info);
-
-void handle_timer_event(TimerInfo & timer_info)
+void handle_timer_event(TimerInfo & timer_info, uint64_t expirations)
 {
   // TODO(Koichi98): Add canceled check here
-
-  // Read the number of expirations to clear the event
-  uint64_t expirations = 0;
-  ssize_t ret = -1;
-
-  {
-    std::shared_lock lock(timer_info.fd_mutex);
-    if (timer_info.timer_fd < 0) {
-      return;  // Timer fd was closed (ROS time activated)
-    }
-    ret = read(timer_info.timer_fd, &expirations, sizeof(expirations));
-  }
-
-  if (ret == -1) {
-    if (errno != EAGAIN && errno != EWOULDBLOCK) {
-      RCLCPP_WARN(logger, "Failed to read timer fd: %s", strerror(errno));
-      return;
-    }
-  }
 
   if (expirations > 0) {
     check_and_execute_timer(timer_info);
