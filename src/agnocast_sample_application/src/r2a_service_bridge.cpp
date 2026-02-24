@@ -49,7 +49,10 @@ int main(int argc, char * argv[])
   rclcpp::init(argc, argv);
 
   auto node = rclcpp::Node::make_shared("r2a_service_brigde");
-  // TODO(bdm-k): Write a note explaining why a single-threaded executor should not be used.
+
+  // NOTE: The executor must be able to schedule both ros_srv_cb_group and agno_client_cb_group
+  // concurrently (see below). This is because the Agnocast client's callback that receives service
+  // responses is invoked while the ROS service callback is being executed.
   agnocast::MultiThreadedAgnocastExecutor executor;
 
   auto result = create_r2a_service_bridge(node, "sum_int_array", rclcpp::ServicesQoS());
