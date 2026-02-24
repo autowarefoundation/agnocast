@@ -75,30 +75,14 @@ void prepare_epoll_impl(
       const uint32_t timer_id = it.first;
       TimerInfo & timer_info = *it.second;
 
-      if (!timer_info.need_epoll_update) {
-        continue;
-      }
-
       if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
         continue;
       }
 
-      // Register timerfd (wall clock based firing)
-      {
-        std::shared_lock fd_lock(timer_info.fd_mutex);
-        if (timer_info.timer_fd >= 0) {
-          struct epoll_event ev = {};
-          ev.events = EPOLLIN;
-          ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
+      std::shared_lock fd_lock(timer_info.fd_mutex);
 
-          if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
-            if (errno != EEXIST) {  // EEXIST means already registered, which is fine
-              RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-              close(agnocast_fd);
-              exit(EXIT_FAILURE);
-            }
-          }
-        }
+      if (!timer_info.need_epoll_update) {
+        continue;
       }
 
       // Register clock_eventfd for ROS_TIME timers (simulation time support)
@@ -113,6 +97,19 @@ void prepare_epoll_impl(
             close(agnocast_fd);
             exit(EXIT_FAILURE);
           }
+        }
+      }
+
+      // Register timerfd (wall clock based firing)
+      if (timer_info.timer_fd >= 0) {
+        struct epoll_event ev = {};
+        ev.events = EPOLLIN;
+        ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
+
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
+          RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
+          close(agnocast_fd);
+          exit(EXIT_FAILURE);
         }
       }
 

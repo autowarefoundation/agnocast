@@ -20,7 +20,7 @@ struct TimerInfo
 {
   ~TimerInfo();
 
-  // Mutex to protect timer_fd and clock_eventfd access.
+  // Mutex to protect timer_fd access.
   // Use shared_lock for read operations (read(), epoll_ctl()).
   // Use unique_lock for write operations (close(), create_timer_fd()).
   std::shared_mutex fd_mutex;
