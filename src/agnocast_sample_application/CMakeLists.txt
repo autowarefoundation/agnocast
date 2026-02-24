@@ -90,6 +90,15 @@ target_include_directories(no_rclcpp_client PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
+add_executable(ros_client src/ros_client.cpp)
+ament_target_dependencies(ros_client rclcpp agnocast_sample_interfaces)
+
+add_executable(r2a_service_bridge src/r2a_service_bridge.cpp)
+ament_target_dependencies(r2a_service_bridge rclcpp agnocastlib agnocast_sample_interfaces)
+target_include_directories(r2a_service_bridge PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+
 add_library(listener_component SHARED src/minimal_subscriber.cpp)
 ament_target_dependencies(listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
 target_include_directories(listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
@@ -150,6 +159,13 @@ install(TARGETS no_rclcpp_server
 
 install(TARGETS no_rclcpp_client
   DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS ros_client
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS r2a_service_bridge
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/
