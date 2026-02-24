@@ -23,10 +23,11 @@ static void setup_one_subscriber(
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = ioctl_add_subscriber(
+  int ret2 = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
@@ -42,11 +43,11 @@ static void setup_one_publisher(
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
   *ret_addr = add_process_args.ret_addr;
 
   union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = ioctl_add_publisher(
+  int ret2 = agnocast_ioctl_add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
     qos_is_transient_local, is_bridge, &add_publisher_args);
   *publisher_id = add_publisher_args.ret_id;
@@ -62,14 +63,15 @@ static void setup_pub_sub_same_process(
   common_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret_proc = ioctl_add_process(common_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret_proc =
+    agnocast_ioctl_add_process(common_pid, current->nsproxy->ipc_ns, &add_process_args);
 
   if (ret_addr) {
     *ret_addr = add_process_args.ret_addr;
   }
 
   union ioctl_add_publisher_args add_publisher_args;
-  int ret_pub = ioctl_add_publisher(
+  int ret_pub = agnocast_ioctl_add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
     is_bridge, &add_publisher_args);
 
@@ -78,7 +80,7 @@ static void setup_pub_sub_same_process(
   }
 
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret_sub = ioctl_add_subscriber(
+  int ret_sub = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
     qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, &add_subscriber_args);
 
@@ -100,7 +102,7 @@ void test_case_publish_msg_no_topic(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_ret;
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_ret);
 
@@ -121,7 +123,7 @@ void test_case_publish_msg_no_publisher(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -139,7 +141,7 @@ void test_case_publish_msg_simple_publish_without_any_release(struct kunit * tes
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -149,9 +151,10 @@ void test_case_publish_msg_simple_publish_without_any_release(struct kunit * tes
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 0);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret.ret_entry_id),
     true);
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
 }
 
 void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
@@ -165,7 +168,7 @@ void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
   setup_one_publisher(test, &publisher_id2, &ret_addr2);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret1;
-  int ret1 = ioctl_publish_msg(
+  int ret1 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id1, ret_addr1, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret1);
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -173,7 +176,7 @@ void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret2;
 
   // Act
-  int ret2 = ioctl_publish_msg(
+  int ret2 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id2, ret_addr2, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret2);
 
@@ -183,13 +186,15 @@ void test_case_publish_msg_different_publisher_no_release(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 0);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
     true);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
     true);
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 
 void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
@@ -204,20 +209,20 @@ void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
   setup_one_subscriber(test, &subscriber_id, false);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret1;
-  int ret1 = ioctl_publish_msg(
+  int ret1 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret1);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   // Subscriber takes a reference to entry1
-  int ret_inc = increment_message_entry_rc(
+  int ret_inc = agnocast_increment_message_entry_rc(
     topic_name, current->nsproxy->ipc_ns, subscriber_id, ioctl_publish_msg_ret1.ret_entry_id);
   KUNIT_ASSERT_EQ(test, ret_inc, 0);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret2;
 
   // Act
-  int ret2 = ioctl_publish_msg(
+  int ret2 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 1, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret2);
 
@@ -227,13 +232,15 @@ void test_case_publish_msg_referenced_node_not_released(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 1);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
     true);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
     true);
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 
 void test_case_publish_msg_single_release_return(struct kunit * test)
@@ -245,7 +252,7 @@ void test_case_publish_msg_single_release_return(struct kunit * test)
   setup_one_publisher(test, &publisher_id, &ret_addr);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret1;
-  int ret1 = ioctl_publish_msg(
+  int ret1 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret1);
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -253,7 +260,7 @@ void test_case_publish_msg_single_release_return(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret2;
 
   // Act: entry1 should be released to meet qos_depth=1
-  int ret2 = ioctl_publish_msg(
+  int ret2 = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 1, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret2);
 
@@ -264,13 +271,15 @@ void test_case_publish_msg_single_release_return(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret2.ret_subscriber_num, 0);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret1.ret_entry_id),
     false);
   KUNIT_EXPECT_EQ(
     test,
-    is_in_topic_entries(topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
+    agnocast_is_in_topic_entries(
+      topic_name, current->nsproxy->ipc_ns, ioctl_publish_msg_ret2.ret_entry_id),
     true);
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
 }
 
 void test_case_publish_msg_excessive_release_count(struct kunit * test)
@@ -289,21 +298,21 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test)
   int64_t entry_ids[MAX_RELEASE_NUM + 1];
   for (int i = 0; i < MAX_RELEASE_NUM + 1; i++) {
     union ioctl_publish_msg_args ioctl_publish_msg_ret;
-    int ret = ioctl_publish_msg(
+    int ret = agnocast_ioctl_publish_msg(
       topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, subscriber_ids_buf,
       ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
     entry_ids[i] = ioctl_publish_msg_ret.ret_entry_id;
     KUNIT_ASSERT_EQ(test, ret, 0);
 
     // Subscriber holds a reference to each entry to prevent immediate GC
-    ret =
-      increment_message_entry_rc(topic_name, current->nsproxy->ipc_ns, subscriber_id, entry_ids[i]);
+    ret = agnocast_increment_message_entry_rc(
+      topic_name, current->nsproxy->ipc_ns, subscriber_id, entry_ids[i]);
     KUNIT_ASSERT_EQ(test, ret, 0);
   }
 
   // Release all subscriber references so entries become eligible for GC
   for (int i = 0; i < MAX_RELEASE_NUM + 1; i++) {
-    int ret = ioctl_release_message_entry_reference(
+    int ret = agnocast_ioctl_release_message_entry_reference(
       topic_name, current->nsproxy->ipc_ns, subscriber_id, entry_ids[i]);
     KUNIT_ASSERT_EQ(test, ret, 0);
   }
@@ -311,7 +320,7 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act: Publish one more message; GC should release up to MAX_RELEASE_NUM entries
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -319,7 +328,7 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, MAX_RELEASE_NUM);
   // Remaining entries: (MAX_RELEASE_NUM + 1) - MAX_RELEASE_NUM + 1 (new) = 2
-  KUNIT_EXPECT_EQ(test, get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 
 void test_case_publish_msg_ret_one_subscriber(struct kunit * test)
@@ -334,7 +343,7 @@ void test_case_publish_msg_ret_one_subscriber(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -363,7 +372,7 @@ void test_case_publish_msg_ret_many_subscribers(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -384,7 +393,7 @@ void test_case_publish_msg_buffer_smaller_than_subscriber_count(struct kunit * t
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act: pass a buffer smaller than MAX_SUBSCRIBER_NUM
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, small_buf, ARRAY_SIZE(small_buf),
     &ioctl_publish_msg_ret);
 
@@ -406,7 +415,7 @@ void test_case_ignore_local_same_pid_enabled(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -429,7 +438,7 @@ void test_case_ignore_local_same_pid_disabled(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -453,7 +462,7 @@ void test_case_ignore_local_diff_pid_enabled(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
@@ -477,7 +486,7 @@ void test_case_ignore_local_diff_pid_disabled(struct kunit * test)
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
 
   // Act
-  int ret = ioctl_publish_msg(
+  int ret = agnocast_ioctl_publish_msg(
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
     ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
 
