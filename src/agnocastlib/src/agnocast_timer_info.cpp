@@ -245,13 +245,12 @@ void handle_timer_event(TimerInfo & timer_info)
   }
 
   const int64_t now_ns = timer_info.clock->now().nanoseconds();
-  const int64_t next_call_ns = timer_info.next_call_time_ns.load(std::memory_order_relaxed);
-  const int64_t period_ns = timer_info.period.count();
 
-  // Update timing
   timer_info.last_call_time_ns.store(now_ns, std::memory_order_relaxed);
 
-  int64_t next_call_time_ns = next_call_ns + period_ns;
+  const int64_t period_ns = timer_info.period.count();
+  int64_t next_call_time_ns =
+    timer_info.next_call_time_ns.load(std::memory_order_relaxed) + period_ns;
 
   // in case the timer has missed at least one cycle
   if (next_call_time_ns < now_ns) {
