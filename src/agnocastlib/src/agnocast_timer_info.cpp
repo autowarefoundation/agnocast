@@ -216,40 +216,13 @@ void register_timer_info(
   need_epoll_updates.store(true);
 }
 
-void handle_timer_event(TimerInfo & timer_info, uint64_t expirations)
+void handle_timer_event(TimerInfo & timer_info)
 {
   // TODO(Koichi98): Add canceled check here
 
-  if (expirations > 0) {
-    check_and_execute_timer(timer_info);
-  }
-}
-
-void handle_clock_event(TimerInfo & timer_info)
-{
-  // Read eventfd to clear the event
-  uint64_t val = 0;
-  const ssize_t ret = read(timer_info.clock_eventfd, &val, sizeof(val));
-
-  if (ret == -1) {
-    if (errno != EAGAIN && errno != EWOULDBLOCK) {
-      RCLCPP_WARN(logger, "Failed to read clock eventfd: %s", strerror(errno));
-      return;
-    }
-  }
-
-  if (val > 0) {
-    check_and_execute_timer(timer_info);
-  }
-}
-
-// Check if timer is ready and execute callback if so
-// Returns true if callback was executed
-bool check_and_execute_timer(TimerInfo & timer_info)
-{
   auto timer = timer_info.timer.lock();
   if (!timer) {
-    return false;  // Timer object has been destroyed
+    return;  // Timer object has been destroyed
   }
 
   const int64_t now_ns = timer_info.clock->now().nanoseconds();
@@ -258,7 +231,7 @@ bool check_and_execute_timer(TimerInfo & timer_info)
 
   // Check if timer is ready (for simulation time support)
   if (now_ns < next_call_ns) {
-    return false;  // Not ready yet
+    return;  // Not ready yet
   }
 
   // Update timing
@@ -282,7 +255,6 @@ bool check_and_execute_timer(TimerInfo & timer_info)
   timer_info.next_call_time_ns.store(next_call_time_ns, std::memory_order_relaxed);
 
   timer->execute_callback();
-  return true;
 }
 
 void unregister_timer_info(uint32_t timer_id)

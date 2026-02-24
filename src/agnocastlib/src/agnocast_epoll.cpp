@@ -70,7 +70,7 @@ bool wait_and_handle_epoll_event(
         return false;  // Timer fd was closed (ROS time activated)
       }
       const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
-      if (ret == -1) {
+      if (ret == -1 || expirations == 0) {
         return false;
       }
     }
@@ -79,8 +79,8 @@ bool wait_and_handle_epoll_event(
     // For tracepoints.
     const void * callable_ptr = callable.get();
     // Create a callable that handles the timer event
-    *callable = [timer_info, expirations, callable_ptr]() {
-      handle_timer_event(*timer_info, expirations);
+    *callable = [timer_info, callable_ptr]() {
+      handle_timer_event(*timer_info);
     };
 
     {
@@ -103,14 +103,20 @@ bool wait_and_handle_epoll_event(
       }
       timer_info = it->second;
       if (!timer_info->timer.lock()) {
-        return;  // Timer object has been destroyed
+        return false;  // Timer object has been destroyed
       }
       callback_group = timer_info->callback_group;
     }
 
+    uint64_t val = 0;
+    const ssize_t ret = read(timer_info->clock_eventfd, &val, sizeof(val));
+    if (ret == -1 || val == 0) {
+      return false;
+    }
+
     // Create a callable that handles the clock event
     const std::shared_ptr<std::function<void()>> callable =
-      std::make_shared<std::function<void()>>([timer_info]() { handle_clock_event(*timer_info); });
+      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};

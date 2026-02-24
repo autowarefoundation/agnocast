@@ -48,9 +48,7 @@ extern std::atomic<uint32_t> next_timer_id;
 int create_timer_fd(
   uint32_t timer_id, std::chrono::nanoseconds period, rcl_clock_type_t clock_type);
 
-void handle_timer_event(TimerInfo & timer_info, uint64_t expirations);
-
-void handle_clock_event(TimerInfo & timer_info);
+void handle_timer_event(TimerInfo & timer_info);
 
 uint32_t allocate_timer_id();
 
