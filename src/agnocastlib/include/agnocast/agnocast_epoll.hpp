@@ -83,20 +83,20 @@ void prepare_epoll_impl(
         continue;
       }
 
-      // Use shared_lock to protect fd access during epoll registration
-      std::shared_lock fd_lock(timer_info.fd_mutex);
-
       // Register timerfd (wall clock based firing)
-      if (timer_info.timer_fd >= 0) {
-        struct epoll_event ev = {};
-        ev.events = EPOLLIN;
-        ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
+      {
+        std::shared_lock fd_lock(timer_info.fd_mutex);
+        if (timer_info.timer_fd >= 0) {
+          struct epoll_event ev = {};
+          ev.events = EPOLLIN;
+          ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
 
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
-          if (errno != EEXIST) {  // EEXIST means already registered, which is fine
-            RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-            close(agnocast_fd);
-            exit(EXIT_FAILURE);
+          if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
+            if (errno != EEXIST) {  // EEXIST means already registered, which is fine
+              RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
+              close(agnocast_fd);
+              exit(EXIT_FAILURE);
+            }
           }
         }
       }

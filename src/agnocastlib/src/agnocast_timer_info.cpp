@@ -250,15 +250,7 @@ void handle_clock_event(TimerInfo & timer_info)
 {
   // Read eventfd to clear the event
   uint64_t val = 0;
-  ssize_t ret = -1;
-
-  {
-    std::shared_lock lock(timer_info.fd_mutex);
-    if (timer_info.clock_eventfd < 0) {
-      return;  // Clock eventfd was closed
-    }
-    ret = read(timer_info.clock_eventfd, &val, sizeof(val));
-  }
+  const ssize_t ret = read(timer_info.clock_eventfd, &val, sizeof(val));
 
   if (ret == -1) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
