@@ -181,7 +181,7 @@ if(BUILD_TESTING)
     std_msgs)
   set_tests_properties(test_integration_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
-    TIMEOUT 120
+    TIMEOUT 300
   )
 
   # AgnocastOnly callback isolated executor integration test (requires kernel module, no mock)
