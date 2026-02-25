@@ -4,10 +4,10 @@
 #include <linux/device.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
-#include <linux/kprobes.h>
 #include <linux/kthread.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
+#include <linux/tracepoint.h>
 #include <linux/version.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
@@ -19,8 +19,8 @@ static struct device * agnocast_device;
 // Locking convention:
 //   Only ioctl_ prefixed functions acquire locks. All other internal/static functions are
 //   lock-free and rely on callers to hold the appropriate locks. Exceptions are
-//   process_exit_cleanup ,agnocast_exit_free_data, and increment_message_entry_rc, which manage
-//   locks directly.
+//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and increment_message_entry_rc, which
+//   manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
 //   1. global_htables_rwsem   (this file)
@@ -3010,7 +3010,8 @@ static struct task_struct * worker_task;
 static DECLARE_WAIT_QUEUE_HEAD(worker_wait);
 static int has_new_pid = false;
 
-// Called from kprobe do_exit handler. Not an ioctl function, so we manage locks here directly.
+// Called from sched_process_exit tracepoint. Not an ioctl function, so we manage locks here
+// directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
   down_read(&global_htables_rwsem);
@@ -3154,21 +3155,23 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   } else {
     dev_warn(
       agnocast_device,
-      "exit_pid_queue is full! consider expanding the queue size. (pre_handler_do_exit)\n");
+      "exit_pid_queue is full! consider expanding the queue size. (enqueue_exit_pid)\n");
   }
 }
 
-static int pre_handler_do_exit(struct kprobe * p, struct pt_regs * regs)
+static struct tracepoint * tp_sched_process_exit;
+
+static void agnocast_process_exit(void * data, struct task_struct * task)
 {
-  const pid_t pid = current->pid;
-  agnocast_enqueue_exit_pid(pid);
-  return 0;
+  agnocast_enqueue_exit_pid(task->pid);
 }
 
-static struct kprobe kp_do_exit = {
-  .symbol_name = "do_exit",
-  .pre_handler = pre_handler_do_exit,
-};
+static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)
+{
+  if (strcmp(tp->name, "sched_process_exit") == 0) {
+    tp_sched_process_exit = tp;
+  }
+}
 
 int agnocast_init_device(void)
 {
@@ -3222,13 +3225,19 @@ int agnocast_init_kthread(void)
   return 0;
 }
 
-int agnocast_init_kprobe(void)
+int agnocast_init_exit_hook(void)
 {
-  int ret = register_kprobe(&kp_do_exit);
-  if (ret < 0) {
-    dev_warn(
-      agnocast_device, "register_kprobe for do_exit failed, returned %d. (agnocast_init_kprobe)\n",
-      ret);
+  int ret;
+
+  for_each_kernel_tracepoint(find_sched_process_exit_tp, NULL);
+  if (!tp_sched_process_exit) {
+    dev_warn(agnocast_device, "sched_process_exit tracepoint not found\n");
+    return -ENOENT;
+  }
+
+  ret = tracepoint_probe_register(tp_sched_process_exit, agnocast_process_exit, NULL);
+  if (ret) {
+    dev_warn(agnocast_device, "tracepoint_probe_register failed: %d\n", ret);
     return ret;
   }
 
@@ -3249,7 +3258,7 @@ static int agnocast_init(void)
     return ret;
   }
 
-  ret = agnocast_init_kprobe();
+  ret = agnocast_init_exit_hook();
   if (ret < 0) {
     agnocast_exit_kthread();
     agnocast_exit_device();
@@ -3348,9 +3357,12 @@ void agnocast_exit_kthread(void)
   kthread_stop(worker_task);
 }
 
-void agnocast_exit_kprobe(void)
+void agnocast_exit_exit_hook(void)
 {
-  unregister_kprobe(&kp_do_exit);
+  if (tp_sched_process_exit) {
+    tracepoint_probe_unregister(tp_sched_process_exit, agnocast_process_exit, NULL);
+    tracepoint_synchronize_unregister();
+  }
 }
 
 void agnocast_exit_device(void)
@@ -3364,7 +3376,7 @@ void agnocast_exit_device(void)
 static void agnocast_exit(void)
 {
   agnocast_exit_kthread();
-  agnocast_exit_kprobe();
+  agnocast_exit_exit_hook();
 
   agnocast_exit_free_data();
   dev_info(agnocast_device, "Agnocast removed!\n");
