@@ -311,8 +311,7 @@ TEST_F(CreateTimerTest, CreateTimer_RosTimeAlreadyActive)
       }
     }
     ASSERT_NE(found_info, nullptr) << "Timer info should be registered";
-    EXPECT_EQ(found_info->timer_fd, -1)
-      << "timer_fd should be -1 when ROS time is already active";
+    EXPECT_EQ(found_info->timer_fd, -1) << "timer_fd should be -1 when ROS time is already active";
     EXPECT_GE(found_info->clock_eventfd, 0) << "clock_eventfd should be valid";
   }
 
