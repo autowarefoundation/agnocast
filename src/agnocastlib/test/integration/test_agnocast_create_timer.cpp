@@ -14,16 +14,11 @@ using namespace std::chrono_literals;
 class CreateTimerTest : public ::testing::Test
 {
 protected:
-  void SetUp() override { rclcpp::init(0, nullptr); }
-
   void TearDown() override
   {
     // Clean up any timer info registered during tests
-    {
-      std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
-      agnocast::id2_timer_info.clear();
-    }
-    rclcpp::shutdown();
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info.clear();
   }
 };
 
