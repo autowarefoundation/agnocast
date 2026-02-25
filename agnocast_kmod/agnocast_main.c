@@ -2325,6 +2325,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -ENOMEM;
     }
 
+    uint64_t subscriber_ids_buffer_addr = publish_msg_args.subscriber_ids_buffer_addr;
+
     ret = agnocast_ioctl_publish_msg(
       topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
       subscriber_ids_buf, buffer_size, &publish_msg_args);
@@ -2335,8 +2337,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       uint32_t copy_count = min(publish_msg_args.ret_subscriber_num, buffer_size);
       if (copy_count > 0) {
         if (copy_to_user(
-              (topic_local_id_t __user *)publish_msg_args.subscriber_ids_buffer_addr,
-              subscriber_ids_buf, copy_count * sizeof(topic_local_id_t))) {
+              (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
+              copy_count * sizeof(topic_local_id_t))) {
           kfree(subscriber_ids_buf);
           return -EFAULT;
         }
