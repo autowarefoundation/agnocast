@@ -273,6 +273,117 @@ TEST_F(CreateTimerTest, CreateTimer_MultipleTimers_AllFire)
     << "100ms timer should fire at least as often as 150ms timer";
 }
 
+TEST_F(CreateTimerTest, CreateTimer_MultipleTimers_SimTime_AllFire)
+{
+  auto node = std::make_shared<agnocast::Node>("test_multiple_timers_sim_time");
+
+  auto clock = node->get_clock();
+  rcl_clock_t * rcl_clock = clock->get_clock_handle();
+
+  // Enable ROS time before creating timers
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    auto ret = rcl_enable_ros_time_override(rcl_clock);
+    ASSERT_EQ(ret, RCL_RET_OK) << "Failed to enable ros time override";
+  }
+
+  // Set initial ROS time to 1s
+  const rcl_time_point_value_t initial_time = 1000000000LL;
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    auto ret = rcl_set_ros_time_override(rcl_clock, initial_time);
+    ASSERT_EQ(ret, RCL_RET_OK) << "Failed to set initial ros time";
+  }
+
+  // Create multiple timers with different periods
+  std::atomic<int> callback_count_100ms{0};
+  std::atomic<int> callback_count_200ms{0};
+  std::atomic<int> callback_count_300ms{0};
+
+  auto timer_100ms =
+    node->create_timer(100ms, [&callback_count_100ms]() { callback_count_100ms++; });
+  auto timer_200ms =
+    node->create_timer(200ms, [&callback_count_200ms]() { callback_count_200ms++; });
+  auto timer_300ms =
+    node->create_timer(300ms, [&callback_count_300ms]() { callback_count_300ms++; });
+
+  // Verify all timers use clock_eventfd (no timerfd since ROS time is active)
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    for (const auto & [id, info] : agnocast::id2_timer_info) {
+      EXPECT_EQ(info->timer_fd, -1) << "timer_fd should be -1 when ROS time is active";
+      EXPECT_GE(info->clock_eventfd, 0) << "clock_eventfd should be valid";
+    }
+  }
+
+  auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+  executor->add_node(node);
+
+  std::thread spin_thread([&executor]() { executor->spin(); });
+
+  // Small delay for executor to start
+  std::this_thread::sleep_for(50ms);
+
+  // Forward jump to 1.15s: fires 100ms timer (next_call=1.1s), not others
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    auto ret = rcl_set_ros_time_override(rcl_clock, 1150000000LL);
+    ASSERT_EQ(ret, RCL_RET_OK);
+  }
+
+  // Wait for 100ms timer callback
+  {
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while (callback_count_100ms.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  EXPECT_EQ(callback_count_100ms.load(), 1) << "100ms timer should have fired once at 1.15s";
+  EXPECT_EQ(callback_count_200ms.load(), 0) << "200ms timer should not have fired yet";
+  EXPECT_EQ(callback_count_300ms.load(), 0) << "300ms timer should not have fired yet";
+
+  // Forward jump to 1.25s: fires 100ms timer again (next_call=1.2s), 200ms timer (next_call=1.2s)
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    auto ret = rcl_set_ros_time_override(rcl_clock, 1250000000LL);
+    ASSERT_EQ(ret, RCL_RET_OK);
+  }
+
+  // Wait for callbacks
+  {
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while ((callback_count_100ms.load() < 2 || callback_count_200ms.load() < 1) &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  EXPECT_EQ(callback_count_100ms.load(), 2) << "100ms timer should have fired twice by 1.25s";
+  EXPECT_EQ(callback_count_200ms.load(), 1) << "200ms timer should have fired once by 1.25s";
+  EXPECT_EQ(callback_count_300ms.load(), 0) << "300ms timer should not have fired yet";
+
+  // Forward jump to 1.35s: fires 100ms (next_call=1.3s), 300ms (next_call=1.3s)
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    auto ret = rcl_set_ros_time_override(rcl_clock, 1350000000LL);
+    ASSERT_EQ(ret, RCL_RET_OK);
+  }
+
+  // Wait for callbacks
+  {
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while ((callback_count_100ms.load() < 3 || callback_count_300ms.load() < 1) &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  EXPECT_EQ(callback_count_100ms.load(), 3) << "100ms timer should have fired 3 times by 1.35s";
+  EXPECT_EQ(callback_count_200ms.load(), 1) << "200ms timer should still be at 1 by 1.35s";
+  EXPECT_EQ(callback_count_300ms.load(), 1) << "300ms timer should have fired once by 1.35s";
+
+  executor->cancel();
+  spin_thread.join();
+}
+
 TEST_F(CreateTimerTest, CreateTimer_RosTimeAlreadyActive)
 {
   auto node = std::make_shared<agnocast::Node>("test_ros_time_already_active");
