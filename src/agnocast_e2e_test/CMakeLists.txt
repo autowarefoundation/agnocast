@@ -11,13 +11,14 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(agnocastlib REQUIRED)
+find_package(agnocast_components REQUIRED)
 
 add_library(test_talker_component SHARED src/test_publisher.cpp)
 ament_target_dependencies(test_talker_component rclcpp rclcpp_components std_msgs agnocastlib)
 target_include_directories(test_talker_component PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
-rclcpp_components_register_node(
+agnocast_components_register_node(
   test_talker_component
   PLUGIN "TestPublisher"
   EXECUTABLE test_talker
@@ -28,7 +29,7 @@ ament_target_dependencies(test_listener_component rclcpp rclcpp_components std_m
 target_include_directories(test_listener_component PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
-rclcpp_components_register_node(
+agnocast_components_register_node(
   test_listener_component
   PLUGIN "TestSubscriber"
   EXECUTABLE test_listener
@@ -39,10 +40,50 @@ ament_target_dependencies(test_taker_component rclcpp rclcpp_components std_msgs
 target_include_directories(test_taker_component PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
-rclcpp_components_register_node(
+agnocast_components_register_node(
   test_taker_component
   PLUGIN "TestTakeSubscriber"
   EXECUTABLE test_taker
+)
+
+# agnocast::Node versions (with USE_AGNOCAST_NODE defined)
+add_library(test_agnocast_node_talker_component SHARED src/test_publisher.cpp)
+target_compile_definitions(test_agnocast_node_talker_component PRIVATE USE_AGNOCAST_NODE)
+ament_target_dependencies(test_agnocast_node_talker_component rclcpp rclcpp_components std_msgs agnocastlib)
+target_include_directories(test_agnocast_node_talker_component PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+agnocast_components_register_node(
+  test_agnocast_node_talker_component
+  PLUGIN "TestAgnocastNodePublisher"
+  EXECUTABLE test_agnocast_node_talker
+  EXECUTOR AgnocastOnlySingleThreadedExecutor
+)
+
+add_library(test_agnocast_node_listener_component SHARED src/test_subscriber.cpp)
+target_compile_definitions(test_agnocast_node_listener_component PRIVATE USE_AGNOCAST_NODE)
+ament_target_dependencies(test_agnocast_node_listener_component rclcpp rclcpp_components std_msgs agnocastlib)
+target_include_directories(test_agnocast_node_listener_component PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+agnocast_components_register_node(
+  test_agnocast_node_listener_component
+  PLUGIN "TestAgnocastNodeSubscriber"
+  EXECUTABLE test_agnocast_node_listener
+  EXECUTOR AgnocastOnlySingleThreadedExecutor
+)
+
+add_library(test_agnocast_node_taker_component SHARED src/test_take_subscriber.cpp)
+target_compile_definitions(test_agnocast_node_taker_component PRIVATE USE_AGNOCAST_NODE)
+ament_target_dependencies(test_agnocast_node_taker_component rclcpp rclcpp_components std_msgs agnocastlib)
+target_include_directories(test_agnocast_node_taker_component PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+agnocast_components_register_node(
+  test_agnocast_node_taker_component
+  PLUGIN "TestAgnocastNodeTakeSubscriber"
+  EXECUTABLE test_agnocast_node_taker
+  EXECUTOR AgnocastOnlySingleThreadedExecutor
 )
 
 add_library(test_ros2_listener_component SHARED src/test_ros2_subscriber.cpp)
@@ -96,6 +137,30 @@ install(TARGETS test_ros2_listener_component
 ament_export_targets(export_test_ros2_talker_component)
 install(TARGETS test_ros2_talker_component
         EXPORT export_test_ros2_talker_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
+
+ament_export_targets(export_test_agnocast_node_talker_component)
+install(TARGETS test_agnocast_node_talker_component
+        EXPORT export_test_agnocast_node_talker_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
+
+ament_export_targets(export_test_agnocast_node_listener_component)
+install(TARGETS test_agnocast_node_listener_component
+        EXPORT export_test_agnocast_node_listener_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
+
+ament_export_targets(export_test_agnocast_node_taker_component)
+install(TARGETS test_agnocast_node_taker_component
+        EXPORT export_test_agnocast_node_taker_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin

@@ -11,7 +11,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM SIGHUP
 
 # Parsing arguments
-OPTIONS=$(getopt -o hscp: --long help,single,continue,parallel: -- "$@")
+OPTIONS=$(getopt -o ahscp: --long help,single,continue,parallel: -- "$@")
 if [ $? -ne 0 ]; then
     echo "Invalid options provided"
     exit 1
@@ -21,6 +21,7 @@ eval set -- "$OPTIONS"
 usage() {
     echo "Usage: $0 [options]"
     echo "Options:"
+    echo "  -a                 Use agnocast::Node instead of rclcpp::Node"
     echo "  -h, --help         Show this help message"
     echo "  -s, --single       Run only one test case using current config file"
     echo "  -c, --continue     Continue running tests even if one fails"
@@ -31,8 +32,13 @@ usage() {
 RUN_SINGLE=false
 CONTINUE_ON_FAILURE=false
 PARALLEL=1
+USE_AGNOCAST_NODE=false
 while true; do
     case "$1" in
+    -a)
+        USE_AGNOCAST_NODE=true
+        shift
+        ;;
     -h | --help)
         usage
         ;;
@@ -82,6 +88,13 @@ source install/setup.bash
 
 CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
+
+NODE_TYPE_DISPLAY="rclcpp::Node"
+if [ "$USE_AGNOCAST_NODE" = true ]; then
+    NODE_TYPE_DISPLAY="agnocast::Node"
+fi
+echo "Node type: $NODE_TYPE_DISPLAY" | sudo tee /dev/kmsg
+export USE_AGNOCAST_NODE
 
 # Run test
 CONFIG_FILE="src/agnocast_e2e_test/test/config_test_1to1.yaml"

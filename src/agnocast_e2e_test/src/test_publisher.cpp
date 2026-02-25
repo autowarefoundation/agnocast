@@ -1,4 +1,8 @@
+#ifdef USE_AGNOCAST_NODE
+#include "agnocast/node/agnocast_node.hpp"
+#else
 #include "agnocast/agnocast.hpp"
+#endif
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_msgs/msg/int64.hpp"
@@ -8,7 +12,30 @@
 
 using namespace std::chrono_literals;
 
-class TestPublisher : public rclcpp::Node
+#ifdef USE_AGNOCAST_NODE
+using BaseNode = agnocast::Node;
+using TimerSharedPtr = agnocast::TimerBase::SharedPtr;
+#define NODE_NAME "test_agnocast_node_publisher"
+#define CLASS_NAME TestAgnocastNodePublisher
+#else
+using BaseNode = rclcpp::Node;
+using TimerSharedPtr = rclcpp::TimerBase::SharedPtr;
+#define NODE_NAME "test_publisher"
+#define CLASS_NAME TestPublisher
+#endif
+
+template <typename MessageT, typename NodeT>
+auto create_agnocast_publisher(
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
+{
+  if constexpr (std::is_base_of_v<agnocast::Node, NodeT>) {
+    return node->template create_publisher<MessageT>(topic_name, qos);
+  } else {
+    return agnocast::create_publisher<MessageT>(node, topic_name, qos);
+  }
+}
+
+class CLASS_NAME : public BaseNode
 {
   enum class State {
     WaitingForConnection,      // Waiting for subscriber connections
@@ -16,7 +43,7 @@ class TestPublisher : public rclcpp::Node
     Publishing                 // Normal publishing
   };
 
-  rclcpp::TimerBase::SharedPtr timer_;
+  TimerSharedPtr timer_;
   agnocast::Publisher<std_msgs::msg::Int64>::SharedPtr publisher_;
   int64_t count_;
   int64_t target_pub_num_;
@@ -86,7 +113,7 @@ class TestPublisher : public rclcpp::Node
   }
 
 public:
-  explicit TestPublisher(const rclcpp::NodeOptions & options) : Node("test_publisher", options)
+  explicit CLASS_NAME(const rclcpp::NodeOptions & options) : BaseNode(NODE_NAME, options)
   {
     this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
@@ -109,7 +136,7 @@ public:
     if (transient_local) {
       qos.transient_local();
     }
-    publisher_ = agnocast::create_publisher<std_msgs::msg::Int64>(this, topic_name_, qos);
+    publisher_ = create_agnocast_publisher<std_msgs::msg::Int64>(this, topic_name_, qos);
     count_ = 0;
     target_pub_num_ = init_pub_num + pub_num;
 
@@ -122,9 +149,9 @@ public:
       count_++;
     }
 
-    timer_ = this->create_wall_timer(100ms, std::bind(&TestPublisher::timer_callback, this));
+    timer_ = this->create_wall_timer(100ms, std::bind(&CLASS_NAME::timer_callback, this));
   }
 };
 
 #include <rclcpp_components/register_node_macro.hpp>
-RCLCPP_COMPONENTS_REGISTER_NODE(TestPublisher)
+RCLCPP_COMPONENTS_REGISTER_NODE(CLASS_NAME)

@@ -1,11 +1,39 @@
+#ifdef USE_AGNOCAST_NODE
+#include "agnocast/node/agnocast_node.hpp"
+#else
 #include "agnocast/agnocast.hpp"
+#endif
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_msgs/msg/int64.hpp"
 
 using std::placeholders::_1;
 
-class TestSubscriber : public rclcpp::Node
+#ifdef USE_AGNOCAST_NODE
+using BaseNode = agnocast::Node;
+#define NODE_NAME "test_agnocast_node_subscription"
+#define CLASS_NAME TestAgnocastNodeSubscriber
+#else
+using BaseNode = rclcpp::Node;
+#define NODE_NAME "test_subscription"
+#define CLASS_NAME TestSubscriber
+#endif
+
+template <typename MessageT, typename NodeT, typename CallbackT>
+auto create_agnocast_subscription(
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos, CallbackT && callback,
+  const agnocast::SubscriptionOptions & options)
+{
+  if constexpr (std::is_base_of_v<agnocast::Node, NodeT>) {
+    return node->template create_subscription<MessageT>(
+      topic_name, qos, std::forward<CallbackT>(callback), options);
+  } else {
+    return agnocast::create_subscription<MessageT>(
+      node, topic_name, qos, std::forward<CallbackT>(callback), options);
+  }
+}
+
+class CLASS_NAME : public BaseNode
 {
   agnocast::Subscription<std_msgs::msg::Int64>::SharedPtr sub_;
   bool forever_;
@@ -33,7 +61,7 @@ class TestSubscriber : public rclcpp::Node
   }
 
 public:
-  explicit TestSubscriber(const rclcpp::NodeOptions & options) : Node("test_subscription", options)
+  explicit CLASS_NAME(const rclcpp::NodeOptions & options) : BaseNode(NODE_NAME, options)
   {
     this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
@@ -55,10 +83,10 @@ public:
     auto cbg = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions sub_options;
     sub_options.callback_group = cbg;
-    sub_ = agnocast::create_subscription<std_msgs::msg::Int64>(
-      this, topic_name, qos, std::bind(&TestSubscriber::callback, this, _1), sub_options);
+    sub_ = create_agnocast_subscription<std_msgs::msg::Int64>(
+      this, topic_name, qos, std::bind(&CLASS_NAME::callback, this, _1), sub_options);
   }
 };
 
 #include <rclcpp_components/register_node_macro.hpp>
-RCLCPP_COMPONENTS_REGISTER_NODE(TestSubscriber)
+RCLCPP_COMPONENTS_REGISTER_NODE(CLASS_NAME)

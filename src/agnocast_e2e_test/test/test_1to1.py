@@ -7,8 +7,7 @@ import launch_testing.markers
 import yaml
 from launch import LaunchDescription
 from launch.actions import SetEnvironmentVariable, TimerAction
-from launch_ros.actions import ComposableNodeContainer
-from launch_ros.descriptions import ComposableNode
+from launch_ros.actions import Node
 
 CONFIG_PATH = os.environ.get('E2E_CONFIG_PATH', os.path.join(os.path.dirname(__file__), 'config_test_1to1.yaml'))
 
@@ -28,6 +27,9 @@ BRIDGE_OFF = check_bridge_mode()
 TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
 TIMEOUT = os.environ.get('STRESS_TEST_TIMEOUT')
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
+
+# Check if using agnocast::Node (standalone executable)
+USE_AGNOCAST_NODE = os.environ.get('USE_AGNOCAST_NODE', '').lower() == 'true'
 
 
 def calc_expect_pub_sub_num(config: dict) -> None:
@@ -74,125 +76,77 @@ def generate_test_description():
     calc_expect_pub_sub_num(config)
     pub_delay, sub_delay, ready_delay = calc_action_delays(config)
 
+    pub_executable = 'test_agnocast_node_talker' if USE_AGNOCAST_NODE else 'test_talker'
     if config['use_agnocast_pub']:
-        pub_container = ComposableNodeContainer(
-            name='test_talker_container',
-            namespace='',
-            package='agnocastlib',
-            executable='agnocast_component_container',
-            parameters=[
-                {"get_next_timeout_ms": 1},
-            ],
-            composable_node_descriptions=[
-                ComposableNode(
-                    package='agnocast_e2e_test',
-                    plugin='TestPublisher',
-                    name='test_talker_node',
-                    parameters=[
-                        {
-                            "topic_name": TOPIC_NAME,
-                            "qos_depth": config['pub_qos_depth'],
-                            "transient_local": config['pub_transient_local'],
-                            "init_pub_num": EXPECT_INIT_PUB_NUM,
-                            "pub_num": EXPECT_PUB_NUM,
-                            "planned_pub_count": 0 if BRIDGE_OFF else 1, # Check ROS2 sub connection. Create ROS2 subscriber only if bridge is ON.
-                            "forever": FOREVER
-                        }
-                    ],
-                )
-            ],
+        pub_node = Node(
+            package='agnocast_e2e_test',
+            executable=pub_executable,
+            name='test_talker_node',
+            parameters=[{
+                "topic_name": TOPIC_NAME,
+                "qos_depth": config['pub_qos_depth'],
+                "transient_local": config['pub_transient_local'],
+                "init_pub_num": EXPECT_INIT_PUB_NUM,
+                "pub_num": EXPECT_PUB_NUM,
+                "planned_pub_count": 0 if BRIDGE_OFF else 1,
+                "forever": FOREVER
+            }],
             output='screen',
             additional_env={
                 'LD_PRELOAD': f"libagnocast_heaphook.so:{os.getenv('LD_PRELOAD', '')}",
             }
         )
     else:
-        pub_container = ComposableNodeContainer(
-            name='test_ros2_talker_container',
-            namespace='',
-            package='rclcpp_components',
-            executable='component_container',
-            composable_node_descriptions=[
-                ComposableNode(
-                    package='agnocast_e2e_test',
-                    plugin='TestROS2Publisher',
-                    name='test_ros2_talker_node',
-                    parameters=[
-                        {
-                            "topic_name": TOPIC_NAME,
-                            "qos_depth": config['pub_qos_depth'],
-                            "transient_local": config['pub_transient_local'],
-                            "init_pub_num": EXPECT_INIT_PUB_NUM,
-                            "pub_num": EXPECT_PUB_NUM,
-                            # If 0, skip the connection wait to avoid hanging in incompatible QoS scenarios.
-                            # This branch (use_agnocast_pub=false) is only reached when bridge is ON (see scripts/e2e_test_1to1).
-                            "planned_sub_count": 2 if EXPECT_SUB_NUM > 0 else 0,
-                            "forever": FOREVER
-                        }
-                    ],
-                )
-            ],
+        pub_node = Node(
+            package='agnocast_e2e_test',
+            executable='test_ros2_talker',
+            name='test_ros2_talker_node',
+            parameters=[{
+                "topic_name": TOPIC_NAME,
+                "qos_depth": config['pub_qos_depth'],
+                "transient_local": config['pub_transient_local'],
+                "init_pub_num": EXPECT_INIT_PUB_NUM,
+                "pub_num": EXPECT_PUB_NUM,
+                "planned_sub_count": 2 if EXPECT_SUB_NUM > 0 else 0,
+                "forever": FOREVER
+            }],
             output='screen',
         )
 
-    pub_node = TimerAction(
+    pub_action = TimerAction(
         period=pub_delay,
-        actions=[pub_container]
+        actions=[pub_node]
     )
 
     sub_nodes_actions = []
-    
+    sub_params = {
+        "topic_name": TOPIC_NAME,
+        "qos_depth": config['sub_qos_depth'],
+        "transient_local": config['sub_transient_local'],
+        "forever": FOREVER,
+        "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
+    }
+
     # Only add ROS2 subscriber if bridge is ON
     if not BRIDGE_OFF:
         sub_nodes_actions.append(
-            ComposableNodeContainer(
-                name='test_ros2_listener_container',
-                namespace='',
-                package='rclcpp_components',
-                executable='component_container',
-                composable_node_descriptions=[
-                        ComposableNode(
-                            package='agnocast_e2e_test',
-                            plugin='TestROS2Subscriber',
-                            name='test_ros2_listener_node',
-                            parameters=[
-                                {
-                                    "topic_name": TOPIC_NAME,
-                                    "qos_depth": config['sub_qos_depth'],
-                                    "transient_local": config['sub_transient_local'],
-                                    "forever": FOREVER,
-                                    "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
-                                }
-                            ],
-                        )
-                ],
+            Node(
+                package='agnocast_e2e_test',
+                executable='test_ros2_listener',
+                name='test_ros2_listener_node',
+                parameters=[sub_params],
                 output='screen',
             )
         )
-    
+
     if config['use_take_sub']:
+        taker_executable = 'test_agnocast_node_taker' if USE_AGNOCAST_NODE else 'test_taker'
         sub_nodes_actions.append(
-            ComposableNodeContainer(
-                name='test_taker_container',
-                namespace='',
-                package='agnocastlib',
-                executable='agnocast_component_container',
-                composable_node_descriptions=[
-                    ComposableNode(
-                        package='agnocast_e2e_test',
-                        plugin='TestTakeSubscriber',
-                        name='test_taker_node',
-                        parameters=[
-                            {
-                                "topic_name": TOPIC_NAME,
-                                "qos_depth": config['sub_qos_depth'],
-                                "transient_local": config['sub_transient_local'],
-                                "forever": FOREVER,
-                                "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
-                            }
-                        ],
-                    )
-                ],
+            Node(
+                package='agnocast_e2e_test',
+                executable=taker_executable,
+                name='test_taker_node',
+                parameters=[sub_params],
                 output='screen',
                 additional_env={
                     'LD_PRELOAD': f"libagnocast_heaphook.so:{os.getenv('LD_PRELOAD', '')}",
@@ -200,28 +154,13 @@ def generate_test_description():
             )
         )
     else:
+        listener_executable = 'test_agnocast_node_listener' if USE_AGNOCAST_NODE else 'test_listener'
         sub_nodes_actions.append(
-            ComposableNodeContainer(
-                name='test_listener_container',
-                namespace='',
-                package='agnocastlib',
-                executable='agnocast_component_container',
-                composable_node_descriptions=[
-                    ComposableNode(
-                        package='agnocast_e2e_test',
-                        plugin='TestSubscriber',
-                        name='test_listener_node',
-                        parameters=[
-                            {
-                                "topic_name": TOPIC_NAME,
-                                "qos_depth": config['sub_qos_depth'],
-                                "transient_local": config['sub_transient_local'],
-                                "forever": FOREVER,
-                                "target_end_id": (EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM) - 1
-                            }
-                        ],
-                    )
-                ],
+            Node(
+                package='agnocast_e2e_test',
+                executable=listener_executable,
+                name='test_listener_node',
+                parameters=[sub_params],
                 output='screen',
                 additional_env={
                     'LD_PRELOAD': f"libagnocast_heaphook.so:{os.getenv('LD_PRELOAD', '')}",
@@ -229,7 +168,7 @@ def generate_test_description():
             )
         )
 
-    sub_nodes = TimerAction(
+    sub_action = TimerAction(
         period=sub_delay,
         actions=sub_nodes_actions
     )
@@ -237,19 +176,19 @@ def generate_test_description():
     # Bridge OFF: only Agnocast subscriber
     # Bridge ON: ROS2 subscriber and Agnocast subscriber
     context = {
-        'test_pub': pub_node.actions[0],
-        'test_sub': sub_nodes.actions[-1],
+        'test_pub': pub_action.actions[0],
+        'test_sub': sub_action.actions[-1],
     }
 
     if not BRIDGE_OFF:
-        context['test_ros2_sub'] = sub_nodes.actions[0]
+        context['test_ros2_sub'] = sub_action.actions[0]
 
     return (
         LaunchDescription(
             [
                 SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '0'),
-                pub_node,
-                sub_nodes,
+                pub_action,
+                sub_action,
                 TimerAction(period=ready_delay, actions=[launch_testing.actions.ReadyToTest()])
             ]
         ),
