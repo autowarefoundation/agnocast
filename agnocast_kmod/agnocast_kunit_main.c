@@ -70,10 +70,17 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
   if (ret < 0) return ret;
 
   ret = agnocast_init_kthread();
-  if (ret < 0) return ret;
+  if (ret < 0) {
+    agnocast_exit_device();
+    return ret;
+  }
 
   ret = agnocast_init_exit_hook();
-  if (ret < 0) return ret;
+  if (ret < 0) {
+    agnocast_exit_kthread();
+    agnocast_exit_device();
+    return ret;
+  }
 
   init_memory_allocator();
 
