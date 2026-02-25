@@ -3344,7 +3344,7 @@ static void remove_all_process_info(void)
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
-  // No synchronize_rcu needed: the kprobe is already unregistered, so no RCU readers exist.
+  // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
 }
 
 static void remove_all_bridge_info(void)
