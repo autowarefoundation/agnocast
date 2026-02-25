@@ -3163,14 +3163,9 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
-static struct tracepoint * tp_sched_process_exit;
-
-static void agnocast_process_exit(void * data, struct task_struct * task)
+// RCU-protected check: returns true if pid is registered in agnocast.
+bool is_agnocast_pid(const pid_t pid)
 {
-  const pid_t pid = task->pid;
-
-  // Quick RCU check: skip non-Agnocast PIDs to avoid the full
-  // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
   struct process_info * proc_info;
   bool found = false;
   rcu_read_lock();
@@ -3182,8 +3177,16 @@ static void agnocast_process_exit(void * data, struct task_struct * task)
     }
   }
   rcu_read_unlock();
+  return found;
+}
 
-  if (found) agnocast_enqueue_exit_pid(pid);
+static struct tracepoint * tp_sched_process_exit;
+
+static void agnocast_process_exit(void * data, struct task_struct * task)
+{
+  // Skip non-Agnocast PIDs to avoid the full
+  // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
+  if (is_agnocast_pid(task->pid)) agnocast_enqueue_exit_pid(task->pid);
 }
 
 static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)

@@ -415,6 +415,7 @@ int agnocast_ioctl_set_ros2_subscriber_num(
 void agnocast_process_exit_cleanup(const pid_t pid);
 
 void agnocast_enqueue_exit_pid(const pid_t pid);
+bool is_agnocast_pid(const pid_t pid);
 
 // ================================================
 // helper functions for KUnit test
