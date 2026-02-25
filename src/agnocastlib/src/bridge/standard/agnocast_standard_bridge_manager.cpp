@@ -178,7 +178,12 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
       return;
     }
 
-    if (!is_r2a) {
+    if (is_r2a) {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
+    } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
         RCLCPP_ERROR(
           logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
@@ -281,6 +286,10 @@ void StandardBridgeManager::check_active_bridges()
     int count = 0;
     if (is_r2a) {
       count = get_agnocast_subscriber_count(std::string(topic_name_view)).count;
+      if (!update_ros2_publisher_num(container_node_.get(), std::string(topic_name_view))) {
+        to_remove.push_back(key);
+        continue;
+      }
     } else {
       count = get_agnocast_publisher_count(std::string(topic_name_view)).count;
       if (!update_ros2_subscriber_num(container_node_.get(), std::string(topic_name_view))) {

@@ -39,6 +39,31 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   return add_subscriber_args;
 }
 
+uint32_t get_publisher_count_core(const std::string & topic_name)
+{
+  union ioctl_get_publisher_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  if (ioctl(agnocast_fd, AGNOCAST_GET_PUBLISHER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_PUBLISHER_NUM_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  uint32_t count = args.ret_publisher_num;
+  // Assumes at most one R2A bridge publisher per topic
+  if (args.ret_r2a_bridge_exist && count > 0) {
+    count--;
+  }
+
+  uint32_t ros2_count = args.ret_ros2_publisher_num;
+  // Assumes at most one A2R bridge subscriber per topic
+  if (args.ret_a2r_bridge_exist && ros2_count > 0) {
+    ros2_count--;
+  }
+
+  return count + ros2_count;
+}
+
 mqd_t open_mq_for_subscription(
   const std::string & topic_name, const topic_local_id_t subscriber_id,
   std::pair<mqd_t, std::string> & mq_subscription)
