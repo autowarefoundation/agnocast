@@ -12,7 +12,7 @@ class NoRclcppPublisher : public agnocast::Node
 
   void timer_callback()
   {
-    if (count_ > 29) {
+    if (count_ > 999) {
       return;
     }
 

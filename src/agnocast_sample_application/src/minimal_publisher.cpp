@@ -13,7 +13,7 @@ class MinimalPublisher : public rclcpp::Node
 
   void timer_callback()
   {
-    if (count_ > 29) {
+    if (count_ > 999) {
       rclcpp::shutdown();
       return;
     }
