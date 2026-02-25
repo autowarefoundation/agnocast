@@ -280,6 +280,16 @@ public:
 
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  size_t count_publishers(const std::string & topic_name) const
+  {
+    return get_publisher_count_core(topic_name);
+  }
+
+  size_t count_subscribers(const std::string & topic_name) const
+  {
+    return get_subscription_count_core(topic_name);
+  }
+
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, const rclcpp::QoS & qos,
