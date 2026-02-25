@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/node/agnocast_only_single_threaded_executor.hpp"
 #include "builtin_interfaces/msg/time.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
@@ -12,6 +13,7 @@
 #include "rosgraph_msgs/msg/clock.hpp"
 
 #include <mutex>
+#include <thread>
 
 namespace agnocast
 {
@@ -29,7 +31,8 @@ public:
 
   NodeTimeSource(
     const rclcpp::node_interfaces::NodeClockInterface::SharedPtr & node_clock,
-    agnocast::Node * node, const rclcpp::QoS & qos = rclcpp::ClockQoS());
+    agnocast::Node * node, const rclcpp::QoS & qos = rclcpp::ClockQoS(),
+    bool use_clock_thread = true);
 
   ~NodeTimeSource() override;
 
@@ -38,12 +41,17 @@ private:
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters_;
   agnocast::Node * agnocast_node_{nullptr};
 
+  bool use_clock_thread_;
   rclcpp::QoS qos_;
   agnocast::Subscription<rosgraph_msgs::msg::Clock>::SharedPtr clock_subscription_;
+  rclcpp::CallbackGroup::SharedPtr clock_callback_group_;
   rclcpp::Clock::SharedPtr clock_;
   bool ros_time_active_{false};
   std::mutex clock_sub_lock_;
   rclcpp::Logger logger_{rclcpp::get_logger("agnocast")};
+
+  std::unique_ptr<AgnocastOnlySingleThreadedExecutor> clock_executor_;
+  std::thread clock_executor_thread_;
 
   void enable_ros_time();
   void disable_ros_time();
