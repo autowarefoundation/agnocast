@@ -24,7 +24,7 @@ std::atomic<uint32_t> next_timer_id{0};
 // post_jump for clock_change cases.
 void handle_pre_time_jump(TimerInfo & timer_info)
 {
-  int64_t now_ns;
+  int64_t now_ns = 0;
   try {
     now_ns = timer_info.clock->now().nanoseconds();
   } catch (const std::exception & e) {
@@ -47,7 +47,7 @@ void handle_pre_time_jump(TimerInfo & timer_info)
 // Corresponds to _rcl_timer_time_jump (before_jump=false) in rcl/src/rcl/timer.c
 void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
 {
-  int64_t now_ns;
+  int64_t now_ns = 0;
   try {
     now_ns = timer_info.clock->now().nanoseconds();
   } catch (const std::exception & e) {
@@ -83,10 +83,10 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
       timer_info.last_call_time_ns.store(now_ns - time_credit, std::memory_order_relaxed);
     }
   } else if (jump.clock_change == RCL_ROS_TIME_DEACTIVATED) {
-    // TODO: Support dynamic ROS time deactivation (use_sim_time changed from true to false at
-    // runtime). This requires recreating timerfd and re-registering it with epoll, which involves
-    // writing need_epoll_update under unique_lock and needs careful synchronization with the
-    // shared_lock reader in prepare_epoll_impl.
+    // TODO(Koichi98): Support dynamic ROS time deactivation (use_sim_time changed from true to
+    // false at runtime). This requires recreating timerfd and re-registering it with epoll, which
+    // involves writing need_epoll_update under unique_lock and needs careful synchronization with
+    // the shared_lock reader in prepare_epoll_impl.
     RCLCPP_WARN(
       rclcpp::get_logger("Agnocast"),
       "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
@@ -125,12 +125,16 @@ void setup_time_jump_callback(
   timer_info->jump_handler = clock->create_jump_callback(
     [weak_timer_info]() {
       auto ti = weak_timer_info.lock();
-      if (!ti) return;
+      if (!ti) {
+        return;
+      }
       handle_pre_time_jump(*ti);
     },
     [weak_timer_info](const rcl_time_jump_t & jump) {
       auto ti = weak_timer_info.lock();
-      if (!ti) return;
+      if (!ti) {
+        return;
+      }
       handle_post_time_jump(*ti, jump);
     },
     threshold);
