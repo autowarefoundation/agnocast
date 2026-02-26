@@ -270,6 +270,16 @@ static int insert_subscriber_info(
     return -ENOBUFS;
   }
 
+  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
+      "added. (insert_subscriber_info)\n",
+      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
+  }
+
   *new_info = kmalloc(sizeof(struct subscriber_info), GFP_KERNEL);
   if (!*new_info) {
     dev_warn(agnocast_device, "kmalloc failed. (insert_subscriber_info)\n");
@@ -372,6 +382,16 @@ static int insert_publisher_info(
       "added. (insert_publisher_info)\n",
       wrapper->key, MAX_PUBLISHER_NUM);
     return -ENOBUFS;
+  }
+
+  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
+      "added. (insert_publisher_info)\n",
+      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
   }
 
   *new_info = kmalloc(sizeof(struct publisher_info), GFP_KERNEL);
