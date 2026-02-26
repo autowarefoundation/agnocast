@@ -26,11 +26,11 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   RCLCPP_DISABLE_COPY(AgnocastOnlyCallbackIsolatedExecutor)
 
   const int next_exec_timeout_ms_;
-  const int monitor_polling_interval_ms_;
 
   // Condition variable notified when a new callback group is created on any registered node.
   std::condition_variable callback_group_created_cv_;
   std::mutex callback_group_created_cv_mutex_;
+  bool callback_group_created_{false};
 
   // Mutex to protect weak_child_executors_ and child_threads_
   mutable std::mutex child_resources_mutex_;
@@ -48,8 +48,7 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
 
 public:
   RCLCPP_PUBLIC
-  explicit AgnocastOnlyCallbackIsolatedExecutor(
-    int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
+  explicit AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms = 50);
 
   RCLCPP_PUBLIC
   ~AgnocastOnlyCallbackIsolatedExecutor() override;

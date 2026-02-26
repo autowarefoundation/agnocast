@@ -12,10 +12,8 @@
 namespace agnocast
 {
 
-AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(
-  int next_exec_timeout_ms, int monitor_polling_interval_ms)
-: next_exec_timeout_ms_(next_exec_timeout_ms),
-  monitor_polling_interval_ms_(monitor_polling_interval_ms > 0 ? monitor_polling_interval_ms : 1)
+AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms)
+: next_exec_timeout_ms_(next_exec_timeout_ms)
 {
 }
 
@@ -122,8 +120,9 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   while (spinning_.load() && rclcpp::ok()) {
     {
       std::unique_lock<std::mutex> lock(callback_group_created_cv_mutex_);
-      callback_group_created_cv_.wait_for(
-        lock, std::chrono::milliseconds(monitor_polling_interval_ms_));
+      callback_group_created_cv_.wait(
+        lock, [this] { return callback_group_created_ || !spinning_.load() || !rclcpp::ok(); });
+      callback_group_created_ = false;
     }
 
     if (!spinning_.load() || !rclcpp::ok()) {
@@ -187,7 +186,10 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
 
 void AgnocastOnlyCallbackIsolatedExecutor::cancel()
 {
-  spinning_.store(false);
+  {
+    std::lock_guard<std::mutex> lock(callback_group_created_cv_mutex_);
+    spinning_.store(false);
+  }
   callback_group_created_cv_.notify_one();
   std::lock_guard<std::mutex> guard{child_resources_mutex_};
   for (auto & weak_child_executor : weak_child_executors_) {
@@ -236,8 +238,13 @@ void AgnocastOnlyCallbackIsolatedExecutor::add_node(
   auto agnocast_node_base =
     std::dynamic_pointer_cast<agnocast::node_interfaces::NodeBase>(node_ptr);
   if (agnocast_node_base) {
-    agnocast_node_base->set_on_callback_group_created(
-      [this]() { callback_group_created_cv_.notify_one(); });
+    agnocast_node_base->set_on_callback_group_created([this]() {
+      {
+        std::lock_guard<std::mutex> lock(callback_group_created_cv_mutex_);
+        callback_group_created_ = true;
+      }
+      callback_group_created_cv_.notify_one();
+    });
     registered_agnocast_nodes_.push_back(agnocast_node_base);
   }
 }
