@@ -1458,9 +1458,8 @@ int agnocast_ioctl_get_topic_list(
 
     if (topic_num >= MAX_TOPIC_NUM || topic_num >= topic_list_args->topic_name_buffer_size) {
       dev_warn(
-        agnocast_device,
-        "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n", MAX_TOPIC_NUM,
-        topic_list_args->topic_name_buffer_size);
+        agnocast_device, "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n",
+        MAX_TOPIC_NUM, topic_list_args->topic_name_buffer_size);
       ret = -ENOBUFS;
       goto unlock;
     }
@@ -1520,8 +1519,8 @@ int agnocast_ioctl_get_node_subscriber_topics(
       if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
         dev_warn(
           agnocast_device,
-          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n",
-          MAX_TOPIC_NUM, node_info_args->topic_name_buffer_size);
+          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n", MAX_TOPIC_NUM,
+          node_info_args->topic_name_buffer_size);
         ret = -ENOBUFS;
         goto unlock;
       }
@@ -1582,8 +1581,8 @@ int agnocast_ioctl_get_node_publisher_topics(
       if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
         dev_warn(
           agnocast_device,
-          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n",
-          MAX_TOPIC_NUM, node_info_args->topic_name_buffer_size);
+          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n", MAX_TOPIC_NUM,
+          node_info_args->topic_name_buffer_size);
         ret = -ENOBUFS;
         goto unlock;
       }
@@ -1640,11 +1639,13 @@ static int ioctl_get_topic_subscriber_info(
 
   hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
   {
-    if (subscriber_num >= MAX_TOPIC_INFO_RET_NUM ||
-        subscriber_num >= topic_info_args->topic_info_ret_buffer_size) {
+    if (
+      subscriber_num >= MAX_TOPIC_INFO_RET_NUM ||
+      subscriber_num >= topic_info_args->topic_info_ret_buffer_size) {
       dev_warn(
         agnocast_device,
-        "Subscriber count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, topic_info_ret_buffer_size=%u\n",
+        "Subscriber count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, "
+        "topic_info_ret_buffer_size=%u\n",
         MAX_TOPIC_INFO_RET_NUM, topic_info_args->topic_info_ret_buffer_size);
       kfree(topic_info_mem);
       ret = -ENOBUFS;
@@ -1716,8 +1717,9 @@ static int ioctl_get_topic_publisher_info(
 
   hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
   {
-    if (publisher_num >= MAX_TOPIC_INFO_RET_NUM ||
-        publisher_num >= topic_info_args->topic_info_ret_buffer_size) {
+    if (
+      publisher_num >= MAX_TOPIC_INFO_RET_NUM ||
+      publisher_num >= topic_info_args->topic_info_ret_buffer_size) {
       dev_warn(
         agnocast_device,
         "Publisher count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, topic_info_ret_buffer_size=%u\n",

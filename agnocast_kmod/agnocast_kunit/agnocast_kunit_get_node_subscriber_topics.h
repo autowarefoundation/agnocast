@@ -1,8 +1,8 @@
 #pragma once
 #include <kunit/test.h>
 
-#define TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS                \
-  KUNIT_CASE(test_case_get_node_sub_topics_exact_match),     \
+#define TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS                  \
+  KUNIT_CASE(test_case_get_node_sub_topics_exact_match),       \
     KUNIT_CASE(test_case_get_node_sub_topics_prefix_no_match), \
     KUNIT_CASE(test_case_get_node_sub_topics_buffer_size_exceeded)
 
