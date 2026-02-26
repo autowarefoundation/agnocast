@@ -3017,33 +3017,12 @@ static int has_new_pid = false;
 // directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
-  down_read(&global_htables_rwsem);
-
-  struct process_info * proc_info;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  bool agnocast_related = false;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
-  {
-    if (proc_info->global_pid == pid) {
-      agnocast_related = true;
-      break;
-    }
-  }
-
-  up_read(&global_htables_rwsem);
-
-  if (!agnocast_related) {
-    return;
-  }
-
-  // Upgrade to write lock for actual cleanup.
   down_write(&global_htables_rwsem);
 
-  // Re-check after upgrading the lock, since the state may have changed.
-  // proc_info is freed by the unlink daemon (via ioctl_get_exit_process), but since only one
-  // kernel worker thread calls this function, proc_info cannot disappear between the read and
-  // write lock. This re-check is not strictly necessary, but we keep it as defensive programming.
-  proc_info = NULL;
+  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
+  // have changed between then and now (e.g., the process was already cleaned up by a prior call).
+  struct process_info * proc_info = NULL;
+  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
   hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
   {
     if (proc_info->global_pid == pid) {
