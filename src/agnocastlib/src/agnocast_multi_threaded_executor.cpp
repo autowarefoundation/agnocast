@@ -132,12 +132,15 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
 
     execute_any_executable(any_executable);
 
-    // rclcpp 28+ (Jazzy) changed entity collection to work like the static executor.
-    // Entities are collected once and not rebuilt unless explicitly triggered.
-    // We must trigger recollection after executing callbacks for timers/subscriptions to fire
-    // again.
+    // On rclcpp 28+ (Jazzy), interrupt_guard_condition_ is a shared_ptr.
+    // Wake up threads that may be blocked in wait_for_work() so they can re-check
+    // MutuallyExclusive callback groups whose can_be_taken_from was just restored.
 #if RCLCPP_VERSION_MAJOR >= 28
-    trigger_entity_recollect(true);
+    if (
+      any_executable.callback_group &&
+      any_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
+      interrupt_guard_condition_->trigger();
+    }
 #endif
 
     // Clear the callback_group to prevent the AnyExecutable destructor from
