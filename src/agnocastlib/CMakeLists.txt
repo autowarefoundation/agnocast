@@ -130,7 +130,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_subscription.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
-    test/unit/test_node_topics.cpp)
+    test/unit/test_node_topics.cpp
+    test/unit/test_agnocast_context.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs)

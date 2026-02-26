@@ -198,9 +198,9 @@ This provides the same argument parsing functionality as rcl.
 | `--` (end marker) | ✓ | **Full Support** | - | ROS arguments end marker |
 | `-r node:old:=new` | ✓ | **Full Support** | - | Node-specific remapping |
 | `--log-level` | ✓ | **Full Support** | - | Set log level |
-| `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
-| `--disable-external-lib-logs` | ✗ | **Unsupported** | TBD | Disable external library logs |
-| `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |
+| `--enable-rosout-logs` | - | **Supportable** | TBD | Enable logging to rosout |
+| `--disable-external-lib-logs` | - | **Default** | - | Disable external library logs |
+| `--disable-stdout-logs` | ✓ | **Full Support** | - | Disable stdout logging |
 | `-e` (enclave) | ✗ | **Unsupported** | TBD | Specify security enclave |
 
 ### 3.2 Parameter Override Resolution
