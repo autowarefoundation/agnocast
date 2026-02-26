@@ -60,3 +60,23 @@ void test_case_get_node_sub_topics_prefix_no_match(struct kunit * test)
     test, node_info_args.ret_topic_num, (uint32_t)0,
     "Prefix of node name should not match (strcmp, not strncmp)");
 }
+
+void test_case_get_node_sub_topics_buffer_size_exceeded(struct kunit * test)
+{
+  union ioctl_add_subscriber_args add_sub_args;
+  union ioctl_node_info_args node_info_args = {0};
+  int ret;
+
+  setup_process(test, PID);
+
+  ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
+    IS_BRIDGE, &add_sub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Set topic_name_buffer_size to 0 so the buffer cannot hold any entry.
+  node_info_args.topic_name_buffer_size = 0;
+  ret =
+    agnocast_ioctl_get_node_subscriber_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
+  KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
+}

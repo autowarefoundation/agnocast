@@ -305,6 +305,7 @@ union ioctl_topic_info_args {
   {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
+    uint32_t topic_info_ret_buffer_size;
   };
   uint32_t ret_topic_info_ret_num;
 };
