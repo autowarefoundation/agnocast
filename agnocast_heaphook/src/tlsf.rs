@@ -65,9 +65,11 @@ unsafe impl SharedMemoryAllocator for TLSFAllocator {
         let new_layout =
             Layout::from_size_align(POINTER_SIZE + size + alignment, LAYOUT_ALIGN).ok()?;
 
-        // get the original pointer
-        // SAFETY: `ptr` must have been allocated by `tlsf_allocate_wrapped`.
-        let old_original_ptr = unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
+        // get the original pointer and compute the old aligned offset
+        // SAFETY: `ptr` must have been allocated by `allocate`.
+        let old_original_ptr: NonNull<u8> =
+            unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
+        let old_offset = ptr.as_ptr() as usize - old_original_ptr.as_ptr() as usize;
 
         // the original pointer returned by the internal allocator
         let mut tlsf = self.inner.lock().unwrap();
@@ -86,6 +88,20 @@ unsafe impl SharedMemoryAllocator for TLSFAllocator {
         // SAFETY: `new_aligned_addr` must be non-zero.
         debug_assert!(new_aligned_addr % alignment == 0 && new_aligned_addr != 0);
         let new_aligned_ptr = unsafe { NonNull::new_unchecked(new_aligned_addr as *mut u8) };
+
+        // If the aligned offset changed after relocation, fix user data position.
+        // rlsf's reallocate copies raw bytes at the block level, so user data
+        // sits at the old offset in the new block. Shift it to the new offset.
+        let new_offset = new_aligned_addr - new_original_addr;
+        if old_offset != new_offset {
+            unsafe {
+                std::ptr::copy(
+                    (new_original_addr + old_offset) as *const u8,
+                    new_aligned_ptr.as_ptr(),
+                    size,
+                );
+            }
+        }
 
         // store the original pointer
         unsafe { *new_aligned_ptr.as_ptr().byte_sub(POINTER_SIZE).cast() = new_original_ptr };
