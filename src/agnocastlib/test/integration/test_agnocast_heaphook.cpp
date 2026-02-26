@@ -118,7 +118,9 @@ TEST_F(HeaphookIntegrationTest, fork_memory_behavior)
 
     std::free(child_ptr);
 
-    std::exit(child_is_shared ? 1 : 0);
+    // Use _exit() instead of std::exit() to avoid running atexit handlers
+    // (e.g., rclcpp shutdown) which can interfere with the child process.
+    _exit(child_is_shared ? 1 : 0);
 
   } else if (pid > 0) {
     // malloc in the parent process

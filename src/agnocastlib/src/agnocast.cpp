@@ -358,6 +358,17 @@ pid_t spawn_daemon_process(Func && func)
   if (pid == 0) {
     agnocast::is_bridge_process = true;
     unsetenv("LD_PRELOAD");
+
+    // Redirect stdio to /dev/null so that CTest doesn't wait for inherited pipe
+    // file descriptors to close when the daemon runs in an infinite loop.
+    int devnull = open("/dev/null", O_RDWR);
+    if (devnull >= 0) {
+      dup2(devnull, STDIN_FILENO);
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+    }
+
     func();
     exit(0);
   }
