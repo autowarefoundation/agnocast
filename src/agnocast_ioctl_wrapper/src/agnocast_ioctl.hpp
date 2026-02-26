@@ -28,7 +28,11 @@ struct name_info
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_topic_list_args {
-  uint64_t topic_name_buffer_addr;
+  struct
+  {
+    uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
+  };
   uint32_t ret_topic_num;
 };
 
@@ -37,6 +41,7 @@ union ioctl_node_info_args {
   {
     struct name_info node_name;
     uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
 };

@@ -33,6 +33,7 @@ void test_case_get_node_pub_topics_exact_match(struct kunit * test)
 
   // copy_to_user inside ioctl_get_node_publisher_topics returns -EFAULT in KUnit (kernel thread)
   // context, but reaching it confirms that the node name match was found.
+  node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   ret =
     agnocast_ioctl_get_node_publisher_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
   KUNIT_EXPECT_TRUE(test, ret == -EFAULT || (ret == 0 && node_info_args.ret_topic_num == 1));
@@ -51,6 +52,7 @@ void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
+  node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   ret =
     agnocast_ioctl_get_node_publisher_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
   KUNIT_EXPECT_EQ(test, ret, 0);

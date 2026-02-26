@@ -1456,7 +1456,7 @@ int agnocast_ioctl_get_topic_list(
       continue;
     }
 
-    if (topic_num >= MAX_TOPIC_NUM) {
+    if (topic_num >= MAX_TOPIC_NUM || topic_num >= topic_list_args->topic_name_buffer_size) {
       dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
       ret = -ENOBUFS;
       goto unlock;
@@ -1514,7 +1514,7 @@ int agnocast_ioctl_get_node_subscriber_topics(
     up_read(&wrapper->topic_rwsem);
 
     if (found) {
-      if (topic_num >= MAX_TOPIC_NUM) {
+      if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
         dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
         ret = -ENOBUFS;
         goto unlock;
@@ -1573,7 +1573,7 @@ int agnocast_ioctl_get_node_publisher_topics(
     up_read(&wrapper->topic_rwsem);
 
     if (found) {
-      if (topic_num >= MAX_TOPIC_NUM) {
+      if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
         dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
         ret = -ENOBUFS;
         goto unlock;
