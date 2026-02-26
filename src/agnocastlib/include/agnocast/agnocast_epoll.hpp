@@ -75,15 +75,15 @@ void prepare_epoll_impl(
       const uint32_t timer_id = it.first;
       TimerInfo & timer_info = *it.second;
 
+      if (!timer_info.need_epoll_update) {
+        continue;
+      }
+
       if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
         continue;
       }
 
       std::shared_lock fd_lock(timer_info.fd_mutex);
-
-      if (!timer_info.need_epoll_update) {
-        continue;
-      }
 
       // Register clock_eventfd for ROS_TIME timers (simulation time support)
       if (timer_info.clock_eventfd >= 0) {
