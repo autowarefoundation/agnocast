@@ -2684,7 +2684,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
     topic_name_buf[bridge_args.topic_name.len] = '\0';
     ret = agnocast_ioctl_add_bridge(
-      topic_name_buf, current->tgid, bridge_args.is_r2a, ipc_ns, &bridge_args);
+      topic_name_buf, pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
     kfree(topic_name_buf);
     if (ret == 0 || ret == -EEXIST) {
       if (copy_to_user(
@@ -2706,7 +2706,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
     ret = agnocast_ioctl_remove_bridge(
-      topic_name_buf, current->tgid, remove_bridge_args.is_r2a, ipc_ns);
+      topic_name_buf, pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
     struct ioctl_get_process_num_args get_process_num_args;
