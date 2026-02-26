@@ -129,9 +129,17 @@ bool wait_and_handle_epoll_event(
       return false;
     }
 
+    auto timer_ptr = timer_info->timer.lock();
+
     // Create a callable that handles the clock event
-    const std::shared_ptr<std::function<void()>> callable =
-      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
+    auto callable = std::make_shared<std::function<void()>>();
+    const void * callable_ptr = callable.get();
+
+    *callable = [timer_info, callable_ptr]() {
+      TRACEPOINT(agnocast_callable_start, callable_ptr);
+      handle_timer_event(*timer_info);
+      TRACEPOINT(agnocast_callable_end, callable_ptr);
+    };
 
     TRACEPOINT(
       agnocast_create_timer_callable, static_cast<const void *>(callable_ptr),
