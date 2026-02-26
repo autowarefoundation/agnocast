@@ -904,35 +904,39 @@ static int release_msgs_to_meet_depth(
   //   greater than the subscriber's qos_depth, this has little effect on system behavior.
   while (num_search_entries > 0 && ioctl_ret->ret_released_num < MAX_RELEASE_NUM) {
     struct entry_node * en = container_of(node, struct entry_node, node);
-    node = rb_next(node);
-    if (!node) {
-      dev_warn(
-        agnocast_device,
-        "Unreachable: entries_num is inconsistent with actual message entry num. "
-        "(release_msgs_to_meet_depth)\n");
-      return -ENODATA;
+    struct rb_node * next = rb_next(node);
+
+    if (en->publisher_id == pub_info->id) {
+      num_search_entries--;
+
+      // This is not counted in a Queue size of QoS.
+      if (!is_referenced(en)) {
+        ioctl_ret->ret_released_addrs[ioctl_ret->ret_released_num] = en->msg_virtual_address;
+        ioctl_ret->ret_released_num++;
+
+        rb_erase(&en->node, &wrapper->topic.entries);
+        kfree(en);
+
+        pub_info->entries_num--;
+
+        dev_dbg(
+          agnocast_device,
+          "Release oldest message in the publisher_info (id=$%d) of the topic "
+          "(topic_name=%s) with qos_depth=%d. (release_msgs_to_meet_depth)\n",
+          pub_info->id, wrapper->key, pub_info->qos_depth);
+      }
     }
 
-    if (en->publisher_id != pub_info->id) continue;
-
-    num_search_entries--;
-
-    // This is not counted in a Queue size of QoS.
-    if (is_referenced(en)) continue;
-
-    ioctl_ret->ret_released_addrs[ioctl_ret->ret_released_num] = en->msg_virtual_address;
-    ioctl_ret->ret_released_num++;
-
-    rb_erase(&en->node, &wrapper->topic.entries);
-    kfree(en);
-
-    pub_info->entries_num--;
-
-    dev_dbg(
-      agnocast_device,
-      "Release oldest message in the publisher_info (id=$%d) of the topic "
-      "(topic_name=%s) with qos_depth=%d. (release_msgs_to_meet_depth)\n",
-      pub_info->id, wrapper->key, pub_info->qos_depth);
+    if (!next) {
+      if (num_search_entries > 0) {
+        dev_warn(
+          agnocast_device,
+          "Unreachable: entries_num is inconsistent with actual message entry num. "
+          "(release_msgs_to_meet_depth)\n");
+      }
+      break;
+    }
+    node = next;
   }
 
   return 0;
