@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -58,9 +59,21 @@ void * map_area(
     shm_fds.push_back(shm_fd);
   }
 
+  auto cleanup_shm_fd = [&]() {
+    close(shm_fd);
+    {
+      std::lock_guard<std::mutex> lock(shm_fds_mtx);
+      shm_fds.erase(std::remove(shm_fds.begin(), shm_fds.end(), shm_fd), shm_fds.end());
+    }
+    if (writable) {
+      shm_unlink(shm_name.c_str());
+    }
+  };
+
   if (writable) {
     if (ftruncate(shm_fd, static_cast<off_t>(shm_size)) == -1) {
       RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
+      cleanup_shm_fd();
       close(agnocast_fd);
       return nullptr;
     }
@@ -68,6 +81,7 @@ void * map_area(
     const int new_shm_mode = 0444;
     if (fchmod(shm_fd, new_shm_mode) == -1) {
       RCLCPP_ERROR(logger, "fchmod failed: %s", strerror(errno));
+      cleanup_shm_fd();
       close(agnocast_fd);
       return nullptr;
     }
@@ -80,6 +94,7 @@ void * map_area(
 
   if (ret == MAP_FAILED) {
     RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
+    cleanup_shm_fd();
     close(agnocast_fd);
     return nullptr;
   }
