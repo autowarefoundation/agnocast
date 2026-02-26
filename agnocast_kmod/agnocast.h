@@ -319,11 +319,11 @@ union ioctl_topic_info_args {
 
 int agnocast_init_device(void);
 int agnocast_init_kthread(void);
-int agnocast_init_kprobe(void);
+int agnocast_init_exit_hook(void);
 
 void agnocast_exit_free_data(void);
 void agnocast_exit_kthread(void);
-void agnocast_exit_kprobe(void);
+void agnocast_exit_exit_hook(void);
 void agnocast_exit_device(void);
 
 int agnocast_ioctl_add_subscriber(
