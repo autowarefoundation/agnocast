@@ -62,14 +62,21 @@ unsafe impl SharedMemoryAllocator for TLSFAllocator {
         // `alignment` must be at least `POINTER_ALIGN` to ensure that `aligned_ptr` is properly aligned to store a pointer.
         let alignment = new_layout.align().max(POINTER_ALIGN);
         let size = new_layout.size();
-        let new_layout =
-            Layout::from_size_align(POINTER_SIZE + size + alignment, LAYOUT_ALIGN).ok()?;
-
         // get the original pointer and compute the old aligned offset
         // SAFETY: `ptr` must have been allocated by `allocate`.
         let old_original_ptr: NonNull<u8> =
             unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
         let old_offset = ptr.as_ptr() as usize - old_original_ptr.as_ptr() as usize;
+
+        // The new block must be large enough for both the final layout (metadata + user data +
+        // alignment padding) and the memmove source (user data sitting at the old offset).
+        // When the old alignment was larger than the new one (e.g. posix_memalign → realloc),
+        // old_offset can exceed POINTER_SIZE + alignment, so we take the max.
+        // NOTE: Without the max, the memmove below would read past the block boundary (UB).
+        // This is not covered by tests because the OOB read happens within the contiguous
+        // TLSF pool and doesn't corrupt the first old_size bytes that tests verify.
+        let internal_size = (POINTER_SIZE + size + alignment).max(old_offset + size);
+        let new_layout = Layout::from_size_align(internal_size, LAYOUT_ALIGN).ok()?;
 
         // the original pointer returned by the internal allocator
         let mut tlsf = self.inner.lock().unwrap();
@@ -111,10 +118,114 @@ unsafe impl SharedMemoryAllocator for TLSFAllocator {
 
     fn deallocate(&self, ptr: NonNull<u8>) {
         // get the original pointer
-        // SAFETY: `ptr` must have been allocated by `tlsf_{allocate, reallocate}_wrapped`.
+        // SAFETY: `ptr` must have been allocated by `allocate` or `reallocate`.
         let original_ptr = unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
 
         let mut tlsf = self.inner.lock().unwrap();
         unsafe { tlsf.deallocate(original_ptr, LAYOUT_ALIGN) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SharedMemoryAllocator;
+
+    fn create_test_allocator() -> TLSFAllocator {
+        let pool_size = 256 * 1024;
+        let pool_ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                pool_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        assert!(pool_ptr != libc::MAP_FAILED);
+
+        // SAFETY: mmap'd memory lives until munmap; we intentionally leak it for 'static.
+        let pool: &'static mut [MaybeUninit<u8>] = unsafe {
+            std::slice::from_raw_parts_mut(pool_ptr as *mut MaybeUninit<u8>, pool_size)
+        };
+        let mut tlsf: TlsfType = Tlsf::new();
+        tlsf.insert_free_block(pool);
+        TLSFAllocator {
+            inner: Mutex::new(tlsf),
+        }
+    }
+
+    fn get_offset(ptr: NonNull<u8>) -> usize {
+        let original_ptr: NonNull<u8> =
+            unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
+        ptr.as_ptr() as usize - original_ptr.as_ptr() as usize
+    }
+
+    /// Test that reallocate preserves user data when the aligned offset changes.
+    ///
+    /// The bug: rlsf's internal reallocate copies raw bytes at the block level.
+    /// If the new block has a different base address alignment, the user-facing
+    /// aligned offset differs, and the user sees shifted/corrupted data.
+    ///
+    /// This test allocates with alignment=256, then reallocates with alignment=16.
+    /// It iterates with different padding sizes to find an allocation where the
+    /// offsets genuinely differ, ensuring the memmove fix path is exercised.
+    #[test]
+    fn test_reallocate_with_offset_change() {
+        let alloc = create_test_allocator();
+        let old_size = 100;
+        let new_size = 200;
+
+        let mut offset_change_tested = false;
+
+        for pad_size in 1..=128 {
+            // Accumulate padding allocations to shift the TLSF free pointer,
+            // changing the base address alignment of subsequent allocations.
+            let _ = alloc.allocate(Layout::from_size_align(pad_size, 1).unwrap());
+
+            let layout = Layout::from_size_align(old_size, 256).unwrap();
+            let Some(ptr) = alloc.allocate(layout) else {
+                break;
+            };
+            let old_offset = get_offset(ptr);
+
+            // Write pattern
+            unsafe {
+                for i in 0..old_size {
+                    *ptr.as_ptr().add(i) = i as u8;
+                }
+            }
+
+            // Reallocate with smaller alignment (simulates realloc's MIN_ALIGN=16)
+            let new_layout = Layout::from_size_align(new_size, 16).unwrap();
+            let new_ptr = alloc.reallocate(ptr, new_layout).unwrap();
+            let new_offset = get_offset(new_ptr);
+
+            // Verify data preserved
+            unsafe {
+                for i in 0..old_size {
+                    assert_eq!(
+                        *new_ptr.as_ptr().add(i),
+                        i as u8,
+                        "Data corrupted at byte {} (old_offset={}, new_offset={})",
+                        i,
+                        old_offset,
+                        new_offset
+                    );
+                }
+            }
+
+            if old_offset != new_offset {
+                offset_change_tested = true;
+            }
+
+            alloc.deallocate(new_ptr);
+        }
+
+        assert!(
+            offset_change_tested,
+            "No allocation produced different offsets — test did not exercise the bug path"
+        );
     }
 }
