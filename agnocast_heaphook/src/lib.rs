@@ -1105,5 +1105,4 @@ mod tests {
             "memalign should return NULL if the alignment is not a power of two"
         );
     }
-
 }

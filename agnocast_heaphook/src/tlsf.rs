@@ -64,8 +64,7 @@ unsafe impl SharedMemoryAllocator for TLSFAllocator {
         let size = new_layout.size();
         // get the original pointer and compute the old aligned offset
         // SAFETY: `ptr` must have been allocated by `allocate`.
-        let old_original_ptr: NonNull<u8> =
-            unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
+        let old_original_ptr: NonNull<u8> = unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
         let old_offset = ptr.as_ptr() as usize - old_original_ptr.as_ptr() as usize;
 
         // The new block must be large enough for both the final layout (metadata + user data +
@@ -146,9 +145,8 @@ mod tests {
         assert!(pool_ptr != libc::MAP_FAILED);
 
         // SAFETY: mmap'd memory lives until munmap; we intentionally leak it for 'static.
-        let pool: &'static mut [MaybeUninit<u8>] = unsafe {
-            std::slice::from_raw_parts_mut(pool_ptr as *mut MaybeUninit<u8>, pool_size)
-        };
+        let pool: &'static mut [MaybeUninit<u8>] =
+            unsafe { std::slice::from_raw_parts_mut(pool_ptr as *mut MaybeUninit<u8>, pool_size) };
         let mut tlsf: TlsfType = Tlsf::new();
         tlsf.insert_free_block(pool);
         TLSFAllocator {
@@ -157,8 +155,7 @@ mod tests {
     }
 
     fn get_offset(ptr: NonNull<u8>) -> usize {
-        let original_ptr: NonNull<u8> =
-            unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
+        let original_ptr: NonNull<u8> = unsafe { *ptr.as_ptr().byte_sub(POINTER_SIZE).cast() };
         ptr.as_ptr() as usize - original_ptr.as_ptr() as usize
     }
 
