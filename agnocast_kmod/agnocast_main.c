@@ -1603,7 +1603,7 @@ static int ioctl_get_topic_subscriber_info(
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
   struct topic_info_ret * topic_info_mem =
-    kmalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
+    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
   if (!topic_info_mem) {
     ret = -ENOMEM;
     goto unlock;
@@ -1677,7 +1677,7 @@ static int ioctl_get_topic_publisher_info(
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
   struct topic_info_ret * topic_info_mem =
-    kmalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
+    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
   if (!topic_info_mem) {
     ret = -ENOMEM;
     goto unlock;
@@ -2152,6 +2152,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
   if (cmd == AGNOCAST_GET_VERSION_CMD) {
     struct ioctl_get_version_args get_version_args;
+    memset(&get_version_args, 0, sizeof(get_version_args));
     ret = agnocast_ioctl_get_version(&get_version_args);
     if (copy_to_user(
           (struct ioctl_get_version_args __user *)arg, &get_version_args, sizeof(get_version_args)))
@@ -2270,7 +2271,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     uint32_t pub_shm_info_size = receive_msg_args.pub_shm_info_size;
 
     struct publisher_shm_info * pub_shm_infos =
-      kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
+      kcalloc(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
     if (!pub_shm_infos) {
       kfree(topic_name_buf);
       return -ENOMEM;
@@ -2320,7 +2321,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EINVAL;
     }
     topic_local_id_t * subscriber_ids_buf =
-      kmalloc_array(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
+      kcalloc(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
     if (!subscriber_ids_buf) {
       kfree(topic_name_buf);
       return -ENOMEM;
@@ -2371,7 +2372,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     uint32_t pub_shm_info_size = take_args.pub_shm_info_size;
 
     struct publisher_shm_info * pub_shm_infos =
-      kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
+      kcalloc(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
     if (!pub_shm_infos) {
       kfree(topic_name_buf);
       return -ENOMEM;
@@ -2442,6 +2443,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
   } else if (cmd == AGNOCAST_GET_EXIT_PROCESS_CMD) {
     struct ioctl_get_exit_process_args get_exit_process_args;
+    memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
     ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
@@ -2680,6 +2682,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
     struct ioctl_get_process_num_args get_process_num_args;
+    memset(&get_process_num_args, 0, sizeof(get_process_num_args));
     get_process_num_args.ret_process_num = agnocast_ioctl_get_process_num(ipc_ns);
     if (copy_to_user(
           (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
