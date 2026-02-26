@@ -2287,6 +2287,10 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
     uint64_t pub_shm_info_addr = receive_msg_args.pub_shm_info_addr;
     uint32_t pub_shm_info_size = receive_msg_args.pub_shm_info_size;
+    if (pub_shm_info_size > MAX_PUBLISHER_NUM) {
+      kfree(topic_name_buf);
+      return -EINVAL;
+    }
 
     struct publisher_shm_info * pub_shm_infos =
       kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
@@ -2388,6 +2392,10 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
     uint64_t pub_shm_info_addr = take_args.pub_shm_info_addr;
     uint32_t pub_shm_info_size = take_args.pub_shm_info_size;
+    if (pub_shm_info_size > MAX_PUBLISHER_NUM) {
+      kfree(topic_name_buf);
+      return -EINVAL;
+    }
 
     struct publisher_shm_info * pub_shm_infos =
       kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
