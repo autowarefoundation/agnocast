@@ -59,6 +59,7 @@ struct process_info
   struct mempool_entry * mempool_entry;
   const struct ipc_namespace * ipc_ns;
   struct hlist_node node;
+  struct rcu_head rcu_head;
 };
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
@@ -270,6 +271,16 @@ static int insert_subscriber_info(
     return -ENOBUFS;
   }
 
+  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
+      "added. (insert_subscriber_info)\n",
+      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
+  }
+
   *new_info = kmalloc(sizeof(struct subscriber_info), GFP_KERNEL);
   if (!*new_info) {
     dev_warn(agnocast_device, "kmalloc failed. (insert_subscriber_info)\n");
@@ -372,6 +383,16 @@ static int insert_publisher_info(
       "added. (insert_publisher_info)\n",
       wrapper->key, MAX_PUBLISHER_NUM);
     return -ENOBUFS;
+  }
+
+  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
+      "added. (insert_publisher_info)\n",
+      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
   }
 
   *new_info = kmalloc(sizeof(struct publisher_info), GFP_KERNEL);
@@ -777,7 +798,7 @@ int agnocast_ioctl_add_process(
 
   INIT_HLIST_NODE(&new_proc_info->node);
   uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
-  hash_add(proc_info_htable, &new_proc_info->node, hash_val);
+  hash_add_rcu(proc_info_htable, &new_proc_info->node, hash_val);
 
   ioctl_ret->ret_addr = new_proc_info->mempool_entry->addr;
   ioctl_ret->ret_shm_size = mempool_size_bytes;
@@ -1408,8 +1429,8 @@ static int ioctl_get_exit_process(
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
-    hash_del(&proc_info->node);
-    kfree(proc_info);
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
     break;
   }
 
@@ -1602,7 +1623,7 @@ static int ioctl_get_topic_subscriber_info(
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
   struct topic_info_ret * topic_info_mem =
-    kmalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
+    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
   if (!topic_info_mem) {
     ret = -ENOMEM;
     goto unlock;
@@ -1676,7 +1697,7 @@ static int ioctl_get_topic_publisher_info(
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
   struct topic_info_ret * topic_info_mem =
-    kmalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
+    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
   if (!topic_info_mem) {
     ret = -ENOMEM;
     goto unlock;
@@ -2151,6 +2172,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
   if (cmd == AGNOCAST_GET_VERSION_CMD) {
     struct ioctl_get_version_args get_version_args;
+    memset(&get_version_args, 0, sizeof(get_version_args));
     ret = agnocast_ioctl_get_version(&get_version_args);
     if (copy_to_user(
           (struct ioctl_get_version_args __user *)arg, &get_version_args, sizeof(get_version_args)))
@@ -2267,9 +2289,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
     uint64_t pub_shm_info_addr = receive_msg_args.pub_shm_info_addr;
     uint32_t pub_shm_info_size = receive_msg_args.pub_shm_info_size;
+    if (pub_shm_info_size > MAX_PUBLISHER_NUM) {
+      kfree(topic_name_buf);
+      return -EINVAL;
+    }
 
     struct publisher_shm_info * pub_shm_infos =
-      kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
+      kcalloc(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
     if (!pub_shm_infos) {
       kfree(topic_name_buf);
       return -ENOMEM;
@@ -2319,11 +2345,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EINVAL;
     }
     topic_local_id_t * subscriber_ids_buf =
-      kmalloc_array(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
+      kcalloc(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
     if (!subscriber_ids_buf) {
       kfree(topic_name_buf);
       return -ENOMEM;
     }
+
+    uint64_t subscriber_ids_buffer_addr = publish_msg_args.subscriber_ids_buffer_addr;
 
     ret = agnocast_ioctl_publish_msg(
       topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
@@ -2335,8 +2363,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       uint32_t copy_count = min(publish_msg_args.ret_subscriber_num, buffer_size);
       if (copy_count > 0) {
         if (copy_to_user(
-              (topic_local_id_t __user *)publish_msg_args.subscriber_ids_buffer_addr,
-              subscriber_ids_buf, copy_count * sizeof(topic_local_id_t))) {
+              (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
+              copy_count * sizeof(topic_local_id_t))) {
           kfree(subscriber_ids_buf);
           return -EFAULT;
         }
@@ -2366,9 +2394,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
     uint64_t pub_shm_info_addr = take_args.pub_shm_info_addr;
     uint32_t pub_shm_info_size = take_args.pub_shm_info_size;
+    if (pub_shm_info_size > MAX_PUBLISHER_NUM) {
+      kfree(topic_name_buf);
+      return -EINVAL;
+    }
 
     struct publisher_shm_info * pub_shm_infos =
-      kmalloc_array(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
+      kcalloc(pub_shm_info_size, sizeof(struct publisher_shm_info), GFP_KERNEL);
     if (!pub_shm_infos) {
       kfree(topic_name_buf);
       return -ENOMEM;
@@ -2439,6 +2471,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
   } else if (cmd == AGNOCAST_GET_EXIT_PROCESS_CMD) {
     struct ioctl_get_exit_process_args get_exit_process_args;
+    memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
     ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
@@ -2677,6 +2710,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
     struct ioctl_get_process_num_args get_process_num_args;
+    memset(&get_process_num_args, 0, sizeof(get_process_num_args));
     get_process_num_args.ret_process_num = agnocast_ioctl_get_process_num(ipc_ns);
     if (copy_to_user(
           (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
@@ -3014,33 +3048,12 @@ static int has_new_pid = false;
 // directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
-  down_read(&global_htables_rwsem);
-
-  struct process_info * proc_info;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  bool agnocast_related = false;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
-  {
-    if (proc_info->global_pid == pid) {
-      agnocast_related = true;
-      break;
-    }
-  }
-
-  up_read(&global_htables_rwsem);
-
-  if (!agnocast_related) {
-    return;
-  }
-
-  // Upgrade to write lock for actual cleanup.
   down_write(&global_htables_rwsem);
 
-  // Re-check after upgrading the lock, since the state may have changed.
-  // proc_info is freed by the unlink daemon (via ioctl_get_exit_process), but since only one
-  // kernel worker thread calls this function, proc_info cannot disappear between the read and
-  // write lock. This re-check is not strictly necessary, but we keep it as defensive programming.
-  proc_info = NULL;
+  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
+  // have changed between then and now (e.g., the process was already cleaned up by a prior call).
+  struct process_info * proc_info = NULL;
+  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
   hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
   {
     if (proc_info->global_pid == pid) {
@@ -3100,28 +3113,30 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
-    pid_t pid;
-    unsigned long flags;
-    bool got_pid = false;
-
     wait_event_interruptible(worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
 
-    spin_lock_irqsave(&pid_queue_lock, flags);
+    // Drain all queued PIDs in a single wake-up cycle
+    while (true) {
+      pid_t pid;
+      unsigned long flags;
+      bool got_pid = false;
 
-    if (queue_head != queue_tail) {
-      pid = exit_pid_queue[queue_head];
-      queue_head = (queue_head + 1) & (EXIT_QUEUE_SIZE - 1);
-      got_pid = true;
-    }
+      spin_lock_irqsave(&pid_queue_lock, flags);
 
-    // queue is empty
-    if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
+      if (queue_head != queue_tail) {
+        pid = exit_pid_queue[queue_head];
+        queue_head = (queue_head + 1) & EXIT_QUEUE_MASK;
+        got_pid = true;
+      }
 
-    spin_unlock_irqrestore(&pid_queue_lock, flags);
+      if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
-    if (got_pid) {
+      spin_unlock_irqrestore(&pid_queue_lock, flags);
+
+      if (!got_pid) break;
+
       agnocast_process_exit_cleanup(pid);
     }
   }
@@ -3138,8 +3153,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 
   spin_lock_irqsave(&pid_queue_lock, flags);
 
-  // Assumes EXIT_QUEUE_SIZE is 2^N
-  next = (queue_tail + 1) & (EXIT_QUEUE_SIZE - 1);
+  next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
   if (next != queue_head) {  // queue is not full
     exit_pid_queue[queue_tail] = pid;
@@ -3159,11 +3173,30 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
+// RCU-protected check: returns true if pid is registered in agnocast.
+bool is_agnocast_pid(const pid_t pid)
+{
+  struct process_info * proc_info;
+  bool found = false;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      found = true;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
 static struct tracepoint * tp_sched_process_exit;
 
 static void agnocast_process_exit(void * data, struct task_struct * task)
 {
-  agnocast_enqueue_exit_pid(task->pid);
+  // Skip non-Agnocast PIDs to avoid the full
+  // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
+  if (is_agnocast_pid(task->pid)) agnocast_enqueue_exit_pid(task->pid);
 }
 
 static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)
@@ -3321,9 +3354,10 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
-    hash_del(&proc_info->node);
-    kfree(proc_info);
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
   }
+  // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
 }
 
 static void remove_all_bridge_info(void)
