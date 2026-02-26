@@ -75,7 +75,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `add_publisher()` | ✗ | **Throws Exception** | No | Uses agnocast's own Publisher management |
 | `create_subscription()` | ✗ | **Throws Exception** | No | Use `agnocast::create_subscription()` or `agnocast::Node::create_subscription()` |
 | `add_subscription()` | ✗ | **Throws Exception** | No | Uses agnocast's own Subscription management |
-| `get_node_timers_interface()` | ✗ | **Throws Exception** | TBD | Use `agnocast::Node::create_wall_timer()` instead |
+| `get_node_timers_interface()` | ✗ | **Throws Exception** | TBD | Use `agnocast::Node::create_wall_timer()` or `agnocast::Node::create_timer()` instead |
 
 ---
 
@@ -139,7 +139,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 |---------|--------|-------|
 | Multiple clocks | Low | `agnocast::Node` uses single clock; rarely needed |
 | Message caching | Low | Only matters when attaching clocks after `/clock` messages arrive |
-| Dynamic parameter change | Low | Typically `use_sim_time` is set at launch time and not changed at runtime (e.g., Autoware's logging_simulation) |
+| Dynamic parameter change | Low | Typically `use_sim_time` is set at launch time and not changed at runtime (e.g., Autoware's logging_simulation). Note: dynamic deactivation of ROS time (`use_sim_time` changed from `true` to `false`) is not yet supported for `create_timer()` timers. |
 
 ---
 
@@ -305,6 +305,7 @@ The following tables compare methods that are **directly defined** in each class
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
 | `create_wall_timer()` | ✓ | ✓ | Return type differs (`uint32_t` timer_id vs `rclcpp::TimerBase::SharedPtr`) |
+| `create_timer()` | ✓ | ✓ | Supports ROS_TIME (simulation time). Return type differs (`agnocast::TimerBase::SharedPtr` vs `rclcpp::TimerBase::SharedPtr`). Note: dynamic deactivation of ROS time (`use_sim_time` changed from `true` to `false` at runtime) is not yet supported. |
 | `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client). **Not officially supported yet; API may change.** |
 | `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service). **Not officially supported yet; API may change.** |
 
@@ -425,6 +426,8 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rclcpp::node_interfaces::NodeTimeSourceInterface` - Node time source interface (inherited)
 - `rclcpp::node_interfaces::NodeLoggingInterface` - Node logging interface (inherited)
 - `rclcpp::Clock` - Clock management
+- `rclcpp::Clock::create_jump_callback()` - Register time jump callbacks (used by `create_timer()` for ROS_TIME support)
+- `rclcpp::JumpHandler` - RAII handle for time jump callbacks
 - `rclcpp::Time` - Time representation
 
 **Message Types**:

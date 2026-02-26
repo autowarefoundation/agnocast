@@ -42,7 +42,7 @@ bool wait_and_handle_epoll_event(
   }
 
   if ((event_id & TIMER_EVENT_FLAG) != 0U) {
-    // Timer event
+    // Timer event (timerfd fired)
     const uint32_t timer_id = event_id & ~TIMER_EVENT_FLAG;
     rclcpp::CallbackGroup::SharedPtr callback_group;
 
@@ -64,18 +64,64 @@ bool wait_and_handle_epoll_event(
 
     // Read the number of expirations to clear the event
     uint64_t expirations = 0;
-    const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
-    if (ret == -1) {
-      return false;
+    {
+      std::shared_lock fd_lock(timer_info->fd_mutex);
+      if (timer_info->timer_fd < 0) {
+        return false;  // Timer fd was closed (ROS time activated)
+      }
+      const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
+      if (ret == -1 || expirations == 0) {
+        return false;
+      }
     }
 
     auto callable = std::make_shared<std::function<void()>>();
     // For tracepoints.
     const void * callable_ptr = callable.get();
     // Create a callable that handles the timer event
-    *callable = [timer_info, expirations, callable_ptr]() {
-      handle_timer_event(*timer_info, expirations);
-    };
+    *callable = [timer_info, callable_ptr]() { handle_timer_event(*timer_info); };
+
+    {
+      std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};
+      ready_agnocast_executables.emplace_back(AgnocastExecutable{callable, callback_group});
+    }
+  } else if ((event_id & CLOCK_EVENT_FLAG) != 0U) {
+    // Clock event (ROS_TIME clock updated via time jump callback)
+    const uint32_t timer_id = event_id & ~CLOCK_EVENT_FLAG;
+    rclcpp::CallbackGroup::SharedPtr callback_group;
+
+    std::shared_ptr<TimerInfo> timer_info;
+    {
+      std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+      const auto it = id2_timer_info.find(timer_id);
+      if (it == id2_timer_info.end()) {
+        RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+      timer_info = it->second;
+      if (!timer_info->timer.lock()) {
+        return false;  // Timer object has been destroyed
+      }
+      callback_group = timer_info->callback_group;
+    }
+
+    uint64_t val = 0;
+    const ssize_t ret = read(timer_info->clock_eventfd, &val, sizeof(val));
+    if (ret == -1 || val == 0) {
+      return false;
+    }
+
+    // Check if timer is ready (corresponds to rcl_timer_is_ready)
+    const int64_t now_ns = timer_info->clock->now().nanoseconds();
+    const int64_t next_call_ns = timer_info->next_call_time_ns.load(std::memory_order_relaxed);
+    if (now_ns < next_call_ns) {
+      return false;
+    }
+
+    // Create a callable that handles the clock event
+    const std::shared_ptr<std::function<void()>> callable =
+      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};
