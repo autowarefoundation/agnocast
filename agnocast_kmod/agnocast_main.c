@@ -1107,7 +1107,7 @@ static int receive_msg_core(
       continue;
     }
 
-    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) {
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
 
@@ -1252,7 +1252,7 @@ int agnocast_ioctl_take_msg(
       continue;
     }
 
-    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) {
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
 
