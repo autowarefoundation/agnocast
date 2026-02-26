@@ -59,6 +59,7 @@ struct process_info
   struct mempool_entry * mempool_entry;
   const struct ipc_namespace * ipc_ns;
   struct hlist_node node;
+  struct rcu_head rcu_head;
 };
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
@@ -797,7 +798,7 @@ int agnocast_ioctl_add_process(
 
   INIT_HLIST_NODE(&new_proc_info->node);
   uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
-  hash_add(proc_info_htable, &new_proc_info->node, hash_val);
+  hash_add_rcu(proc_info_htable, &new_proc_info->node, hash_val);
 
   ioctl_ret->ret_addr = new_proc_info->mempool_entry->addr;
   ioctl_ret->ret_shm_size = mempool_size_bytes;
@@ -1428,8 +1429,8 @@ static int ioctl_get_exit_process(
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
-    hash_del(&proc_info->node);
-    kfree(proc_info);
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
     break;
   }
 
@@ -3044,33 +3045,12 @@ static int has_new_pid = false;
 // directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
-  down_read(&global_htables_rwsem);
-
-  struct process_info * proc_info;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  bool agnocast_related = false;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
-  {
-    if (proc_info->global_pid == pid) {
-      agnocast_related = true;
-      break;
-    }
-  }
-
-  up_read(&global_htables_rwsem);
-
-  if (!agnocast_related) {
-    return;
-  }
-
-  // Upgrade to write lock for actual cleanup.
   down_write(&global_htables_rwsem);
 
-  // Re-check after upgrading the lock, since the state may have changed.
-  // proc_info is freed by the unlink daemon (via ioctl_get_exit_process), but since only one
-  // kernel worker thread calls this function, proc_info cannot disappear between the read and
-  // write lock. This re-check is not strictly necessary, but we keep it as defensive programming.
-  proc_info = NULL;
+  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
+  // have changed between then and now (e.g., the process was already cleaned up by a prior call).
+  struct process_info * proc_info = NULL;
+  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
   hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
   {
     if (proc_info->global_pid == pid) {
@@ -3130,28 +3110,30 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
-    pid_t pid;
-    unsigned long flags;
-    bool got_pid = false;
-
     wait_event_interruptible(worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
 
-    spin_lock_irqsave(&pid_queue_lock, flags);
+    // Drain all queued PIDs in a single wake-up cycle
+    while (true) {
+      pid_t pid;
+      unsigned long flags;
+      bool got_pid = false;
 
-    if (queue_head != queue_tail) {
-      pid = exit_pid_queue[queue_head];
-      queue_head = (queue_head + 1) & (EXIT_QUEUE_SIZE - 1);
-      got_pid = true;
-    }
+      spin_lock_irqsave(&pid_queue_lock, flags);
 
-    // queue is empty
-    if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
+      if (queue_head != queue_tail) {
+        pid = exit_pid_queue[queue_head];
+        queue_head = (queue_head + 1) & EXIT_QUEUE_MASK;
+        got_pid = true;
+      }
 
-    spin_unlock_irqrestore(&pid_queue_lock, flags);
+      if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
-    if (got_pid) {
+      spin_unlock_irqrestore(&pid_queue_lock, flags);
+
+      if (!got_pid) break;
+
       agnocast_process_exit_cleanup(pid);
     }
   }
@@ -3168,8 +3150,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 
   spin_lock_irqsave(&pid_queue_lock, flags);
 
-  // Assumes EXIT_QUEUE_SIZE is 2^N
-  next = (queue_tail + 1) & (EXIT_QUEUE_SIZE - 1);
+  next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
   if (next != queue_head) {  // queue is not full
     exit_pid_queue[queue_tail] = pid;
@@ -3189,11 +3170,30 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
+// RCU-protected check: returns true if pid is registered in agnocast.
+bool is_agnocast_pid(const pid_t pid)
+{
+  struct process_info * proc_info;
+  bool found = false;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      found = true;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
 static struct tracepoint * tp_sched_process_exit;
 
 static void agnocast_process_exit(void * data, struct task_struct * task)
 {
-  agnocast_enqueue_exit_pid(task->pid);
+  // Skip non-Agnocast PIDs to avoid the full
+  // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
+  if (is_agnocast_pid(task->pid)) agnocast_enqueue_exit_pid(task->pid);
 }
 
 static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)
@@ -3351,9 +3351,10 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
-    hash_del(&proc_info->node);
-    kfree(proc_info);
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
   }
+  // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
 }
 
 static void remove_all_bridge_info(void)
