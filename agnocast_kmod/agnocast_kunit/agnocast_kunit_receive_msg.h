@@ -29,7 +29,9 @@
     KUNIT_CASE(test_case_receive_msg_2sub_in_same_process),                                           \
     KUNIT_CASE(test_case_receive_msg_twice),                                                          \
     KUNIT_CASE(test_case_receive_msg_with_exited_publisher),                                          \
-    KUNIT_CASE(test_case_receive_msg_pub_shm_info_buffer_too_small)
+    KUNIT_CASE(test_case_receive_msg_pub_shm_info_buffer_too_small),                                  \
+    KUNIT_CASE(test_case_receive_msg_ignore_local_same_pid_enabled),                                  \
+    KUNIT_CASE(test_case_receive_msg_ignore_local_same_pid_disabled)
 
 void test_case_receive_msg_no_topic_when_receive(struct kunit * test);
 void test_case_receive_msg_no_subscriber_when_receive(struct kunit * test);
@@ -59,3 +61,5 @@ void test_case_receive_msg_2sub_in_same_process(struct kunit * test);
 void test_case_receive_msg_twice(struct kunit * test);
 void test_case_receive_msg_with_exited_publisher(struct kunit * test);
 void test_case_receive_msg_pub_shm_info_buffer_too_small(struct kunit * test);
+void test_case_receive_msg_ignore_local_same_pid_enabled(struct kunit * test);
+void test_case_receive_msg_ignore_local_same_pid_disabled(struct kunit * test);

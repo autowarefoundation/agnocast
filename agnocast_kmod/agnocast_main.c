@@ -2,6 +2,7 @@
 #include "agnocast_memory_allocator.h"
 
 #include <linux/device.h>
+#include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -1109,6 +1110,10 @@ static int receive_msg_core(
       continue;
     }
 
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
     int ret = add_subscriber_reference(en, subscriber_id);
     if (ret < 0) {
       return ret;
@@ -1247,6 +1252,10 @@ int agnocast_ioctl_take_msg(
 
     const struct process_info * proc_info = find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
+      continue;
+    }
+
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
 
@@ -1491,8 +1500,10 @@ int agnocast_ioctl_get_topic_list(
       continue;
     }
 
-    if (topic_num >= MAX_TOPIC_NUM) {
-      dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
+    if (topic_num >= MAX_TOPIC_NUM || topic_num >= topic_list_args->topic_name_buffer_size) {
+      dev_warn(
+        agnocast_device, "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n",
+        MAX_TOPIC_NUM, topic_list_args->topic_name_buffer_size);
       ret = -ENOBUFS;
       goto unlock;
     }
@@ -1549,8 +1560,11 @@ int agnocast_ioctl_get_node_subscriber_topics(
     up_read(&wrapper->topic_rwsem);
 
     if (found) {
-      if (topic_num >= MAX_TOPIC_NUM) {
-        dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
+      if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
+        dev_warn(
+          agnocast_device,
+          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n", MAX_TOPIC_NUM,
+          node_info_args->topic_name_buffer_size);
         ret = -ENOBUFS;
         goto unlock;
       }
@@ -1608,8 +1622,11 @@ int agnocast_ioctl_get_node_publisher_topics(
     up_read(&wrapper->topic_rwsem);
 
     if (found) {
-      if (topic_num >= MAX_TOPIC_NUM) {
-        dev_warn(agnocast_device, "The number of topics is over MAX_TOPIC_NUM=%d\n", MAX_TOPIC_NUM);
+      if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
+        dev_warn(
+          agnocast_device,
+          "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n", MAX_TOPIC_NUM,
+          node_info_args->topic_name_buffer_size);
         ret = -ENOBUFS;
         goto unlock;
       }
@@ -1666,10 +1683,14 @@ static int ioctl_get_topic_subscriber_info(
 
   hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
   {
-    if (subscriber_num >= MAX_TOPIC_INFO_RET_NUM) {
+    if (
+      subscriber_num >= MAX_TOPIC_INFO_RET_NUM ||
+      subscriber_num >= topic_info_args->topic_info_ret_buffer_size) {
       dev_warn(
-        agnocast_device, "The number of subscribers is over MAX_TOPIC_INFO_RET_NUM=%d\n",
-        MAX_TOPIC_INFO_RET_NUM);
+        agnocast_device,
+        "Subscriber count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, "
+        "topic_info_ret_buffer_size=%u\n",
+        MAX_TOPIC_INFO_RET_NUM, topic_info_args->topic_info_ret_buffer_size);
       kfree(topic_info_mem);
       ret = -ENOBUFS;
       goto unlock;
@@ -1740,10 +1761,13 @@ static int ioctl_get_topic_publisher_info(
 
   hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
   {
-    if (publisher_num >= MAX_TOPIC_INFO_RET_NUM) {
+    if (
+      publisher_num >= MAX_TOPIC_INFO_RET_NUM ||
+      publisher_num >= topic_info_args->topic_info_ret_buffer_size) {
       dev_warn(
-        agnocast_device, "The number of publishers is over MAX_TOPIC_INFO_RET_NUM=%d\n",
-        MAX_TOPIC_INFO_RET_NUM);
+        agnocast_device,
+        "Publisher count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, topic_info_ret_buffer_size=%u\n",
+        MAX_TOPIC_INFO_RET_NUM, topic_info_args->topic_info_ret_buffer_size);
       kfree(topic_info_mem);
       ret = -ENOBUFS;
       goto unlock;
@@ -2718,8 +2742,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
     }
     topic_name_buf[bridge_args.topic_name.len] = '\0';
-    ret = agnocast_ioctl_add_bridge(
-      topic_name_buf, bridge_args.pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
+    ret = agnocast_ioctl_add_bridge(topic_name_buf, pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
     kfree(topic_name_buf);
     if (ret == 0 || ret == -EEXIST) {
       if (copy_to_user(
@@ -2740,8 +2763,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
     }
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
-    ret = agnocast_ioctl_remove_bridge(
-      topic_name_buf, remove_bridge_args.pid, remove_bridge_args.is_r2a, ipc_ns);
+    ret = agnocast_ioctl_remove_bridge(topic_name_buf, pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
   } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
     struct ioctl_get_process_num_args get_process_num_args;

@@ -25,6 +25,26 @@
 // In Jazzy, TRACEPOINT macro is for calling tracepoints, not defining function names.
 // We need to define the functions explicitly with ros_trace_ prefix.
 
+void ros_trace_agnocast_init(
+  const void * context_handle)
+{
+  CONDITIONAL_TP(
+    agnocast_init,
+    context_handle);
+}
+
+void ros_trace_agnocast_node_init(
+  const void * node_handle,
+  const char * node_name,
+  const char * namespace_arg)
+{
+  CONDITIONAL_TP(
+    agnocast_node_init,
+    node_handle,
+    node_name,
+    namespace_arg);
+}
+
 void ros_trace_agnocast_publisher_init(
   const void * publisher_handle,
   const void * node_handle,
@@ -61,6 +81,36 @@ void ros_trace_agnocast_subscription_init(
     pid_callback_info_id);
 }
 
+void ros_trace_agnocast_timer_init(
+  const void * timer_handle,
+  const void * node_handle,
+  const void * callback,
+  const void * callback_group,
+  const char * function_symbol,
+  int64_t period)
+{
+  CONDITIONAL_TP(
+    agnocast_timer_init,
+    timer_handle,
+    node_handle,
+    callback,
+    callback_group,
+    function_symbol,
+    period);
+}
+
+void ros_trace_agnocast_add_callback_group(
+  const void * executor_addr,
+  const void * callback_group_addr,
+  const char * group_type_name)
+{
+  CONDITIONAL_TP(
+    agnocast_add_callback_group,
+    executor_addr,
+    callback_group_addr,
+    group_type_name);
+}
+
 void ros_trace_agnocast_publish(
   const void * publisher_handle,
   const int64_t entry_id)
@@ -81,6 +131,16 @@ void ros_trace_agnocast_create_callable(
     callable,
     entry_id,
     pid_callback_info_id);
+}
+
+void ros_trace_agnocast_create_timer_callable(
+  const void * callable,
+  const void * timer_handle)
+{
+  CONDITIONAL_TP(
+    agnocast_create_timer_callable,
+    callable,
+    timer_handle);
 }
 
 void ros_trace_agnocast_callable_start(

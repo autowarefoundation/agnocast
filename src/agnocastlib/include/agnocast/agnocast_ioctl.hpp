@@ -229,6 +229,7 @@ union ioctl_topic_info_args {
   {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
+    uint32_t topic_info_ret_buffer_size;
   };
   uint32_t ret_topic_info_ret_num;
 };
@@ -287,7 +288,6 @@ struct ioctl_add_bridge_args
 {
   struct
   {
-    pid_t pid;
     struct name_info topic_name;
     bool is_r2a;
   };
@@ -302,7 +302,6 @@ struct ioctl_add_bridge_args
 
 struct ioctl_remove_bridge_args
 {
-  pid_t pid;
   struct name_info topic_name;
   bool is_r2a;
 };

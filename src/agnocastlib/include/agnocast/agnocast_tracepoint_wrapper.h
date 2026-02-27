@@ -13,6 +13,16 @@ extern "C" {
 // clang-format off
 
 DECLARE_TRACEPOINT(
+  agnocast_init,
+  const void * context_handle)
+
+DECLARE_TRACEPOINT(
+  agnocast_node_init,
+  const void * node_handle,
+  const char * node_name,
+  const char * namespace_arg)
+
+DECLARE_TRACEPOINT(
   agnocast_publisher_init,
   const void * publisher_handle,
   const void * node_handle,
@@ -31,6 +41,21 @@ DECLARE_TRACEPOINT(
   const uint64_t pid_callback_info_id)
 
 DECLARE_TRACEPOINT(
+  agnocast_timer_init,
+  const void * timer_handle,
+  const void * node_handle,
+  const void * callback,
+  const void * callback_group,
+  const char * function_symbol,
+  int64_t period)
+
+DECLARE_TRACEPOINT(
+  agnocast_add_callback_group,
+  const void * executor_addr,
+  const void * callback_group_addr,
+  const char * group_type_name)
+
+DECLARE_TRACEPOINT(
   agnocast_publish,
   const void * publisher_handle,
   const int64_t entry_id)
@@ -40,6 +65,11 @@ DECLARE_TRACEPOINT(
   const void * callable,
   const int64_t entry_id,
   const uint64_t pid_callback_info_id)
+
+DECLARE_TRACEPOINT(
+  agnocast_create_timer_callable,
+  const void * callable,
+  const void * timer_handle)
 
 DECLARE_TRACEPOINT(
   agnocast_callable_start,
