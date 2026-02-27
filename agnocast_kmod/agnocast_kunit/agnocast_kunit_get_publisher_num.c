@@ -146,12 +146,54 @@ void test_case_get_publisher_num_bridge_exist(struct kunit * test)
   int ret1 =
     agnocast_ioctl_get_publisher_num(topic_name, current->nsproxy->ipc_ns, &publisher_num_args);
   KUNIT_EXPECT_EQ(test, ret1, 0);
-  KUNIT_EXPECT_FALSE(test, publisher_num_args.ret_bridge_exist);
+  KUNIT_EXPECT_FALSE(test, publisher_num_args.ret_r2a_bridge_exist);
 
   setup_one_publisher_with_bridge(test, topic_name);
 
   int ret3 =
     agnocast_ioctl_get_publisher_num(topic_name, current->nsproxy->ipc_ns, &publisher_num_args);
   KUNIT_EXPECT_EQ(test, ret3, 0);
-  KUNIT_EXPECT_TRUE(test, publisher_num_args.ret_bridge_exist);
+  KUNIT_EXPECT_TRUE(test, publisher_num_args.ret_r2a_bridge_exist);
+}
+
+void test_case_get_publisher_num_ros2_publisher_num(struct kunit * test)
+{
+  char * topic_name = "/kunit_test_topic";
+  setup_one_publisher(test, topic_name);
+
+  int ret1 = agnocast_ioctl_set_ros2_publisher_num(topic_name, current->nsproxy->ipc_ns, 3);
+  KUNIT_EXPECT_EQ(test, ret1, 0);
+
+  union ioctl_get_publisher_num_args publisher_num_args;
+  int ret2 =
+    agnocast_ioctl_get_publisher_num(topic_name, current->nsproxy->ipc_ns, &publisher_num_args);
+  KUNIT_EXPECT_EQ(test, ret2, 0);
+  KUNIT_EXPECT_EQ(test, publisher_num_args.ret_publisher_num, 1);
+  KUNIT_EXPECT_EQ(test, publisher_num_args.ret_ros2_publisher_num, 3);
+}
+
+void test_case_get_publisher_num_a2r_bridge_exist(struct kunit * test)
+{
+  char * topic_name = "/kunit_test_topic";
+
+  // Add a subscriber with is_bridge=true to simulate A2R bridge subscriber
+  subscriber_pid++;
+
+  union ioctl_add_process_args add_process_args;
+  int ret1 =
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret2 = agnocast_ioctl_add_subscriber(
+    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, true,
+    &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret2, 0);
+
+  union ioctl_get_publisher_num_args publisher_num_args;
+  int ret3 =
+    agnocast_ioctl_get_publisher_num(topic_name, current->nsproxy->ipc_ns, &publisher_num_args);
+  KUNIT_EXPECT_EQ(test, ret3, 0);
+  KUNIT_EXPECT_TRUE(test, publisher_num_args.ret_a2r_bridge_exist);
 }

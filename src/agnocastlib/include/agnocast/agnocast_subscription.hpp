@@ -50,6 +50,7 @@ mqd_t open_mq_for_subscription(
   const std::string & topic_name, const topic_local_id_t subscriber_id,
   std::pair<mqd_t, std::string> & mq_subscription);
 void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription);
+uint32_t get_publisher_count_core(const std::string & topic_name);
 
 template <typename NodeT>
 rclcpp::CallbackGroup::SharedPtr get_valid_callback_group(
@@ -82,6 +83,9 @@ protected:
 public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
   SubscriptionBase(agnocast::Node * node, const std::string & topic_name);
+
+  // Returns the publisher count for this topic (excluding bridge publishers).
+  uint32_t get_publisher_count() const { return get_publisher_count_core(topic_name_); }
 
   virtual ~SubscriptionBase()
   {
