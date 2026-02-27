@@ -16,6 +16,6 @@ repos:
     hooks:
       - id: kunit
         name: Run KUnit tests
-        entry: scripts/test/run_kunit
+        entry: scripts/test/run_kunit.bash
         language: system
         types: [c]
