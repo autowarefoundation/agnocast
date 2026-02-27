@@ -4,9 +4,16 @@
 #include "agnocast/node/agnocast_only_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
+
+namespace agnocast::node_interfaces
+{
+class NodeBase;
+}  // namespace agnocast::node_interfaces
 
 namespace agnocast
 {
@@ -20,16 +27,31 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
 
   const int next_exec_timeout_ms_;
 
-  // Mutex to protect weak_child_executors_
-  mutable std::mutex weak_child_executors_mutex_;
+  // Condition variable notified when a new callback group is created on any registered node.
+  std::condition_variable callback_group_created_cv_;
+  std::mutex callback_group_created_cv_mutex_;
+  bool callback_group_created_{false};
+
+  // Mutex to protect weak_child_executors_ and child_threads_
+  mutable std::mutex child_resources_mutex_;
 
   // Child executors created during spin()
   std::vector<std::weak_ptr<AgnocastOnlyExecutor>> weak_child_executors_
-    RCPPUTILS_TSA_GUARDED_BY(weak_child_executors_mutex_);
+    RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Child threads created during spin()
+  std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Nodes that have registered callback-group-created callbacks, used for cleanup.
+  std::vector<std::weak_ptr<agnocast::node_interfaces::NodeBase>> registered_agnocast_nodes_
+    RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
 public:
   RCLCPP_PUBLIC
   explicit AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms = 50);
+
+  RCLCPP_PUBLIC
+  ~AgnocastOnlyCallbackIsolatedExecutor() override;
 
   RCLCPP_PUBLIC
   void spin() override;

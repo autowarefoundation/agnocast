@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace agnocast
@@ -16,7 +17,8 @@ struct AgnocastExecutable;
 extern std::atomic<bool> need_epoll_updates;
 
 constexpr uint32_t TIMER_EVENT_FLAG = 0x80000000;
-constexpr uint32_t SHUTDOWN_EVENT_FLAG = 0x40000000;
+constexpr uint32_t CLOCK_EVENT_FLAG = 0x40000000;     // For clock_eventfd events (ROS_TIME timers)
+constexpr uint32_t SHUTDOWN_EVENT_FLAG = 0x20000000;  // For shutdown events (AgnocastOnlyExecutor)
 
 /// @return true if shutdown event detected, false otherwise
 bool wait_and_handle_epoll_event(
@@ -81,37 +83,58 @@ void prepare_epoll_impl(
         continue;
       }
 
-      struct epoll_event ev = {};
-      ev.events = EPOLLIN;
-      ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
+      std::shared_lock fd_lock(timer_info.fd_mutex);
 
-      if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
-        RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+      // Register clock_eventfd for ROS_TIME timers (simulation time support)
+      if (timer_info.clock_eventfd >= 0) {
+        struct epoll_event clock_ev = {};
+        clock_ev.events = EPOLLIN;
+        clock_ev.data.u32 = timer_id | CLOCK_EVENT_FLAG;
+
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.clock_eventfd, &clock_ev) == -1) {
+          RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
+          close(agnocast_fd);
+          exit(EXIT_FAILURE);
+        }
+      }
+
+      // Register timerfd (wall clock based firing)
+      if (timer_info.timer_fd >= 0) {
+        struct epoll_event ev = {};
+        ev.events = EPOLLIN;
+        ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
+
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
+          RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
+          close(agnocast_fd);
+          exit(EXIT_FAILURE);
+        }
       }
 
       timer_info.need_epoll_update = false;
     }
   }
 
-  // Check if all updates are done
-  const bool all_callbacks_updated = [&]() {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-    return std::none_of(id2_callback_info.begin(), id2_callback_info.end(), [](const auto & it) {
-      return it.second.need_epoll_update;
-    });
-  }();
+  // Check if all updates are done. Both locks must be held simultaneously to prevent
+  // a TOCTOU race: without this, a new subscription could set need_epoll_updates=true
+  // between the two checks (or between the last check and the store), and that update
+  // would be lost when need_epoll_updates is overwritten to false.
+  // Lock ordering: id2_callback_info_mtx before id2_timer_info_mtx (see declarations).
+  {
+    std::lock_guard<std::mutex> cb_lock(id2_callback_info_mtx);
+    std::lock_guard<std::mutex> timer_lock(id2_timer_info_mtx);
 
-  const bool all_timers_updated = [&]() {
-    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-    return std::none_of(id2_timer_info.begin(), id2_timer_info.end(), [](const auto & it) {
-      return it.second->need_epoll_update;
-    });
-  }();
+    const bool all_callbacks_updated = std::none_of(
+      id2_callback_info.begin(), id2_callback_info.end(),
+      [](const auto & it) { return it.second.need_epoll_update; });
 
-  if (all_callbacks_updated && all_timers_updated) {
-    need_epoll_updates.store(false);
+    const bool all_timers_updated = std::none_of(
+      id2_timer_info.begin(), id2_timer_info.end(),
+      [](const auto & it) { return it.second->need_epoll_update; });
+
+    if (all_callbacks_updated && all_timers_updated) {
+      need_epoll_updates.store(false);
+    }
   }
 }
 
