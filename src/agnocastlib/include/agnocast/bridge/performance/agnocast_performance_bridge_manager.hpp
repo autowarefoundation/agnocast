@@ -6,6 +6,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -31,7 +32,7 @@ private:
   std::shared_ptr<agnocast::MultiThreadedAgnocastExecutor> executor_;
   std::thread executor_thread_;
 
-  bool shutdown_requested_ = false;
+  std::atomic_bool shutdown_requested_ = false;
 
   std::unordered_map<std::string, std::shared_ptr<void>> active_r2a_bridges_;
   std::unordered_map<std::string, std::shared_ptr<void>> active_a2r_bridges_;
