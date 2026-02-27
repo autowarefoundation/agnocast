@@ -216,7 +216,6 @@ struct ioctl_add_bridge_args
 {
   struct
   {
-    pid_t pid;
     struct name_info topic_name;
     bool is_r2a;
   };
@@ -230,7 +229,6 @@ struct ioctl_add_bridge_args
 
 struct ioctl_remove_bridge_args
 {
-  pid_t pid;
   struct name_info topic_name;
   bool is_r2a;
 };

@@ -135,7 +135,6 @@ StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_
   struct ioctl_add_bridge_args add_bridge_args
   {
   };
-  add_bridge_args.pid = getpid();
   add_bridge_args.topic_name = {topic_name.c_str(), topic_name.size()};
   add_bridge_args.is_r2a = is_r2a;
 
@@ -347,7 +346,6 @@ void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_
   struct ioctl_remove_bridge_args remove_bridge_args
   {
   };
-  remove_bridge_args.pid = getpid();
   remove_bridge_args.topic_name = {topic_name_view.data(), topic_name_view.size()};
   remove_bridge_args.is_r2a = is_r2a;
 
