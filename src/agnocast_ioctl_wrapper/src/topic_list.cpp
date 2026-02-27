@@ -35,6 +35,7 @@ char ** get_agnocast_topics(int * topic_count)
 
   ioctl_topic_list_args topic_list_args = {};
   topic_list_args.topic_name_buffer_addr = reinterpret_cast<uint64_t>(agnocast_topic_buffer);
+  topic_list_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   if (ioctl(fd, AGNOCAST_GET_TOPIC_LIST_CMD, &topic_list_args) < 0) {
     perror("AGNOCAST_GET_TOPIC_LIST_CMD failed");
     free(agnocast_topic_buffer);
