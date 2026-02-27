@@ -101,6 +101,7 @@ struct topic_struct
   topic_local_id_t current_pubsub_id;
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
+  uint32_t ros2_publisher_num;   // Updated by Bridge Manager
 };
 
 struct topic_wrapper
@@ -221,6 +222,7 @@ static int add_topic(
   (*wrapper)->topic.current_pubsub_id = 0;
   (*wrapper)->topic.current_entry_id = 0;
   (*wrapper)->topic.ros2_subscriber_num = 0;
+  (*wrapper)->topic.ros2_publisher_num = 0;
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
   dev_dbg(agnocast_device, "Topic (topic_name=%s) added. (add_topic)\n", topic_name);
@@ -1385,12 +1387,34 @@ int agnocast_ioctl_set_ros2_subscriber_num(
   return ret;
 }
 
+int agnocast_ioctl_set_ros2_publisher_num(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count)
+{
+  int ret = 0;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
+  if (wrapper) {
+    down_write(&wrapper->topic_rwsem);
+    wrapper->topic.ros2_publisher_num = count;
+    up_write(&wrapper->topic_rwsem);
+  } else {
+    ret = -ENOENT;
+  }
+
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
 int agnocast_ioctl_get_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_get_publisher_num_args * ioctl_ret)
 {
   ioctl_ret->ret_publisher_num = 0;
-  ioctl_ret->ret_bridge_exist = false;
+  ioctl_ret->ret_ros2_publisher_num = 0;
+  ioctl_ret->ret_r2a_bridge_exist = false;
+  ioctl_ret->ret_a2r_bridge_exist = false;
 
   down_read(&global_htables_rwsem);
 
@@ -1404,13 +1428,24 @@ int agnocast_ioctl_get_publisher_num(
   down_read(&wrapper->topic_rwsem);
 
   ioctl_ret->ret_publisher_num = get_size_pub_info_htable(wrapper);
+  ioctl_ret->ret_ros2_publisher_num = wrapper->topic.ros2_publisher_num;
 
   struct publisher_info * pub_info;
   int bkt_pub;
   hash_for_each(wrapper->topic.pub_info_htable, bkt_pub, pub_info, node)
   {
     if (pub_info->is_bridge) {
-      ioctl_ret->ret_bridge_exist = true;
+      ioctl_ret->ret_r2a_bridge_exist = true;
+      break;
+    }
+  }
+
+  struct subscriber_info * sub_info;
+  int bkt_sub;
+  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub, sub_info, node)
+  {
+    if (sub_info->is_bridge) {
+      ioctl_ret->ret_a2r_bridge_exist = true;
       break;
     }
   }
@@ -2754,6 +2789,23 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     topic_name_buf[set_ros2_sub_args.topic_name.len] = '\0';
     ret = agnocast_ioctl_set_ros2_subscriber_num(
       topic_name_buf, ipc_ns, set_ros2_sub_args.ros2_subscriber_num);
+    kfree(topic_name_buf);
+  } else if (cmd == AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD) {
+    struct ioctl_set_ros2_publisher_num_args set_ros2_pub_args;
+    if (copy_from_user(&set_ros2_pub_args, (void __user *)arg, sizeof(set_ros2_pub_args)))
+      return -EFAULT;
+    if (set_ros2_pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
+    char * topic_name_buf = kmalloc(set_ros2_pub_args.topic_name.len + 1, GFP_KERNEL);
+    if (!topic_name_buf) return -ENOMEM;
+    if (copy_from_user(
+          topic_name_buf, (char __user *)set_ros2_pub_args.topic_name.ptr,
+          set_ros2_pub_args.topic_name.len)) {
+      kfree(topic_name_buf);
+      return -EFAULT;
+    }
+    topic_name_buf[set_ros2_pub_args.topic_name.len] = '\0';
+    ret = agnocast_ioctl_set_ros2_publisher_num(
+      topic_name_buf, ipc_ns, set_ros2_pub_args.ros2_publisher_num);
     kfree(topic_name_buf);
   } else {
     return -EINVAL;
