@@ -33,6 +33,11 @@ extern std::mutex mmap_mtx;
 
 void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size);
 
+// Create a dummy callback group for agnocast::Node tracepoint use.
+// Defined in .cpp to avoid circular inclusion between agnocast_subscription.hpp and
+// agnocast_node.hpp.
+rclcpp::CallbackGroup::SharedPtr create_dummy_callback_group(agnocast::Node * node);
+
 struct SubscriptionOptions
 {
   rclcpp::CallbackGroup::SharedPtr callback_group{nullptr};
@@ -168,10 +173,17 @@ public:
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
-    [[maybe_unused]] const rclcpp::QoS actual_qos =
+    const rclcpp::QoS actual_qos =
       constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, false);
 
-    // TODO(atsushi421): CARET tracepoint for agnocast::Node
+    {
+      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(node), static_cast<const void *>(&callback),
+        static_cast<const void *>(callback_group.get()), tracetools::get_symbol(callback),
+        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
+    }
   }
 
   ~BasicSubscription()
@@ -251,9 +263,18 @@ public:
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
   : SubscriptionBase(node, topic_name)
   {
-    constructor_impl(node, qos, options);
+    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options);
 
-    // TODO(atsushi421): CARET tracepoint for agnocast::Node
+    {
+      auto dummy_cbg = create_dummy_callback_group(node);
+      auto dummy_cb = []() {};
+      std::string dummy_cb_symbols = "dummy_take" + topic_name;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(node), static_cast<const void *>(&dummy_cb),
+        static_cast<const void *>(dummy_cbg.get()), dummy_cb_symbols.c_str(), topic_name_.c_str(),
+        actual_qos.depth(), 0);
+    }
   }
 
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)

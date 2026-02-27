@@ -1,5 +1,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 
+#include "agnocast/agnocast_tracepoint_wrapper.h"
+
 namespace agnocast
 {
 
@@ -27,6 +29,8 @@ void init(int argc, char const * const * argv)
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
   g_context.init(argc, argv);
+
+  TRACEPOINT(agnocast_init, static_cast<const void *>(&g_context));
 }
 
 }  // namespace agnocast
