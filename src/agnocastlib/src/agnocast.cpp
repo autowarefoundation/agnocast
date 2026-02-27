@@ -60,11 +60,11 @@ void * map_area(
   }
 
   auto cleanup_shm_fd = [&]() {
-    close(shm_fd);
     {
       std::lock_guard<std::mutex> lock(shm_fds_mtx);
       shm_fds.erase(std::remove(shm_fds.begin(), shm_fds.end(), shm_fd), shm_fds.end());
     }
+    close(shm_fd);
     if (writable) {
       shm_unlink(shm_name.c_str());
     }
