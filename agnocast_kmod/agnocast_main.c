@@ -3246,9 +3246,14 @@ static struct tracepoint * tp_sched_process_exit;
 
 static void agnocast_process_exit(void * data, struct task_struct * task)
 {
+  // Wait until all threads in the thread group have exited.
+  // The thread group leader isn't always the last to exit, so instead of checking
+  // pid == tgid, we check that no live threads remain in the group.
+  if (atomic_read(&task->signal->live) != 0) return;
+
   // Skip non-Agnocast PIDs to avoid the full
   // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
-  if (is_agnocast_pid(task->pid)) agnocast_enqueue_exit_pid(task->pid);
+  if (is_agnocast_pid(task->tgid)) agnocast_enqueue_exit_pid(task->tgid);
 }
 
 static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)
