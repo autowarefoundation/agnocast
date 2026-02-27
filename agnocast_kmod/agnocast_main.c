@@ -3194,10 +3194,10 @@ static struct tracepoint * tp_sched_process_exit;
 
 static void agnocast_process_exit(void * data, struct task_struct * task)
 {
-  // Skip non-leader threads early to avoid the RCU-protected hashtable lookup
-  // in is_agnocast_pid(). Since processes register with tgid, only the thread group
-  // leader (where pid == tgid) can match a registered process.
-  if (task->pid != task->tgid) return;
+  // Wait until all threads in the thread group have exited.
+  // The thread group leader isn't always the last to exit, so instead of checking
+  // pid == tgid, we check that no live threads remain in the group.
+  if (atomic_read(&task->signal->live) != 0) return;
 
   // Skip non-Agnocast PIDs to avoid the full
   // enqueue → wake → dequeue → rwsem pipeline for unrelated exits.
