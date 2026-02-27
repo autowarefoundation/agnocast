@@ -52,6 +52,8 @@ struct CallbackInfo
 std::vector<std::string> get_agnocast_topics_by_group(
   const rclcpp::CallbackGroup::SharedPtr & group);
 
+// Lock ordering: when acquiring both id2_callback_info_mtx and id2_timer_info_mtx,
+// always lock id2_callback_info_mtx first to avoid deadlocks.
 extern std::mutex id2_callback_info_mtx;
 extern std::unordered_map<uint32_t, CallbackInfo> id2_callback_info;
 extern std::atomic<uint32_t> next_callback_info_id;
