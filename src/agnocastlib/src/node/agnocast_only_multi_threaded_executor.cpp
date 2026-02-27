@@ -2,13 +2,16 @@
 
 #include "agnocast/agnocast.hpp"
 
+#include <algorithm>
+
 namespace agnocast
 {
 
 AgnocastOnlyMultiThreadedExecutor::AgnocastOnlyMultiThreadedExecutor(
   size_t number_of_threads, bool yield_before_execute, int next_exec_timeout_ms)
 : number_of_threads_(
-    number_of_threads != 0 ? number_of_threads : std::thread::hardware_concurrency()),
+    number_of_threads != 0 ? number_of_threads
+                           : std::max<size_t>(1, std::thread::hardware_concurrency())),
   yield_before_execute_(yield_before_execute),
   next_exec_timeout_ms_(next_exec_timeout_ms)
 {
