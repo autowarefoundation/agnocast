@@ -191,7 +191,7 @@ int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period, rcl_cloc
 uint32_t allocate_timer_id()
 {
   const uint32_t timer_id = next_timer_id.fetch_add(1);
-  if ((timer_id & TIMER_EVENT_FLAG) != 0U) {
+  if ((timer_id & EPOLL_EVENT_ID_RESERVED_MASK) != 0U) {
     throw std::runtime_error("Timer ID overflow: too many timers created");
   }
   return timer_id;
