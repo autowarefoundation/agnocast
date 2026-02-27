@@ -143,7 +143,7 @@ typename Service<ServiceT>::SharedPtr create_service(
  * \return Shared pointer to the created timer.
  */
 template <typename NodeT, typename CallbackT>
-typename agnocast::TimerBase::SharedPtr create_timer(
+TimerBase::SharedPtr create_timer(
   NodeT node, rclcpp::Clock::SharedPtr clock, rclcpp::Duration period, CallbackT && callback,
   rclcpp::CallbackGroup::SharedPtr group = nullptr)
 {

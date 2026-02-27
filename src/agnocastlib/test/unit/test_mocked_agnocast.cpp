@@ -569,6 +569,104 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
 }
 
 // =========================================
+// create_timer free function tests
+// =========================================
+
+class CreateTimerFreeFunctionTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    rclcpp::init(0, nullptr);
+    node = std::make_shared<agnocast::Node>("test_timer_node");
+  }
+
+  void TearDown() override
+  {
+    node.reset();
+    rclcpp::shutdown();
+  }
+
+  std::shared_ptr<agnocast::Node> node;
+};
+
+TEST_F(CreateTimerFreeFunctionTest, creates_timer_and_registers_info)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+
+  // Assert
+  ASSERT_NE(timer, nullptr);
+  EXPECT_EQ(timer->get_clock()->get_clock_type(), RCL_STEADY_TIME);
+}
+
+TEST_F(CreateTimerFreeFunctionTest, uses_default_callback_group_when_nullptr)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto expected_group = node->get_node_base_interface()->get_default_callback_group();
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, nullptr);
+
+  // Assert: verify the timer was registered with the default callback group
+  ASSERT_NE(timer, nullptr);
+  // Check via id2_timer_info that the callback group matches the default
+  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+  bool found = false;
+  for (const auto & [id, info] : agnocast::id2_timer_info) {
+    if (info->callback_group == expected_group && info->timer.lock() == timer) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Timer should be registered with the default callback group";
+}
+
+TEST_F(CreateTimerFreeFunctionTest, uses_explicit_callback_group)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(50));
+  auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, group);
+
+  // Assert
+  ASSERT_NE(timer, nullptr);
+  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+  bool found = false;
+  for (const auto & [id, info] : agnocast::id2_timer_info) {
+    if (info->callback_group == group && info->timer.lock() == timer) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Timer should be registered with the explicit callback group";
+}
+
+TEST_F(CreateTimerFreeFunctionTest, callback_is_invoked)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(10));
+  bool called = false;
+  auto timer = agnocast::create_timer(node.get(), clock, period, [&called]() { called = true; });
+
+  // Act
+  timer->execute_callback();
+
+  // Assert
+  EXPECT_TRUE(called);
+}
+
+// =========================================
 // ID overflow tests
 // =========================================
 
