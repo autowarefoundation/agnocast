@@ -271,7 +271,11 @@ struct ioctl_set_ros2_subscriber_num_args
 #define MAX_TOPIC_NUM 1024
 
 union ioctl_topic_list_args {
-  uint64_t topic_name_buffer_addr;
+  struct
+  {
+    uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
+  };
   uint32_t ret_topic_num;
 };
 
@@ -280,6 +284,7 @@ union ioctl_node_info_args {
   {
     struct name_info node_name;
     uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
 };
@@ -298,6 +303,7 @@ union ioctl_topic_info_args {
   {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
+    uint32_t topic_info_ret_buffer_size;
   };
   uint32_t ret_topic_info_ret_num;
 };
