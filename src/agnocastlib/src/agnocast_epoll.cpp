@@ -45,7 +45,7 @@ bool wait_and_handle_epoll_event(
     // Timer event (timerfd fired)
     const uint32_t timer_id = event_id & ~TIMER_EVENT_FLAG;
     rclcpp::CallbackGroup::SharedPtr callback_group;
-    rclcpp::TimerBase::SharedPtr timer_ptr;
+    std::shared_ptr<agnocast::TimerBase> timer_ptr;
 
     std::shared_ptr<TimerInfo> timer_info;
     {
@@ -99,7 +99,7 @@ bool wait_and_handle_epoll_event(
     // Clock event (ROS_TIME clock updated via time jump callback)
     const uint32_t timer_id = event_id & ~CLOCK_EVENT_FLAG;
     rclcpp::CallbackGroup::SharedPtr callback_group;
-    rclcpp::TimerBase::SharedPtr timer_ptr;
+    std::shared_ptr<agnocast::TimerBase> timer_ptr;
 
     std::shared_ptr<TimerInfo> timer_info;
     {
