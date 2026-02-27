@@ -575,17 +575,9 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
 class CreateTimerFreeFunctionTest : public ::testing::Test
 {
 protected:
-  void SetUp() override
-  {
-    rclcpp::init(0, nullptr);
-    node = std::make_shared<agnocast::Node>("test_timer_node");
-  }
+  void SetUp() override { node = std::make_shared<agnocast::Node>("test_timer_node"); }
 
-  void TearDown() override
-  {
-    node.reset();
-    rclcpp::shutdown();
-  }
+  void TearDown() override { node.reset(); }
 
   std::shared_ptr<agnocast::Node> node;
 };
