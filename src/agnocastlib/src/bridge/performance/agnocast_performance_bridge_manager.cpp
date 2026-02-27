@@ -83,6 +83,7 @@ void PerformanceBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
+      shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
   });
@@ -93,7 +94,6 @@ void PerformanceBridgeManager::on_mq_request(int fd)
   std::vector<char> buffer(PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE);
 
   ssize_t bytes_read = mq_receive(fd, buffer.data(), buffer.size(), nullptr);
-
   if (bytes_read < 0) {
     if (errno != EAGAIN) {
       RCLCPP_WARN_STREAM(

@@ -1,9 +1,11 @@
 #include "agnocast/agnocast_callback_info.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_executor.hpp"
 
 #include <array>
+#include <stdexcept>
 
 namespace agnocast
 {
@@ -12,6 +14,15 @@ std::mutex id2_callback_info_mtx;
 const int callback_map_bkt_cnt = 100;  // arbitrary size to prevent rehash
 std::unordered_map<uint32_t, CallbackInfo> id2_callback_info(callback_map_bkt_cnt);
 std::atomic<uint32_t> next_callback_info_id;
+
+uint32_t allocate_callback_info_id()
+{
+  const uint32_t callback_info_id = next_callback_info_id.fetch_add(1);
+  if ((callback_info_id & EPOLL_EVENT_ID_RESERVED_MASK) != 0U) {
+    throw std::runtime_error("Callback info ID overflow: too many callbacks registered");
+  }
+  return callback_info_id;
+}
 
 void receive_and_execute_message(
   const uint32_t callback_info_id, const pid_t my_pid, const CallbackInfo & callback_info,
