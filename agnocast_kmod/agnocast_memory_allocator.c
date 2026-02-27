@@ -1,8 +1,8 @@
 #include "agnocast_memory_allocator.h"
 
+#include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
@@ -29,8 +29,8 @@ int init_memory_allocator(void)
 
   if (mempool_size_gb < MIN_MEMPOOL_SIZE_GB || mempool_size_gb > MAX_MEMPOOL_SIZE_GB) {
     pr_err(
-      "Agnocast: invalid mempool_size_gb=%d. Must be between %d and %d.\n",
-      mempool_size_gb, MIN_MEMPOOL_SIZE_GB, MAX_MEMPOOL_SIZE_GB);
+      "Agnocast: invalid mempool_size_gb=%d. Must be between %d and %d.\n", mempool_size_gb,
+      MIN_MEMPOOL_SIZE_GB, MAX_MEMPOOL_SIZE_GB);
     return -EINVAL;
   }
 
