@@ -1,4 +1,4 @@
-name: build-and-test-agnocastlib-heaphook
+name: build-and-test-agnocastlib-components-heaphook
 
 on:
   pull_request:
