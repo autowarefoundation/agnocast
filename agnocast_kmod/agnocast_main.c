@@ -2,6 +2,7 @@
 #include "agnocast_memory_allocator.h"
 
 #include <linux/device.h>
+#include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -1107,6 +1108,10 @@ static int receive_msg_core(
       continue;
     }
 
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
     int ret = add_subscriber_reference(en, subscriber_id);
     if (ret < 0) {
       return ret;
@@ -1245,6 +1250,10 @@ int agnocast_ioctl_take_msg(
 
     const struct process_info * proc_info = find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
+      continue;
+    }
+
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
 
