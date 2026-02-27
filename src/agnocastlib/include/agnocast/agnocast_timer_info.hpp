@@ -40,6 +40,8 @@ struct TimerInfo
   rclcpp::JumpHandler::SharedPtr jump_handler;
 };
 
+// Lock ordering: when acquiring both id2_callback_info_mtx and id2_timer_info_mtx,
+// always lock id2_callback_info_mtx first to avoid deadlocks.
 extern std::mutex id2_timer_info_mtx;
 extern std::unordered_map<uint32_t, std::shared_ptr<TimerInfo>> id2_timer_info;
 extern std::atomic<uint32_t> next_timer_id;
