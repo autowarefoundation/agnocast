@@ -1,7 +1,9 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_callback_info.hpp"
+#include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
+#include "agnocast/agnocast_timer_info.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_msgs/msg/int32.hpp"
@@ -564,6 +566,64 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
 
   // Assert
   EXPECT_TRUE(callback_called);
+}
+
+// =========================================
+// ID overflow tests
+// =========================================
+
+TEST(AllocateCallbackInfoIdTest, throws_when_id_has_reserved_epoll_flag_bits)
+{
+  // Arrange: Set next_callback_info_id so the next allocation hits SHUTDOWN_EVENT_FLAG (bit 29).
+  const uint32_t original = next_callback_info_id.load();
+  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG);
+
+  // Act & Assert
+  EXPECT_THROW(allocate_callback_info_id(), std::runtime_error);
+
+  // Cleanup
+  next_callback_info_id.store(original);
+}
+
+TEST(AllocateCallbackInfoIdTest, succeeds_just_below_reserved_range)
+{
+  // Arrange: Set next_callback_info_id to the maximum valid value (one below SHUTDOWN_EVENT_FLAG).
+  const uint32_t original = next_callback_info_id.load();
+  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG - 1);
+
+  // Act & Assert
+  EXPECT_EQ(allocate_callback_info_id(), SHUTDOWN_EVENT_FLAG - 1);
+
+  // Cleanup
+  next_callback_info_id.store(original);
+}
+
+TEST(AllocateTimerIdTest, throws_when_id_has_reserved_epoll_flag_bits)
+{
+  // Arrange: Set next_timer_id so the returned ID includes a reserved epoll flag bit.
+  // This covers the bug where timer IDs OR'd with CLOCK_EVENT_FLAG/TIMER_EVENT_FLAG
+  // could collide with reserved flags.
+  const uint32_t original = next_timer_id.load();
+  next_timer_id.store(SHUTDOWN_EVENT_FLAG);
+
+  // Act & Assert
+  EXPECT_THROW(allocate_timer_id(), std::runtime_error);
+
+  // Cleanup
+  next_timer_id.store(original);
+}
+
+TEST(AllocateTimerIdTest, succeeds_just_below_reserved_range)
+{
+  // Arrange: Set next_timer_id to the maximum valid value.
+  const uint32_t original = next_timer_id.load();
+  next_timer_id.store(SHUTDOWN_EVENT_FLAG - 1);
+
+  // Act & Assert
+  EXPECT_EQ(allocate_timer_id(), SHUTDOWN_EVENT_FLAG - 1);
+
+  // Cleanup
+  next_timer_id.store(original);
 }
 
 TEST_F(AgnocastSmartPointerTest, converting_copy_constructor)
