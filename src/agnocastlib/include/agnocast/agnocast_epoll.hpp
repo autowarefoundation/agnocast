@@ -117,23 +117,26 @@ void prepare_epoll_impl(
     }
   }
 
-  // Check if all updates are done
-  const bool all_callbacks_updated = [&]() {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-    return std::none_of(id2_callback_info.begin(), id2_callback_info.end(), [](const auto & it) {
-      return it.second.need_epoll_update;
-    });
-  }();
+  // Check if all updates are done. Both locks must be held simultaneously to prevent
+  // a TOCTOU race: without this, a new subscription could set need_epoll_updates=true
+  // between the two checks (or between the last check and the store), and that update
+  // would be lost when need_epoll_updates is overwritten to false.
+  // Lock ordering: id2_callback_info_mtx before id2_timer_info_mtx (see declarations).
+  {
+    std::lock_guard<std::mutex> cb_lock(id2_callback_info_mtx);
+    std::lock_guard<std::mutex> timer_lock(id2_timer_info_mtx);
 
-  const bool all_timers_updated = [&]() {
-    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-    return std::none_of(id2_timer_info.begin(), id2_timer_info.end(), [](const auto & it) {
-      return it.second->need_epoll_update;
-    });
-  }();
+    const bool all_callbacks_updated = std::none_of(
+      id2_callback_info.begin(), id2_callback_info.end(),
+      [](const auto & it) { return it.second.need_epoll_update; });
 
-  if (all_callbacks_updated && all_timers_updated) {
-    need_epoll_updates.store(false);
+    const bool all_timers_updated = std::none_of(
+      id2_timer_info.begin(), id2_timer_info.end(),
+      [](const auto & it) { return it.second->need_epoll_update; });
+
+    if (all_callbacks_updated && all_timers_updated) {
+      need_epoll_updates.store(false);
+    }
   }
 }
 
