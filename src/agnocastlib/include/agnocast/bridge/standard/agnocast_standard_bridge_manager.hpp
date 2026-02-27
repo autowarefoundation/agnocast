@@ -5,6 +5,7 @@
 #include "agnocast/bridge/standard/agnocast_standard_bridge_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -46,7 +47,7 @@ private:
   StandardBridgeLoader loader_;
 
   bool is_parent_alive_ = true;
-  bool shutdown_requested_ = false;
+  std::atomic_bool shutdown_requested_ = false;
 
   rclcpp::Node::SharedPtr container_node_;
   std::shared_ptr<agnocast::MultiThreadedAgnocastExecutor> executor_;
