@@ -50,13 +50,13 @@ uint32_t get_publisher_count_core(const std::string & topic_name)
   }
 
   uint32_t count = args.ret_publisher_num;
-  // Assumes at most one R2A bridge publisher per topic
+  // If an R2A bridge exists, exclude the agnocast publisher created by the bridge
   if (args.ret_r2a_bridge_exist && count > 0) {
     count--;
   }
 
   uint32_t ros2_count = args.ret_ros2_publisher_num;
-  // Assumes at most one A2R bridge subscriber per topic
+  // If an A2R bridge exists, exclude the ROS 2 publisher created by the bridge
   if (args.ret_a2r_bridge_exist && ros2_count > 0) {
     ros2_count--;
   }
