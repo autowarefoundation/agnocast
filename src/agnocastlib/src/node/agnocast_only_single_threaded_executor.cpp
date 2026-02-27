@@ -16,7 +16,9 @@ AgnocastOnlySingleThreadedExecutor::AgnocastOnlySingleThreadedExecutor(int next_
       "callbacks may be extremely slow to execute.");
   }
 
-  // TODO(atsushi421): CARET tracepoint for executor creation
+  TRACEPOINT(
+    agnocast_construct_executor, static_cast<const void *>(this),
+    "agnocast_only_single_threaded_executor");
 }
 
 void AgnocastOnlySingleThreadedExecutor::spin()

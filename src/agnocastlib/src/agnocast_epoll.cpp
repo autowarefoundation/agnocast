@@ -45,6 +45,7 @@ bool wait_and_handle_epoll_event(
     // Timer event (timerfd fired)
     const uint32_t timer_id = event_id & ~TIMER_EVENT_FLAG;
     rclcpp::CallbackGroup::SharedPtr callback_group;
+    std::shared_ptr<agnocast::TimerBase> timer_ptr;
 
     std::shared_ptr<TimerInfo> timer_info;
     {
@@ -56,7 +57,8 @@ bool wait_and_handle_epoll_event(
         exit(EXIT_FAILURE);
       }
       timer_info = it->second;
-      if (!timer_info->timer.lock()) {
+      timer_ptr = timer_info->timer.lock();
+      if (!timer_ptr) {
         return false;  // Timer object has been destroyed
       }
       callback_group = timer_info->callback_group;
@@ -79,7 +81,15 @@ bool wait_and_handle_epoll_event(
     // For tracepoints.
     const void * callable_ptr = callable.get();
     // Create a callable that handles the timer event
-    *callable = [timer_info, callable_ptr]() { handle_timer_event(*timer_info); };
+    *callable = [timer_info, callable_ptr]() {
+      TRACEPOINT(agnocast_callable_start, callable_ptr);
+      handle_timer_event(*timer_info);
+      TRACEPOINT(agnocast_callable_end, callable_ptr);
+    };
+
+    TRACEPOINT(
+      agnocast_create_timer_callable, static_cast<const void *>(callable_ptr),
+      static_cast<const void *>(timer_ptr.get()));
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};
@@ -89,6 +99,7 @@ bool wait_and_handle_epoll_event(
     // Clock event (ROS_TIME clock updated via time jump callback)
     const uint32_t timer_id = event_id & ~CLOCK_EVENT_FLAG;
     rclcpp::CallbackGroup::SharedPtr callback_group;
+    std::shared_ptr<agnocast::TimerBase> timer_ptr;
 
     std::shared_ptr<TimerInfo> timer_info;
     {
@@ -100,7 +111,8 @@ bool wait_and_handle_epoll_event(
         exit(EXIT_FAILURE);
       }
       timer_info = it->second;
-      if (!timer_info->timer.lock()) {
+      timer_ptr = timer_info->timer.lock();
+      if (!timer_ptr) {
         return false;  // Timer object has been destroyed
       }
       callback_group = timer_info->callback_group;
@@ -120,8 +132,18 @@ bool wait_and_handle_epoll_event(
     }
 
     // Create a callable that handles the clock event
-    const std::shared_ptr<std::function<void()>> callable =
-      std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
+    auto callable = std::make_shared<std::function<void()>>();
+    const void * callable_ptr = callable.get();
+
+    *callable = [timer_info, callable_ptr]() {
+      TRACEPOINT(agnocast_callable_start, callable_ptr);
+      handle_timer_event(*timer_info);
+      TRACEPOINT(agnocast_callable_end, callable_ptr);
+    };
+
+    TRACEPOINT(
+      agnocast_create_timer_callable, static_cast<const void *>(callable_ptr),
+      static_cast<const void *>(timer_ptr.get()));
 
     {
       std::lock_guard<std::mutex> ready_lock{ready_agnocast_executables_mutex};

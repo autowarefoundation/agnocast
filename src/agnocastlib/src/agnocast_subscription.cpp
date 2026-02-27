@@ -1,4 +1,5 @@
 #include "agnocast/agnocast.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
 namespace agnocast
 {
@@ -78,6 +79,12 @@ void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription)
       logger,
       "mq_unlink failed for mq_name='" << mq_subscription.second << "': " << strerror(errno));
   }
+}
+
+rclcpp::CallbackGroup::SharedPtr create_dummy_callback_group(agnocast::Node * node)
+{
+  return node->get_node_base_interface()->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive, false);
 }
 
 }  // namespace agnocast

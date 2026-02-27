@@ -134,9 +134,11 @@ public:
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options = PublisherOptions{})
   {
-    constructor_impl(node, topic_name, qos, options, false);
+    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, false);
 
-    // TODO: CARET tracepoint for agnocast::Node
+    TRACEPOINT(
+      agnocast_publisher_init, static_cast<const void *>(this), static_cast<const void *>(node),
+      topic_name_.c_str(), actual_qos.depth());
   }
 
   ~BasicPublisher()
