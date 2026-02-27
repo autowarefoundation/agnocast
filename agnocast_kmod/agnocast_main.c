@@ -2,6 +2,7 @@
 #include "agnocast_memory_allocator.h"
 
 #include <linux/device.h>
+#include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
