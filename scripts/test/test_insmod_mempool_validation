@@ -1,0 +1,72 @@
+#!/bin/bash
+
+set -u
+
+MODULE_NAME="agnocast"
+KMOD_DIR="$(cd "$(dirname "$0")/../../agnocast_kmod" && pwd)"
+
+# Check sudo is cached (non-interactive)
+if ! sudo -n true 2>/dev/null; then
+    echo "ERROR: sudo credentials not cached. Run 'sudo true' first, then re-run this script."
+    exit 1
+fi
+
+# Ensure module is unloaded before testing
+if lsmod | grep -q "^${MODULE_NAME}\b"; then
+    echo "Module loaded. Unloading..."
+    sudo -n rmmod "$MODULE_NAME" || { echo "ABORT: failed to unload module"; exit 1; }
+fi
+
+PASS=0
+FAIL=0
+
+run_test() {
+    local description="$1"
+    local value="$2"
+    local expect_success="$3"  # "yes" or "no"
+
+    echo "--- Test: ${description} (mempool_size_gb=${value}) ---"
+
+    if sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko" "mempool_size_gb=${value}" 2>/dev/null; then
+        sudo -n rmmod "$MODULE_NAME"
+        if [ "$expect_success" = "yes" ]; then
+            echo "PASS: insmod succeeded as expected"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: insmod succeeded but should have failed"
+            FAIL=$((FAIL + 1))
+        fi
+    else
+        if [ "$expect_success" = "no" ]; then
+            echo "PASS: insmod correctly rejected"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: insmod failed but should have succeeded"
+            FAIL=$((FAIL + 1))
+        fi
+    fi
+}
+
+echo "=== Test: insmod mempool_size_gb validation ==="
+
+# Valid values
+run_test "minimum valid value"   1   "yes"
+run_test "default value"         8   "yes"
+run_test "maximum valid value"   50  "yes"
+
+# Invalid values
+run_test "zero"                  0   "no"
+run_test "negative value"        -1  "no"
+run_test "above maximum"         51  "no"
+run_test "very large value"      999 "no"
+
+echo ""
+echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+
+# Reload module with default settings
+sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko"
+echo "Module reloaded with defaults."
+
+if [ "$FAIL" -ne 0 ]; then
+    exit 1
+fi

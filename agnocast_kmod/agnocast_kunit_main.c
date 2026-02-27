@@ -84,7 +84,13 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
     return ret;
   }
 
-  init_memory_allocator();
+  ret = init_memory_allocator();
+  if (ret < 0) {
+    agnocast_exit_exit_hook();
+    agnocast_exit_kthread();
+    agnocast_exit_device();
+    return ret;
+  }
 
   return 0;
 }

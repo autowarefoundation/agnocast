@@ -23,7 +23,7 @@ struct mempool_entry
   struct list_head mapped_pid_head;
 };
 
-void init_memory_allocator(void);
+int init_memory_allocator(void);
 struct mempool_entry * assign_memory(const pid_t pid);
 int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid);
 void free_memory(const pid_t pid);
