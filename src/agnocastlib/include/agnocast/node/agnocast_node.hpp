@@ -354,6 +354,9 @@ public:
   }
 
   template <typename DurationRepT, typename DurationT, typename CallbackT>
+  [[deprecated(
+    "Use agnocast::create_timer() free function instead. "
+    "This will be removed in the next major release.")]]
   typename GenericTimer<CallbackT>::SharedPtr create_timer(
     std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
     rclcpp::CallbackGroup::SharedPtr group = nullptr)
