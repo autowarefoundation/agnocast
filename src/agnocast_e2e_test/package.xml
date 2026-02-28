@@ -26,6 +26,7 @@
   <depend>std_msgs</depend>
 
   <depend>agnocastlib</depend>
+  <exec_depend>agnocast_components</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

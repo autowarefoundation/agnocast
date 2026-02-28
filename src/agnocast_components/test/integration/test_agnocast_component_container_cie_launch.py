@@ -22,7 +22,7 @@ def generate_test_description():
     component_container = ComposableNodeContainer(
         name='test_component_container',
         namespace='',
-        package='agnocastlib',
+        package='agnocast_components',
         executable='agnocast_component_container_cie',
         composable_node_descriptions=[
             ComposableNode(

@@ -78,7 +78,7 @@ def generate_test_description():
         pub_container = ComposableNodeContainer(
             name='test_talker_container',
             namespace='',
-            package='agnocastlib',
+            package='agnocast_components',
             executable='agnocast_component_container',
             parameters=[
                 {"get_next_timeout_ms": 1},
@@ -175,7 +175,7 @@ def generate_test_description():
             ComposableNodeContainer(
                 name='test_taker_container',
                 namespace='',
-                package='agnocastlib',
+                package='agnocast_components',
                 executable='agnocast_component_container',
                 composable_node_descriptions=[
                     ComposableNode(
@@ -204,7 +204,7 @@ def generate_test_description():
             ComposableNodeContainer(
                 name='test_listener_container',
                 namespace='',
-                package='agnocastlib',
+                package='agnocast_components',
                 executable='agnocast_component_container',
                 composable_node_descriptions=[
                     ComposableNode(
