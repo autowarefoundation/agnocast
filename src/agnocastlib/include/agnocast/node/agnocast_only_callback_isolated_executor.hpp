@@ -57,7 +57,7 @@ public:
   void spin() override;
 
   RCLCPP_PUBLIC
-  void cancel();
+  void cancel() override;
 
   /// Add a node to this executor. Unlike the base class add_node(), this does NOT set
   /// the has_executor atomic flag on the node or its callback groups, because the CIE
