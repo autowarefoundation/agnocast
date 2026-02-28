@@ -84,6 +84,7 @@ sudo insmod agnocast.ko mempool_size_gb=16
 ### Notes
 
 - The parameter value is in gigabytes (GB)
+- Valid range: 1 to 50 (GB). If an out-of-range value is specified, the module will fail to load with `-EINVAL`
 - Default value is 8GB
 - The configured size is logged to kernel messages (`dmesg`) when the module is loaded
 - Due to demand paging, physical memory is allocated only upon the first access (first touch) of a page, so the configured size does not consume physical memory immediately

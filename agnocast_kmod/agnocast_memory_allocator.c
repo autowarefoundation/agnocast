@@ -1,5 +1,6 @@
 #include "agnocast_memory_allocator.h"
 
+#include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
@@ -13,16 +14,25 @@ static DEFINE_SPINLOCK(mempool_lock);
 // Module parameter: mempool size in GB (default: 8GB)
 int mempool_size_gb = 8;
 module_param(mempool_size_gb, int, 0444);
-MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 8)");
+MODULE_PARM_DESC(mempool_size_gb, "Mempool size per process in GB (default: 8, valid: 1-50)");
 
 uint64_t mempool_size_bytes = 0;
 
 // Default mempool size in GB
 #define DEFAULT_MEMPOOL_SIZE_GB 8
+#define MIN_MEMPOOL_SIZE_GB 1
+#define MAX_MEMPOOL_SIZE_GB 50
 
-void init_memory_allocator(void)
+int init_memory_allocator(void)
 {
   uint64_t addr = 0x40000000000;
+
+  if (mempool_size_gb < MIN_MEMPOOL_SIZE_GB || mempool_size_gb > MAX_MEMPOOL_SIZE_GB) {
+    pr_err(
+      "Agnocast: invalid mempool_size_gb=%d. Must be between %d and %d.\n", mempool_size_gb,
+      MIN_MEMPOOL_SIZE_GB, MAX_MEMPOOL_SIZE_GB);
+    return -EINVAL;
+  }
 
   mempool_size_bytes = (uint64_t)mempool_size_gb * 1024ULL * 1024ULL * 1024ULL;
 
@@ -43,6 +53,8 @@ void init_memory_allocator(void)
     INIT_LIST_HEAD(&mempool_entries[i].mapped_pid_head);
     addr += mempool_size_bytes;
   }
+
+  return 0;
 }
 
 struct mempool_entry * assign_memory(const pid_t pid)
