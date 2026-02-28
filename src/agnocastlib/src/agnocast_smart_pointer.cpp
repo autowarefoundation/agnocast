@@ -1,14 +1,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 
-#include "rclcpp/rclcpp.hpp"
-
 namespace agnocast
 {
-
-namespace
-{
-rclcpp::Logger logger = rclcpp::get_logger("agnocast_smart_pointer");
-}
 
 void release_subscriber_reference(
   const std::string & topic_name, const topic_local_id_t pubsub_id, const int64_t entry_id)

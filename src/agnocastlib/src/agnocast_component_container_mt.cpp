@@ -54,7 +54,7 @@ int main(int argc, char * argv[])
     close(agnocast::agnocast_fd);
     return EXIT_FAILURE;
   } catch (...) {
-    std::cerr << "Unknown exception caught in main" << std::endl;
+    std::cerr << "Unknown exception caught in main: " << std::endl;
     close(agnocast::agnocast_fd);
     return EXIT_FAILURE;
   }
