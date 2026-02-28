@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # ROS 2
 source /opt/ros/${ROS_DISTRO}/setup.bash
 rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO
