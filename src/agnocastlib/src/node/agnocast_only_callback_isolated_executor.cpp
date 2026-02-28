@@ -117,15 +117,15 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   }  // guard child_resources_mutex_
 
   // Monitoring loop: wait for notification when new callback groups are created
-  while (spinning_.load() && rclcpp::ok()) {
+  while (spinning_.load()) {
     {
       std::unique_lock<std::mutex> lock(callback_group_created_cv_mutex_);
       callback_group_created_cv_.wait(
-        lock, [this] { return callback_group_created_ || !spinning_.load() || !rclcpp::ok(); });
+        lock, [this] { return callback_group_created_ || !spinning_.load(); });
       callback_group_created_ = false;
     }
 
-    if (!spinning_.load() || !rclcpp::ok()) {
+    if (!spinning_.load()) {
       break;
     }
 
@@ -157,7 +157,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
     }
 
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    if (!spinning_.load() || !rclcpp::ok()) {
+    if (!spinning_.load()) {
       break;
     }
     for (auto & [group, node] : new_groups) {
