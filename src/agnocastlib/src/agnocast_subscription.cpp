@@ -32,9 +32,8 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
   add_subscriber_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("AGNOCAST_ADD_SUBSCRIBER_CMD failed: ") + strerror(errno));
   }
 
   return add_subscriber_args;
@@ -45,9 +44,8 @@ uint32_t get_publisher_count_core(const std::string & topic_name)
   union ioctl_get_publisher_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};
   if (ioctl(agnocast_fd, AGNOCAST_GET_PUBLISHER_NUM_CMD, &args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_GET_PUBLISHER_NUM_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("AGNOCAST_GET_PUBLISHER_NUM_CMD failed: ") + strerror(errno));
   }
 
   uint32_t count = args.ret_publisher_num;
@@ -79,12 +77,9 @@ mqd_t open_mq_for_subscription(
   const int mq_mode = 0666;
   mqd_t mq = mq_open(mq_name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK, mq_mode, &attr);
   if (mq == -1) {
-    RCLCPP_ERROR_STREAM(
-      logger, "mq_open failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
-                                           << ", mq_name='" << mq_name
-                                           << "'): " << strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      "mq_open failed for topic '" + topic_name + "' (subscriber_id=" +
+      std::to_string(subscriber_id) + ", mq_name='" + mq_name + "'): " + strerror(errno));
   }
   mq_subscription = std::make_pair(mq, mq_name);
 

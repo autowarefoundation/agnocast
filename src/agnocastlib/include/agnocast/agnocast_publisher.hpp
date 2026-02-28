@@ -175,9 +175,7 @@ public:
   void publish(ipc_shared_ptr<MessageT> && message)
   {
     if (!message || topic_name_ != message.get_topic_name()) {
-      RCLCPP_ERROR(logger, "Invalid message to publish.");
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::runtime_error("Invalid message to publish.");
     }
 
     // Capture raw pointer BEFORE invalidation (get() returns nullptr after invalidation).

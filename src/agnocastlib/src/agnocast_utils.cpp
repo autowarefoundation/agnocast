@@ -19,8 +19,7 @@ void validate_ld_preload()
   if (
     ld_preload_cstr == nullptr ||
     std::strstr(ld_preload_cstr, "libagnocast_heaphook.so") == nullptr) {
-    RCLCPP_ERROR(logger, "libagnocast_heaphook.so not found in LD_PRELOAD.");
-    exit(EXIT_FAILURE);
+    throw std::runtime_error("libagnocast_heaphook.so not found in LD_PRELOAD.");
   }
 
   std::string ld_preload(ld_preload_cstr);
@@ -46,9 +45,7 @@ static std::string create_mq_name(
   const std::string & header, const std::string & topic_name, const topic_local_id_t id)
 {
   if (topic_name.length() == 0 || topic_name[0] != '/') {
-    RCLCPP_ERROR(logger, "create_mq_name failed");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error("create_mq_name failed: invalid topic_name");
   }
 
   std::string mq_name = topic_name;

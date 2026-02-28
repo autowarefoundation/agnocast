@@ -11,9 +11,8 @@ void release_subscriber_reference(
   entry_args.pubsub_id = pubsub_id;
   entry_args.entry_id = entry_id;
   if (ioctl(agnocast_fd, AGNOCAST_RELEASE_SUB_REF_CMD, &entry_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_RELEASE_SUB_REF_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("AGNOCAST_RELEASE_SUB_REF_CMD failed: ") + strerror(errno));
   }
 }
 

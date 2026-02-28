@@ -60,9 +60,7 @@ rclcpp::CallbackGroup::SharedPtr get_valid_callback_group(
 
   if (callback_group) {
     if (!node->get_node_base_interface()->callback_group_in_node(callback_group)) {
-      RCLCPP_ERROR(logger, "Cannot create agnocast subscription, callback group not in node.");
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::runtime_error("Cannot create agnocast subscription, callback group not in node.");
     }
   } else {
     callback_group = node->get_node_base_interface()->get_default_callback_group();
@@ -296,9 +294,8 @@ public:
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {
-        RCLCPP_ERROR(logger, "AGNOCAST_TAKE_MSG_CMD failed: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        throw std::runtime_error(
+          std::string("AGNOCAST_TAKE_MSG_CMD failed: ") + strerror(errno));
       }
 
       for (uint32_t i = 0; i < take_args.ret_pub_shm_num; i++) {
