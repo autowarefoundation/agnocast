@@ -35,21 +35,10 @@ template <typename ServiceT>
 class Client
 {
 public:
-  // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
-  struct RequestT : public ServiceT::Request
-  {
-    std::string _node_name;
-    int64_t _sequence_number;
-  };
-  struct ResponseT : public ServiceT::Response
-  {
-    int64_t _sequence_number;
-  };
-
   using SharedPtr = std::shared_ptr<Client<ServiceT>>;
 
-  using Future = std::future<ipc_shared_ptr<ResponseT>>;
-  using SharedFuture = std::shared_future<ipc_shared_ptr<ResponseT>>;
+  using Future = std::future<ipc_shared_ptr<typename ServiceT::Response>>;
+  using SharedFuture = std::shared_future<ipc_shared_ptr<typename ServiceT::Response>>;
 
   struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
   {
@@ -62,9 +51,20 @@ public:
   };
 
 private:
+  // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
+  struct RequestT : public ServiceT::Request
+  {
+    std::string _node_name;
+    int64_t _sequence_number;
+  };
+  struct ResponseT : public ServiceT::Response
+  {
+    int64_t _sequence_number;
+  };
+
   struct ResponseCallInfo
   {
-    std::promise<ipc_shared_ptr<ResponseT>> promise;
+    std::promise<ipc_shared_ptr<typename ServiceT::Response>> promise;
     std::optional<SharedFuture> shared_future;
     std::optional<std::function<void(SharedFuture)>> callback;
 
@@ -77,6 +77,7 @@ private:
   };
 
   using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRequestPolicy>;
+  using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRequestPolicy>;
 
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
@@ -87,7 +88,7 @@ private:
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
   const std::string service_name_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
-  typename BasicSubscription<ResponseT, NoBridgeRequestPolicy>::SharedPtr subscriber_;
+  typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
 public:
   template <typename NodeT>
@@ -103,11 +104,13 @@ public:
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
+
     RCLCPP_WARN(
       logger_,
       "Agnocast service/client is not officially supported yet and the API may change in the "
       "future: %s",
       service_name_.c_str());
+
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options);
@@ -127,7 +130,7 @@ public:
       /* --- critical section end --- */
       lock.unlock();
 
-      info.promise.set_value(std::move(response));
+      info.promise.set_value(ipc_shared_ptr<typename ServiceT::Response>(std::move(response)));
       if (info.callback.has_value()) {
         (info.callback.value())(info.shared_future.value());
       }
@@ -137,18 +140,18 @@ public:
     std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
     std::visit(
       [this, &topic_name, &qos, cb = std::move(subscriber_callback), &options](auto * node) {
-        subscriber_ = std::make_shared<BasicSubscription<ResponseT, NoBridgeRequestPolicy>>(
+        subscriber_ = std::make_shared<ServiceResponseSubscriber>(
           node, topic_name, qos, std::move(cb), options);
       },
       node_);
   }
 
-  ipc_shared_ptr<RequestT> borrow_loaned_request()
+  ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
     auto request = publisher_->borrow_loaned_message();
     request->_node_name = node_name_;
     request->_sequence_number = next_sequence_number_.fetch_add(1);
-    return request;
+    return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
   const char * get_service_name() const { return service_name_.c_str(); }
@@ -165,10 +168,12 @@ public:
   }
 
   SharedFutureAndRequestId async_send_request(
-    ipc_shared_ptr<RequestT> && request, std::function<void(SharedFuture)> callback)
+    ipc_shared_ptr<typename ServiceT::Request> && request,
+    std::function<void(SharedFuture)> callback)
   {
     SharedFuture shared_future;
-    int64_t seqno = request->_sequence_number;
+    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    int64_t seqno = internal_request->_sequence_number;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -176,14 +181,15 @@ public:
       shared_future = it->second.shared_future.value();
     }
 
-    publisher_->publish(std::move(request));
+    publisher_->publish(std::move(internal_request));
     return SharedFutureAndRequestId(std::move(shared_future), seqno);
   }
 
-  FutureAndRequestId async_send_request(ipc_shared_ptr<RequestT> && request)
+  FutureAndRequestId async_send_request(ipc_shared_ptr<typename ServiceT::Request> && request)
   {
     Future future;
-    int64_t seqno = request->_sequence_number;
+    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    int64_t seqno = internal_request->_sequence_number;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -191,7 +197,7 @@ public:
       future = it->second.promise.get_future();
     }
 
-    publisher_->publish(std::move(request));
+    publisher_->publish(std::move(internal_request));
     return FutureAndRequestId(std::move(future), seqno);
   }
 };
