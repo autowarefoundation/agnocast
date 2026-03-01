@@ -19,11 +19,7 @@ CallbackIsolatedAgnocastExecutor::CallbackIsolatedAgnocastExecutor(
 void CallbackIsolatedAgnocastExecutor::spin()
 {
   if (spinning.exchange(true)) {
-    RCLCPP_ERROR(logger, "spin() called while already spinning");
-    if (agnocast_fd != -1) {
-      close(agnocast_fd);
-    }
-    exit(EXIT_FAILURE);
+    throw std::logic_error("spin() called while already spinning");
   }
 
   RCPPUTILS_SCOPE_EXIT(this->spinning.store(false););
@@ -196,23 +192,15 @@ void CallbackIsolatedAgnocastExecutor::add_callback_group(
     }
 
     if (n->callback_group_in_node(group_ptr)) {
-      RCLCPP_ERROR(
-        logger, "Callback group already exists in node: %s", n->get_fully_qualified_name());
-      if (agnocast_fd != -1) {
-        close(agnocast_fd);
-      }
-      exit(EXIT_FAILURE);
+      throw std::logic_error(
+        std::string("Callback group already exists in node: ") + n->get_fully_qualified_name());
     }
   }
 
   auto insert_info = weak_groups_to_nodes_.insert(std::make_pair(weak_group_ptr, weak_node_ptr));
 
   if (!insert_info.second) {
-    RCLCPP_ERROR(logger, "Callback group already exists in the executor");
-    if (agnocast_fd != -1) {
-      close(agnocast_fd);
-    }
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Callback group already exists in the executor");
   }
 }
 
@@ -296,11 +284,7 @@ void CallbackIsolatedAgnocastExecutor::remove_callback_group(
   if (it != weak_groups_to_nodes_.end()) {
     weak_groups_to_nodes_.erase(it);
   } else {
-    RCLCPP_ERROR(logger, "Callback group not found in the executor");
-    if (agnocast_fd != -1) {
-      close(agnocast_fd);
-    }
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Callback group not found in the executor");
   }
 }
 
@@ -321,11 +305,9 @@ void CallbackIsolatedAgnocastExecutor::add_node(
     }
 
     if (node_ptr->callback_group_in_node(group)) {
-      RCLCPP_ERROR(
-        logger, "One of the callback groups in node %s already exists in the executor.",
-        node_ptr->get_fully_qualified_name());
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::logic_error(
+        std::string("One of the callback groups in node ") + node_ptr->get_fully_qualified_name() +
+        " already exists in the executor.");
     }
   }
 
@@ -333,12 +315,8 @@ void CallbackIsolatedAgnocastExecutor::add_node(
 
   auto insert_info = weak_nodes_.insert(weak_node_ptr);
   if (!insert_info.second) {
-    RCLCPP_ERROR(
-      logger, "Node already exists in the executor: %s", node_ptr->get_fully_qualified_name());
-    if (agnocast_fd != -1) {
-      close(agnocast_fd);
-    }
-    exit(EXIT_FAILURE);
+    throw std::logic_error(
+      std::string("Node already exists in the executor: ") + node_ptr->get_fully_qualified_name());
   }
 }
 
@@ -361,12 +339,8 @@ void CallbackIsolatedAgnocastExecutor::remove_node(
   if (it != weak_nodes_.end()) {
     weak_nodes_.erase(it);
   } else {
-    RCLCPP_ERROR(
-      logger, "Node not found in the executor: %s", node_ptr->get_fully_qualified_name());
-    if (agnocast_fd != -1) {
-      close(agnocast_fd);
-    }
-    exit(EXIT_FAILURE);
+    throw std::logic_error(
+      std::string("Node not found in the executor: ") + node_ptr->get_fully_qualified_name());
   }
 }
 

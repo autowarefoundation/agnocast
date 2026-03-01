@@ -22,14 +22,12 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
   my_pid_(getpid())
 {
   if (epoll_fd_ == -1) {
-    RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("epoll_create1 failed: ") + strerror(errno));
   }
 
   if (shutdown_event_fd_ == -1) {
-    RCLCPP_ERROR(logger, "eventfd failed: %s", strerror(errno));
     close(epoll_fd_);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("eventfd failed: ") + strerror(errno));
   }
 
   struct epoll_event ev
@@ -38,10 +36,10 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
   ev.events = EPOLLIN;
   ev.data.u32 = SHUTDOWN_EVENT_FLAG;
   if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, shutdown_event_fd_, &ev) == -1) {
-    RCLCPP_ERROR(logger, "epoll_ctl for shutdown_event_fd failed: %s", strerror(errno));
     close(shutdown_event_fd_);
     close(epoll_fd_);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("epoll_ctl for shutdown_event_fd failed: ") + strerror(errno));
   }
 
   SignalHandler::install();
@@ -158,17 +156,13 @@ void AgnocastOnlyExecutor::add_callback_group(
   (void)notify;
   std::atomic_bool & has_executor = group_ptr->get_associated_with_executor_atomic();
   if (has_executor.exchange(true)) {
-    RCLCPP_ERROR(logger, "Callback group has already been added to an executor.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Callback group has already been added to an executor.");
   }
   std::lock_guard<std::mutex> lock(mutex_);
   bool was_inserted =
     weak_groups_associated_with_executor_to_nodes_.insert({group_ptr, node_ptr}).second;
   if (!was_inserted) {
-    RCLCPP_ERROR(logger, "Callback group was already added to executor.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Callback group was already added to executor.");
   }
 
   const auto group_type_enum = group_ptr->type();
@@ -190,14 +184,10 @@ void AgnocastOnlyExecutor::remove_callback_group(
   const rclcpp::CallbackGroup::WeakPtr weak(group_ptr);
   const auto it = weak_groups_associated_with_executor_to_nodes_.find(weak);
   if (it == weak_groups_associated_with_executor_to_nodes_.end()) {
-    RCLCPP_ERROR(logger, "Callback group needs to be associated with this executor.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Callback group needs to be associated with this executor.");
   }
   if (it->second.expired()) {
-    RCLCPP_ERROR(logger, "Node must not be deleted before its callback group(s).");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Node must not be deleted before its callback group(s).");
   }
   weak_groups_associated_with_executor_to_nodes_.erase(it);
   group_ptr->get_associated_with_executor_atomic().store(false);
@@ -292,11 +282,9 @@ void AgnocastOnlyExecutor::add_node(
   (void)notify;
   std::atomic_bool & has_executor = node_ptr->get_associated_with_executor_atomic();
   if (has_executor.exchange(true)) {
-    RCLCPP_ERROR(
-      logger, "Node '%s' has already been added to an executor.",
-      node_ptr->get_fully_qualified_name());
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error(
+      std::string("Node '") + node_ptr->get_fully_qualified_name() +
+      "' has already been added to an executor.");
   }
   std::lock_guard<std::mutex> lock(mutex_);
   node_ptr->for_each_callback_group(
@@ -331,9 +319,7 @@ void AgnocastOnlyExecutor::remove_node(
 {
   (void)notify;
   if (!node_ptr->get_associated_with_executor_atomic().load()) {
-    RCLCPP_ERROR(logger, "Node needs to be associated with an executor.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Node needs to be associated with an executor.");
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
@@ -348,9 +334,7 @@ void AgnocastOnlyExecutor::remove_node(
     }
   }
   if (!found_node) {
-    RCLCPP_ERROR(logger, "Node needs to be associated with this executor.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("Node needs to be associated with this executor.");
   }
 
   for (auto it = weak_groups_to_nodes_associated_with_executor_.begin();

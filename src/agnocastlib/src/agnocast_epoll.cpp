@@ -21,9 +21,7 @@ bool wait_and_handle_epoll_event(
 
   if (nfds == -1) {
     if (errno != EINTR) {  // signal handler interruption is not error
-      RCLCPP_ERROR(logger, "epoll_wait failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::runtime_error(std::string("epoll_wait failed: ") + strerror(errno));
     }
 
     return false;
@@ -52,9 +50,7 @@ bool wait_and_handle_epoll_event(
       std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
       const auto it = id2_timer_info.find(timer_id);
       if (it == id2_timer_info.end()) {
-        RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        throw std::logic_error("Agnocast internal implementation error: timer info cannot be found");
       }
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
@@ -106,9 +102,7 @@ bool wait_and_handle_epoll_event(
       std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
       const auto it = id2_timer_info.find(timer_id);
       if (it == id2_timer_info.end()) {
-        RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        throw std::logic_error("Agnocast internal implementation error: timer info cannot be found");
       }
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
@@ -173,12 +167,9 @@ bool wait_and_handle_epoll_event(
       mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
     if (ret < 0) {
       if (errno != EAGAIN) {
-        RCLCPP_ERROR_STREAM(
-          logger, "mq_receive failed for topic '" << callback_info.topic_name << "' (subscriber_id="
-                                                  << callback_info.subscriber_id
-                                                  << "): " << strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        throw std::runtime_error(
+          "mq_receive failed for topic '" + callback_info.topic_name + "' (subscriber_id=" +
+          std::to_string(callback_info.subscriber_id) + "): " + strerror(errno));
       }
 
       return false;

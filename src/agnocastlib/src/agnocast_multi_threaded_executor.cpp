@@ -33,9 +33,7 @@ bool MultiThreadedAgnocastExecutor::validate_callback_group(
   const rclcpp::CallbackGroup::SharedPtr & group) const
 {
   if (!group) {
-    RCLCPP_ERROR(logger, "Callback group is nullptr. The node may have been destructed.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::invalid_argument("Callback group is nullptr. The node may have been destructed.");
   }
 
   if (group->type() == rclcpp::CallbackGroupType::Reentrant) {
@@ -66,15 +64,12 @@ bool MultiThreadedAgnocastExecutor::validate_callback_group(
     });
 
   if (is_shared_with_ros2) {
-    RCLCPP_ERROR(
-      logger,
+    throw std::invalid_argument(
       "To prevent performance degradation, MultiThreadedAgnocastExecutor prohibits the agnocast "
-      "callback and the ros2 callback from belonging to the same MutuallyExclusive callback group "
-      ". If mutual exclusion between callbacks is not required, consider using Reentrant callback "
+      "callback and the ros2 callback from belonging to the same MutuallyExclusive callback group. "
+      "If mutual exclusion between callbacks is not required, consider using Reentrant callback "
       "group. If mutual exclusion is required, separate them into different callback groups and "
       "use a mutex or other synchronization mechanism.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
   }
 
   return true;
@@ -83,9 +78,7 @@ bool MultiThreadedAgnocastExecutor::validate_callback_group(
 void MultiThreadedAgnocastExecutor::spin()
 {
   if (spinning.exchange(true)) {
-    RCLCPP_ERROR(logger, "spin() called while already spinning");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("spin() called while already spinning");
   }
 
   RCPPUTILS_SCOPE_EXIT(this->spinning.store(false););

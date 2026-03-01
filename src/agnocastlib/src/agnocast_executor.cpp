@@ -15,8 +15,7 @@ AgnocastExecutor::AgnocastExecutor(const rclcpp::ExecutorOptions & options)
 : rclcpp::Executor(options), epoll_fd_(epoll_create1(0)), my_pid_(getpid())
 {
   if (epoll_fd_ == -1) {
-    RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("epoll_create1 failed: ") + strerror(errno));
   }
 }
 
