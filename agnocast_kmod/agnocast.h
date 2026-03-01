@@ -218,7 +218,6 @@ struct ioctl_add_bridge_args
 {
   struct
   {
-    pid_t pid;
     struct name_info topic_name;
     bool is_r2a;
   };
@@ -232,7 +231,6 @@ struct ioctl_add_bridge_args
 
 struct ioctl_remove_bridge_args
 {
-  pid_t pid;
   struct name_info topic_name;
   bool is_r2a;
 };
@@ -282,7 +280,11 @@ struct ioctl_set_ros2_publisher_num_args
 #define MAX_TOPIC_NUM 1024
 
 union ioctl_topic_list_args {
-  uint64_t topic_name_buffer_addr;
+  struct
+  {
+    uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
+  };
   uint32_t ret_topic_num;
 };
 
@@ -291,6 +293,7 @@ union ioctl_node_info_args {
   {
     struct name_info node_name;
     uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
 };
@@ -309,6 +312,7 @@ union ioctl_topic_info_args {
   {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
+    uint32_t topic_info_ret_buffer_size;
   };
   uint32_t ret_topic_info_ret_num;
 };
@@ -325,14 +329,15 @@ union ioctl_topic_info_args {
 // From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10
 #define EXIT_QUEUE_SIZE_BITS 16
 #define EXIT_QUEUE_SIZE (1U << EXIT_QUEUE_SIZE_BITS)
+#define EXIT_QUEUE_MASK (EXIT_QUEUE_SIZE - 1)
 
 int agnocast_init_device(void);
 int agnocast_init_kthread(void);
-int agnocast_init_kprobe(void);
+int agnocast_init_exit_hook(void);
 
 void agnocast_exit_free_data(void);
 void agnocast_exit_kthread(void);
-void agnocast_exit_kprobe(void);
+void agnocast_exit_exit_hook(void);
 void agnocast_exit_device(void);
 
 int agnocast_ioctl_add_subscriber(
@@ -426,6 +431,7 @@ int agnocast_ioctl_set_ros2_publisher_num(
 void agnocast_process_exit_cleanup(const pid_t pid);
 
 void agnocast_enqueue_exit_pid(const pid_t pid);
+bool is_agnocast_pid(const pid_t pid);
 
 // ================================================
 // helper functions for KUnit test

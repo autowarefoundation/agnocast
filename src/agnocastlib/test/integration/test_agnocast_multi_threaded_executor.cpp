@@ -14,7 +14,8 @@ protected:
     int next_exec_timeout_ms = std::get<1>(GetParam());
     cbg_type_ = std::get<2>(GetParam());
     int agnocast_next_exec_timeout_ms = next_exec_timeout_ms;
-    std::chrono::nanoseconds ros2_next_exec_timeout(next_exec_timeout_ms * 1000 * 1000);
+    std::chrono::nanoseconds ros2_next_exec_timeout(
+      static_cast<int64_t>(next_exec_timeout_ms) * 1000 * 1000);
 
     // Set the execution time of each callback
     uint64_t num_cbs = NUM_AGNOCAST_SUB_CBS + NUM_AGNOCAST_CBS_TO_BE_ADDED + NUM_ROS2_SUB_CBS;

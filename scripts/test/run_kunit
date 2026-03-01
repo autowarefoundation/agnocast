@@ -24,7 +24,7 @@ if lsmod | grep -q "agnocast"; then
     exit 1
 fi
 
-AGNOCAST_DIR=$(realpath "$(dirname $(readlink -f $0))/..")
+AGNOCAST_DIR=$(realpath "$(dirname $(readlink -f $0))/../..")
 
 AGNOCAST_KMOD_PATH=$AGNOCAST_DIR/agnocast_kmod
 
