@@ -69,6 +69,8 @@ void PerformanceBridgeManager::run()
     check_and_remove_request_cache();
     check_and_request_shutdown();
   }
+
+  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
 }
 
 void PerformanceBridgeManager::start_ros_execution()

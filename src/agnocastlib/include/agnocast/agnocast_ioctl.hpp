@@ -51,9 +51,14 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
+    bool is_bridge_manager;
+  };
+  struct
+  {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
+    bool ret_performance_bridge_daemon_exist;
   };
 };
 #pragma GCC diagnostic pop
@@ -345,5 +350,6 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
+#define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 
 }  // namespace agnocast

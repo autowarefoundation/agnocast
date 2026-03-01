@@ -22,7 +22,7 @@ void test_case_get_process_num_single(struct kunit * test)
   // Act
   uint64_t local_pid = pid_act++;
   union ioctl_add_process_args args;
-  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -37,7 +37,7 @@ void test_case_get_process_num_max(struct kunit * test)
   for (int i = 0; i < max_process_num; i++) {
     uint64_t local_pid = pid_act++;
     union ioctl_add_process_args args;
-    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
   }
 
   // Assert

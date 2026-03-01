@@ -36,9 +36,14 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
+    bool is_bridge_manager;
+  };
+  struct
+  {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
+    bool ret_performance_bridge_daemon_exist;
   };
 };
 
@@ -273,6 +278,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
+#define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 
 // ================================================
 // ros2cli ioctls
@@ -376,7 +382,8 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret);
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,

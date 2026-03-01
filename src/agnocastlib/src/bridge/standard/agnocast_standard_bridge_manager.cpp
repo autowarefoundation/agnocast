@@ -76,6 +76,8 @@ void StandardBridgeManager::run()
     check_active_bridges();
     check_should_exit();
   }
+
+  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
 }
 
 void StandardBridgeManager::start_ros_execution()
