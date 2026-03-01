@@ -32,11 +32,8 @@ void increment_borrowed_publisher_num()
 void decrement_borrowed_publisher_num()
 {
   if (borrowed_publisher_num == 0) {
-    RCLCPP_ERROR(
-      logger,
+    throw std::logic_error(
       "The number of publish() called exceeds the number of borrow_loaned_message() called.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
   }
   borrowed_publisher_num--;
 }
