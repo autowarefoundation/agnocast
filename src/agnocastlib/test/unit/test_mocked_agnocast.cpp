@@ -536,9 +536,7 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_invalid_type)
   // Act & Assert
   agnocast::TypeErasedCallback erased_callback =
     agnocast::get_erased_callback<float>(float_callback);
-  EXPECT_EXIT(
-    erased_callback(std::move(int_arg)), ::testing::ExitedWithCode(EXIT_FAILURE),
-    "Agnocast internal implementation error: bad allocation when callback is called");
+  EXPECT_THROW(erased_callback(std::move(int_arg)), std::runtime_error);
 }
 
 TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
