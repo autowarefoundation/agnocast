@@ -161,7 +161,9 @@ union ioctl_get_publisher_num_args {
   struct
   {
     uint32_t ret_publisher_num;
-    bool ret_bridge_exist;
+    uint32_t ret_ros2_publisher_num;
+    bool ret_r2a_bridge_exist;
+    bool ret_a2r_bridge_exist;
   };
 };
 
@@ -244,6 +246,12 @@ struct ioctl_set_ros2_subscriber_num_args
   uint32_t ros2_subscriber_num;
 };
 
+struct ioctl_set_ros2_publisher_num_args
+{
+  struct name_info topic_name;
+  uint32_t ros2_publisher_num;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -264,6 +272,7 @@ struct ioctl_set_ros2_subscriber_num_args
 #define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
+#define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 
 // ================================================
 // ros2cli ioctls
@@ -414,6 +423,9 @@ int agnocast_ioctl_get_node_publisher_topics(
 int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_set_ros2_subscriber_num(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
+
+int agnocast_ioctl_set_ros2_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
 void agnocast_process_exit_cleanup(const pid_t pid);

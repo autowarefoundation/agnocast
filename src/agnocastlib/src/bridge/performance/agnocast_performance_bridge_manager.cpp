@@ -165,6 +165,10 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     if (result.count <= 0 || !is_demanded_by_ros2) {
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
       ++r2a_it;
     }
   }
@@ -284,6 +288,10 @@ void PerformanceBridgeManager::create_bridge_if_needed(
 
     if (result.entity_handle) {
       if (is_r2a) {
+        if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+          RCLCPP_ERROR(
+            logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+        }
         active_r2a_bridges_[topic_name] = result.entity_handle;
       } else {
         if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
