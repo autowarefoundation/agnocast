@@ -49,7 +49,9 @@ void * map_area(
   const int shm_mode = 0666;
   int shm_fd = shm_open(shm_name.c_str(), oflag, shm_mode);
   if (shm_fd == -1) {
-    throw std::runtime_error(std::string("shm_open failed: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "shm_open failed: %s", strerror(errno));
+    close(agnocast_fd);
+    return nullptr;
   }
 
   {
@@ -70,14 +72,18 @@ void * map_area(
 
   if (writable) {
     if (ftruncate(shm_fd, static_cast<off_t>(shm_size)) == -1) {
+      RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
       cleanup_shm_fd();
-      throw std::runtime_error(std::string("ftruncate failed: ") + strerror(errno));
+      close(agnocast_fd);
+      return nullptr;
     }
 
     const int new_shm_mode = 0444;
     if (fchmod(shm_fd, new_shm_mode) == -1) {
+      RCLCPP_ERROR(logger, "fchmod failed: %s", strerror(errno));
       cleanup_shm_fd();
-      throw std::runtime_error(std::string("fchmod failed: ") + strerror(errno));
+      close(agnocast_fd);
+      return nullptr;
     }
   }
 
@@ -87,8 +93,10 @@ void * map_area(
     0);
 
   if (ret == MAP_FAILED) {
+    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
     cleanup_shm_fd();
-    throw std::runtime_error(std::string("mmap failed: ") + strerror(errno));
+    close(agnocast_fd);
+    return nullptr;
   }
 
   return ret;
@@ -101,7 +109,9 @@ void * map_writable_area(const pid_t pid, const uint64_t shm_addr, const uint64_
 
 void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size)
 {
-  map_area(pid, shm_addr, shm_size, false);
+  if (map_area(pid, shm_addr, shm_size, false) == nullptr) {
+    exit(EXIT_FAILURE);
+  }
 }
 
 // Initializes the child allocator for bridge functionality.
@@ -144,6 +154,10 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
 
+  if (mempool_ptr == nullptr) {
+    throw std::runtime_error("map_writable_area failed.");
+  }
+
   return {
     mempool_ptr,
     add_process_args.ret_shm_size,
@@ -153,8 +167,9 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 void poll_for_unlink()
 {
   if (setsid() == -1) {
-    throw std::runtime_error(
-      std::string("setsid failed for unlink daemon: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "setsid failed for unlink daemon: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   while (true) {
@@ -164,8 +179,9 @@ void poll_for_unlink()
     do {
       get_exit_process_args = {};
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
-        throw std::runtime_error(
-          std::string("AGNOCAST_GET_EXIT_PROCESS_CMD failed: ") + strerror(errno));
+        RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
       }
 
       if (get_exit_process_args.ret_pid > 0) {
@@ -195,21 +211,30 @@ void poll_for_unlink()
 void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
 {
   if (setsid() == -1) {
-    throw std::runtime_error(
-      std::string("setsid failed for bridge manager: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "setsid failed for unlink daemon: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
-  const auto resources = acquire_agnocast_resources_for_bridge();
-  initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
+  try {
+    const auto resources = acquire_agnocast_resources_for_bridge();
+    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
 
-  auto bridge_mode = get_bridge_mode();
-  if (bridge_mode == BridgeMode::Standard) {
-    StandardBridgeManager manager(target_pid);
-    manager.run();
-  } else if (bridge_mode == BridgeMode::Performance) {
-    PerformanceBridgeManager manager;
-    manager.run();
+    auto bridge_mode = get_bridge_mode();
+    if (bridge_mode == BridgeMode::Standard) {
+      StandardBridgeManager manager(target_pid);
+      manager.run();
+    } else if (bridge_mode == BridgeMode::Performance) {
+      {
+        PerformanceBridgeManager manager;
+        manager.run();
+      }
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(logger, "BridgeManager crashed: %s", e.what());
+    exit(EXIT_FAILURE);
   }
+  exit(0);
 }
 
 struct semver
@@ -341,7 +366,9 @@ pid_t spawn_daemon_process(Func && func)
 {
   pid_t pid = fork();
   if (pid < 0) {
-    throw std::runtime_error(std::string("fork failed: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "fork failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
   if (pid == 0) {
     agnocast::is_bridge_process = true;
@@ -357,12 +384,7 @@ pid_t spawn_daemon_process(Func && func)
       close(devnull);
     }
 
-    try {
-      func();
-    } catch (const std::exception & e) {
-      RCLCPP_ERROR(logger, "Daemon process failed: %s", e.what());
-      exit(EXIT_FAILURE);
-    }
+    func();
     exit(0);
   }
 
@@ -374,32 +396,37 @@ struct initialize_agnocast_result initialize_agnocast(
   const unsigned char * heaphook_version_ptr, const size_t heaphook_version_str_len)
 {
   if (agnocast_fd >= 0) {
-    throw std::runtime_error("Agnocast is already open");
+    RCLCPP_ERROR(logger, "Agnocast is already open");
+    exit(EXIT_FAILURE);
   }
 
   agnocast_fd = open("/dev/agnocast", O_RDWR);
   if (agnocast_fd < 0) {
     if (errno == ENOENT) {
-      throw std::runtime_error(AGNOCAST_DEVICE_NOT_FOUND_MSG);
+      RCLCPP_ERROR(logger, "%s", AGNOCAST_DEVICE_NOT_FOUND_MSG);
     } else {
-      throw std::runtime_error(std::string("Failed to open /dev/agnocast: ") + strerror(errno));
+      RCLCPP_ERROR(logger, "Failed to open /dev/agnocast: %s", strerror(errno));
     }
+    exit(EXIT_FAILURE);
   }
 
   struct ioctl_get_version_args get_version_args = {};
   if (ioctl(agnocast_fd, AGNOCAST_GET_VERSION_CMD, &get_version_args) < 0) {
-    throw std::runtime_error(
-      std::string("AGNOCAST_GET_VERSION_CMD failed: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_VERSION_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   if (!is_version_consistent(heaphook_version_ptr, heaphook_version_str_len, get_version_args)) {
-    throw std::runtime_error("Agnocast version mismatch");
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   union ioctl_add_process_args add_process_args = {};
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
-    throw std::runtime_error(
-      std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
+    RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   pid_t target_pid = 0;
@@ -428,6 +455,10 @@ struct initialize_agnocast_result initialize_agnocast(
 
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
+  if (mempool_ptr == nullptr) {
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
 
   struct initialize_agnocast_result result = {};
   result.mempool_ptr = mempool_ptr;
