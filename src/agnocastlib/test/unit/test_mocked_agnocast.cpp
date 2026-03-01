@@ -107,9 +107,7 @@ TEST_F(AgnocastPublisherTest, test_publish_null_message)
   agnocast::ipc_shared_ptr<std_msgs::msg::Int32> message;
 
   // Act & Assert
-  EXPECT_EXIT(
-    dummy_publisher->publish(std::move(message)), ::testing::ExitedWithCode(EXIT_FAILURE),
-    "Invalid message to publish.");
+  EXPECT_THROW(dummy_publisher->publish(std::move(message)), std::invalid_argument);
 }
 
 TEST_F(AgnocastPublisherTest, test_publish_already_published_message)
@@ -119,9 +117,7 @@ TEST_F(AgnocastPublisherTest, test_publish_already_published_message)
   dummy_publisher->publish(std::move(message));
 
   // Act & Assert
-  EXPECT_EXIT(
-    dummy_publisher->publish(std::move(message)), ::testing::ExitedWithCode(EXIT_FAILURE),
-    "Invalid message to publish.");
+  EXPECT_THROW(dummy_publisher->publish(std::move(message)), std::invalid_argument);
 }
 
 TEST_F(AgnocastPublisherTest, test_publish_different_message)
@@ -135,9 +131,7 @@ TEST_F(AgnocastPublisherTest, test_publish_different_message)
   agnocast::ipc_shared_ptr<std_msgs::msg::Int32> message = dummy_publisher->borrow_loaned_message();
 
   // Act & Assert
-  EXPECT_EXIT(
-    dummy_publisher->publish(std::move(diff_message)), ::testing::ExitedWithCode(EXIT_FAILURE),
-    "Invalid message to publish.");
+  EXPECT_THROW(dummy_publisher->publish(std::move(diff_message)), std::invalid_argument);
 }
 
 TEST_F(AgnocastPublisherTest, test_publish_loan_num_and_pub_num_mismatch)
