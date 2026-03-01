@@ -34,10 +34,7 @@ TEST_F(GetValidCallbackGroupTest, get_valid_callback_group_not_in_node)
   options.callback_group =
     other_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-  EXPECT_EXIT(
-    agnocast::get_valid_callback_group(node.get(), options),
-    ::testing::ExitedWithCode(EXIT_FAILURE),
-    "Cannot create agnocast subscription, callback group not in node.");
+  EXPECT_THROW(agnocast::get_valid_callback_group(node.get(), options), std::invalid_argument);
 }
 
 TEST_F(GetValidCallbackGroupTest, get_valid_callback_group_nullptr)
