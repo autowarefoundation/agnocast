@@ -29,7 +29,8 @@ else
 	  agnocast_kunit/agnocast_kunit_do_exit.o \
 	  agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.o \
 	  agnocast_kunit/agnocast_kunit_get_node_publisher_topics.o \
-	  agnocast_kunit/agnocast_kunit_get_version.o
+	  agnocast_kunit/agnocast_kunit_get_version.o \
+	  agnocast_kunit/agnocast_kunit_bridge_shutdown.o
 	ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
   else
     $(warning "CONFIG_KUNIT or CONFIG_GCOV_KERNEL is not set")

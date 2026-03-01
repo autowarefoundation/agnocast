@@ -438,6 +438,8 @@ int agnocast_ioctl_set_ros2_subscriber_num(
 int agnocast_ioctl_set_ros2_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
+int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid);
+
 void agnocast_process_exit_cleanup(const pid_t pid);
 
 void agnocast_enqueue_exit_pid(const pid_t pid);
