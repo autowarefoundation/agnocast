@@ -54,9 +54,7 @@ void prepare_epoll_impl(
       ev.data.u32 = callback_info_id;
 
       if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.mqdes, &ev) == -1) {
-        RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
+        throw std::runtime_error(std::string("epoll_ctl failed: ") + strerror(errno));
       }
 
       if (callback_info.is_transient_local) {
@@ -94,9 +92,8 @@ void prepare_epoll_impl(
         clock_ev.data.u32 = timer_id | CLOCK_EVENT_FLAG;
 
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.clock_eventfd, &clock_ev) == -1) {
-          RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
-          close(agnocast_fd);
-          exit(EXIT_FAILURE);
+          throw std::runtime_error(
+            std::string("epoll_ctl failed for clock_eventfd: ") + strerror(errno));
         }
       }
 
@@ -107,9 +104,7 @@ void prepare_epoll_impl(
         ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
 
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
-          RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-          close(agnocast_fd);
-          exit(EXIT_FAILURE);
+          throw std::runtime_error(std::string("epoll_ctl failed for timer: ") + strerror(errno));
         }
       }
 
