@@ -14,6 +14,8 @@ class AgnocastOnlyMultiThreadedExecutor : public AgnocastOnlyExecutor
   bool yield_before_execute_;
   const int next_exec_timeout_ms_;
 
+  std::atomic<bool> worker_thread_failed_{false};
+
   void agnocast_spin();
 
 public:

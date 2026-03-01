@@ -27,6 +27,8 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
     weak_groups_to_nodes_ RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
+  std::atomic<bool> worker_thread_failed_{false};
+
   // Mutex to protect weak_child_executors_ and child_threads_
   mutable std::mutex child_resources_mutex_;
 

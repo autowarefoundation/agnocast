@@ -32,6 +32,8 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   std::mutex callback_group_created_cv_mutex_;
   bool callback_group_created_{false};
 
+  std::atomic<bool> worker_thread_failed_{false};
+
   // Mutex to protect weak_child_executors_ and child_threads_
   mutable std::mutex child_resources_mutex_;
 
