@@ -3,7 +3,6 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#include <stdexcept>
 #include <string>
 
 namespace agnocast
@@ -16,8 +15,9 @@ extern bool is_bridge_process;
 inline void validate_qos(const rclcpp::QoS & qos)
 {
   if (qos.history() == rclcpp::HistoryPolicy::KeepAll) {
-    throw std::invalid_argument(
-      "Agnocast does not support KeepAll history policy. Use KeepLast instead.");
+    RCLCPP_ERROR(logger, "Agnocast does not support KeepAll history policy. Use KeepLast instead.");
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   const auto & rmw_qos = qos.get_rmw_qos_profile();

@@ -32,8 +32,7 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
   add_subscriber_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
-    throw std::runtime_error(
-      std::string("AGNOCAST_ADD_SUBSCRIBER_CMD failed: ") + strerror(errno));
+    throw std::runtime_error(std::string("AGNOCAST_ADD_SUBSCRIBER_CMD failed: ") + strerror(errno));
   }
 
   return add_subscriber_args;

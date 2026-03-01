@@ -104,6 +104,10 @@ void MultiThreadedAgnocastExecutor::spin()
   for (auto & thread : threads) {
     thread.join();
   }
+
+  if (worker_thread_failed_.load()) {
+    throw std::runtime_error("Exception occurred in agnocast worker thread");
+  }
 }
 
 void MultiThreadedAgnocastExecutor::ros2_spin()
@@ -148,30 +152,36 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
 
 void MultiThreadedAgnocastExecutor::agnocast_spin()
 {
-  while (rclcpp::ok(this->context_) && spinning.load()) {
-    if (need_epoll_updates.load()) {
-      prepare_epoll();
-    }
-
-    agnocast::AgnocastExecutable agnocast_executable;
-
-    if (!rclcpp::ok(this->context_) || !spinning.load()) {
-      return;
-    }
-
-    // Unlike a single-threaded executor, in a multi-threaded executor, each thread is dedicated to
-    // handling either ROS 2 callbacks or Agnocast callbacks exclusively.
-    // Given this separation, get_next_agnocast_executable() can block indefinitely without a
-    // timeout. However, since we need to periodically check for epoll updates, we should implement
-    // a long timeout period instead of an infinite block.
-    if (get_next_agnocast_executable(
-          agnocast_executable, agnocast_next_exec_timeout_ms_ /* timed-blocking*/)) {
-      if (yield_before_execute_) {
-        std::this_thread::yield();
+  try {
+    while (rclcpp::ok(this->context_) && spinning.load()) {
+      if (need_epoll_updates.load()) {
+        prepare_epoll();
       }
 
-      execute_agnocast_executable(agnocast_executable);
+      agnocast::AgnocastExecutable agnocast_executable;
+
+      if (!rclcpp::ok(this->context_) || !spinning.load()) {
+        return;
+      }
+
+      // Unlike a single-threaded executor, in a multi-threaded executor, each thread is dedicated
+      // to handling either ROS 2 callbacks or Agnocast callbacks exclusively. Given this
+      // separation, get_next_agnocast_executable() can block indefinitely without a timeout.
+      // However, since we need to periodically check for epoll updates, we should implement a long
+      // timeout period instead of an infinite block.
+      if (get_next_agnocast_executable(
+            agnocast_executable, agnocast_next_exec_timeout_ms_ /* timed-blocking*/)) {
+        if (yield_before_execute_) {
+          std::this_thread::yield();
+        }
+
+        execute_agnocast_executable(agnocast_executable);
+      }
     }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(logger, "Exception in agnocast worker thread: %s", e.what());
+    worker_thread_failed_.store(true);
+    spinning.store(false);
   }
 }
 
