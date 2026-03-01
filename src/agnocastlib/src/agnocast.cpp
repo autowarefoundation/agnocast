@@ -438,8 +438,9 @@ struct initialize_agnocast_result initialize_agnocast(
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
-  if (bridge_mode == BridgeMode::Performance &&
-      !add_process_args.ret_performance_bridge_daemon_exist) {
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    !add_process_args.ret_performance_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
   if (bridge_mode == BridgeMode::Standard) {

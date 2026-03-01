@@ -41,7 +41,8 @@ static void setup_one_publisher(
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   *ret_addr = add_process_args.ret_addr;
 
   union ioctl_add_publisher_args add_publisher_args;
@@ -716,7 +717,8 @@ void test_case_receive_msg_2pub_in_same_process(struct kunit * test)
 
   union ioctl_add_process_args add_process_args;
   const pid_t publisher_pid = 1000;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   union ioctl_add_publisher_args add_publisher_args1;
   const uint32_t publisher_qos_depth = 10;
   int ret2 = agnocast_ioctl_add_publisher(

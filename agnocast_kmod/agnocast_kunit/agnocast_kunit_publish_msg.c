@@ -43,7 +43,8 @@ static void setup_one_publisher(
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   *ret_addr = add_process_args.ret_addr;
 
   union ioctl_add_publisher_args add_publisher_args;

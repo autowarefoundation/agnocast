@@ -53,7 +53,8 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
@@ -69,7 +70,8 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
   pid_t intra_pid = current->tgid;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(intra_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(intra_pid, current->nsproxy->ipc_ns, false, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
