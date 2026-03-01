@@ -76,8 +76,6 @@ void StandardBridgeManager::run()
     check_active_bridges();
     check_should_exit();
   }
-
-  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
 }
 
 void StandardBridgeManager::start_ros_execution()
@@ -92,6 +90,7 @@ void StandardBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
+      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
       shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
@@ -111,6 +110,7 @@ void StandardBridgeManager::on_mq_request(mqd_t fd)
 
 void StandardBridgeManager::on_signal()
 {
+  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
   shutdown_requested_ = true;
   if (executor_) {
     executor_->cancel();
@@ -175,6 +175,7 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
 
     if (!bridge) {
       RCLCPP_ERROR(logger_, "Failed to create bridge for '%s'", topic_name_with_direction.c_str());
+      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
       shutdown_requested_ = true;
       return;
     }
@@ -331,6 +332,7 @@ void StandardBridgeManager::check_managed_bridges()
 void StandardBridgeManager::check_should_exit()
 {
   if (!is_parent_alive_ && active_bridges_.empty()) {
+    ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
     shutdown_requested_ = true;
     if (executor_) {
       executor_->cancel();

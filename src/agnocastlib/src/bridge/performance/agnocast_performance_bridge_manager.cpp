@@ -69,8 +69,6 @@ void PerformanceBridgeManager::run()
     check_and_remove_request_cache();
     check_and_request_shutdown();
   }
-
-  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
 }
 
 void PerformanceBridgeManager::start_ros_execution()
@@ -85,6 +83,7 @@ void PerformanceBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
+      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
       shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
@@ -118,6 +117,7 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
 void PerformanceBridgeManager::on_signal()
 {
+  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
   shutdown_requested_ = true;
   if (executor_) {
     executor_->cancel();
@@ -160,6 +160,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
         topic_name.c_str());
+      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
       shutdown_requested_ = true;
       return;
     }
@@ -184,6 +185,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
         topic_name.c_str());
+      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
       shutdown_requested_ = true;
       return;
     }
@@ -218,14 +220,13 @@ void PerformanceBridgeManager::check_and_remove_request_cache()
 
 void PerformanceBridgeManager::check_and_request_shutdown()
 {
-  struct ioctl_get_process_num_args args = {};
-  if (ioctl(agnocast_fd, AGNOCAST_GET_PROCESS_NUM_CMD, &args) < 0) {
-    RCLCPP_ERROR(logger_, "Failed to get active process count from kernel module.");
+  struct ioctl_check_and_request_bridge_shutdown_args args = {};
+  if (ioctl(agnocast_fd, AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger_, "Failed to check bridge shutdown from kernel module.");
     return;
   }
 
-  // Request shutdown if there is no other process excluding poll_for_unlink.
-  if (args.ret_process_num <= 1) {
+  if (args.ret_should_shutdown) {
     shutdown_requested_ = true;
   }
 }

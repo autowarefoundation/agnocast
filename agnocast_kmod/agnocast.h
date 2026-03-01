@@ -240,9 +240,9 @@ struct ioctl_remove_bridge_args
   bool is_r2a;
 };
 
-struct ioctl_get_process_num_args
+struct ioctl_check_and_request_bridge_shutdown_args
 {
-  uint32_t ret_process_num;
+  bool ret_should_shutdown;
 };
 
 struct ioctl_set_ros2_subscriber_num_args
@@ -274,7 +274,8 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_GET_PUBLISHER_NUM_CMD _IOWR(0xA6, 16, union ioctl_get_publisher_num_args)
 #define AGNOCAST_REMOVE_SUBSCRIBER_CMD _IOW(0xA6, 17, struct ioctl_remove_subscriber_args)
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
-#define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
+#define AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD \
+  _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
@@ -427,7 +428,9 @@ int agnocast_ioctl_get_node_publisher_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args);
 
-int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
+int agnocast_ioctl_check_and_request_bridge_shutdown(
+  const pid_t pid, const struct ipc_namespace * ipc_ns,
+  struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret);
 
 int agnocast_ioctl_set_ros2_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
@@ -444,6 +447,7 @@ bool is_agnocast_pid(const pid_t pid);
 // helper functions for KUnit test
 
 #ifdef KUNIT_BUILD
+int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 int agnocast_get_alive_proc_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);

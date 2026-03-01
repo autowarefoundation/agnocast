@@ -311,9 +311,9 @@ struct ioctl_remove_bridge_args
   bool is_r2a;
 };
 
-struct ioctl_get_process_num_args
+struct ioctl_check_and_request_bridge_shutdown_args
 {
-  uint32_t ret_process_num;
+  bool ret_should_shutdown;
 };
 
 struct ioctl_set_ros2_subscriber_num_args
@@ -345,7 +345,8 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_GET_PUBLISHER_NUM_CMD _IOWR(0xA6, 16, union ioctl_get_publisher_num_args)
 #define AGNOCAST_REMOVE_SUBSCRIBER_CMD _IOW(0xA6, 17, struct ioctl_remove_subscriber_args)
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
-#define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
+#define AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD \
+  _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
