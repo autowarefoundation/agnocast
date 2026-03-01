@@ -60,7 +60,8 @@ rclcpp::CallbackGroup::SharedPtr get_valid_callback_group(
 
   if (callback_group) {
     if (!node->get_node_base_interface()->callback_group_in_node(callback_group)) {
-      throw std::runtime_error("Cannot create agnocast subscription, callback group not in node.");
+      throw std::invalid_argument(
+        "Cannot create agnocast subscription, callback group not in node.");
     }
   } else {
     callback_group = node->get_node_base_interface()->get_default_callback_group();

@@ -175,7 +175,7 @@ public:
   void publish(ipc_shared_ptr<MessageT> && message)
   {
     if (!message || topic_name_ != message.get_topic_name()) {
-      throw std::runtime_error("Invalid message to publish.");
+      throw std::invalid_argument("Invalid message to publish.");
     }
 
     // Capture raw pointer BEFORE invalidation (get() returns nullptr after invalidation).

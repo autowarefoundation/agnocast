@@ -16,7 +16,7 @@ extern bool is_bridge_process;
 inline void validate_qos(const rclcpp::QoS & qos)
 {
   if (qos.history() == rclcpp::HistoryPolicy::KeepAll) {
-    throw std::runtime_error(
+    throw std::invalid_argument(
       "Agnocast does not support KeepAll history policy. Use KeepLast instead.");
   }
 
