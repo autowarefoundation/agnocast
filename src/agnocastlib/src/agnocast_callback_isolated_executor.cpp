@@ -85,7 +85,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
 
       weak_child_executors_.push_back(executor);
 
-      child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
+      child_threads_.emplace_back([this, executor, callback_group_id = std::move(callback_group_id),
                                    &client_publisher, &client_publisher_mutex]() {
         auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
@@ -94,7 +94,13 @@ void CallbackIsolatedAgnocastExecutor::spin()
           agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
         }
 
-        executor->spin();
+        try {
+          executor->spin();
+        } catch (const std::exception & e) {
+          RCLCPP_ERROR(logger, "Exception in agnocast child executor thread: %s", e.what());
+          worker_thread_failed_.store(true);
+          spinning.store(false);
+        }
       });
     };
 
@@ -169,6 +175,10 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }
   child_threads_.clear();
   weak_child_executors_.clear();
+
+  if (worker_thread_failed_.load()) {
+    throw std::runtime_error("Exception occurred in agnocast child executor thread");
+  }
 }
 
 void CallbackIsolatedAgnocastExecutor::add_callback_group(

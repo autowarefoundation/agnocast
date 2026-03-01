@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <atomic>
 #include <chrono>
 
 namespace agnocast
@@ -18,6 +19,8 @@ class MultiThreadedAgnocastExecutor : public agnocast::AgnocastExecutor
   bool yield_before_execute_;
   std::chrono::nanoseconds ros2_next_exec_timeout_;
   const int agnocast_next_exec_timeout_ms_;
+
+  std::atomic<bool> worker_thread_failed_{false};
 
   void ros2_spin();
   void agnocast_spin();
