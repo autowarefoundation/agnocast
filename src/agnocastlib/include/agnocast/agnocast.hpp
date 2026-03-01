@@ -131,4 +131,49 @@ typename Service<ServiceT>::SharedPtr create_service(
     node, service_name, std::forward<Func>(callback), qos, group);
 }
 
+/// Create a timer with a given clock
+/**
+ * This free function mirrors the rclcpp::create_timer() API for portability.
+ *
+ * \param[in] node Node providing get_node_base_interface() for the default callback group.
+ * \param[in] clock Clock to drive the timer.
+ * \param[in] period Time interval between triggers of the callback.
+ * \param[in] callback User-defined callback function.
+ * \param[in] group Callback group to execute this timer's callback in.
+ * \return Shared pointer to the created timer.
+ */
+template <typename NodeT, typename CallbackT>
+TimerBase::SharedPtr create_timer(
+  NodeT node, rclcpp::Clock::SharedPtr clock, rclcpp::Duration period, CallbackT && callback,
+  rclcpp::CallbackGroup::SharedPtr group = nullptr, bool autostart = true)
+{
+  using NodePtrT = std::remove_pointer_t<std::decay_t<NodeT>>;
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodePtrT> || std::is_base_of_v<agnocast::Node, NodePtrT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
+  static_assert(
+    std::is_invocable_v<CallbackT, TimerBase &> || std::is_invocable_v<CallbackT>,
+    "Callback must be callable with void() or void(TimerBase&)");
+
+  if (!autostart) {
+    RCLCPP_WARN(
+      node->get_logger(),
+      "autostart=false is not yet supported in agnocast. Timer will autostart.");
+  }
+
+  if (!group) {
+    group = node->get_node_base_interface()->get_default_callback_group();
+  }
+
+  const uint32_t timer_id = allocate_timer_id();
+  const auto period_ns = period.to_chrono<std::chrono::nanoseconds>();
+
+  auto timer = std::make_shared<GenericTimer<CallbackT>>(
+    timer_id, period_ns, clock, std::forward<CallbackT>(callback));
+
+  register_timer_info(timer_id, timer, period_ns, group, clock);
+
+  return timer;
+}
+
 }  // namespace agnocast
