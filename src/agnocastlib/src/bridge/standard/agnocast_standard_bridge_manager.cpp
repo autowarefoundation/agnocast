@@ -90,7 +90,9 @@ void StandardBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
-      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
       shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }

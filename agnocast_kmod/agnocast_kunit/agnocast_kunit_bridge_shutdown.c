@@ -6,7 +6,7 @@
 
 static pid_t pid_bs = 8000;
 
-// is_bridge_manager=true で登録すると ret_performance_bridge_daemon_exist が反映される
+// Registering with is_bridge_manager=true should succeed
 void test_case_bridge_manager_flag_set_on_registration(struct kunit * test)
 {
   pid_t bridge_pid = pid_bs++;
@@ -16,8 +16,8 @@ void test_case_bridge_manager_flag_set_on_registration(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
 }
 
-// bridge_manager が登録済みの状態で新プロセスが add_process すると
-// ret_performance_bridge_daemon_exist=true が返る
+// When a bridge manager is already registered, a new process calling add_process
+// should receive ret_performance_bridge_daemon_exist=true
 void test_case_bridge_manager_detected_by_new_process(struct kunit * test)
 {
   // Register bridge manager
@@ -34,8 +34,8 @@ void test_case_bridge_manager_detected_by_new_process(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, normal_args.ret_performance_bridge_daemon_exist);
 }
 
-// notify_bridge_shutdown で is_bridge_manager がクリアされ、
-// 新プロセスが ret_performance_bridge_daemon_exist=false を受け取る
+// notify_bridge_shutdown clears is_bridge_manager, so a new process
+// should receive ret_performance_bridge_daemon_exist=false
 void test_case_notify_bridge_shutdown_clears_flag(struct kunit * test)
 {
   // Register bridge manager
@@ -54,8 +54,8 @@ void test_case_notify_bridge_shutdown_clears_flag(struct kunit * test)
   KUNIT_EXPECT_FALSE(test, normal_args.ret_performance_bridge_daemon_exist);
 }
 
-// bridge_manager のみの状態で check_and_request_bridge_shutdown →
-// ret_should_shutdown=true かつ is_bridge_manager がクリアされる
+// When only the bridge manager exists, check_and_request_bridge_shutdown
+// should return ret_should_shutdown=true and clear is_bridge_manager
 void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test)
 {
   // Register bridge manager only
@@ -79,8 +79,8 @@ void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test)
   KUNIT_EXPECT_FALSE(test, normal_args.ret_performance_bridge_daemon_exist);
 }
 
-// 他プロセスが存在する状態で check_and_request_bridge_shutdown →
-// ret_should_shutdown=false かつ is_bridge_manager が残る
+// When other processes exist, check_and_request_bridge_shutdown
+// should return ret_should_shutdown=false and keep is_bridge_manager set
 void test_case_check_and_request_bridge_shutdown_when_others_exist(struct kunit * test)
 {
   // Register bridge manager

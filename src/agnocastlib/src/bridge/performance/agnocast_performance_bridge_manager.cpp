@@ -83,7 +83,9 @@ void PerformanceBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
-      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
       shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
@@ -117,7 +119,9 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
 void PerformanceBridgeManager::on_signal()
 {
-  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+  if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+    RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+  }
   shutdown_requested_ = true;
   if (executor_) {
     executor_->cancel();
@@ -160,7 +164,9 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
         topic_name.c_str());
-      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
       shutdown_requested_ = true;
       return;
     }
@@ -185,7 +191,9 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
         topic_name.c_str());
-      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
       shutdown_requested_ = true;
       return;
     }
