@@ -50,7 +50,8 @@ bool wait_and_handle_epoll_event(
       std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
       const auto it = id2_timer_info.find(timer_id);
       if (it == id2_timer_info.end()) {
-        throw std::logic_error("Agnocast internal implementation error: timer info cannot be found");
+        throw std::logic_error(
+          "Agnocast internal implementation error: timer info cannot be found");
       }
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
@@ -102,7 +103,8 @@ bool wait_and_handle_epoll_event(
       std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
       const auto it = id2_timer_info.find(timer_id);
       if (it == id2_timer_info.end()) {
-        throw std::logic_error("Agnocast internal implementation error: timer info cannot be found");
+        throw std::logic_error(
+          "Agnocast internal implementation error: timer info cannot be found");
       }
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
