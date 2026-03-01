@@ -55,6 +55,10 @@ static DECLARE_RWSEM(global_htables_rwsem);
 struct process_info
 {
   bool exited;
+  // Used to track whether this process is an alive Performance Bridge Manager.
+  // Standard Bridge Manager also updates this flag for consistency, but the flag
+  // is not used for Standard Bridge spawn decisions (Standard bridges are spawned
+  // per-process, not per-IPC-namespace).
   bool is_bridge_manager;
   pid_t global_pid;
   pid_t local_pid;
