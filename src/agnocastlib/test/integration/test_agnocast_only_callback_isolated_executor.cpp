@@ -77,6 +77,10 @@ TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, test_spin_publishes_callback_gr
   receiver_executor.add_node(receiver_node);
   std::thread receiver_thread([&receiver_executor]() { receiver_executor.spin(); });
 
+  // Wait for the receiver's DDS subscription to be discovered before starting the CIE executor,
+  // since the AgnocastOnly path requires bridge setup (agnocast IPC -> bridge -> DDS).
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
   auto test_node = std::make_shared<AgnocastOnlyDummyNode>();
   auto callback_isolated_executor =
     std::make_shared<agnocast::AgnocastOnlyCallbackIsolatedExecutor>();
