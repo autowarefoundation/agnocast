@@ -64,7 +64,7 @@ echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
 
 # Reload module with default settings
-sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko"
+sudo -n insmod "${KMOD_DIR}/${MODULE_NAME}.ko" || { echo "ERROR: failed to reload module with defaults"; exit 1; }
 echo "Module reloaded with defaults."
 
 if [ "$FAIL" -ne 0 ]; then

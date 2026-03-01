@@ -29,7 +29,7 @@ int init_memory_allocator(void)
 
   if (mempool_size_gb < MIN_MEMPOOL_SIZE_GB || mempool_size_gb > MAX_MEMPOOL_SIZE_GB) {
     pr_err(
-      "Agnocast: invalid mempool_size_gb=%d. Must be between %d and %d.\n", mempool_size_gb,
+      "agnocast: invalid mempool_size_gb=%d. Must be between %d and %d.\n", mempool_size_gb,
       MIN_MEMPOOL_SIZE_GB, MAX_MEMPOOL_SIZE_GB);
     return -EINVAL;
   }
@@ -37,12 +37,12 @@ int init_memory_allocator(void)
   mempool_size_bytes = (uint64_t)mempool_size_gb * 1024ULL * 1024ULL * 1024ULL;
 
   pr_info(
-    "Agnocast: Initializing memory allocator with pool size: %llu bytes (%d GB)\n",
+    "agnocast: Initializing memory allocator with pool size: %llu bytes (%d GB)\n",
     mempool_size_bytes, mempool_size_gb);
 
   if (mempool_size_gb != DEFAULT_MEMPOOL_SIZE_GB) {
     pr_warn(
-      "Agnocast: mempool_size_gb=%d is not the default value (%d). "
+      "agnocast: mempool_size_gb=%d is not the default value (%d). "
       "This parameter is experimental and may be removed or changed in future versions.\n",
       mempool_size_gb, DEFAULT_MEMPOOL_SIZE_GB);
   }
