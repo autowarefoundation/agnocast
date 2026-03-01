@@ -43,8 +43,7 @@ void receive_and_execute_message(
     std::lock_guard<std::mutex> lock(mmap_mtx);
 
     if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {
-      throw std::runtime_error(
-        std::string("AGNOCAST_RECEIVE_MSG_CMD failed: ") + strerror(errno));
+      throw std::runtime_error(std::string("AGNOCAST_RECEIVE_MSG_CMD failed: ") + strerror(errno));
     }
 
     // Map the shared memory region with read permissions whenever a new publisher is discovered.

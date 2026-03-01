@@ -54,8 +54,7 @@ topic_local_id_t initialize_publisher(
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PUBLISHER_CMD, &pub_args) < 0) {
-    throw std::runtime_error(
-      std::string("AGNOCAST_ADD_PUBLISHER_CMD failed: ") + strerror(errno));
+    throw std::runtime_error(std::string("AGNOCAST_ADD_PUBLISHER_CMD failed: ") + strerror(errno));
   }
 
   return pub_args.ret_id;
@@ -79,8 +78,7 @@ union ioctl_publish_msg_args publish_core(
   publish_msg_args.subscriber_ids_buffer_size = MAX_SUBSCRIBER_NUM;
 
   if (ioctl(agnocast_fd, AGNOCAST_PUBLISH_MSG_CMD, &publish_msg_args) < 0) {
-    throw std::runtime_error(
-      std::string("AGNOCAST_PUBLISH_MSG_CMD failed: ") + strerror(errno));
+    throw std::runtime_error(std::string("AGNOCAST_PUBLISH_MSG_CMD failed: ") + strerror(errno));
   }
 
   TRACEPOINT(agnocast_publish, publisher_handle, publish_msg_args.ret_entry_id);

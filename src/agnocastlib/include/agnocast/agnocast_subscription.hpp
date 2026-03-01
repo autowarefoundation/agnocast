@@ -295,8 +295,7 @@ public:
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {
-        throw std::runtime_error(
-          std::string("AGNOCAST_TAKE_MSG_CMD failed: ") + strerror(errno));
+        throw std::runtime_error(std::string("AGNOCAST_TAKE_MSG_CMD failed: ") + strerror(errno));
       }
 
       for (uint32_t i = 0; i < take_args.ret_pub_shm_num; i++) {
