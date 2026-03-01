@@ -17,7 +17,6 @@ else
 	  agnocast_kunit/agnocast_kunit_publish_msg.o \
 	  agnocast_kunit/agnocast_kunit_receive_msg.o \
 	  agnocast_kunit/agnocast_kunit_take_msg.o \
-	  agnocast_kunit/agnocast_kunit_get_process_num.o \
 	  agnocast_kunit/agnocast_kunit_get_publisher_num.o \
 	  agnocast_kunit/agnocast_kunit_get_publisher_qos.o \
 	  agnocast_kunit/agnocast_kunit_get_subscriber_num.o \
@@ -30,7 +29,8 @@ else
 	  agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.o \
 	  agnocast_kunit/agnocast_kunit_get_node_publisher_topics.o \
 	  agnocast_kunit/agnocast_kunit_get_version.o \
-	  agnocast_kunit/agnocast_kunit_bridge_shutdown.o
+	  agnocast_kunit/agnocast_kunit_bridge_shutdown.o \
+	  agnocast_kunit/agnocast_kunit_check_and_request_bridge_shutdown.o
 	ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
   else
     $(warning "CONFIG_KUNIT or CONFIG_GCOV_KERNEL is not set")

@@ -2868,11 +2868,6 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 // No locking needed for the following KUnit helper functions.
 // These are only called from single-threaded KUnit context.
 
-int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns)
-{
-  return get_process_num(ipc_ns);
-}
-
 int agnocast_get_alive_proc_num(void)
 {
   int count = 0;

@@ -449,7 +449,6 @@ bool is_agnocast_pid(const pid_t pid);
 // helper functions for KUnit test
 
 #ifdef KUNIT_BUILD
-int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 int agnocast_get_alive_proc_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
