@@ -112,7 +112,9 @@ void StandardBridgeManager::on_mq_request(mqd_t fd)
 
 void StandardBridgeManager::on_signal()
 {
-  ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+  if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+    RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+  }
   shutdown_requested_ = true;
   if (executor_) {
     executor_->cancel();
@@ -177,7 +179,9 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
 
     if (!bridge) {
       RCLCPP_ERROR(logger_, "Failed to create bridge for '%s'", topic_name_with_direction.c_str());
-      ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
       shutdown_requested_ = true;
       return;
     }
@@ -334,7 +338,9 @@ void StandardBridgeManager::check_managed_bridges()
 void StandardBridgeManager::check_should_exit()
 {
   if (!is_parent_alive_ && active_bridges_.empty()) {
-    ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD);
+    if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+      RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+    }
     shutdown_requested_ = true;
     if (executor_) {
       executor_->cancel();
