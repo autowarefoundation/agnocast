@@ -220,12 +220,6 @@ if(BUILD_TESTING)
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin)
 
-  # Integration tests for ComponentManagerCallbackIsolated using launch_testing
-  find_package(launch_testing_ament_cmake REQUIRED)
-  add_launch_test(
-    test/integration/test_agnocast_component_container_cie_launch.py
-    TIMEOUT 120
-  )
 
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)

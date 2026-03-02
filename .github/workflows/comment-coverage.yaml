@@ -2,7 +2,7 @@ name: comment-coverage
 
 on:
   workflow_run:
-    workflows: ["build-and-test-agnocastlib-heaphook"]
+    workflows: ["build-and-test-agnocastlib-components-heaphook"]
     types:
       - completed
 

@@ -1,4 +1,4 @@
-name: build-and-test-agnocastlib-heaphook
+name: build-and-test-agnocastlib-components-heaphook
 
 on:
   pull_request:
@@ -49,7 +49,7 @@ jobs:
         echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
         echo "EOF" >> "$GITHUB_OUTPUT"
 
-        if echo "$CHANGED_FILES" | grep -qE '(agnocastlib|agnocast_ioctl_wrapper|agnocast_cie_thread_configurator)/.*\.(cpp|hpp)$'; then
+        if echo "$CHANGED_FILES" | grep -qE '(agnocastlib|agnocast_components|agnocast_ioctl_wrapper|agnocast_cie_thread_configurator)/.*\.(cpp|hpp)$'; then
           echo "cpp_changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "cpp_changed=false" >> "$GITHUB_OUTPUT"
@@ -154,18 +154,18 @@ jobs:
     #   - modernize-pass-by-value: stricter about pass-by-value patterns
     # These produce many false positives with ROS/rclcpp code.
     # Until we can align the checks across versions, we only run clang-tidy on Humble.
-    - name: Run clang-tidy for agnocastlib
+    - name: Run clang-tidy for agnocastlib and agnocast_components
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true' && env.ROS_DISTRO == 'humble'
       run: |
         set -euo pipefail
-        export FILES=($(echo "${{ steps.check_diff.outputs.changed_files }}" | grep -E '^src/agnocastlib/.*\.(cpp|hpp)$' | grep -v '/test/' || true))
+        export FILES=($(echo "${{ steps.check_diff.outputs.changed_files }}" | grep -E '^src/(agnocastlib|agnocast_components)/.*\.(cpp|hpp)$' | grep -v '/test/' || true))
         if [ ${#FILES[@]} -gt 0 ]; then
           run-clang-tidy -j $(nproc) -p build/ "${FILES[@]}"
         else
-          echo "No agnocastlib C++ files changed, skipping clang-tidy"
+          echo "No agnocastlib/agnocast_components C++ files changed, skipping clang-tidy"
         fi
 
-    - name: Test for agnocastlib
+    - name: Test for agnocastlib and agnocast_components
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
       id: test
       run: |
