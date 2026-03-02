@@ -21,7 +21,7 @@ class ComponentManagerCallbackIsolated : public rclcpp_components::ComponentMana
   struct ExecutorWrapper
   {
     explicit ExecutorWrapper(std::shared_ptr<rclcpp::Executor> executor)
-    : executor_(std::move(executor)), thread_initialized_(false)
+    : executor_(std::move(executor))
     {
     }
 
@@ -37,7 +37,6 @@ class ComponentManagerCallbackIsolated : public rclcpp_components::ComponentMana
 
     std::shared_ptr<rclcpp::Executor> executor_;
     std::thread thread_;
-    std::atomic_bool thread_initialized_;
   };
 
 public:
@@ -183,7 +182,6 @@ void ComponentManagerCallbackIsolated::start_executor_for_callback_group(
         agnocast::publish_callback_group_info(this->client_publisher_, tid, group_id);
       }
 
-      executor_wrapper.thread_initialized_ = true;
       executor_wrapper.executor_->spin();
     });
 }
@@ -257,12 +255,10 @@ void ComponentManagerCallbackIsolated::remove_node_from_executor(uint64_t node_i
 
 void ComponentManagerCallbackIsolated::cancel_executor(ExecutorWrapper & executor_wrapper)
 {
-  if (!executor_wrapper.thread_initialized_) {
-    auto context = this->get_node_base_interface()->get_context();
+  auto context = this->get_node_base_interface()->get_context();
 
-    while (!executor_wrapper.executor_->is_spinning() && rclcpp::ok(context)) {
-      rclcpp::sleep_for(std::chrono::milliseconds(1));
-    }
+  while (!executor_wrapper.executor_->is_spinning() && rclcpp::ok(context)) {
+    rclcpp::sleep_for(std::chrono::milliseconds(1));
   }
 
   executor_wrapper.executor_->cancel();

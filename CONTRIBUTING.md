@@ -68,8 +68,8 @@ Examples:
 Before submitting a PR, please ensure the following tests pass:
 
 - [ ] Autoware (required)
-- [ ] `bash scripts/test/e2e_test_1to1` (required)
-- [ ] `bash scripts/test/e2e_test_2to2` (required)
+- [ ] `bash scripts/test/e2e_test_1to1.bash` (required)
+- [ ] `bash scripts/test/e2e_test_2to2.bash` (required)
 - [ ] kunit tests (required when modifying the kernel module)
 
 ## Questions?
