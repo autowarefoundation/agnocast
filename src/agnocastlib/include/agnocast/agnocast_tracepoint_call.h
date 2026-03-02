@@ -18,6 +18,32 @@
 
 TRACEPOINT_EVENT(
   TRACEPOINT_PROVIDER,
+  agnocast_init,
+  TP_ARGS(
+    const void *, context_handle_arg
+  ),
+  TP_FIELDS(
+    ctf_integer_hex(const void *, context_handle, context_handle_arg)
+  )
+)
+
+TRACEPOINT_EVENT(
+  TRACEPOINT_PROVIDER,
+  agnocast_node_init,
+  TP_ARGS(
+    const void *, node_handle_arg,
+    const char *, node_name_arg,
+    const char *, namespace_arg
+  ),
+  TP_FIELDS(
+    ctf_integer_hex(const void *, node_handle, node_handle_arg)
+    ctf_string(node_name, node_name_arg)
+    ctf_string(namespace, namespace_arg)
+  )
+)
+
+TRACEPOINT_EVENT(
+  TRACEPOINT_PROVIDER,
   agnocast_publisher_init,
   TP_ARGS(
     const void *, publisher_handle_arg,
@@ -60,6 +86,42 @@ TRACEPOINT_EVENT(
 
 TRACEPOINT_EVENT(
   TRACEPOINT_PROVIDER,
+  agnocast_timer_init,
+  TP_ARGS(
+    const void *, timer_handle_arg,      
+    const void *, node_handle_arg,      
+    const void *, callback_arg,          
+    const void *, callback_group_arg,    
+    const char *, symbol_arg,            
+    int64_t, period_arg                     
+  ),
+  TP_FIELDS(
+    ctf_integer_hex(const void *, timer_handle, timer_handle_arg)
+    ctf_integer_hex(const void *, node_handle, node_handle_arg)
+    ctf_integer_hex(const void *, callback, callback_arg)
+    ctf_integer_hex(const void *, callback_group, callback_group_arg)
+    ctf_string(symbol, symbol_arg)
+    ctf_integer(const int64_t, period, period_arg)
+  )
+)
+
+TRACEPOINT_EVENT(
+  TRACEPOINT_PROVIDER,
+  agnocast_add_callback_group,
+  TP_ARGS(
+    const void *, executor_addr_arg,
+    const void *, callback_group_addr_arg,
+    const char *, group_type_name_arg
+  ),
+  TP_FIELDS(
+    ctf_integer_hex(const void *, executor_addr, executor_addr_arg)
+    ctf_integer_hex(const void *, callback_group_addr, callback_group_addr_arg)
+    ctf_string(group_type_name, group_type_name_arg)
+  )
+)
+
+TRACEPOINT_EVENT(
+  TRACEPOINT_PROVIDER,
   agnocast_publish,
   TP_ARGS(
     const void *, publisher_handle_arg,
@@ -83,6 +145,19 @@ TRACEPOINT_EVENT(
     ctf_integer_hex(const void *, callable, callable_arg)
     ctf_integer(const int64_t, entry_id, entry_id_arg)
     ctf_integer(const uint64_t, pid_callback_info_id, pid_callback_info_id_arg)
+  )
+)
+
+TRACEPOINT_EVENT(
+  TRACEPOINT_PROVIDER,
+  agnocast_create_timer_callable,
+  TP_ARGS(
+    const void *, callable_arg,         
+    const void *, timer_handle_arg      
+  ),
+  TP_FIELDS(
+    ctf_integer_hex(const void *, callable, callable_arg)
+    ctf_integer_hex(const void *, timer_handle, timer_handle_arg)
   )
 )
 

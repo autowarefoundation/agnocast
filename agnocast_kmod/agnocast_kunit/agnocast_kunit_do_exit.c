@@ -91,6 +91,18 @@ static uint64_t setup_one_entry(
   return publish_msg_args.ret_entry_id;
 }
 
+void test_case_is_agnocast_pid(struct kunit * test)
+{
+  // Arrange
+  setup_processes(test, 1);
+
+  // Assert: registered PID should be found
+  KUNIT_EXPECT_TRUE(test, is_agnocast_pid(PID_BASE));
+
+  // Assert: unregistered PID should not be found
+  KUNIT_EXPECT_FALSE(test, is_agnocast_pid(PID_BASE + 999));
+}
+
 void test_case_do_exit(struct kunit * test)
 {
   // Arrange

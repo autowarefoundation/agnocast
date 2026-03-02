@@ -3,7 +3,7 @@
 set -u
 
 MODULE_NAME="agnocast"
-KMOD_DIR="$(cd "$(dirname "$0")/../agnocast_kmod" && pwd)"
+KMOD_DIR="$(cd "$(dirname "$0")/../../agnocast_kmod" && pwd)"
 
 # Check sudo is cached (non-interactive)
 if ! sudo -n true 2>/dev/null; then
