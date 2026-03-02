@@ -359,12 +359,15 @@ bool is_version_consistent(
 template <typename Func>
 pid_t spawn_daemon_process(Func && func)
 {
-  const char * err_fmt;
+  auto fail = [](const char * err_fmt) {
+    RCLCPP_ERROR(logger, err_fmt, strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  };
 
   pid_t pid = fork();
   if (pid < 0) {
-    err_fmt = "fork failed: %s";
-    goto exit_failure;
+    fail("fork failed: %s");
   }
   if (pid == 0) {
     agnocast::is_bridge_process = true;
@@ -377,12 +380,10 @@ pid_t spawn_daemon_process(Func && func)
     struct stat st_out = {};
     struct stat st_err = {};
     if (fstat(STDOUT_FILENO, &st_out) < 0) {
-      err_fmt = "fstat for stdout failed: %s";
-      goto exit_failure;
+      fail("fstat for stdout failed: %s");
     }
     if (fstat(STDERR_FILENO, &st_err) < 0) {
-      err_fmt = "fstat for stderr failed: %s";
-      goto exit_failure;
+      fail("fstat for stderr failed: %s");
     }
 
     if (
@@ -390,29 +391,23 @@ pid_t spawn_daemon_process(Func && func)
       S_ISSOCK(st_err.st_mode)) {
       int devnull = open("/dev/null", O_RDWR);
       if (devnull < 0) {
-        err_fmt = "Failed to open /dev/null: %s";
-        goto exit_failure;
+        fail("Failed to open /dev/null: %s");
       }
 
       if (dup2(devnull, STDIN_FILENO) < 0) {
-        err_fmt = "dup2 for stdin failed: %s";
-        goto exit_failure;
+        fail("dup2 for stdin failed: %s");
       }
       if (dup2(devnull, STDOUT_FILENO) < 0) {
-        err_fmt = "dup2 for stdout failed: %s";
-        goto exit_failure;
+        fail("dup2 for stdout failed: %s");
       }
       if (dup2(devnull, STDERR_FILENO) < 0) {
-        err_fmt = "dup2 for stderr failed: %s";
-        goto exit_failure;
+        fail("dup2 for stderr failed: %s");
       }
       close(devnull);
     }
 
     if (setsid() == -1) {
-      RCLCPP_ERROR(logger, "setsid failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      fail("setsid failed: %s");
     }
 
     func();
@@ -420,11 +415,6 @@ pid_t spawn_daemon_process(Func && func)
   }
 
   return pid;
-
-exit_failure:
-  RCLCPP_ERROR(logger, err_fmt, strerror(errno));
-  close(agnocast_fd);
-  exit(EXIT_FAILURE);
 }
 
 // NOTE: Avoid heap allocation inside initialize_agnocast. TLSF is not initialized yet.
