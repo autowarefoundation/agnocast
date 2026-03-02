@@ -37,6 +37,14 @@ install(
   DESTINATION share/${PROJECT_NAME}/src
 )
 
+if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(
+    test/integration/test_agnocast_component_container_cie_launch.py
+    TIMEOUT 120
+  )
+endif()
+
 ament_export_dependencies(
   rclcpp
   rclcpp_components
