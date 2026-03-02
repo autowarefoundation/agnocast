@@ -1,7 +1,7 @@
 /**
  * @brief Sample application to demonstrate create_timer with use_sim_time support
  *
- * This sample creates a timer using agnocast::Node::create_timer() which supports
+ * This sample creates a timer using agnocast::create_timer() free function which supports
  * ROS_TIME (simulation time). When use_sim_time:=true, the timer will use the
  * /clock topic time instead of wall clock time.
  *
@@ -35,9 +35,11 @@ public:
       this->get_logger(), "Starting timer node (use_sim_time: %s)",
       use_sim_time ? "true" : "false");
 
-    // Create timer using create_timer() which supports ROS_TIME
+    // Create timer using agnocast::create_timer() free function which supports ROS_TIME
     // This timer will respect use_sim_time parameter
-    timer_ = this->create_timer(500ms, std::bind(&SimTimeTimerNode::timer_callback, this));
+    timer_ = agnocast::create_timer(
+      this, this->get_clock(), rclcpp::Duration(500ms),
+      std::bind(&SimTimeTimerNode::timer_callback, this));
 
     const auto clock_type = timer_->get_clock()->get_clock_type();
     const char * clock_type_str = (clock_type == RCL_STEADY_TIME)   ? "STEADY_TIME"

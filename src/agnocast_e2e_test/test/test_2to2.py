@@ -119,7 +119,7 @@ def generate_test_description():
         container = ComposableNodeContainer(
             name=f'test_container_{i}',
             namespace='',
-            package='agnocastlib',
+            package='agnocast_components',
             executable='agnocast_component_container_mt',
             composable_node_descriptions=composable_nodes,
             output='screen',

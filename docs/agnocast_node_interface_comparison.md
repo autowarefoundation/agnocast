@@ -317,8 +317,8 @@ The following tables compare methods that are **directly defined** in each class
 | `get_topic_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types_by_node()` | ✓ | ✗ |
-| `count_publishers()` | ✓ | ✗ |
-| `count_subscribers()` | ✓ | ✗ |
+| `count_publishers()` | ✓ | ✓ |
+| `count_subscribers()` | ✓ | ✓ |
 | `get_publishers_info_by_topic()` | ✓ | ✗ |
 | `get_subscriptions_info_by_topic()` | ✓ | ✗ |
 | `get_graph_event()` | ✓ | ✗ |

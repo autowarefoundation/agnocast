@@ -159,7 +159,6 @@ void PerformanceBridgeManager::check_and_remove_bridges()
   while (r2a_it != active_r2a_bridges_.end()) {
     const std::string & topic_name = r2a_it->first;
     auto result = get_agnocast_subscriber_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
@@ -171,7 +170,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    if (result.count <= 0) {
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
       if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
@@ -186,7 +185,6 @@ void PerformanceBridgeManager::check_and_remove_bridges()
   while (a2r_it != active_a2r_bridges_.end()) {
     const std::string & topic_name = a2r_it->first;
     auto result = get_agnocast_publisher_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
@@ -198,7 +196,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    if (result.count <= 0) {
       a2r_it = active_a2r_bridges_.erase(a2r_it);
     } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
@@ -248,22 +246,14 @@ bool PerformanceBridgeManager::should_create_bridge(
     }
 
     const auto stats = get_agnocast_subscriber_count(topic_name);
-    if (stats.count <= 0) {
-      return false;
-    }
-
-    return has_external_ros2_publisher(container_node_.get(), topic_name);
+    return stats.count > 0;
   }
   if (active_a2r_bridges_.count(topic_name) > 0) {
     return false;
   }
 
   const auto stats = get_agnocast_publisher_count(topic_name);
-  if (stats.count <= 0) {
-    return false;
-  }
-
-  return agnocast::has_external_ros2_subscriber(container_node_.get(), topic_name);
+  return stats.count > 0;
 }
 
 void PerformanceBridgeManager::create_bridge_if_needed(
