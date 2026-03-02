@@ -15,7 +15,9 @@ AgnocastOnlyMultiThreadedExecutor::AgnocastOnlyMultiThreadedExecutor(
   yield_before_execute_(yield_before_execute),
   next_exec_timeout_ms_(next_exec_timeout_ms)
 {
-  // TODO(atsushi421): CARET tracepoint for executor creation
+  TRACEPOINT(
+    agnocast_construct_executor, static_cast<const void *>(this),
+    "agnocast_only_multi_threaded_executor");
 }
 
 void AgnocastOnlyMultiThreadedExecutor::spin()

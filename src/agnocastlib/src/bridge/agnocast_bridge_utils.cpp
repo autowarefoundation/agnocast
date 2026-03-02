@@ -98,11 +98,11 @@ PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name
   }
 
   int total_pubs = static_cast<int>(args.ret_publisher_num);
-  if (args.ret_bridge_exist && total_pubs > 0) {
+  if (args.ret_r2a_bridge_exist && total_pubs > 0) {
     total_pubs--;
   }
 
-  return {total_pubs, args.ret_bridge_exist};
+  return {total_pubs, args.ret_r2a_bridge_exist};
 }
 
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name)
@@ -147,6 +147,25 @@ bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & t
 
   if (ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+    return false;
+  }
+  return true;
+}
+
+bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & topic_name)
+{
+  if (node == nullptr) {
+    return false;
+  }
+
+  size_t ros2_count = node->count_publishers(topic_name);
+
+  struct ioctl_set_ros2_publisher_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.ros2_publisher_num = static_cast<uint32_t>(ros2_count);
+
+  if (ioctl(agnocast_fd, AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD failed: %s", strerror(errno));
     return false;
   }
   return true;
