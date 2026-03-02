@@ -13,7 +13,7 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -25,12 +25,12 @@ static void verify_subscriber_qos(struct kunit * test, bool is_transient, bool i
 
   setup_process(test, SUBSCRIBER_PID);
 
-  ret = ioctl_add_subscriber(
+  ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, is_transient,
     is_reliable, false, false, IS_BRIDGE, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  ret = ioctl_get_subscriber_qos(
+  ret = agnocast_ioctl_get_subscriber_qos(
     TOPIC_NAME, current->nsproxy->ipc_ns, add_sub_args.ret_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -71,7 +71,7 @@ void test_case_sub_error_topic_not_found(struct kunit * test)
 
   dummy_id = 0;
 
-  ret = ioctl_get_subscriber_qos(
+  ret = agnocast_ioctl_get_subscriber_qos(
     "/non_existent_topic", current->nsproxy->ipc_ns, dummy_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
@@ -84,14 +84,15 @@ void test_case_error_subscriber_not_found(struct kunit * test)
   struct ioctl_get_subscriber_qos_args get_qos_args;
   int ret;
 
-  ret = ioctl_add_subscriber(
+  ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, false, false, false,
     false, IS_BRIDGE, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_local_id_t invalid_id = add_sub_args.ret_id + 999;
 
-  ret = ioctl_get_subscriber_qos(TOPIC_NAME, current->nsproxy->ipc_ns, invalid_id, &get_qos_args);
+  ret = agnocast_ioctl_get_subscriber_qos(
+    TOPIC_NAME, current->nsproxy->ipc_ns, invalid_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }

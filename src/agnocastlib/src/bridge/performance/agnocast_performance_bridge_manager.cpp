@@ -83,6 +83,7 @@ void PerformanceBridgeManager::start_ros_execution()
     try {
       this->executor_->spin();
     } catch (const std::exception & e) {
+      shutdown_requested_ = true;
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
   });
@@ -93,7 +94,6 @@ void PerformanceBridgeManager::on_mq_request(int fd)
   std::vector<char> buffer(PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE);
 
   ssize_t bytes_read = mq_receive(fd, buffer.data(), buffer.size(), nullptr);
-
   if (bytes_read < 0) {
     if (errno != EAGAIN) {
       RCLCPP_WARN_STREAM(
@@ -153,7 +153,6 @@ void PerformanceBridgeManager::check_and_remove_bridges()
   while (r2a_it != active_r2a_bridges_.end()) {
     const std::string & topic_name = r2a_it->first;
     auto result = get_agnocast_subscriber_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
@@ -162,9 +161,13 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    if (result.count <= 0) {
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
       ++r2a_it;
     }
   }
@@ -173,7 +176,6 @@ void PerformanceBridgeManager::check_and_remove_bridges()
   while (a2r_it != active_a2r_bridges_.end()) {
     const std::string & topic_name = a2r_it->first;
     auto result = get_agnocast_publisher_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
@@ -182,7 +184,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    if (result.count <= 0) {
       a2r_it = active_a2r_bridges_.erase(a2r_it);
     } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
@@ -233,22 +235,14 @@ bool PerformanceBridgeManager::should_create_bridge(
     }
 
     const auto stats = get_agnocast_subscriber_count(topic_name);
-    if (stats.count <= 0) {
-      return false;
-    }
-
-    return has_external_ros2_publisher(container_node_.get(), topic_name);
+    return stats.count > 0;
   }
   if (active_a2r_bridges_.count(topic_name) > 0) {
     return false;
   }
 
   const auto stats = get_agnocast_publisher_count(topic_name);
-  if (stats.count <= 0) {
-    return false;
-  }
-
-  return agnocast::has_external_ros2_subscriber(container_node_.get(), topic_name);
+  return stats.count > 0;
 }
 
 void PerformanceBridgeManager::create_bridge_if_needed(
@@ -284,6 +278,10 @@ void PerformanceBridgeManager::create_bridge_if_needed(
 
     if (result.entity_handle) {
       if (is_r2a) {
+        if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+          RCLCPP_ERROR(
+            logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+        }
         active_r2a_bridges_[topic_name] = result.entity_handle;
       } else {
         if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {

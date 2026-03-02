@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -23,6 +24,7 @@ class TestROS2Publisher : public rclcpp::Node
 
   size_t planned_sub_count_;
   size_t planned_pub_count_;
+  std::string topic_name_;
 
   State state_ = State::WaitingForConnection;
   rclcpp::Time connection_detected_time_;
@@ -33,7 +35,7 @@ class TestROS2Publisher : public rclcpp::Node
   {
     if (
       publisher_->get_subscription_count() < planned_sub_count_ ||
-      this->count_publishers("/test_topic") < planned_pub_count_) {
+      this->count_publishers(topic_name_) < planned_pub_count_) {
       return false;
     }
     return true;
@@ -87,6 +89,7 @@ public:
   explicit TestROS2Publisher(const rclcpp::NodeOptions & options)
   : Node("test_ros2_publisher", options)
   {
+    this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
     this->declare_parameter<bool>("transient_local", true);
     this->declare_parameter<int64_t>("init_pub_num", 10);
@@ -95,6 +98,7 @@ public:
     this->declare_parameter<int64_t>("planned_pub_count", 1);
     this->declare_parameter<bool>("forever", false);
 
+    topic_name_ = this->get_parameter("topic_name").as_string();
     int64_t qos_depth = this->get_parameter("qos_depth").as_int();
     bool transient_local = this->get_parameter("transient_local").as_bool();
     int64_t init_pub_num = this->get_parameter("init_pub_num").as_int();
@@ -110,7 +114,7 @@ public:
       qos.reliable();
     }
 
-    publisher_ = this->create_publisher<std_msgs::msg::Int64>("/test_topic", qos);
+    publisher_ = this->create_publisher<std_msgs::msg::Int64>(topic_name_, qos);
 
     count_ = 0;
     target_pub_num_ = init_pub_num + pub_num;

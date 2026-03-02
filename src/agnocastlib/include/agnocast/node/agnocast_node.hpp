@@ -280,6 +280,16 @@ public:
 
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  size_t count_publishers(const std::string & topic_name) const
+  {
+    return get_publisher_count_core(node_topics_->resolve_topic_name(topic_name));
+  }
+
+  size_t count_subscribers(const std::string & topic_name) const
+  {
+    return get_subscription_count_core(node_topics_->resolve_topic_name(topic_name));
+  }
+
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, const rclcpp::QoS & qos,
@@ -331,44 +341,19 @@ public:
     return std::make_shared<PollingSubscriber<MessageT>>(this, topic_name, qos);
   }
 
-  template <typename Func>
-  typename WallTimer<Func>::SharedPtr create_wall_timer(
-    std::chrono::nanoseconds period, Func && callback,
-    rclcpp::CallbackGroup::SharedPtr group = nullptr)
-  {
-    static_assert(
-      std::is_invocable_v<Func, TimerBase &> || std::is_invocable_v<Func>,
-      "Callback must be callable with void() or void(TimerBase&)");
-
-    if (!group) {
-      group = node_base_->get_default_callback_group();
-    }
-
-    const uint32_t timer_id = allocate_timer_id();
-
-    auto timer = std::make_shared<WallTimer<Func>>(timer_id, period, std::forward<Func>(callback));
-
-    register_timer_info(timer_id, timer, period, group, timer->get_clock());
-
-    return timer;
-  }
-
-  template <typename DurationRepT, typename DurationT, typename CallbackT>
-  typename GenericTimer<CallbackT>::SharedPtr create_timer(
-    std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
-    rclcpp::CallbackGroup::SharedPtr group = nullptr)
-  {
-    return create_timer(period, std::forward<CallbackT>(callback), group, get_clock());
-  }
-
-  template <typename DurationRepT, typename DurationT, typename CallbackT>
-  typename GenericTimer<CallbackT>::SharedPtr create_timer(
-    std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
-    rclcpp::CallbackGroup::SharedPtr group, rclcpp::Clock::SharedPtr clock)
+  template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
+  typename WallTimer<CallbackT>::SharedPtr create_wall_timer(
+    std::chrono::duration<DurationRepT, DurationT> period, CallbackT callback,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr, bool autostart = true)
   {
     static_assert(
       std::is_invocable_v<CallbackT, TimerBase &> || std::is_invocable_v<CallbackT>,
       "Callback must be callable with void() or void(TimerBase&)");
+
+    if (!autostart) {
+      RCLCPP_WARN(
+        get_logger(), "autostart=false is not yet supported in agnocast. Timer will autostart.");
+    }
 
     if (!group) {
       group = node_base_->get_default_callback_group();
@@ -377,12 +362,41 @@ public:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
-    auto timer = std::make_shared<GenericTimer<CallbackT>>(
-      timer_id, period_ns, clock, std::forward<CallbackT>(callback));
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
 
-    register_timer_info(timer_id, timer, period_ns, group, clock);
+    auto timer = std::make_shared<WallTimer<CallbackT>>(timer_id, period_ns, std::move(callback));
+
+    register_timer_info(timer_id, timer, period_ns, group, timer->get_clock());
+
+    TRACEPOINT(
+      agnocast_timer_init, static_cast<const void *>(timer.get()), static_cast<const void *>(this),
+      callback_addr, static_cast<const void *>(group.get()), callback_symbol, period.count());
 
     return timer;
+  }
+
+  template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
+  typename GenericTimer<CallbackT>::SharedPtr create_timer(
+    std::chrono::duration<DurationRepT, DurationT> period, CallbackT callback,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr, bool autostart = true)
+  {
+    if (!autostart) {
+      RCLCPP_WARN(
+        get_logger(), "autostart=false is not yet supported in agnocast. Timer will autostart.");
+    }
+    return create_timer_impl(period, std::move(callback), group, get_clock());
+  }
+
+  template <typename DurationRepT, typename DurationT, typename CallbackT>
+  [[deprecated(
+    "Use the 3-argument Node::create_timer(period, callback, group) or "
+    "agnocast::create_timer() free function instead.")]]
+  typename GenericTimer<CallbackT>::SharedPtr create_timer(
+    std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
+    rclcpp::CallbackGroup::SharedPtr group, rclcpp::Clock::SharedPtr clock)
+  {
+    return create_timer_impl(period, std::forward<CallbackT>(callback), group, clock);
   }
 
   template <typename ServiceT>
@@ -404,6 +418,35 @@ public:
   }
 
 private:
+  template <typename DurationRepT, typename DurationT, typename CallbackT>
+  typename GenericTimer<CallbackT>::SharedPtr create_timer_impl(
+    std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
+    rclcpp::CallbackGroup::SharedPtr group, rclcpp::Clock::SharedPtr clock)
+  {
+    static_assert(
+      std::is_invocable_v<CallbackT, TimerBase &> || std::is_invocable_v<CallbackT>,
+      "Callback must be callable with void() or void(TimerBase&)");
+
+    if (!group) {
+      group = node_base_->get_default_callback_group();
+    }
+
+    const uint32_t timer_id = allocate_timer_id();
+    const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
+
+    auto timer = std::make_shared<GenericTimer<CallbackT>>(
+      timer_id, period_ns, clock, std::forward<CallbackT>(callback));
+
+    register_timer_info(timer_id, timer, period_ns, group, clock);
+
+    TRACEPOINT(
+      agnocast_timer_init, static_cast<const void *>(timer.get()), static_cast<const void *>(this),
+      static_cast<const void *>(&callback), static_cast<const void *>(group.get()),
+      tracetools::get_symbol(callback), period_ns.count());
+
+    return timer;
+  }
+
   // ParsedArguments must be stored to keep rcl_arguments_t alive
   ParsedArguments local_args_;
 

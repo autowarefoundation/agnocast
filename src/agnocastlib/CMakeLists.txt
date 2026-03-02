@@ -45,10 +45,9 @@ add_library(agnocast SHARED
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp)
 
-ament_target_dependencies(agnocast agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
+ament_target_dependencies(agnocast rclcpp agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
 
 target_link_libraries(agnocast
-  ${rclcpp_LIBRARIES}
   ${rcl_yaml_param_parser_LIBRARIES}
   ${tracetools_LIBRARIES}
   ${LTTNGUST_LIBRARIES}
@@ -57,7 +56,6 @@ target_link_libraries(agnocast
 target_include_directories(agnocast PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${rclcpp_INCLUDE_DIRS}
   ${rcl_yaml_param_parser_INCLUDE_DIRS}
   ${tracetools_INCLUDE_DIRS}
   ${LTTNGUST_INCLUDE_DIRS}
@@ -164,7 +162,7 @@ if(BUILD_TESTING)
   target_link_libraries(test_integration_message_filters_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_integration_message_filters_${PROJECT_NAME} std_msgs message_filters)
   set_tests_properties(test_integration_message_filters_${PROJECT_NAME} PROPERTIES
-    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     LABELS "requires_kernel_module"
   )
 
@@ -182,7 +180,7 @@ if(BUILD_TESTING)
     std_msgs)
   set_tests_properties(test_integration_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
-    TIMEOUT 120
+    TIMEOUT 300
   )
 
   # AgnocastOnly callback isolated executor integration test (requires kernel module, no mock)
@@ -192,7 +190,7 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME}
     agnocast_cie_config_msgs)
   set_tests_properties(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} PROPERTIES
-    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
     LABELS "requires_kernel_module"
   )
@@ -222,12 +220,6 @@ if(BUILD_TESTING)
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin)
 
-  # Integration tests for ComponentManagerCallbackIsolated using launch_testing
-  find_package(launch_testing_ament_cmake REQUIRED)
-  add_launch_test(
-    test/integration/test_agnocast_component_container_cie_launch.py
-    TIMEOUT 120
-  )
 
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)

@@ -60,7 +60,7 @@ public:
   virtual ~AgnocastOnlyExecutor();
 
   virtual void spin() = 0;
-  void cancel();
+  virtual void cancel();
 
   void add_callback_group(
     rclcpp::CallbackGroup::SharedPtr group_ptr,

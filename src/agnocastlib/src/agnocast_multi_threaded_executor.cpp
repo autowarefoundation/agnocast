@@ -4,6 +4,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <algorithm>
+
 namespace agnocast
 {
 
@@ -13,10 +15,11 @@ MultiThreadedAgnocastExecutor::MultiThreadedAgnocastExecutor(
   std::chrono::nanoseconds ros2_next_exec_timeout, int agnocast_next_exec_timeout_ms)
 : agnocast::AgnocastExecutor(options),
   number_of_ros2_threads_(
-    number_of_ros2_threads != 0 ? number_of_ros2_threads : std::thread::hardware_concurrency() / 2),
+    number_of_ros2_threads != 0 ? number_of_ros2_threads
+                                : std::max<size_t>(1, std::thread::hardware_concurrency() / 2)),
   number_of_agnocast_threads_(
     number_of_agnocast_threads != 0 ? number_of_agnocast_threads
-                                    : std::thread::hardware_concurrency() / 2),
+                                    : std::max<size_t>(1, std::thread::hardware_concurrency() / 2)),
   yield_before_execute_(yield_before_execute),
   ros2_next_exec_timeout_(ros2_next_exec_timeout),
   agnocast_next_exec_timeout_ms_(agnocast_next_exec_timeout_ms)
@@ -132,12 +135,15 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
 
     execute_any_executable(any_executable);
 
-    // rclcpp 28+ (Jazzy) changed entity collection to work like the static executor.
-    // Entities are collected once and not rebuilt unless explicitly triggered.
-    // We must trigger recollection after executing callbacks for timers/subscriptions to fire
-    // again.
+    // On rclcpp 28+ (Jazzy), interrupt_guard_condition_ is a shared_ptr.
+    // Wake up threads that may be blocked in wait_for_work() so they can re-check
+    // MutuallyExclusive callback groups whose can_be_taken_from was just restored.
 #if RCLCPP_VERSION_MAJOR >= 28
-    trigger_entity_recollect(true);
+    if (
+      any_executable.callback_group &&
+      any_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
+      interrupt_guard_condition_->trigger();
+    }
 #endif
 
     // Clear the callback_group to prevent the AnyExecutable destructor from

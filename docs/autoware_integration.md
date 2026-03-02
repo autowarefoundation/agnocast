@@ -52,5 +52,5 @@ message_sub_ = agnocast::create_subscription<MessageType>("/topic_name", rclcpp:
 ### Other tips
 
 - Until the subscription callback thread is integrated into ROS 2 executor, all callback functions should be guarded with mutex lock.
-- Although Agnocast already has `get_subscription_count()` API, it is not still complete. There is an issue ticket <https://github.com/tier4/agnocast/issues/181>.
-- Agnocast does not support `publish_if_subscribed()` API yet. There is an issue ticket <https://github.com/tier4/agnocast/issues/164>.
+- Although Agnocast already has `get_subscription_count()` API, it is not still complete. There is an issue ticket <https://github.com/autowarefoundation/agnocast/issues/181>.
+- Agnocast does not support `publish_if_subscribed()` API yet. There is an issue ticket <https://github.com/autowarefoundation/agnocast/issues/164>.

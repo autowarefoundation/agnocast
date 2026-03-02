@@ -161,7 +161,9 @@ union ioctl_get_publisher_num_args {
   struct
   {
     uint32_t ret_publisher_num;
-    bool ret_bridge_exist;
+    uint32_t ret_ros2_publisher_num;
+    bool ret_r2a_bridge_exist;
+    bool ret_a2r_bridge_exist;
   };
 };
 
@@ -216,7 +218,6 @@ struct ioctl_add_bridge_args
 {
   struct
   {
-    pid_t pid;
     struct name_info topic_name;
     bool is_r2a;
   };
@@ -230,7 +231,6 @@ struct ioctl_add_bridge_args
 
 struct ioctl_remove_bridge_args
 {
-  pid_t pid;
   struct name_info topic_name;
   bool is_r2a;
 };
@@ -244,6 +244,12 @@ struct ioctl_set_ros2_subscriber_num_args
 {
   struct name_info topic_name;
   uint32_t ros2_subscriber_num;
+};
+
+struct ioctl_set_ros2_publisher_num_args
+{
+  struct name_info topic_name;
+  uint32_t ros2_publisher_num;
 };
 
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
@@ -266,6 +272,7 @@ struct ioctl_set_ros2_subscriber_num_args
 #define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
+#define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 
 // ================================================
 // ros2cli ioctls
@@ -273,7 +280,11 @@ struct ioctl_set_ros2_subscriber_num_args
 #define MAX_TOPIC_NUM 1024
 
 union ioctl_topic_list_args {
-  uint64_t topic_name_buffer_addr;
+  struct
+  {
+    uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
+  };
   uint32_t ret_topic_num;
 };
 
@@ -282,6 +293,7 @@ union ioctl_node_info_args {
   {
     struct name_info node_name;
     uint64_t topic_name_buffer_addr;
+    uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
 };
@@ -300,6 +312,7 @@ union ioctl_topic_info_args {
   {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
+    uint32_t topic_info_ret_buffer_size;
   };
   uint32_t ret_topic_info_ret_num;
 };
@@ -316,118 +329,133 @@ union ioctl_topic_info_args {
 // From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10
 #define EXIT_QUEUE_SIZE_BITS 16
 #define EXIT_QUEUE_SIZE (1U << EXIT_QUEUE_SIZE_BITS)
+#define EXIT_QUEUE_MASK (EXIT_QUEUE_SIZE - 1)
 
 int agnocast_init_device(void);
 int agnocast_init_kthread(void);
-int agnocast_init_kprobe(void);
+int agnocast_init_exit_hook(void);
 
 void agnocast_exit_free_data(void);
 void agnocast_exit_kthread(void);
-void agnocast_exit_kprobe(void);
+void agnocast_exit_exit_hook(void);
 void agnocast_exit_device(void);
 
-int ioctl_add_subscriber(
+int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
   const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
 
-int ioctl_add_publisher(
+int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
 
-int increment_message_entry_rc(
+int agnocast_increment_message_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 
-int ioctl_release_message_entry_reference(
+int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 
-int ioctl_receive_msg(
+int agnocast_ioctl_receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
   uint32_t pub_shm_infos_size, union ioctl_receive_msg_args * ioctl_ret);
 
-int ioctl_publish_msg(
+int agnocast_ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
   const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
   uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret);
 
-int ioctl_take_msg(
+int agnocast_ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, bool allow_same_message,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   union ioctl_take_msg_args * ioctl_ret);
 
-int ioctl_add_process(
+int agnocast_ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret);
 
-int ioctl_get_subscriber_num(
+int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   union ioctl_get_subscriber_num_args * ioctl_ret);
 
-int ioctl_get_publisher_num(
+int agnocast_ioctl_get_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_get_publisher_num_args * ioctl_ret);
 
-int ioctl_get_topic_list(
+int agnocast_ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
 
-int ioctl_get_subscriber_qos(
+int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct ioctl_get_subscriber_qos_args * args);
 
-int ioctl_get_publisher_qos(
+int agnocast_ioctl_get_publisher_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
   struct ioctl_get_publisher_qos_args * args);
 
-int ioctl_remove_subscriber(
+int agnocast_ioctl_remove_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, topic_local_id_t subscriber_id);
 
-int ioctl_remove_publisher(
+int agnocast_ioctl_remove_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, topic_local_id_t publisher_id);
 
-int ioctl_add_bridge(
+int agnocast_ioctl_add_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns,
   struct ioctl_add_bridge_args * ioctl_ret);
 
-int ioctl_remove_bridge(
+int agnocast_ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
-int ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
+int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 
-int ioctl_set_ros2_subscriber_num(
+int agnocast_ioctl_get_node_subscriber_topics(
+  const struct ipc_namespace * ipc_ns, const char * node_name,
+  union ioctl_node_info_args * node_info_args);
+
+int agnocast_ioctl_get_node_publisher_topics(
+  const struct ipc_namespace * ipc_ns, const char * node_name,
+  union ioctl_node_info_args * node_info_args);
+
+int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
+
+int agnocast_ioctl_set_ros2_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
-void process_exit_cleanup(const pid_t pid);
+int agnocast_ioctl_set_ros2_publisher_num(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
-void enqueue_exit_pid(const pid_t pid);
+void agnocast_process_exit_cleanup(const pid_t pid);
+
+void agnocast_enqueue_exit_pid(const pid_t pid);
+bool is_agnocast_pid(const pid_t pid);
 
 // ================================================
 // helper functions for KUnit test
 
 #ifdef KUNIT_BUILD
-int get_alive_proc_num(void);
-bool is_proc_exited(const pid_t pid);
-int get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
-int64_t get_latest_received_entry_id(
+int agnocast_get_alive_proc_num(void);
+bool agnocast_is_proc_exited(const pid_t pid);
+int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
+int64_t agnocast_get_latest_received_entry_id(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id);
-bool is_in_topic_entries(
+bool agnocast_is_in_topic_entries(
   const char * topic_name, const struct ipc_namespace * ipc_ns, int64_t entry_id);
-int get_entry_rc(
+int agnocast_get_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const int64_t entry_id,
   const topic_local_id_t pubsub_id);
-bool is_in_subscriber_htable(
+bool agnocast_is_in_subscriber_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id);
-bool is_in_publisher_htable(
+bool agnocast_is_in_publisher_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t publisher_id);
-int get_topic_num(const struct ipc_namespace * ipc_ns);
-bool is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
-bool is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
-pid_t get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
+int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns);
+bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
+bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
+pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
 #endif

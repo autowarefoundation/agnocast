@@ -37,10 +37,12 @@ public:
   explicit TestTakeSubscriber(const rclcpp::NodeOptions & options)
   : Node("test_take_subscription", options)
   {
+    this->declare_parameter<std::string>("topic_name", "/test_topic");
     this->declare_parameter<int64_t>("qos_depth", 10);
     this->declare_parameter<bool>("transient_local", true);
     this->declare_parameter<bool>("forever", false);
     this->declare_parameter<int64_t>("target_end_id", 0);
+    std::string topic_name = this->get_parameter("topic_name").as_string();
     forever_ = this->get_parameter("forever").as_bool();
     target_end_id_ = this->get_parameter("target_end_id").as_int();
 
@@ -51,7 +53,7 @@ public:
     }
 
     sub_ =
-      std::make_shared<agnocast::TakeSubscription<std_msgs::msg::Int64>>(this, "/test_topic", qos);
+      std::make_shared<agnocast::TakeSubscription<std_msgs::msg::Int64>>(this, topic_name, qos);
     timer_ = this->create_wall_timer(10ms, std::bind(&TestTakeSubscriber::timer_callback, this));
   }
 };

@@ -234,7 +234,7 @@ impl AgnocastSharedMemory {
     #[inline]
     fn is_shared(&self, ptr: *const u8) -> bool {
         let addr = ptr as usize;
-        self.start <= addr && addr <= self.end
+        self.start <= addr && addr < self.end
     }
 
     #[inline]

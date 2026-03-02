@@ -1,7 +1,9 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_callback_info.hpp"
+#include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
+#include "agnocast/agnocast_timer_info.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_msgs/msg/int32.hpp"
@@ -564,6 +566,154 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
 
   // Assert
   EXPECT_TRUE(callback_called);
+}
+
+// =========================================
+// create_timer free function tests
+// =========================================
+
+class CreateTimerFreeFunctionTest : public ::testing::Test
+{
+protected:
+  void SetUp() override { node = std::make_shared<agnocast::Node>("test_timer_node"); }
+
+  void TearDown() override { node.reset(); }
+
+  std::shared_ptr<agnocast::Node> node;
+};
+
+TEST_F(CreateTimerFreeFunctionTest, creates_timer_and_registers_info)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+
+  // Assert
+  ASSERT_NE(timer, nullptr);
+  EXPECT_EQ(timer->get_clock()->get_clock_type(), RCL_STEADY_TIME);
+}
+
+TEST_F(CreateTimerFreeFunctionTest, uses_default_callback_group_when_nullptr)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto expected_group = node->get_node_base_interface()->get_default_callback_group();
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, nullptr);
+
+  // Assert: verify the timer was registered with the default callback group
+  ASSERT_NE(timer, nullptr);
+  // Check via id2_timer_info that the callback group matches the default
+  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+  bool found = false;
+  for (const auto & [id, info] : agnocast::id2_timer_info) {
+    if (info->callback_group == expected_group && info->timer.lock() == timer) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Timer should be registered with the default callback group";
+}
+
+TEST_F(CreateTimerFreeFunctionTest, uses_explicit_callback_group)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(50));
+  auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  // Act
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, group);
+
+  // Assert
+  ASSERT_NE(timer, nullptr);
+  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+  bool found = false;
+  for (const auto & [id, info] : agnocast::id2_timer_info) {
+    if (info->callback_group == group && info->timer.lock() == timer) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Timer should be registered with the explicit callback group";
+}
+
+TEST_F(CreateTimerFreeFunctionTest, callback_is_invoked)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(10));
+  bool called = false;
+  auto timer = agnocast::create_timer(node.get(), clock, period, [&called]() { called = true; });
+
+  // Act
+  timer->execute_callback();
+
+  // Assert
+  EXPECT_TRUE(called);
+}
+
+// =========================================
+// ID overflow tests
+// =========================================
+
+TEST(AllocateCallbackInfoIdTest, throws_when_id_has_reserved_epoll_flag_bits)
+{
+  // Arrange: Set next_callback_info_id so the next allocation hits SHUTDOWN_EVENT_FLAG (bit 29).
+  const uint32_t original = next_callback_info_id.load();
+  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG);
+
+  // Act & Assert
+  EXPECT_THROW(allocate_callback_info_id(), std::runtime_error);
+
+  // Cleanup
+  next_callback_info_id.store(original);
+}
+
+TEST(AllocateCallbackInfoIdTest, succeeds_just_below_reserved_range)
+{
+  // Arrange: Set next_callback_info_id to the maximum valid value (one below SHUTDOWN_EVENT_FLAG).
+  const uint32_t original = next_callback_info_id.load();
+  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG - 1);
+
+  // Act & Assert
+  EXPECT_EQ(allocate_callback_info_id(), SHUTDOWN_EVENT_FLAG - 1);
+
+  // Cleanup
+  next_callback_info_id.store(original);
+}
+
+TEST(AllocateTimerIdTest, throws_when_id_has_reserved_epoll_flag_bits)
+{
+  // Arrange: Set next_timer_id so the returned ID includes a reserved epoll flag bit.
+  // This covers the bug where timer IDs OR'd with CLOCK_EVENT_FLAG/TIMER_EVENT_FLAG
+  // could collide with reserved flags.
+  const uint32_t original = next_timer_id.load();
+  next_timer_id.store(SHUTDOWN_EVENT_FLAG);
+
+  // Act & Assert
+  EXPECT_THROW(allocate_timer_id(), std::runtime_error);
+
+  // Cleanup
+  next_timer_id.store(original);
+}
+
+TEST(AllocateTimerIdTest, succeeds_just_below_reserved_range)
+{
+  // Arrange: Set next_timer_id to the maximum valid value.
+  const uint32_t original = next_timer_id.load();
+  next_timer_id.store(SHUTDOWN_EVENT_FLAG - 1);
+
+  // Act & Assert
+  EXPECT_EQ(allocate_timer_id(), SHUTDOWN_EVENT_FLAG - 1);
+
+  // Cleanup
+  next_timer_id.store(original);
 }
 
 TEST_F(AgnocastSmartPointerTest, converting_copy_constructor)
