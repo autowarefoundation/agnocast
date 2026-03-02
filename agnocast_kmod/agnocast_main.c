@@ -1,6 +1,7 @@
 #include "agnocast.h"
 #include "agnocast_memory_allocator.h"
 
+#include <linux/bitmap.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/hashtable.h>
@@ -98,7 +99,7 @@ struct topic_struct
   struct rb_root entries;
   DECLARE_HASHTABLE(pub_info_htable, PUB_INFO_HASH_BITS);
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
-  topic_local_id_t current_pubsub_id;
+  DECLARE_BITMAP(pubsub_id_map, MAX_TOPIC_LOCAL_ID);
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
@@ -219,7 +220,7 @@ static int add_topic(
   (*wrapper)->topic.entries = RB_ROOT;
   hash_init((*wrapper)->topic.pub_info_htable);
   hash_init((*wrapper)->topic.sub_info_htable);
-  (*wrapper)->topic.current_pubsub_id = 0;
+  bitmap_zero((*wrapper)->topic.pubsub_id_map, MAX_TOPIC_LOCAL_ID);
   (*wrapper)->topic.current_entry_id = 0;
   (*wrapper)->topic.ros2_subscriber_num = 0;
   (*wrapper)->topic.ros2_publisher_num = 0;
@@ -274,16 +275,6 @@ static int insert_subscriber_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
-    dev_warn(
-      agnocast_device,
-      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
-      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
-      "added. (insert_subscriber_info)\n",
-      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
-    return -ENOSPC;
-  }
-
   *new_info = kmalloc(sizeof(struct subscriber_info), GFP_KERNEL);
   if (!*new_info) {
     dev_warn(agnocast_device, "kmalloc failed. (insert_subscriber_info)\n");
@@ -297,8 +288,18 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
-  const topic_local_id_t new_id = wrapper->topic.current_pubsub_id;
-  wrapper->topic.current_pubsub_id++;
+  const topic_local_id_t new_id =
+    find_first_zero_bit(wrapper->topic.pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  if (new_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
+      "added. (insert_subscriber_info)\n",
+      new_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
+  }
+  set_bit(new_id, wrapper->topic.pubsub_id_map);
 
   (*new_info)->id = new_id;
   (*new_info)->pid = subscriber_pid;
@@ -388,16 +389,6 @@ static int insert_publisher_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
-    dev_warn(
-      agnocast_device,
-      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
-      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
-      "added. (insert_publisher_info)\n",
-      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
-    return -ENOSPC;
-  }
-
   *new_info = kmalloc(sizeof(struct publisher_info), GFP_KERNEL);
   if (!*new_info) {
     dev_warn(agnocast_device, "kmalloc failed. (insert_publisher_info)\n");
@@ -411,8 +402,18 @@ static int insert_publisher_info(
     return -ENOMEM;
   }
 
-  const topic_local_id_t new_id = wrapper->topic.current_pubsub_id;
-  wrapper->topic.current_pubsub_id++;
+  const topic_local_id_t new_id =
+    find_first_zero_bit(wrapper->topic.pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  if (new_id >= MAX_TOPIC_LOCAL_ID) {
+    dev_warn(
+      agnocast_device,
+      "pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
+      "added. (insert_publisher_info)\n",
+      new_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    return -ENOSPC;
+  }
+  set_bit(new_id, wrapper->topic.pubsub_id_map);
 
   (*new_info)->id = new_id;
   (*new_info)->pid = publisher_pid;
@@ -1923,6 +1924,8 @@ int agnocast_ioctl_remove_subscriber(
     goto unlock;
   }
 
+  clear_bit(subscriber_id, wrapper->topic.pubsub_id_map);
+
   struct rb_root * root = &wrapper->topic.entries;
   struct rb_node * node = rb_first(root);
 
@@ -1998,6 +2001,8 @@ int agnocast_ioctl_remove_publisher(
     ret = -ENODATA;
     goto unlock;
   }
+
+  clear_bit(publisher_id, wrapper->topic.pubsub_id_map);
 
   // Publisher-side handles do not participate in reference counting, so we don't need
   // to remove publisher references. Just clean up entries that have no subscriber references.
