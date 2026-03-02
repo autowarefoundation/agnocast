@@ -7,6 +7,7 @@
 #include "agnocast/bridge/standard/agnocast_standard_bridge_manager.hpp"
 
 #include <dlfcn.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <algorithm>
@@ -375,11 +376,24 @@ pid_t spawn_daemon_process(Func && func)
     agnocast::is_bridge_process = true;
     unsetenv("LD_PRELOAD");
 
-    // Redirect stdio to /dev/null when stdout or stderr is not referring to a terminal. If this
-    // condition holds, it is likely that a process is reading from the inherited pipe and waiting
-    // on it to close, which can cause the process to hang because the daemon never closes it.
-    // Redirecting to /dev/null works around this issue.
-    if (!isatty(STDOUT_FILENO) || !isatty(STDERR_FILENO)) {
+    // Redirect stdio to /dev/null when stdout or stderr is an inherited pipe or socket. In that
+    // case, a process may be reading from the pipe and waiting on it to close, which can cause
+    // the process to hang because the daemon never closes it. Redirecting to /dev/null works around
+    // this issue.
+    struct stat st_out = {};
+    struct stat st_err = {};
+    if (fstat(STDOUT_FILENO, &st_out) < 0) {
+      err_fmt = "fstat for stdout failed: %s";
+      goto exit_failure;
+    }
+    if (fstat(STDERR_FILENO, &st_err) < 0) {
+      err_fmt = "fstat for stderr failed: %s";
+      goto exit_failure;
+    }
+
+    if (
+      S_ISFIFO(st_out.st_mode) || S_ISFIFO(st_err.st_mode) || S_ISSOCK(st_out.st_mode) ||
+      S_ISSOCK(st_err.st_mode)) {
       int devnull = open("/dev/null", O_RDWR);
       if (devnull < 0) {
         err_fmt = "Failed to open /dev/null: %s";
