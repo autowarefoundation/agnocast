@@ -1,5 +1,5 @@
 <launch>
-    <node_container pkg="agnocastlib" exec="agnocast_component_container" name="listener_container" namespace="" output="screen">
+    <node_container pkg="agnocast_components" exec="agnocast_component_container" name="listener_container" namespace="" output="screen">
       <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
 
       <composable_node pkg="agnocast_sample_application" plugin="MinimalSubscriber" name="listener_node" namespace="">
