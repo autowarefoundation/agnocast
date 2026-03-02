@@ -135,7 +135,7 @@ ulimit -q
 Run the setup script to install dependencies:
 
 ```bash
-bash scripts/setup
+bash scripts/setup.bash
 ```
 
 <details>
@@ -197,8 +197,8 @@ Run sample app (different window for each script).
 The order does not matter.
 
 ```bash
-bash scripts/sample_application/run_listener
-bash scripts/sample_application/run_talker
+bash scripts/sample_application/run_listener.bash
+bash scripts/sample_application/run_talker.bash
 ```
 
 Stop applications and unload kernel module.
@@ -301,12 +301,12 @@ If you want to disable pre-commit, please run `pre-commit uninstall`.
 ### Build and insert kmod
 
 > [!NOTE]
-> If you have already installed `agnocast-heaphook` or `agnocast-kmod` via apt (i.e., `bash scripts/setup`), please remove them first.
+> If you have already installed `agnocast-heaphook` or `agnocast-kmod` via apt (i.e., `bash scripts/setup.bash`), please remove them first.
 
 Build.
 
 ```bash
-bash scripts/build_all
+bash scripts/build_all.bash
 ```
 
 Check if there is a `libagnocast_heaphook.so` in `install/agnocastlib/lib`.
@@ -329,7 +329,7 @@ sudo lsmod
 You can build, test and generate the coverage report by following:
 
 ```bash
-bash scripts/test/test_and_create_report
+bash scripts/test/test_and_create_report.bash
 ```
 
 ### Kernel Module Test
@@ -342,7 +342,7 @@ A custom kernel with the following CONFIG enabled is required to run KUnit Test 
 If booting with the custom kernel, the following script can be used to run unit tests on kernel modules and generate coverage reports.
 
 ```bash
-bash scripts/test/run_kunit
+bash scripts/test/run_kunit.bash
 ```
 
 You can also use [pre-commit](#setup-pre-commit)
@@ -385,7 +385,7 @@ Refer to the [Linux kernel documentation](https://www.kernel.org/doc/Documentati
 
 ### Migrating from old PPA setup
 
-If you previously installed Agnocast using the old `add-apt-repository` method, remove the old configuration before running `scripts/setup`:
+If you previously installed Agnocast using the old `add-apt-repository` method, remove the old configuration before running `scripts/setup.bash`:
 
 ```bash
 # Remove old repository configuration
