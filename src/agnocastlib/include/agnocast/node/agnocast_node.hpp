@@ -352,14 +352,16 @@ public:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
     auto timer = std::make_shared<WallTimer<CallbackT>>(timer_id, period_ns, std::move(callback));
 
     register_timer_info(timer_id, timer, period_ns, group, timer->get_clock());
 
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()), static_cast<const void *>(this),
-      static_cast<const void *>(&callback), static_cast<const void *>(group.get()),
-      tracetools::get_symbol(callback), period.count());
+      callback_addr, static_cast<const void *>(group.get()), callback_symbol, period.count());
 
     return timer;
   }
