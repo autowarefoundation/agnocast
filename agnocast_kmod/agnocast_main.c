@@ -55,6 +55,11 @@ static DECLARE_RWSEM(global_htables_rwsem);
 struct process_info
 {
   bool exited;
+  // Used to track whether this process is an alive Performance Bridge Manager.
+  // Standard Bridge Manager also updates this flag for consistency, but the flag
+  // is not used for Standard Bridge spawn decisions (Standard bridges are spawned
+  // per-process, not per-IPC-namespace).
+  bool is_bridge_manager;
   pid_t global_pid;
   pid_t local_pid;
   struct mempool_entry * mempool_entry;
@@ -759,8 +764,22 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
+static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns)
+{
+  struct process_info * proc_info;
+  int bkt;
+  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->is_bridge_manager && !proc_info->exited) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret)
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
 
@@ -773,6 +792,11 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
+  ioctl_ret->ret_performance_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns);
+
+  if (is_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+    goto unlock;
+  }
 
   struct process_info * new_proc_info = kmalloc(sizeof(struct process_info), GFP_KERNEL);
   if (!new_proc_info) {
@@ -782,6 +806,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
+  new_proc_info->is_bridge_manager = is_bridge_manager;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -2215,12 +2240,34 @@ static int get_process_num(const struct ipc_namespace * ipc_ns)
   return count;
 }
 
-int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns)
+int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
 {
-  down_read(&global_htables_rwsem);
-  int count = get_process_num(ipc_ns);
-  up_read(&global_htables_rwsem);
-  return count;
+  down_write(&global_htables_rwsem);
+  struct process_info * proc_info = find_process_info(pid);
+  if (proc_info) {
+    proc_info->is_bridge_manager = false;
+  }
+  up_write(&global_htables_rwsem);
+  return 0;
+}
+
+int agnocast_ioctl_check_and_request_bridge_shutdown(
+  const pid_t pid, const struct ipc_namespace * ipc_ns,
+  struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret)
+{
+  down_write(&global_htables_rwsem);
+  // Request shutdown if there is no other process excluding poll_for_unlink.
+  if (get_process_num(ipc_ns) <= 1) {
+    struct process_info * proc_info = find_process_info(pid);
+    if (proc_info) {
+      proc_info->is_bridge_manager = false;
+    }
+    ioctl_ret->ret_should_shutdown = true;
+  } else {
+    ioctl_ret->ret_should_shutdown = false;
+  }
+  up_write(&global_htables_rwsem);
+  return 0;
 }
 
 static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
@@ -2241,7 +2288,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     if (copy_from_user(
           &add_process_args, (union ioctl_add_process_args __user *)arg, sizeof(add_process_args)))
       return -EFAULT;
-    ret = agnocast_ioctl_add_process(pid, ipc_ns, &add_process_args);
+    bool is_bridge_manager = add_process_args.is_bridge_manager;
+    ret = agnocast_ioctl_add_process(pid, ipc_ns, is_bridge_manager, &add_process_args);
     if (ret == 0) {
       if (copy_to_user(
             (union ioctl_add_process_args __user *)arg, &add_process_args,
@@ -2765,13 +2813,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
     ret = agnocast_ioctl_remove_bridge(topic_name_buf, pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
-  } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
-    struct ioctl_get_process_num_args get_process_num_args;
-    memset(&get_process_num_args, 0, sizeof(get_process_num_args));
-    get_process_num_args.ret_process_num = agnocast_ioctl_get_process_num(ipc_ns);
+  } else if (cmd == AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD) {
+    struct ioctl_check_and_request_bridge_shutdown_args shutdown_args;
+    memset(&shutdown_args, 0, sizeof(shutdown_args));
+    ret = agnocast_ioctl_check_and_request_bridge_shutdown(pid, ipc_ns, &shutdown_args);
     if (copy_to_user(
-          (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
-          sizeof(get_process_num_args)))
+          (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg, &shutdown_args,
+          sizeof(shutdown_args)))
       return -EFAULT;
   } else if (cmd == AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD) {
     struct ioctl_set_ros2_subscriber_num_args set_ros2_sub_args;
@@ -2807,6 +2855,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     ret = agnocast_ioctl_set_ros2_publisher_num(
       topic_name_buf, ipc_ns, set_ros2_pub_args.ros2_publisher_num);
     kfree(topic_name_buf);
+  } else if (cmd == AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) {
+    ret = agnocast_ioctl_notify_bridge_shutdown(pid);
   } else {
     return -EINVAL;
   }
