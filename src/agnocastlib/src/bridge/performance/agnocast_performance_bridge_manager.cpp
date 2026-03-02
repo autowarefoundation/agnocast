@@ -235,22 +235,14 @@ bool PerformanceBridgeManager::should_create_bridge(
     }
 
     const auto stats = get_agnocast_subscriber_count(topic_name);
-    if (stats.count <= 0) {
-      return false;
-    }
-
-    return true;
+    return stats.count > 0;
   }
   if (active_a2r_bridges_.count(topic_name) > 0) {
     return false;
   }
 
   const auto stats = get_agnocast_publisher_count(topic_name);
-  if (stats.count <= 0) {
-    return false;
-  }
-
-  return true;
+  return stats.count > 0;
 }
 
 void PerformanceBridgeManager::create_bridge_if_needed(
