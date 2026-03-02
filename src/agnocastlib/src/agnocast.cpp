@@ -166,12 +166,6 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 
 void poll_for_unlink()
 {
-  if (setsid() == -1) {
-    RCLCPP_ERROR(logger, "setsid failed for unlink daemon: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
   while (true) {
     sleep(1);
 
@@ -210,12 +204,6 @@ void poll_for_unlink()
 
 void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
 {
-  if (setsid() == -1) {
-    RCLCPP_ERROR(logger, "setsid failed for unlink daemon: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
@@ -382,6 +370,12 @@ pid_t spawn_daemon_process(Func && func)
       dup2(devnull, STDOUT_FILENO);
       dup2(devnull, STDERR_FILENO);
       close(devnull);
+    }
+
+    if (setsid() == -1) {
+      RCLCPP_ERROR(logger, "setsid failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
     }
 
     func();
