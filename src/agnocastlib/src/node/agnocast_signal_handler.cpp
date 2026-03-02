@@ -38,13 +38,13 @@ void SignalHandler::install()
   sa.sa_handler = &SignalHandler::signal_handler;
 
   if (sigaction(SIGINT, &sa, nullptr) != 0) {
-    RCLCPP_ERROR(logger, "Failed to install SIGINT handler: %s", strerror(errno));
-    exit(EXIT_FAILURE);
+    installed_.store(false);
+    throw std::runtime_error(std::string("Failed to install SIGINT handler: ") + strerror(errno));
   }
 
   if (sigaction(SIGTERM, &sa, nullptr) != 0) {
-    RCLCPP_ERROR(logger, "Failed to install SIGTERM handler: %s", strerror(errno));
-    exit(EXIT_FAILURE);
+    installed_.store(false);
+    throw std::runtime_error(std::string("Failed to install SIGTERM handler: ") + strerror(errno));
   }
 }
 

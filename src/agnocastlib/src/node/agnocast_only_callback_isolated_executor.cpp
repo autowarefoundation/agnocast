@@ -30,9 +30,7 @@ AgnocastOnlyCallbackIsolatedExecutor::~AgnocastOnlyCallbackIsolatedExecutor()
 void AgnocastOnlyCallbackIsolatedExecutor::spin()
 {
   if (spinning_.exchange(true)) {
-    RCLCPP_ERROR(logger, "spin() called while already spinning");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("spin() called while already spinning");
   }
 
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
@@ -226,20 +224,17 @@ void AgnocastOnlyCallbackIsolatedExecutor::add_node(
     }
 
     if (node_ptr->callback_group_in_node(group)) {
-      RCLCPP_ERROR(
-        logger, "One of the callback groups in node %s already exists in the executor.",
-        node_ptr->get_fully_qualified_name());
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::logic_error(
+        std::string("One of the callback groups in node ") + node_ptr->get_fully_qualified_name() +
+        " already exists in the executor.");
     }
   }
 
   for (const auto & weak_node : weak_nodes_) {
     if (weak_node.lock() == node_ptr) {
-      RCLCPP_ERROR(
-        logger, "Node already exists in the executor: %s", node_ptr->get_fully_qualified_name());
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::logic_error(
+        std::string("Node already exists in the executor: ") +
+        node_ptr->get_fully_qualified_name());
     }
   }
 

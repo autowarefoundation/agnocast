@@ -28,9 +28,7 @@ bool SingleThreadedAgnocastExecutor::validate_callback_group(
   const rclcpp::CallbackGroup::SharedPtr & group) const
 {
   if (!group) {
-    RCLCPP_ERROR(logger, "Callback group is nullptr. The node may have been destructed.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::invalid_argument("Callback group is nullptr. The node may have been destructed.");
   }
 
   if (is_dedicated_to_one_callback_group_) {
@@ -43,9 +41,7 @@ bool SingleThreadedAgnocastExecutor::validate_callback_group(
 void SingleThreadedAgnocastExecutor::spin()
 {
   if (spinning.exchange(true)) {
-    RCLCPP_ERROR(logger, "spin() called while already spinning");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("spin() called while already spinning");
   }
 
   RCPPUTILS_SCOPE_EXIT(this->spinning.store(false););
@@ -73,9 +69,7 @@ void SingleThreadedAgnocastExecutor::dedicate_to_callback_group(
   const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node)
 {
   if (!group) {
-    RCLCPP_ERROR(logger, "The passed callback group is nullptr.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::invalid_argument("The passed callback group is nullptr.");
   }
 
   is_dedicated_to_one_callback_group_ = true;

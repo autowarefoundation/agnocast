@@ -24,9 +24,7 @@ AgnocastOnlySingleThreadedExecutor::AgnocastOnlySingleThreadedExecutor(int next_
 void AgnocastOnlySingleThreadedExecutor::spin()
 {
   if (spinning_.exchange(true)) {
-    RCLCPP_ERROR(logger, "spin() called while already spinning");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::logic_error("spin() called while already spinning");
   }
 
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););

@@ -118,3 +118,76 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, cancel)
   // Assert
   EXPECT_TRUE(spin_finished) << "Spin should have finished after cancel";
 }
+
+// Test that spin() throws std::logic_error when called while already spinning
+TEST_F(CallbackIsolatedAgnocastExecutorTest, spin_while_already_spinning_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  executor->add_node(node);
+
+  std::thread spin_thread([this]() { executor->spin(); });
+
+  // Wait for spin to start
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Calling spin() again should throw std::logic_error
+  EXPECT_THROW(executor->spin(), std::logic_error);
+
+  executor->cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}
+
+// Test that adding a nullptr callback group throws std::logic_error
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_nullptr_callback_group_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  rclcpp::CallbackGroup::SharedPtr null_group = nullptr;
+
+  EXPECT_THROW(
+    executor->add_callback_group(null_group, node->get_node_base_interface()), std::logic_error);
+}
+
+// Test that adding a duplicate callback group throws std::logic_error
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_duplicate_callback_group_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  executor->add_callback_group(group, node->get_node_base_interface());
+
+  // Adding the same group again should throw
+  EXPECT_THROW(
+    executor->add_callback_group(group, node->get_node_base_interface()), std::logic_error);
+}
+
+// Test that adding a duplicate node throws std::logic_error
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_duplicate_node_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+
+  executor->add_node(node->get_node_base_interface());
+
+  // Adding the same node again should throw
+  EXPECT_THROW(executor->add_node(node->get_node_base_interface()), std::logic_error);
+}
+
+// Test that removing a non-existent callback group throws std::logic_error
+TEST_F(CallbackIsolatedAgnocastExecutorTest, remove_nonexistent_callback_group_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  // Group was never added, so removing it should throw
+  EXPECT_THROW(executor->remove_callback_group(group), std::logic_error);
+}
+
+// Test that removing a non-existent node throws std::logic_error
+TEST_F(CallbackIsolatedAgnocastExecutorTest, remove_nonexistent_node_throws)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+
+  // Node was never added, so removing it should throw
+  EXPECT_THROW(executor->remove_node(node->get_node_base_interface()), std::logic_error);
+}
