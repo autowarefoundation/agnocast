@@ -18,7 +18,7 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_process_args add_process_args;
   int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -35,7 +35,8 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
@@ -51,7 +52,8 @@ static void setup_one_publisher_with_bridge(struct kunit * test, char * topic_na
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
@@ -181,7 +183,7 @@ void test_case_get_publisher_num_a2r_bridge_exist(struct kunit * test)
 
   union ioctl_add_process_args add_process_args;
   int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args;
