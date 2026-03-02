@@ -297,6 +297,8 @@ static int insert_subscriber_info(
       "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
       "added. (insert_subscriber_info)\n",
       new_id, wrapper->key, MAX_TOPIC_LOCAL_ID);
+    kfree(node_name_copy);
+    kfree(*new_info);
     return -ENOSPC;
   }
   set_bit(new_id, wrapper->topic.pubsub_id_map);
