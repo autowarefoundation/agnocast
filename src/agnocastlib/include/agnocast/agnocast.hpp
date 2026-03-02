@@ -34,6 +34,19 @@
 namespace agnocast
 {
 
+/// Type trait to extract the pointed-to node type from raw pointers and smart pointers.
+template <typename T, typename = void>
+struct node_pointer_traits
+{
+  using type = std::remove_pointer_t<T>;
+};
+
+template <typename T>
+struct node_pointer_traits<T, std::void_t<typename T::element_type>>
+{
+  using type = typename T::element_type;
+};
+
 struct initialize_agnocast_result
 {
   void * mempool_ptr;
@@ -147,7 +160,7 @@ TimerBase::SharedPtr create_timer(
   NodeT node, rclcpp::Clock::SharedPtr clock, rclcpp::Duration period, CallbackT && callback,
   rclcpp::CallbackGroup::SharedPtr group = nullptr, bool autostart = true)
 {
-  using NodePtrT = std::remove_pointer_t<std::decay_t<NodeT>>;
+  using NodePtrT = typename node_pointer_traits<std::decay_t<NodeT>>::type;
   static_assert(
     std::is_base_of_v<rclcpp::Node, NodePtrT> || std::is_base_of_v<agnocast::Node, NodePtrT>,
     "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
