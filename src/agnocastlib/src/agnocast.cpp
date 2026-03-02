@@ -152,6 +152,11 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
+  if (add_process_args.ret_performance_bridge_daemon_exist) {
+    close(agnocast_fd);
+    exit(EXIT_SUCCESS);
+  }
+
   void * mempool_ptr =
     map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
 

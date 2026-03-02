@@ -794,6 +794,10 @@ int agnocast_ioctl_add_process(
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
   ioctl_ret->ret_performance_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns);
 
+  if (is_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+    goto unlock;
+  }
+
   struct process_info * new_proc_info = kmalloc(sizeof(struct process_info), GFP_KERNEL);
   if (!new_proc_info) {
     dev_warn(agnocast_device, "kmalloc failed. (ioctl_add_process)\n");
