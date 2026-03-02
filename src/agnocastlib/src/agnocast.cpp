@@ -374,14 +374,18 @@ pid_t spawn_daemon_process(Func && func)
     agnocast::is_bridge_process = true;
     unsetenv("LD_PRELOAD");
 
-    // Redirect stdio to /dev/null so that CTest doesn't wait for inherited pipe
-    // file descriptors to close when the daemon runs in an infinite loop.
-    int devnull = open("/dev/null", O_RDWR);
-    if (devnull >= 0) {
-      dup2(devnull, STDIN_FILENO);
-      dup2(devnull, STDOUT_FILENO);
-      dup2(devnull, STDERR_FILENO);
-      close(devnull);
+    // Redirect stdio to /dev/null when stdout or stderr is not referring to a terminal. If this
+    // condition holds, it is likely that a process is reading from the inherited pipe and waiting
+    // on it to close, which can cause the process to hang because the daemon never closes it.
+    // Redirecting to /dev/null works around this issue.
+    if (!isatty(STDOUT_FILENO) || !isatty(STDERR_FILENO)) {
+      int devnull = open("/dev/null", O_RDWR);
+      if (devnull >= 0) {
+        dup2(devnull, STDIN_FILENO);
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+      }
     }
 
     func();
