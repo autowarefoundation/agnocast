@@ -364,11 +364,12 @@ bool is_version_consistent(
 template <typename Func>
 pid_t spawn_daemon_process(Func && func)
 {
+  const char * err_fmt;
+
   pid_t pid = fork();
   if (pid < 0) {
-    RCLCPP_ERROR(logger, "fork failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    err_fmt = "fork failed: %s";
+    goto exit_failure;
   }
   if (pid == 0) {
     agnocast::is_bridge_process = true;
@@ -380,12 +381,24 @@ pid_t spawn_daemon_process(Func && func)
     // Redirecting to /dev/null works around this issue.
     if (!isatty(STDOUT_FILENO) || !isatty(STDERR_FILENO)) {
       int devnull = open("/dev/null", O_RDWR);
-      if (devnull >= 0) {
-        dup2(devnull, STDIN_FILENO);
-        dup2(devnull, STDOUT_FILENO);
-        dup2(devnull, STDERR_FILENO);
-        close(devnull);
+      if (devnull < 0) {
+        err_fmt = "Failed to open /dev/null: %s";
+        goto exit_failure;
       }
+
+      if (dup2(devnull, STDIN_FILENO) < 0) {
+        err_fmt = "dup2 for stdin failed: %s";
+        goto exit_failure;
+      }
+      if (dup2(devnull, STDOUT_FILENO) < 0) {
+        err_fmt = "dup2 for stdout failed: %s";
+        goto exit_failure;
+      }
+      if (dup2(devnull, STDERR_FILENO) < 0) {
+        err_fmt = "dup2 for stderr failed: %s";
+        goto exit_failure;
+      }
+      close(devnull);
     }
 
     func();
@@ -393,6 +406,11 @@ pid_t spawn_daemon_process(Func && func)
   }
 
   return pid;
+
+exit_failure:
+  RCLCPP_ERROR(logger, err_fmt, strerror(errno));
+  close(agnocast_fd);
+  exit(EXIT_FAILURE);
 }
 
 // NOTE: Avoid heap allocation inside initialize_agnocast. TLSF is not initialized yet.
