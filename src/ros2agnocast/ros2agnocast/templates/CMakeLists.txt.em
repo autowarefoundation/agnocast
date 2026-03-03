@@ -35,23 +35,40 @@ install(TARGETS bridge_plugin_@(safe_name)
 
 @[end for]
 
+@[for srv_type in service_types]
+@{
+safe_name = srv_type.replace('/', '_')
+pkg = srv_type.split('/')[0]
+}
+# Plugin for @(srv_type)
+add_library(service_bridge_plugin_@(safe_name) SHARED src/service_bridge_plugin_@(safe_name).cpp)
+target_link_libraries(service_bridge_plugin_@(safe_name) agnocastlib::agnocast)
+ament_target_dependencies(service_bridge_plugin_@(safe_name) rclcpp @(pkg))
+
+install(TARGETS service_bridge_plugin_@(safe_name)
+  DESTINATION lib/${PROJECT_NAME})
+
+@[end for]
+
 # Use precompiled headers to speed up build (requires CMake >= 3.16)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
 @{
-first_safe_name = message_types[0].replace('/', '_')
+all_targets = (
+  ['bridge_plugin_' + t.replace('/', '_') for t in message_types] +
+  ['service_bridge_plugin_' + t.replace('/', '_') for t in service_types]
+)
+first_target = all_targets[0]
+rest_targets = all_targets[1:]
 }
-  set_target_properties(bridge_plugin_@(first_safe_name) PROPERTIES DEFINE_SYMBOL "AGNOCAST_BRIDGE_PLUGIN_EXPORTS")
-  target_precompile_headers(bridge_plugin_@(first_safe_name) PRIVATE
+  set_target_properties(@(first_target) PROPERTIES DEFINE_SYMBOL "AGNOCAST_BRIDGE_PLUGIN_EXPORTS")
+  target_precompile_headers(@(first_target) PRIVATE
     <agnocast/agnocast.hpp>
     <rclcpp/rclcpp.hpp>
     <utility>)
 
-@[for msg_type in message_types[1:]]
-@{
-safe_name = msg_type.replace('/', '_')
-}
-  set_target_properties(bridge_plugin_@(safe_name) PROPERTIES DEFINE_SYMBOL "AGNOCAST_BRIDGE_PLUGIN_EXPORTS")
-  target_precompile_headers(bridge_plugin_@(safe_name) REUSE_FROM bridge_plugin_@(first_safe_name))
+@[for target in rest_targets]
+  set_target_properties(@(target) PROPERTIES DEFINE_SYMBOL "AGNOCAST_BRIDGE_PLUGIN_EXPORTS")
+  target_precompile_headers(@(target) REUSE_FROM @(first_target))
 
 @[end for]
 endif()
