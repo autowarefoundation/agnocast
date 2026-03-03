@@ -7,6 +7,7 @@
 #include "agnocast/bridge/standard/agnocast_standard_bridge_manager.hpp"
 
 #include <dlfcn.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <algorithm>
@@ -358,30 +359,55 @@ bool is_version_consistent(
 template <typename Func>
 pid_t spawn_daemon_process(Func && func)
 {
-  pid_t pid = fork();
-  if (pid < 0) {
-    RCLCPP_ERROR(logger, "fork failed: %s", strerror(errno));
+  auto fail = [](const char * err_fmt) {
+    RCLCPP_ERROR(logger, err_fmt, strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
+  };
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    fail("fork failed: %s");
   }
   if (pid == 0) {
     agnocast::is_bridge_process = true;
     unsetenv("LD_PRELOAD");
 
-    // Redirect stdio to /dev/null so that CTest doesn't wait for inherited pipe
-    // file descriptors to close when the daemon runs in an infinite loop.
-    int devnull = open("/dev/null", O_RDWR);
-    if (devnull >= 0) {
-      dup2(devnull, STDIN_FILENO);
-      dup2(devnull, STDOUT_FILENO);
-      dup2(devnull, STDERR_FILENO);
+    // Redirect stdio to /dev/null when stdout or stderr is an inherited pipe or socket. In that
+    // case, a process may be reading from the pipe and waiting on it to close, which can cause
+    // the process to hang because the daemon never closes it. Redirecting to /dev/null works around
+    // this issue.
+    struct stat st_out = {};
+    struct stat st_err = {};
+    if (fstat(STDOUT_FILENO, &st_out) < 0) {
+      fail("fstat for stdout failed: %s");
+    }
+    if (fstat(STDERR_FILENO, &st_err) < 0) {
+      fail("fstat for stderr failed: %s");
+    }
+
+    if (
+      S_ISFIFO(st_out.st_mode) || S_ISFIFO(st_err.st_mode) || S_ISSOCK(st_out.st_mode) ||
+      S_ISSOCK(st_err.st_mode)) {
+      int devnull = open("/dev/null", O_RDWR);
+      if (devnull < 0) {
+        fail("Failed to open /dev/null: %s");
+      }
+
+      if (dup2(devnull, STDIN_FILENO) < 0) {
+        fail("dup2 for stdin failed: %s");
+      }
+      if (dup2(devnull, STDOUT_FILENO) < 0) {
+        fail("dup2 for stdout failed: %s");
+      }
+      if (dup2(devnull, STDERR_FILENO) < 0) {
+        fail("dup2 for stderr failed: %s");
+      }
       close(devnull);
     }
 
     if (setsid() == -1) {
-      RCLCPP_ERROR(logger, "setsid failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      fail("setsid failed: %s");
     }
 
     func();
