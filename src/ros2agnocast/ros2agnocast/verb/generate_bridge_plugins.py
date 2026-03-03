@@ -146,7 +146,10 @@ class GenerateBridgePluginsVerb(VerbExtension):
     def _generate_plugin_source(self, src_dir, type, interface_type, templates_pkg):
         """Generate a single plugin C++ source file."""
         flat_type = type.replace('/', '_')
-        output_file = os.path.join(src_dir, f'bridge_plugin_{flat_type}.cpp')
+        if interface_type == InterfaceType.MESSAGE:
+            output_file = os.path.join(src_dir, f'bridge_plugin_{flat_type}.cpp')
+        else:
+            output_file = os.path.join(src_dir, f'service_bridge_plugin_{flat_type}.cpp')
 
         cpp_type = type.replace('/', '::')
 
