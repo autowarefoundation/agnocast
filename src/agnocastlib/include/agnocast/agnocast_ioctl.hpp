@@ -51,9 +51,14 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
+    bool is_bridge_manager;
+  };
+  struct
+  {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
+    bool ret_performance_bridge_daemon_exist;
   };
 };
 #pragma GCC diagnostic pop
@@ -306,9 +311,9 @@ struct ioctl_remove_bridge_args
   bool is_r2a;
 };
 
-struct ioctl_get_process_num_args
+struct ioctl_check_and_request_bridge_shutdown_args
 {
-  uint32_t ret_process_num;
+  bool ret_should_shutdown;
 };
 
 struct ioctl_set_ros2_subscriber_num_args
@@ -340,10 +345,12 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_GET_PUBLISHER_NUM_CMD _IOWR(0xA6, 16, union ioctl_get_publisher_num_args)
 #define AGNOCAST_REMOVE_SUBSCRIBER_CMD _IOW(0xA6, 17, struct ioctl_remove_subscriber_args)
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
-#define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
+#define AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD \
+  _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
+#define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 
 }  // namespace agnocast
