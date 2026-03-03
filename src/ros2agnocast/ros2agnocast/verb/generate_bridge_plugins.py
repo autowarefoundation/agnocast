@@ -102,7 +102,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
             )
             return [stripped for line in result.stdout.strip().split('\n') if '/' in (stripped := line.strip())]
         except subprocess.CalledProcessError as e:
-            print(f'Error: Failed to run "ros2 interface list: {e}', file=sys.stderr)
+            print(f'Error: Failed to run "ros2 interface list {opt}": {e}', file=sys.stderr)
             return []
 
     def _validate_types(self, types, interface_type):
