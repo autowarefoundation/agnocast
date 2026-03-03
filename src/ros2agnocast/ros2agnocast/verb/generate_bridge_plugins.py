@@ -143,30 +143,30 @@ class GenerateBridgePluginsVerb(VerbExtension):
         # Generate package.xml
         self._generate_package_xml(output_dir, package_names, templates_pkg)
 
-    def _generate_plugin_source(self, src_dir, type, interface_type, templates_pkg):
+    def _generate_plugin_source(self, src_dir, typ, interface_type, templates_pkg):
         """Generate a single plugin C++ source file."""
-        flat_type = type.replace('/', '_')
+        flat_type = typ.replace('/', '_')
         if interface_type == InterfaceType.MESSAGE:
             output_file = os.path.join(src_dir, f'bridge_plugin_{flat_type}.cpp')
         else:
             output_file = os.path.join(src_dir, f'service_bridge_plugin_{flat_type}.cpp')
 
-        cpp_type = type.replace('/', '::')
+        cpp_type = typ.replace('/', '::')
 
-        parts = type.split('/')
+        parts = typ.split('/')
         parts[-1] = camel_to_snake(parts[-1])
         header_path = '/'.join(parts) + '.hpp'
 
         if interface_type == InterfaceType.MESSAGE:
             data = {
-                'msg_type': type,
+                'msg_type': typ,
                 'cpp_type': cpp_type,
                 'header_path': header_path,
             }
             template_file = templates_pkg.joinpath('bridge_plugin.cpp.em')
         else:
             data = {
-                'srv_type': type,
+                'srv_type': typ,
                 'cpp_type': cpp_type,
                 'header_path': header_path,
             }
