@@ -145,7 +145,7 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
   }
 }
 
-initialize_agnocast_result acquire_agnocast_resources_for_bridge()
+initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode bridge_mode)
 {
   union ioctl_add_process_args add_process_args = {};
   add_process_args.is_bridge_manager = true;
@@ -153,7 +153,8 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (add_process_args.ret_performance_bridge_daemon_exist) {
+  if (
+    bridge_mode == BridgeMode::Performance && add_process_args.ret_performance_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -212,10 +213,9 @@ void poll_for_unlink()
 void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
 {
   try {
-    const auto resources = acquire_agnocast_resources_for_bridge();
-    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-
     auto bridge_mode = get_bridge_mode();
+    const auto resources = acquire_agnocast_resources_for_bridge(bridge_mode);
+    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     if (bridge_mode == BridgeMode::Standard) {
       StandardBridgeManager manager(target_pid);
       manager.run();
