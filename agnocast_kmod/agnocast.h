@@ -36,14 +36,9 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
-  };
-  struct
-  {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
   };
 };
 
@@ -240,9 +235,9 @@ struct ioctl_remove_bridge_args
   bool is_r2a;
 };
 
-struct ioctl_check_and_request_bridge_shutdown_args
+struct ioctl_get_process_num_args
 {
-  bool ret_should_shutdown;
+  uint32_t ret_process_num;
 };
 
 struct ioctl_set_ros2_subscriber_num_args
@@ -274,12 +269,10 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_GET_PUBLISHER_NUM_CMD _IOWR(0xA6, 16, union ioctl_get_publisher_num_args)
 #define AGNOCAST_REMOVE_SUBSCRIBER_CMD _IOW(0xA6, 17, struct ioctl_remove_subscriber_args)
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
-#define AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD \
-  _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
+#define AGNOCAST_GET_PROCESS_NUM_CMD _IOR(0xA6, 19, struct ioctl_get_process_num_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
-#define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 
 // ================================================
 // ros2cli ioctls
@@ -383,8 +376,7 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
-  union ioctl_add_process_args * ioctl_ret);
+  const pid_t pid, const struct ipc_namespace * ipc_ns, union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
@@ -428,17 +420,13 @@ int agnocast_ioctl_get_node_publisher_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args);
 
-int agnocast_ioctl_check_and_request_bridge_shutdown(
-  const pid_t pid, const struct ipc_namespace * ipc_ns,
-  struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret);
+int agnocast_ioctl_get_process_num(const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_set_ros2_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
 
 int agnocast_ioctl_set_ros2_publisher_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t count);
-
-int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 

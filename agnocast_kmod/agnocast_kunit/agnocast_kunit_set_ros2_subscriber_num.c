@@ -17,7 +17,7 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_process_args add_process_args;
   int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
