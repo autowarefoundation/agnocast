@@ -154,7 +154,8 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode brid
   }
 
   if (
-    bridge_mode == BridgeMode::Performance && add_process_args.ret_performance_bridge_daemon_exist) {
+    bridge_mode == BridgeMode::Performance &&
+    add_process_args.ret_performance_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
