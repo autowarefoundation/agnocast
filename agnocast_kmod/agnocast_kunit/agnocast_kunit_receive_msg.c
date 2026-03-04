@@ -24,7 +24,7 @@ static void setup_one_subscriber(
 {
   union ioctl_add_process_args add_process_args;
   int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -41,8 +41,7 @@ static void setup_one_publisher(
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
   union ioctl_add_process_args add_process_args;
-  int ret1 =
-    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
   *ret_addr = add_process_args.ret_addr;
 
   union ioctl_add_publisher_args add_publisher_args;
@@ -675,7 +674,7 @@ void test_case_receive_msg_pubsub_in_same_process(struct kunit * test)
 
   union ioctl_add_process_args add_process_args;
   const pid_t pid = 1000;
-  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
   union ioctl_add_subscriber_args add_subscriber_args;
   const uint32_t subscriber_qos_depth = 10;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -717,8 +716,7 @@ void test_case_receive_msg_2pub_in_same_process(struct kunit * test)
 
   union ioctl_add_process_args add_process_args;
   const pid_t publisher_pid = 1000;
-  int ret1 =
-    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, &add_process_args);
   union ioctl_add_publisher_args add_publisher_args1;
   const uint32_t publisher_qos_depth = 10;
   int ret2 = agnocast_ioctl_add_publisher(
@@ -756,7 +754,7 @@ void test_case_receive_msg_2sub_in_same_process(struct kunit * test)
   union ioctl_add_process_args add_process_args;
   const pid_t subscriber_pid = 2000;
   int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
   union ioctl_add_subscriber_args add_subscriber_args1;
   const uint32_t subscriber_qos_depth1 = 10;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -983,7 +981,7 @@ void test_case_receive_msg_ignore_local_same_pid_enabled(struct kunit * test)
   const pid_t pid = 1000;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   union ioctl_add_publisher_args add_publisher_args;
@@ -1026,7 +1024,7 @@ void test_case_receive_msg_ignore_local_same_pid_disabled(struct kunit * test)
   const pid_t pid = 1000;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret1, 0);
 
   union ioctl_add_publisher_args add_publisher_args;
