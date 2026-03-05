@@ -2815,13 +2815,13 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
     ret = agnocast_ioctl_remove_bridge(topic_name_buf, pid, remove_bridge_args.is_r2a, ipc_ns);
     kfree(topic_name_buf);
-  } else if (cmd == AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD) {
-    struct ioctl_check_and_request_bridge_shutdown_args shutdown_args;
-    memset(&shutdown_args, 0, sizeof(shutdown_args));
-    ret = agnocast_ioctl_check_and_request_bridge_shutdown(pid, ipc_ns, &shutdown_args);
+  } else if (cmd == AGNOCAST_GET_PROCESS_NUM_CMD) {
+    struct ioctl_get_process_num_args get_process_num_args;
+    memset(&get_process_num_args, 0, sizeof(get_process_num_args));
+    get_process_num_args.ret_process_num = agnocast_ioctl_get_process_num(ipc_ns);
     if (copy_to_user(
-          (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg, &shutdown_args,
-          sizeof(shutdown_args)))
+          (struct ioctl_get_process_num_args __user *)arg, &get_process_num_args,
+          sizeof(get_process_num_args)))
       return -EFAULT;
   } else if (cmd == AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD) {
     struct ioctl_set_ros2_subscriber_num_args set_ros2_sub_args;
@@ -2857,8 +2857,6 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     ret = agnocast_ioctl_set_ros2_publisher_num(
       topic_name_buf, ipc_ns, set_ros2_pub_args.ros2_publisher_num);
     kfree(topic_name_buf);
-  } else if (cmd == AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) {
-    ret = agnocast_ioctl_notify_bridge_shutdown(pid);
   } else {
     return -EINVAL;
   }
