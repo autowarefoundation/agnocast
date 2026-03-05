@@ -265,6 +265,13 @@ inline void IpcEventLoopBase::cleanup_resources()
     mq_fd_ = -1;
   }
 
+  if (!mq_name_.empty()) {
+    if (mq_unlink(mq_name_.c_str()) == -1 && errno != ENOENT) {
+      RCLCPP_WARN_STREAM(
+        logger_, "Failed to unlink mq for mq_name='" << mq_name_ << "': " << strerror(errno));
+    }
+  }
+
   mq_name_.clear();
 }
 
