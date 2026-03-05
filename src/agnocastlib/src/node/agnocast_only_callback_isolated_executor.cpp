@@ -120,8 +120,9 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   while (spinning_.load()) {
     {
       std::unique_lock<std::mutex> lock(callback_group_created_cv_mutex_);
-      callback_group_created_cv_.wait(
-        lock, [this] { return callback_group_created_ || !spinning_.load(); });
+      callback_group_created_cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+        return callback_group_created_ || !spinning_.load();
+      });
       callback_group_created_ = false;
     }
 
