@@ -203,7 +203,7 @@ This provides the same argument parsing functionality as rcl.
 | `--enable-rosout-logs` | - | **Supportable** | TBD | Enable logging to rosout |
 | `--disable-external-lib-logs` | - | **Default** | - | Disable external library logs |
 | `--disable-stdout-logs` | ✓ | **Full Support** | - | Disable stdout logging |
-| `-e` (enclave) | ✗ | **Unsupported** | TBD | Specify security enclave |
+| `-e` (enclave) | ✗ | **Unsupported** | - | Specify security enclave |
 
 ### 3.2 Parameter Override Resolution
 

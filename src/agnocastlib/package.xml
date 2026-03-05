@@ -21,6 +21,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>rcl_interfaces</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>rcl_yaml_param_parser</depend>
