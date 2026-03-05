@@ -32,11 +32,8 @@ void increment_borrowed_publisher_num()
 void decrement_borrowed_publisher_num()
 {
   if (borrowed_publisher_num == 0) {
-    RCLCPP_ERROR(
-      logger,
+    throw std::logic_error(
       "The number of publish() called exceeds the number of borrow_loaned_message() called.");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
   }
   borrowed_publisher_num--;
 }
@@ -54,9 +51,7 @@ topic_local_id_t initialize_publisher(
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PUBLISHER_CMD, &pub_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_ADD_PUBLISHER_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("AGNOCAST_ADD_PUBLISHER_CMD failed: ") + strerror(errno));
   }
 
   return pub_args.ret_id;
@@ -80,9 +75,7 @@ union ioctl_publish_msg_args publish_core(
   publish_msg_args.subscriber_ids_buffer_size = MAX_SUBSCRIBER_NUM;
 
   if (ioctl(agnocast_fd, AGNOCAST_PUBLISH_MSG_CMD, &publish_msg_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("AGNOCAST_PUBLISH_MSG_CMD failed: ") + strerror(errno));
   }
 
   TRACEPOINT(agnocast_publish, publisher_handle, publish_msg_args.ret_entry_id);
@@ -152,9 +145,8 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
   union ioctl_get_subscriber_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};
   if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: ") + strerror(errno));
   }
 
   uint32_t inter_count = args.ret_other_process_subscriber_num;
@@ -177,9 +169,8 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
   union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
   get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
   if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &get_subscriber_count_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(
+      std::string("AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: ") + strerror(errno));
   }
 
   return get_subscriber_count_args.ret_same_process_subscriber_num;

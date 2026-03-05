@@ -29,8 +29,8 @@ int main(int argc, char * argv[])
     executor->spin();
 
     rclcpp::shutdown();
-  } catch (rclcpp_components::ComponentManagerException & ex) {
-    std::cerr << "Exception caught in main: " << ex.what() << std::endl;
+  } catch (const std::exception & e) {
+    std::cerr << "Exception caught in main: " << e.what() << std::endl;
     close(agnocast::agnocast_fd);
     return EXIT_FAILURE;
   } catch (...) {

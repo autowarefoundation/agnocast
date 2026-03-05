@@ -69,10 +69,8 @@ TypeErasedCallback get_erased_callback(Func && callback)
       auto && typed_arg = static_cast<TypedMessagePtr<T> &&>(arg);
       callback(std::move(typed_arg).get());
     } else {
-      RCLCPP_ERROR(
-        logger, "Agnocast internal implementation error: bad allocation when callback is called");
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+      throw std::runtime_error(
+        "Agnocast internal implementation error: bad allocation when callback is called");
     }
   };
 }
