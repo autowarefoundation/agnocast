@@ -14,7 +14,6 @@ namespace agnocast
 
 constexpr int CV_TIMEOUT_MS = 100;
 
-
 AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms)
 : next_exec_timeout_ms_(next_exec_timeout_ms)
 {
