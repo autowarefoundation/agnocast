@@ -21,7 +21,7 @@ static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args ioctl_ret;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, &ioctl_ret);
+  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &ioctl_ret);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   return ioctl_ret.ret_addr;

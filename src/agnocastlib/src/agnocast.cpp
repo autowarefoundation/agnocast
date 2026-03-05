@@ -153,7 +153,9 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode brid
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (add_process_args.ret_performance_bridge_daemon_exist) {
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    add_process_args.ret_performance_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -461,12 +463,11 @@ struct initialize_agnocast_result initialize_agnocast(
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
-
-    // Since the performance bridge daemon is created once per IPC namespace,
-    // this logic is placed inside this block.
-    if (bridge_mode == BridgeMode::Performance) {
-      should_spawn_bridge = true;
-    }
+  }
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    !add_process_args.ret_performance_bridge_daemon_exist) {
+    should_spawn_bridge = true;
   }
   if (bridge_mode == BridgeMode::Standard) {
     target_pid = getpid();
