@@ -181,6 +181,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
       }
     }
     threads_to_join = std::move(child_threads_);
+    child_threads_.clear();
     weak_child_executors_.clear();
   }
   for (auto & thread : threads_to_join) {
