@@ -3,7 +3,7 @@
 #include <linux/list.h>
 #include <linux/types.h>
 
-#define MEMPOOL_NUM 1024
+#define MEMPOOL_NUM 4096  // Max concurrent agnocast processes
 
 // Default is 8GB, can be overridden by insmod parameter mempool_size_gb
 extern int mempool_size_gb;
