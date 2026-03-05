@@ -12,6 +12,9 @@
 namespace agnocast
 {
 
+constexpr int CV_TIMEOUT_MS = 100;
+
+
 AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms)
 : next_exec_timeout_ms_(next_exec_timeout_ms)
 {
@@ -120,7 +123,7 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   while (spinning_.load()) {
     {
       std::unique_lock<std::mutex> lock(callback_group_created_cv_mutex_);
-      callback_group_created_cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+      callback_group_created_cv_.wait_for(lock, std::chrono::milliseconds(CV_TIMEOUT_MS), [this] {
         return callback_group_created_ || !spinning_.load();
       });
       callback_group_created_ = false;
