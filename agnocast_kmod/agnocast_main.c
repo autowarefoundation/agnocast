@@ -59,7 +59,7 @@ struct process_info
   // Standard Bridge Manager also updates this flag for consistency, but the flag
   // is not used for Standard Bridge spawn decisions (Standard bridges are spawned
   // per-process, not per-IPC-namespace).
-  bool is_bridge_manager;
+  bool is_performance_bridge_manager;
   pid_t global_pid;
   pid_t local_pid;
   struct mempool_entry * mempool_entry;
@@ -764,13 +764,15 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns)
+static bool has_alive_performance_bridge_manager(const struct ipc_namespace * ipc_ns)
 {
   struct process_info * proc_info;
   int bkt;
   hash_for_each(proc_info_htable, bkt, proc_info, node)
   {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->is_bridge_manager && !proc_info->exited) {
+    if (
+      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->is_performance_bridge_manager &&
+      !proc_info->exited) {
       return true;
     }
   }
@@ -778,7 +780,7 @@ static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns)
 }
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
   union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
@@ -792,9 +794,9 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
-  ioctl_ret->ret_performance_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns);
+  ioctl_ret->ret_performance_bridge_daemon_exist = has_alive_performance_bridge_manager(ipc_ns);
 
-  if (is_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+  if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
     goto unlock;
   }
 
@@ -806,7 +808,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
-  new_proc_info->is_bridge_manager = is_bridge_manager;
+  new_proc_info->is_performance_bridge_manager = is_performance_bridge_manager;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -2245,7 +2247,7 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = find_process_info(pid);
   if (proc_info) {
-    proc_info->is_bridge_manager = false;
+    proc_info->is_performance_bridge_manager = false;
   }
   up_write(&global_htables_rwsem);
   return 0;
@@ -2260,7 +2262,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   if (get_process_num(ipc_ns) <= 1) {
     struct process_info * proc_info = find_process_info(pid);
     if (proc_info) {
-      proc_info->is_bridge_manager = false;
+      proc_info->is_performance_bridge_manager = false;
     }
     ioctl_ret->ret_should_shutdown = true;
   } else {
@@ -2288,8 +2290,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     if (copy_from_user(
           &add_process_args, (union ioctl_add_process_args __user *)arg, sizeof(add_process_args)))
       return -EFAULT;
-    bool is_bridge_manager = add_process_args.is_bridge_manager;
-    ret = agnocast_ioctl_add_process(pid, ipc_ns, is_bridge_manager, &add_process_args);
+    bool is_performance_bridge_manager = add_process_args.is_performance_bridge_manager;
+    ret = agnocast_ioctl_add_process(pid, ipc_ns, is_performance_bridge_manager, &add_process_args);
     if (ret == 0) {
       if (copy_to_user(
             (union ioctl_add_process_args __user *)arg, &add_process_args,

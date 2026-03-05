@@ -148,7 +148,7 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
 initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode bridge_mode)
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_bridge_manager = true;
+  add_process_args.is_performance_bridge_manager = (bridge_mode == BridgeMode::Performance);
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }

@@ -51,7 +51,7 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
+    bool is_performance_bridge_manager;
   };
   struct
   {

@@ -36,7 +36,7 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
+    bool is_performance_bridge_manager;
   };
   struct
   {
@@ -383,7 +383,7 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
   union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
