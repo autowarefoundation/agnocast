@@ -3,6 +3,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace agnocast

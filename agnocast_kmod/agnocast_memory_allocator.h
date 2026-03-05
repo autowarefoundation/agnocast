@@ -5,7 +5,7 @@
 
 #define MEMPOOL_NUM 4096  // Max concurrent agnocast processes
 
-// Default is 8GB, can be overridden by insmod parameter mempool_size_gb
+// Default is 16GB, can be overridden by insmod parameter mempool_size_gb
 extern int mempool_size_gb;
 // Mempool size in bytes (calculated from mempool_size_gb)
 extern uint64_t mempool_size_bytes;
