@@ -3160,11 +3160,12 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
   }
 }
 
-// Ring buffer to hold exited pids
+// Ring buffer (fast path) + overflow linked list (fallback) to hold exited pids
 static DEFINE_SPINLOCK(pid_queue_lock);
 static pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 static uint32_t queue_head;
 static uint32_t queue_tail;
+static LIST_HEAD(exit_pid_overflow_list);
 
 // For controling the kernel thread
 static struct task_struct * worker_task;
@@ -3244,11 +3245,13 @@ static int exit_worker_thread(void * data)
 
     if (kthread_should_stop()) break;
 
-    // Drain all queued PIDs in a single wake-up cycle
+    // Drain all queued PIDs in a single wake-up cycle.
+    // First drain the ring buffer, then the overflow list.
     while (true) {
       pid_t pid;
       unsigned long flags;
       bool got_pid = false;
+      struct exit_pid_node * overflow_entry = NULL;
 
       spin_lock_irqsave(&pid_queue_lock, flags);
 
@@ -3256,15 +3259,21 @@ static int exit_worker_thread(void * data)
         pid = exit_pid_queue[queue_head];
         queue_head = (queue_head + 1) & EXIT_QUEUE_MASK;
         got_pid = true;
+      } else if (!list_empty(&exit_pid_overflow_list)) {
+        overflow_entry = list_first_entry(&exit_pid_overflow_list, struct exit_pid_node, list);
+        list_del(&overflow_entry->list);
+        pid = overflow_entry->pid;
+        got_pid = true;
       }
 
-      if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
+      if (!got_pid) smp_store_release(&has_new_pid, 0);
 
       spin_unlock_irqrestore(&pid_queue_lock, flags);
 
       if (!got_pid) break;
 
       agnocast_process_exit_cleanup(pid);
+      kfree(overflow_entry);
     }
   }
 
@@ -3276,28 +3285,33 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   unsigned long flags;
   uint32_t next;
 
-  bool need_wakeup = false;
-
   spin_lock_irqsave(&pid_queue_lock, flags);
 
   next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
-  if (next != queue_head) {  // queue is not full
+  if (next != queue_head) {
+    // Fast path: ring buffer has space
     exit_pid_queue[queue_tail] = pid;
     queue_tail = next;
-    smp_store_release(&has_new_pid, 1);
-    need_wakeup = true;
+  } else {
+    // Overflow: ring buffer is full, allocate a list node
+    struct exit_pid_node * entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+    if (!entry) {
+      spin_unlock_irqrestore(&pid_queue_lock, flags);
+#ifndef KUNIT_BUILD
+      dev_warn(
+        agnocast_device, "failed to allocate exit_pid_node for pid=%d. (enqueue_exit_pid)\n", pid);
+#endif
+      return;
+    }
+    entry->pid = pid;
+    list_add_tail(&entry->list, &exit_pid_overflow_list);
   }
 
+  smp_store_release(&has_new_pid, 1);
   spin_unlock_irqrestore(&pid_queue_lock, flags);
 
-  if (need_wakeup) {
-    wake_up_interruptible(&worker_wait);
-  } else {
-    dev_warn(
-      agnocast_device,
-      "exit_pid_queue is full! consider expanding the queue size. (enqueue_exit_pid)\n");
-  }
+  wake_up_interruptible(&worker_wait);
 }
 
 // RCU-protected check: returns true if pid is registered in agnocast.
@@ -3525,8 +3539,18 @@ void agnocast_exit_free_data(void)
 
 void agnocast_exit_kthread(void)
 {
+  struct exit_pid_node * entry;
+  struct exit_pid_node * tmp;
+
   wake_up_interruptible(&worker_wait);
   kthread_stop(worker_task);
+
+  // Free any remaining entries in the overflow list
+  list_for_each_entry_safe(entry, tmp, &exit_pid_overflow_list, list)
+  {
+    list_del(&entry->list);
+    kfree(entry);
+  }
 }
 
 void agnocast_exit_exit_hook(void)

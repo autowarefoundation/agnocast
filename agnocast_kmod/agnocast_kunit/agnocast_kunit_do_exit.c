@@ -145,6 +145,31 @@ void test_case_do_exit_many(struct kunit * test)
   }
 }
 
+void test_case_do_exit_overflow(struct kunit * test)
+{
+  // Arrange: register some agnocast processes, then enqueue more PIDs than EXIT_QUEUE_SIZE
+  // to force the overflow linked list path.
+  const int agnocast_process_num = mempool_num;
+  const int total_enqueue_num = EXIT_QUEUE_SIZE + agnocast_process_num;
+  setup_processes(test, agnocast_process_num);
+
+  // Act: enqueue enough PIDs to overflow the ring buffer
+  for (int i = 0; i < total_enqueue_num; i++) {
+    const pid_t pid = PID_BASE + i;
+    agnocast_enqueue_exit_pid(pid);
+  }
+
+  // wait for exit_worker_thread to handle process exit
+  msleep(200);
+
+  // Assert: all agnocast processes must have been cleaned up (none dropped)
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 0);
+  for (int i = 0; i < agnocast_process_num; i++) {
+    const pid_t pid = PID_BASE + i;
+    KUNIT_EXPECT_TRUE(test, agnocast_is_proc_exited(pid));
+  }
+}
+
 void test_case_do_exit_with_publisher(struct kunit * test)
 {
   // Arrange
