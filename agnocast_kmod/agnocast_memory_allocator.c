@@ -2,6 +2,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/overflow.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
@@ -35,8 +36,35 @@ uint64_t mempool_size_bytes = 0;
 int init_memory_allocator(void)
 {
   uint64_t addr = (uint64_t)mempool_start_addr;
+  uint64_t total_size;
+  uint64_t end_addr;
+
+  if (mempool_num <= 0) {
+    pr_err("Agnocast: invalid mempool_num=%d, must be positive\n", mempool_num);
+    return -EINVAL;
+  }
+
+  if (mempool_size_gb <= 0) {
+    pr_err("Agnocast: invalid mempool_size_gb=%d, must be positive\n", mempool_size_gb);
+    return -EINVAL;
+  }
 
   mempool_size_bytes = (uint64_t)mempool_size_gb * 1024ULL * 1024ULL * 1024ULL;
+
+  if (check_mul_overflow((uint64_t)mempool_num, mempool_size_bytes, &total_size)) {
+    pr_err(
+      "Agnocast: overflow computing total memory size (mempool_num=%d, mempool_size_gb=%d)\n",
+      mempool_num, mempool_size_gb);
+    return -EINVAL;
+  }
+
+  if (check_add_overflow(addr, total_size, &end_addr)) {
+    pr_err(
+      "Agnocast: overflow computing end address "
+      "(mempool_start_addr=0x%lx, total_size=0x%llx)\n",
+      mempool_start_addr, total_size);
+    return -EINVAL;
+  }
 
   mempool_entries = kmalloc_array(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
   if (!mempool_entries) {
@@ -47,7 +75,7 @@ int init_memory_allocator(void)
   pr_info(
     "Agnocast: Initializing memory allocator with %d pools, pool size: %llu bytes (%d GB), "
     "start address: 0x%llx\n",
-    mempool_num, mempool_size_bytes, mempool_size_gb, (uint64_t)mempool_start_addr);
+    mempool_num, mempool_size_bytes, mempool_size_gb, addr);
 
   if (mempool_num != DEFAULT_MEMPOOL_NUM) {
     pr_warn(
@@ -71,7 +99,6 @@ int init_memory_allocator(void)
   }
 
   {
-    uint64_t end_addr = addr + (uint64_t)mempool_num * mempool_size_bytes;
     uint64_t limit_85tb = 85ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
     if (end_addr > limit_85tb) {
       pr_warn(
@@ -176,7 +203,9 @@ void exit_memory_allocator(void)
 {
   struct mapped_pid_entry * entry;
   struct mapped_pid_entry * tmp;
+  unsigned long flags;
 
+  spin_lock_irqsave(&mempool_lock, flags);
   for (int i = 0; i < mempool_num; i++) {
     list_for_each_entry_safe(entry, tmp, &mempool_entries[i].mapped_pid_head, list)
     {
@@ -185,6 +214,7 @@ void exit_memory_allocator(void)
     }
     mempool_entries[i].mapped_num = 0;
   }
+  spin_unlock_irqrestore(&mempool_lock, flags);
 }
 
 void cleanup_memory_allocator(void)
