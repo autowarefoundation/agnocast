@@ -40,26 +40,26 @@ int init_memory_allocator(void)
   uint64_t end_addr;
 
   if (mempool_num <= 0) {
-    pr_err("Agnocast: invalid mempool_num=%d, must be positive\n", mempool_num);
+    pr_warn("Agnocast: invalid mempool_num=%d, must be positive\n", mempool_num);
     return -EINVAL;
   }
 
   if (mempool_size_gb <= 0) {
-    pr_err("Agnocast: invalid mempool_size_gb=%d, must be positive\n", mempool_size_gb);
+    pr_warn("Agnocast: invalid mempool_size_gb=%d, must be positive\n", mempool_size_gb);
     return -EINVAL;
   }
 
   mempool_size_bytes = (uint64_t)mempool_size_gb * 1024ULL * 1024ULL * 1024ULL;
 
   if (check_mul_overflow((uint64_t)mempool_num, mempool_size_bytes, &total_size)) {
-    pr_err(
+    pr_warn(
       "Agnocast: overflow computing total memory size (mempool_num=%d, mempool_size_gb=%d)\n",
       mempool_num, mempool_size_gb);
     return -EINVAL;
   }
 
   if (check_add_overflow(addr, total_size, &end_addr)) {
-    pr_err(
+    pr_warn(
       "Agnocast: overflow computing end address "
       "(mempool_start_addr=0x%lx, total_size=0x%llx)\n",
       mempool_start_addr, total_size);
