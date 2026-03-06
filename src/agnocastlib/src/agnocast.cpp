@@ -206,7 +206,7 @@ void poll_for_unlink()
 
         // Unlink subscription MQs that the exited process owned
         for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
           const std::string topic_name(mq_info_buf[i].topic_name);
           const std::string sub_mq_name =
             create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
