@@ -178,7 +178,8 @@ void AgnocastOnlyExecutor::add_callback_group(
 
   TRACEPOINT(
     agnocast_add_callback_group, static_cast<const void *>(this),
-    static_cast<const void *>(group_ptr.get()), group_type_str);
+    static_cast<const void *>(node_ptr.get()), static_cast<const void *>(group_ptr.get()),
+    group_type_str);
 }
 
 void AgnocastOnlyExecutor::remove_callback_group(
@@ -277,7 +278,8 @@ void AgnocastOnlyExecutor::add_callback_groups_from_nodes_associated_to_executor
 
           TRACEPOINT(
             agnocast_add_callback_group, static_cast<const void *>(this),
-            static_cast<const void *>(group_ptr.get()), group_type_str);
+            static_cast<const void *>(node.get()), static_cast<const void *>(group_ptr.get()),
+            group_type_str);
         }
       });
     }
@@ -313,7 +315,8 @@ void AgnocastOnlyExecutor::add_node(
 
         TRACEPOINT(
           agnocast_add_callback_group, static_cast<const void *>(this),
-          static_cast<const void *>(group_ptr.get()), group_type_str);
+          static_cast<const void *>(node_ptr.get()), static_cast<const void *>(group_ptr.get()),
+          group_type_str);
       }
     });
   weak_nodes_.push_back(node_ptr);
