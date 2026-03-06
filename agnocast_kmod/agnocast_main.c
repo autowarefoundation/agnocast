@@ -1535,28 +1535,37 @@ int ioctl_get_exit_process(
     // Copy subscription info to kernel buffer for user-space MQ cleanup.
     // The skip guard above ensures mq_info_buf is valid when the list is non-empty.
     uint32_t count = 0;
+    bool truncated = false;
     if (mq_info_buf != NULL && mq_info_buf_size > 0) {
       struct exit_subscription_entry * entry;
-      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
+      struct exit_subscription_entry * tmp_entry;
+      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
       {
         // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard
         // above
         if (count >= mq_info_buf_size) {
+          truncated = true;
           dev_warn(
             agnocast_device,
-            "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
+            "mq_info_buf is full, remaining entries kept for next poll. "
+            "(ioctl_get_exit_process)\n");
           break;
         }
         strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
         mq_info_buf[count].subscriber_id = entry->subscriber_id;
+        list_del(&entry->list);
+        kfree(entry);
+        proc_info->exit_subscription_count--;
         count++;
       }
     }
     ioctl_ret->ret_subscription_mq_info_num = count;
 
-    free_exit_subscription_list(proc_info);
-    hash_del_rcu(&proc_info->node);
-    kfree_rcu(proc_info, rcu_head);
+    if (!truncated) {
+      free_exit_subscription_list(proc_info);
+      hash_del_rcu(&proc_info->node);
+      kfree_rcu(proc_info, rcu_head);
+    }
     break;
   }
 
@@ -2645,6 +2654,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     if (mq_buf_size > MAX_SUBSCRIPTION_NUM_PER_PROCESS) return -EINVAL;
 
     uint64_t mq_buf_addr = get_exit_process_args.subscription_mq_info_buffer_addr;
+    if (mq_buf_size > 0 && mq_buf_addr == 0) return -EINVAL;
 
     struct exit_subscription_mq_info * mq_info_buf = NULL;
     if (mq_buf_size > 0) {
