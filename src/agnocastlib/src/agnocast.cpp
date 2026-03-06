@@ -205,8 +205,9 @@ void poll_for_unlink()
 
         // Unlink subscription MQs that the exited process owned
         for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
-          const std::string sub_mq_name = create_mq_name_for_agnocast_publish(
-            mq_info_buf[i].topic_name, mq_info_buf[i].subscriber_id);
+          const std::string topic_name(mq_info_buf[i].topic_name);
+          const std::string sub_mq_name =
+            create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
           mq_unlink(sub_mq_name.c_str());
         }
       }
