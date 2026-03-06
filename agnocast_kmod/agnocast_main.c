@@ -1587,6 +1587,8 @@ void ioctl_commit_exit_process(
       struct exit_subscription_entry * tmp_entry;
       list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
       {
+        // cppcheck-suppress unsignedLessThanZero ; both are uint32_t, committed_count == 0
+        // correctly skips the loop
         if (deleted >= committed_count) break;
         list_del(&entry->list);
         kfree(entry);
