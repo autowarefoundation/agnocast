@@ -2704,12 +2704,8 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
 
     pid_t global_pid = -1;
-    ret = agnocast_ioctl_get_exit_process(
+    agnocast_ioctl_get_exit_process(
       ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
-    if (ret < 0) {
-      kfree(mq_info_buf);
-      return ret;
-    }
 
     // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
     // for the next poll (agnocast_ioctl_commit_exit_process is not called).
