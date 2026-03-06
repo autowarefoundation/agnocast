@@ -53,6 +53,9 @@ extern "C" PerformanceBridgeResult create_a2r_bridge(
   auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<@(cpp_type)> msg) {
+    if (ros_pub->get_subscription_count() == 0) {
+      return;
+    }
     auto loaned_msg = ros_pub->borrow_loaned_message();
     if (loaned_msg.is_valid()) {
       loaned_msg.get() = *msg;
