@@ -14,7 +14,7 @@ void test_case_add_process_normal(struct kunit * test)
 
   uint64_t local_pid = pid++;
   union ioctl_add_process_args args;
-  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 1);
@@ -32,12 +32,12 @@ void test_case_add_process_many(struct kunit * test)
   for (int i = 0; i < max_process_num - 1; i++) {
     uint64_t local_pid = pid++;
     union ioctl_add_process_args args;
-    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
   }
 
   uint64_t local_pid = pid++;
   union ioctl_add_process_args args;
-  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
 
   // ================================================
   // Assert
@@ -55,8 +55,8 @@ void test_case_add_process_twice(struct kunit * test)
 
   pid_t local_pid = pid++;
   union ioctl_add_process_args args;
-  int ret1 = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
-  int ret2 = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+  int ret1 = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
+  int ret2 = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
 
   KUNIT_EXPECT_EQ(test, ret1, 0);
   KUNIT_EXPECT_EQ(test, ret2, -EINVAL);
@@ -74,11 +74,11 @@ void test_case_add_process_too_many(struct kunit * test)
   for (int i = 0; i < max_process_num; i++) {
     uint64_t local_pid = pid++;
     union ioctl_add_process_args args;
-    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+    agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
   }
   uint64_t local_pid = pid++;
   union ioctl_add_process_args args;
-  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, &args);
+  int ret = agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
 
   // ================================================
   // Assert

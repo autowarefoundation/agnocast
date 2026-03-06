@@ -145,11 +145,19 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
   }
 }
 
-initialize_agnocast_result acquire_agnocast_resources_for_bridge()
+initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode bridge_mode)
 {
   union ioctl_add_process_args add_process_args = {};
+  add_process_args.is_performance_bridge_manager = (bridge_mode == BridgeMode::Performance);
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
+  }
+
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    add_process_args.ret_performance_bridge_daemon_exist) {
+    close(agnocast_fd);
+    exit(EXIT_SUCCESS);
   }
 
   void * mempool_ptr =
@@ -206,10 +214,9 @@ void poll_for_unlink()
 void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
 {
   try {
-    const auto resources = acquire_agnocast_resources_for_bridge();
-    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-
     auto bridge_mode = get_bridge_mode();
+    const auto resources = acquire_agnocast_resources_for_bridge(bridge_mode);
+    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     if (bridge_mode == BridgeMode::Standard) {
       StandardBridgeManager manager(target_pid);
       manager.run();
@@ -456,12 +463,11 @@ struct initialize_agnocast_result initialize_agnocast(
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
-
-    // Since the performance bridge daemon is created once per IPC namespace,
-    // this logic is placed inside this block.
-    if (bridge_mode == BridgeMode::Performance) {
-      should_spawn_bridge = true;
-    }
+  }
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    !add_process_args.ret_performance_bridge_daemon_exist) {
+    should_spawn_bridge = true;
   }
   if (bridge_mode == BridgeMode::Standard) {
     target_pid = getpid();

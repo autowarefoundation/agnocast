@@ -23,7 +23,8 @@ static void setup_one_publisher(
   const pid_t PUBLISHER_PID = 2000;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(PUBLISHER_PID, current->nsproxy->ipc_ns, &add_process_args);
+  int ret1 =
+    agnocast_ioctl_add_process(PUBLISHER_PID, current->nsproxy->ipc_ns, false, &add_process_args);
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH,
@@ -105,7 +106,7 @@ void test_case_release_sub_ref_last_reference(struct kunit * test)
   const pid_t subscriber_pid = 1000;
   union ioctl_add_process_args add_process_args;
   int ret2 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args;
@@ -153,8 +154,8 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   // First subscriber
   const pid_t subscriber_pid1 = 1000;
   union ioctl_add_process_args add_process_args1;
-  int ret2 =
-    agnocast_ioctl_add_process(subscriber_pid1, current->nsproxy->ipc_ns, &add_process_args1);
+  int ret2 = agnocast_ioctl_add_process(
+    subscriber_pid1, current->nsproxy->ipc_ns, false, &add_process_args1);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args1;
@@ -172,8 +173,8 @@ void test_case_release_sub_ref_multi_reference(struct kunit * test)
   // Second subscriber
   const pid_t subscriber_pid2 = 1001;
   union ioctl_add_process_args add_process_args2;
-  int ret5 =
-    agnocast_ioctl_add_process(subscriber_pid2, current->nsproxy->ipc_ns, &add_process_args2);
+  int ret5 = agnocast_ioctl_add_process(
+    subscriber_pid2, current->nsproxy->ipc_ns, false, &add_process_args2);
   KUNIT_ASSERT_EQ(test, ret5, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args2;
@@ -231,7 +232,7 @@ void test_case_increment_rc_already_referenced(struct kunit * test)
   const pid_t subscriber_pid = 1000;
   union ioctl_add_process_args add_process_args;
   int ret2 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, &add_process_args);
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   union ioctl_add_subscriber_args add_subscriber_args;
