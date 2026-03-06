@@ -1596,7 +1596,6 @@ void ioctl_commit_exit_process(
 
       // Free proc_info only when all subscription entries have been consumed.
       if (list_empty(&proc_info->exit_subscription_list)) {
-        free_exit_subscription_list(proc_info);
         hash_del_rcu(&proc_info->node);
         kfree_rcu(proc_info, rcu_head);
       }
