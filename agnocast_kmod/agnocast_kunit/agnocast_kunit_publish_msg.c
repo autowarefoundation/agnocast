@@ -527,6 +527,7 @@ void test_case_bridge_sub_skipped_when_no_ros2_sub(struct kunit * test)
 
   topic_local_id_t bridge_sub_id;
   setup_one_bridge_subscriber(test, &bridge_sub_id, false);
+  (void)bridge_sub_id;
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
