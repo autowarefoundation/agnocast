@@ -1508,10 +1508,11 @@ static void free_exit_subscription_list(struct process_info * proc_info)
 // Two-phase ioctl for exit process cleanup:
 //   Phase 1 (ioctl_get_exit_process): read-only copy of subscription entries to kernel buffer.
 //   Phase 2 (ioctl_commit_exit_process): delete entries and free proc_info.
-// The dispatch handler calls Phase 2 only after copy_to_user succeeds. If copy_to_user fails,
-// entries remain in the kernel for the next daemon poll — no data is permanently lost.
-// A single-phase design would delete entries before copy_to_user, risking permanent loss on
-// failure.
+// The dispatch handler copies ret_pid and ret_subscription_mq_info_num to user-space between
+// Phase 1 and Phase 2. Phase 2 runs only after those critical copies succeed, so subscription
+// entries are never permanently lost. ret_daemon_should_exit is patched via a separate
+// copy_to_user after Phase 2; if that final copy fails, the daemon merely stays alive one extra
+// poll cycle — no resource leak.
 int ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
   struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
@@ -2714,15 +2715,24 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
     kfree(mq_info_buf);
 
-    // Commit: delete copied entries and free proc_info. Computes ret_daemon_should_exit.
-    bool daemon_should_exit = false;
-    ioctl_commit_exit_process(
-      ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
-    get_exit_process_args.ret_daemon_should_exit = daemon_should_exit;
-
+    // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
+    // ret_daemon_should_exit is not yet known and will be patched after commit.
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
           sizeof(get_exit_process_args)))
+      return -EFAULT;
+
+    // Commit: delete copied entries and free proc_info. Safe because user-space already
+    // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
+    bool daemon_should_exit = false;
+    ioctl_commit_exit_process(
+      ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+
+    // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
+    // alive one extra poll cycle — no resource leak.
+    if (copy_to_user(
+          &((struct ioctl_get_exit_process_args __user *)arg)->ret_daemon_should_exit,
+          &daemon_should_exit, sizeof(daemon_should_exit)))
       return -EFAULT;
   } else if (cmd == AGNOCAST_GET_TOPIC_LIST_CMD) {
     union ioctl_topic_list_args topic_list_args;
