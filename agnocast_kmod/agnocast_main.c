@@ -1539,7 +1539,8 @@ int ioctl_get_exit_process(
       struct exit_subscription_entry * entry;
       list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
       {
-        if (count == mq_info_buf_size) {
+        // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard above
+        if (count >= mq_info_buf_size) {
           dev_warn(
             agnocast_device,
             "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
