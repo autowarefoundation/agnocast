@@ -12,7 +12,8 @@
  * space. */
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3          // Maximum number of entries that can be released at one ioctl
-#define NODE_NAME_BUFFER_SIZE 256  // Maximum length of node name: 256 characters
+#define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
+#define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32      // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
@@ -172,10 +173,28 @@ union ioctl_get_publisher_num_args {
   };
 };
 
+/* Max subscription MQ info entries buffered per process during exit cleanup.
+ * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
+ * These entries live in kernel memory from process exit until the daemon polls them (typically ~1s).
+ * If the daemon is dead, they persist until module unload — but that scenario already leaves
+ * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
+#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
+
+struct exit_subscription_mq_info
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  topic_local_id_t subscriber_id;
+};
+
 struct ioctl_get_exit_process_args
 {
+  // input: user-space buffer for subscription MQ info
+  uint64_t subscription_mq_info_buffer_addr;
+  uint32_t subscription_mq_info_buffer_size;
+  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
+  uint32_t ret_subscription_mq_info_num;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -266,7 +285,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
