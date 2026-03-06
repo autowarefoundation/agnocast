@@ -123,7 +123,7 @@ void test_case_do_exit(struct kunit * test)
 void test_case_do_exit_many(struct kunit * test)
 {
   // Arrange
-  const int agnocast_process_num = MEMPOOL_NUM;
+  const int agnocast_process_num = mempool_num;
   const int non_agnocast_process_num = EXIT_QUEUE_SIZE - agnocast_process_num;
   setup_processes(test, agnocast_process_num);
 

@@ -2,33 +2,94 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/overflow.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 
-static struct mempool_entry mempool_entries[MEMPOOL_NUM];
+static struct mempool_entry * mempool_entries;
 static DEFINE_SPINLOCK(mempool_lock);
 
-// Module parameter: mempool size in GB (default: 16GB)
-int mempool_size_gb = 16;
+#define DEFAULT_MEMPOOL_NUM 4096
+#define DEFAULT_MEMPOOL_START_ADDR 0x40000000000ULL
+#define DEFAULT_MEMPOOL_SIZE_GB 16
+
+// Module parameter: number of memory pools
+int mempool_num = DEFAULT_MEMPOOL_NUM;
+module_param(mempool_num, int, 0444);
+MODULE_PARM_DESC(mempool_num, "Number of memory pools (default: 4096)");
+
+// Module parameter: start address of the allocator
+unsigned long mempool_start_addr = DEFAULT_MEMPOOL_START_ADDR;
+module_param(mempool_start_addr, ulong, 0444);
+MODULE_PARM_DESC(
+  mempool_start_addr, "Start address of the memory allocator (default: 0x40000000000)");
+
+// Module parameter: mempool size in GB
+int mempool_size_gb = DEFAULT_MEMPOOL_SIZE_GB;
 module_param(mempool_size_gb, int, 0444);
 MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 16)");
 
 uint64_t mempool_size_bytes = 0;
 
-// Default mempool size in GB
-#define DEFAULT_MEMPOOL_SIZE_GB 16
-
-void init_memory_allocator(void)
+int init_memory_allocator(void)
 {
-  uint64_t addr = 0x40000000000;
+  uint64_t addr = (uint64_t)mempool_start_addr;
+  uint64_t total_size;
+  uint64_t end_addr;
+
+  if (mempool_num <= 0) {
+    pr_warn("Agnocast: invalid mempool_num=%d, must be positive\n", mempool_num);
+    return -EINVAL;
+  }
+
+  if (mempool_size_gb <= 0) {
+    pr_warn("Agnocast: invalid mempool_size_gb=%d, must be positive\n", mempool_size_gb);
+    return -EINVAL;
+  }
 
   mempool_size_bytes = (uint64_t)mempool_size_gb * 1024ULL * 1024ULL * 1024ULL;
 
+  if (check_mul_overflow((uint64_t)mempool_num, mempool_size_bytes, &total_size)) {
+    pr_warn(
+      "Agnocast: overflow computing total memory size (mempool_num=%d, mempool_size_gb=%d)\n",
+      mempool_num, mempool_size_gb);
+    return -EINVAL;
+  }
+
+  if (check_add_overflow(addr, total_size, &end_addr)) {
+    pr_warn(
+      "Agnocast: overflow computing end address "
+      "(mempool_start_addr=0x%lx, total_size=0x%llx)\n",
+      mempool_start_addr, total_size);
+    return -EINVAL;
+  }
+
+  mempool_entries = kmalloc_array(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
+  if (!mempool_entries) {
+    pr_err("Agnocast: Failed to allocate mempool_entries array\n");
+    return -ENOMEM;
+  }
+
   pr_info(
-    "Agnocast: Initializing memory allocator with pool size: %llu bytes (%d GB)\n",
-    mempool_size_bytes, mempool_size_gb);
+    "Agnocast: Initializing memory allocator with %d pools, pool size: %llu bytes (%d GB), "
+    "start address: 0x%llx\n",
+    mempool_num, mempool_size_bytes, mempool_size_gb, addr);
+
+  if (mempool_num != DEFAULT_MEMPOOL_NUM) {
+    pr_warn(
+      "Agnocast: mempool_num=%d is not the default value (%d). "
+      "This parameter is experimental and may be removed or changed in future versions.\n",
+      mempool_num, DEFAULT_MEMPOOL_NUM);
+  }
+
+  if ((uint64_t)mempool_start_addr != DEFAULT_MEMPOOL_START_ADDR) {
+    pr_warn(
+      "Agnocast: mempool_start_addr=0x%lx is not the default value (0x%llx). "
+      "This parameter is experimental and may be removed or changed in future versions.\n",
+      mempool_start_addr, DEFAULT_MEMPOOL_START_ADDR);
+  }
 
   if (mempool_size_gb != DEFAULT_MEMPOOL_SIZE_GB) {
     pr_warn(
@@ -37,12 +98,24 @@ void init_memory_allocator(void)
       mempool_size_gb, DEFAULT_MEMPOOL_SIZE_GB);
   }
 
-  for (int i = 0; i < MEMPOOL_NUM; i++) {
+  {
+    uint64_t limit_85tb = 85ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+    if (end_addr > limit_85tb) {
+      pr_warn(
+        "Agnocast: memory region end address 0x%llx exceeds 85TB (0x%llx). "
+        "This may cause address space conflicts.\n",
+        end_addr, limit_85tb);
+    }
+  }
+
+  for (int i = 0; i < mempool_num; i++) {
     mempool_entries[i].addr = addr;
     mempool_entries[i].mapped_num = 0;
     INIT_LIST_HEAD(&mempool_entries[i].mapped_pid_head);
     addr += mempool_size_bytes;
   }
+
+  return 0;
 }
 
 struct mempool_entry * assign_memory(const pid_t pid)
@@ -59,7 +132,7 @@ struct mempool_entry * assign_memory(const pid_t pid)
   new_entry->pid = pid;
 
   spin_lock_irqsave(&mempool_lock, flags);
-  for (int i = 0; i < MEMPOOL_NUM; i++) {
+  for (int i = 0; i < mempool_num; i++) {
     if (mempool_entries[i].mapped_num == 0) {
       list_add(&new_entry->list, &mempool_entries[i].mapped_pid_head);
       mempool_entries[i].mapped_num = 1;
@@ -112,7 +185,7 @@ void free_memory(const pid_t pid)
   unsigned long flags;
 
   spin_lock_irqsave(&mempool_lock, flags);
-  for (int i = 0; i < MEMPOOL_NUM; i++) {
+  for (int i = 0; i < mempool_num; i++) {
     list_for_each_entry_safe(entry, tmp, &mempool_entries[i].mapped_pid_head, list)
     {
       if (entry->pid == pid) {
@@ -126,13 +199,14 @@ void free_memory(const pid_t pid)
   spin_unlock_irqrestore(&mempool_lock, flags);
 }
 
-#ifdef KUNIT_BUILD
 void exit_memory_allocator(void)
 {
   struct mapped_pid_entry * entry;
   struct mapped_pid_entry * tmp;
+  unsigned long flags;
 
-  for (int i = 0; i < MEMPOOL_NUM; i++) {
+  spin_lock_irqsave(&mempool_lock, flags);
+  for (int i = 0; i < mempool_num; i++) {
     list_for_each_entry_safe(entry, tmp, &mempool_entries[i].mapped_pid_head, list)
     {
       list_del(&entry->list);
@@ -140,5 +214,16 @@ void exit_memory_allocator(void)
     }
     mempool_entries[i].mapped_num = 0;
   }
+  spin_unlock_irqrestore(&mempool_lock, flags);
 }
-#endif
+
+void cleanup_memory_allocator(void)
+{
+  if (!mempool_entries) {
+    return;
+  }
+
+  exit_memory_allocator();
+  kfree(mempool_entries);
+  mempool_entries = NULL;
+}
