@@ -1533,12 +1533,18 @@ int ioctl_get_exit_process(
       continue;
     }
 
-    // Skip this proc_info if it has subscription entries but no buffer to receive them.
-    // It will be picked up on the next poll when a proper buffer is provided.
+    // If there are subscription entries but no buffer to receive them, discard the entries
+    // and warn. The subscription MQs will leak, but shm/bridge cleanup can still proceed and
+    // the daemon won't hang indefinitely.
     if (
       !list_empty(&proc_info->exit_subscription_list) &&
       (mq_info_buf == NULL || mq_info_buf_size == 0)) {
-      continue;
+      dev_warn(
+        agnocast_device,
+        "No MQ info buffer provided for pid=%d with %u subscription entries; "
+        "subscription MQs will leak. (ioctl_get_exit_process)\n",
+        proc_info->global_pid, proc_info->exit_subscription_count);
+      free_exit_subscription_list(proc_info);
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
@@ -2697,7 +2703,6 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       if (!mq_info_buf) return -ENOMEM;
     }
 
-    memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
     pid_t global_pid = -1;
     ret =
       ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
