@@ -159,20 +159,27 @@ void CallbackIsolatedAgnocastExecutor::spin()
     }
   }
 
-  // Join all child threads after monitoring loop exits
-  std::lock_guard<std::mutex> guard{child_resources_mutex_};
-  for (auto & weak_child_executor : weak_child_executors_) {
-    if (auto child_executor = weak_child_executor.lock()) {
-      child_executor->cancel();
+  // Join all child threads after monitoring loop exits.
+  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
+  // A child thread's callback may call cancel() which acquires child_resources_mutex_,
+  // so holding it during thread.join() would deadlock.
+  std::vector<std::thread> threads_to_join;
+  {
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    for (auto & weak_child_executor : weak_child_executors_) {
+      if (auto child_executor = weak_child_executor.lock()) {
+        child_executor->cancel();
+      }
     }
+    threads_to_join = std::move(child_threads_);
+    child_threads_.clear();
+    weak_child_executors_.clear();
   }
-  for (auto & thread : child_threads_) {
+  for (auto & thread : threads_to_join) {
     if (thread.joinable()) {
       thread.join();
     }
   }
-  child_threads_.clear();
-  weak_child_executors_.clear();
 }
 
 void CallbackIsolatedAgnocastExecutor::add_callback_group(
