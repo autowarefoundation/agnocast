@@ -1532,21 +1532,23 @@ int ioctl_get_exit_process(
 
     ioctl_ret->ret_pid = proc_info->local_pid;
 
-    // Copy subscription info to kernel buffer for user-space MQ cleanup
-    const uint32_t limit = (mq_info_buf != NULL) ? mq_info_buf_size : 0;
+    // Copy subscription info to kernel buffer for user-space MQ cleanup.
+    // The skip guard above ensures mq_info_buf is valid when the list is non-empty.
     uint32_t count = 0;
-    struct exit_subscription_entry * entry;
-    list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
-    {
-      if (count >= limit) {
-        dev_warn(
-          agnocast_device,
-          "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
-        break;
+    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
+      struct exit_subscription_entry * entry;
+      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
+      {
+        if (count >= mq_info_buf_size) {
+          dev_warn(
+            agnocast_device,
+            "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
+          break;
+        }
+        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
+        mq_info_buf[count].subscriber_id = entry->subscriber_id;
+        count++;
       }
-      strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
-      mq_info_buf[count].subscriber_id = entry->subscriber_id;
-      count++;
     }
     ioctl_ret->ret_subscription_mq_info_num = count;
 
