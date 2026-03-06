@@ -1533,11 +1533,12 @@ int ioctl_get_exit_process(
     ioctl_ret->ret_pid = proc_info->local_pid;
 
     // Copy subscription info to kernel buffer for user-space MQ cleanup
+    const uint32_t limit = (mq_info_buf != NULL) ? mq_info_buf_size : 0;
     uint32_t count = 0;
     struct exit_subscription_entry * entry;
     list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
     {
-      if (count >= mq_info_buf_size) {
+      if (count >= limit) {
         dev_warn(
           agnocast_device,
           "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
