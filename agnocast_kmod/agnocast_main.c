@@ -49,7 +49,7 @@ static DECLARE_RWSEM(global_htables_rwsem);
 // Maximum number of topic info ret
 #define MAX_TOPIC_INFO_RET_NUM max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
-// Allocated in pre_handler_subscriber_exit(), freed in ioctl_commit_exit_process() after
+// Allocated in pre_handler_subscriber_exit(), freed in agnocast_ioctl_commit_exit_process() after
 // the daemon successfully copies the data to user-space.
 struct exit_subscription_entry
 {
@@ -1506,14 +1506,15 @@ static void free_exit_subscription_list(struct process_info * proc_info)
 }
 
 // Two-phase ioctl for exit process cleanup:
-//   Phase 1 (ioctl_get_exit_process): read-only copy of subscription entries to kernel buffer.
-//   Phase 2 (ioctl_commit_exit_process): delete entries and free proc_info.
+//   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
+//   buffer.
+//   Phase 2 (agnocast_ioctl_commit_exit_process): delete entries and free proc_info.
 // The dispatch handler copies ret_pid and ret_subscription_mq_info_num to user-space between
 // Phase 1 and Phase 2. Phase 2 runs only after those critical copies succeed, so subscription
 // entries are never permanently lost. ret_daemon_should_exit is patched via a separate
 // copy_to_user after Phase 2; if that final copy fails, the daemon merely stays alive one extra
 // poll cycle — no resource leak.
-int ioctl_get_exit_process(
+int agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
   struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
 {
@@ -1526,8 +1527,7 @@ int ioctl_get_exit_process(
 
   struct process_info * proc_info;
   int bkt;
-  struct hlist_node * tmp;
-  hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
+  hash_for_each(proc_info_htable, bkt, proc_info, node)
   {
     if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
       continue;
@@ -1542,7 +1542,7 @@ int ioctl_get_exit_process(
       dev_warn(
         agnocast_device,
         "No MQ info buffer provided for pid=%d with %u subscription entries; "
-        "subscription MQs will leak. (ioctl_get_exit_process)\n",
+        "subscription MQs will leak. (agnocast_ioctl_get_exit_process)\n",
         proc_info->global_pid, proc_info->exit_subscription_count);
       free_exit_subscription_list(proc_info);
     }
@@ -1551,7 +1551,7 @@ int ioctl_get_exit_process(
     *out_global_pid = proc_info->global_pid;
 
     // Read-only copy of subscription info to kernel buffer. Entries are NOT deleted here;
-    // deletion is deferred to ioctl_commit_exit_process() after copy_to_user succeeds.
+    // deletion is deferred to agnocast_ioctl_commit_exit_process() after copy_to_user succeeds.
     uint32_t count = 0;
     if (mq_info_buf != NULL && mq_info_buf_size > 0) {
       struct exit_subscription_entry * entry;
@@ -1563,7 +1563,7 @@ int ioctl_get_exit_process(
           dev_warn(
             agnocast_device,
             "mq_info_buf is full, remaining entries kept for next poll. "
-            "(ioctl_get_exit_process)\n");
+            "(agnocast_ioctl_get_exit_process)\n");
           break;
         }
         strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
@@ -1579,7 +1579,7 @@ int ioctl_get_exit_process(
   return 0;
 }
 
-void ioctl_commit_exit_process(
+void agnocast_ioctl_commit_exit_process(
   const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
   bool * ret_daemon_should_exit)
 {
@@ -2704,11 +2704,15 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
 
     pid_t global_pid = -1;
-    ret =
-      ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
+    ret = agnocast_ioctl_get_exit_process(
+      ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
+    if (ret) {
+      kfree(mq_info_buf);
+      return ret;
+    }
 
     // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
-    // for the next poll (ioctl_commit_exit_process is not called).
+    // for the next poll (agnocast_ioctl_commit_exit_process is not called).
     if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
       uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
       if (copy_to_user(
@@ -2730,7 +2734,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     // Commit: delete copied entries and free proc_info. Safe because user-space already
     // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
     bool daemon_should_exit = false;
-    ioctl_commit_exit_process(
+    agnocast_ioctl_commit_exit_process(
       ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
 
     // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
