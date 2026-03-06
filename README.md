@@ -402,7 +402,7 @@ If shared memory or message queues are left behind, you can remove them manually
 
 ```bash
 # Remove leftover shared memory
-rm /dev/shm/agnocast_*
+rm /dev/shm/agnocast@*
 
 # Remove leftover message queues
 rm /dev/mqueue/agnocast@*
