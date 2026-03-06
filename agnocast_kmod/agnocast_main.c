@@ -2706,7 +2706,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     pid_t global_pid = -1;
     ret = agnocast_ioctl_get_exit_process(
       ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
-    if (ret) {
+    if (ret < 0) {
       kfree(mq_info_buf);
       return ret;
     }
