@@ -3430,7 +3430,13 @@ static int agnocast_init(void)
     return ret;
   }
 
-  init_memory_allocator();
+  ret = init_memory_allocator();
+  if (ret < 0) {
+    agnocast_exit_exit_hook();
+    agnocast_exit_kthread();
+    agnocast_exit_device();
+    return ret;
+  }
 
   dev_info(agnocast_device, "Agnocast installed! v%s\n", VERSION);
   return 0;
@@ -3545,6 +3551,7 @@ static void agnocast_exit(void)
   agnocast_exit_exit_hook();
 
   agnocast_exit_free_data();
+  cleanup_memory_allocator();
   dev_info(agnocast_device, "Agnocast removed!\n");
   agnocast_exit_device();
 }

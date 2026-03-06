@@ -6,8 +6,6 @@
 #include <kunit/test.h>
 
 static pid_t pid = 1000;
-static const int max_process_num = MEMPOOL_NUM;
-
 void test_case_add_process_normal(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 0);
@@ -29,7 +27,7 @@ void test_case_add_process_many(struct kunit * test)
   // Act
 
   pid_t local_pid_start = pid;
-  for (int i = 0; i < max_process_num - 1; i++) {
+  for (int i = 0; i < mempool_num - 1; i++) {
     uint64_t local_pid = pid++;
     union ioctl_add_process_args args;
     agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
@@ -43,8 +41,8 @@ void test_case_add_process_many(struct kunit * test)
   // Assert
 
   KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), max_process_num);
-  for (int i = 0; i < max_process_num; i++) {
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), mempool_num);
+  for (int i = 0; i < mempool_num; i++) {
     KUNIT_EXPECT_FALSE(test, agnocast_is_proc_exited(local_pid_start + i));
   }
 }
@@ -71,7 +69,7 @@ void test_case_add_process_too_many(struct kunit * test)
   // ================================================
   // Act
 
-  for (int i = 0; i < max_process_num; i++) {
+  for (int i = 0; i < mempool_num; i++) {
     uint64_t local_pid = pid++;
     union ioctl_add_process_args args;
     agnocast_ioctl_add_process(local_pid, current->nsproxy->ipc_ns, false, &args);
@@ -84,6 +82,6 @@ void test_case_add_process_too_many(struct kunit * test)
   // Assert
 
   KUNIT_EXPECT_EQ(test, ret, -ENOMEM);
-  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), max_process_num);
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), mempool_num);
   KUNIT_EXPECT_FALSE(test, agnocast_is_proc_exited(local_pid));
 }
