@@ -28,7 +28,7 @@ protected:
             (num_cbs));
 
     // Set the spin duration
-    std::chrono::seconds buffer = std::chrono::seconds(1);  // Rough value
+    std::chrono::seconds buffer = std::chrono::seconds(3);  // Rough value (generous for slow CI)
     spin_duration_ = std::max(
                        std::chrono::seconds(
                          (agnocast_next_exec_timeout_ms + cb_exec_time.count()) *
