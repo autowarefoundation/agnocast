@@ -1526,18 +1526,20 @@ static int ioctl_get_exit_process(
 
     // Copy subscription info to kernel buffer for user-space MQ cleanup
     uint32_t count = 0;
-    struct exit_subscription_entry * entry;
-    list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
-    {
-      if (count >= mq_info_buf_size) {
-        dev_warn(
-          agnocast_device,
-          "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
-        break;
+    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
+      struct exit_subscription_entry * entry;
+      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
+      {
+        if (count >= mq_info_buf_size) {
+          dev_warn(
+            agnocast_device,
+            "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
+          break;
+        }
+        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
+        mq_info_buf[count].subscriber_id = entry->subscriber_id;
+        count++;
       }
-      strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
-      mq_info_buf[count].subscriber_id = entry->subscriber_id;
-      count++;
     }
     ioctl_ret->ret_subscription_mq_info_num = count;
 
@@ -2642,7 +2644,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
     ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size);
 
-    if (ret == 0 && get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
+    if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
       uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
       if (copy_to_user(
             (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
@@ -3191,8 +3193,8 @@ static void pre_handler_subscriber_exit(
       hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * proc_info = find_process_info(pub_info->pid);
-          if (!proc_info || proc_info->exited) {
+          const struct process_info * pub_proc_info = find_process_info(pub_info->pid);
+          if (!pub_proc_info || pub_proc_info->exited) {
             publisher_exited = true;
           }
           break;
