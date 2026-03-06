@@ -461,7 +461,12 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid);
 
 int ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size);
+  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
+  pid_t * out_global_pid);
+
+void ioctl_commit_exit_process(
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
+  bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 

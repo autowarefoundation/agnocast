@@ -49,7 +49,8 @@ static DECLARE_RWSEM(global_htables_rwsem);
 // Maximum number of topic info ret
 #define MAX_TOPIC_INFO_RET_NUM max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
-// Allocated in pre_handler_subscriber_exit(), freed when the daemon polls ioctl_get_exit_process().
+// Allocated in pre_handler_subscriber_exit(), freed in ioctl_commit_exit_process() after
+// the daemon successfully copies the data to user-space.
 struct exit_subscription_entry
 {
   char topic_name[TOPIC_NAME_BUFFER_SIZE];
@@ -1504,12 +1505,21 @@ static void free_exit_subscription_list(struct process_info * proc_info)
   proc_info->exit_subscription_count = 0;
 }
 
+// Two-phase ioctl for exit process cleanup:
+//   Phase 1 (ioctl_get_exit_process): read-only copy of subscription entries to kernel buffer.
+//   Phase 2 (ioctl_commit_exit_process): delete entries and free proc_info.
+// The dispatch handler calls Phase 2 only after copy_to_user succeeds. If copy_to_user fails,
+// entries remain in the kernel for the next daemon poll — no data is permanently lost.
+// A single-phase design would delete entries before copy_to_user, risking permanent loss on
+// failure.
 int ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size)
+  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
 {
   ioctl_ret->ret_pid = -1;
   ioctl_ret->ret_subscription_mq_info_num = 0;
+  ioctl_ret->ret_daemon_should_exit = false;
+  *out_global_pid = -1;
 
   down_write(&global_htables_rwsem);
 
@@ -1531,20 +1541,18 @@ int ioctl_get_exit_process(
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
+    *out_global_pid = proc_info->global_pid;
 
-    // Copy subscription info to kernel buffer for user-space MQ cleanup.
-    // The skip guard above ensures mq_info_buf is valid when the list is non-empty.
+    // Read-only copy of subscription info to kernel buffer. Entries are NOT deleted here;
+    // deletion is deferred to ioctl_commit_exit_process() after copy_to_user succeeds.
     uint32_t count = 0;
-    bool truncated = false;
     if (mq_info_buf != NULL && mq_info_buf_size > 0) {
       struct exit_subscription_entry * entry;
-      struct exit_subscription_entry * tmp_entry;
-      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
+      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
       {
         // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard
         // above
         if (count >= mq_info_buf_size) {
-          truncated = true;
           dev_warn(
             agnocast_device,
             "mq_info_buf is full, remaining entries kept for next poll. "
@@ -1553,26 +1561,51 @@ int ioctl_get_exit_process(
         }
         strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
         mq_info_buf[count].subscriber_id = entry->subscriber_id;
-        list_del(&entry->list);
-        kfree(entry);
-        proc_info->exit_subscription_count--;
         count++;
       }
     }
     ioctl_ret->ret_subscription_mq_info_num = count;
-
-    if (!truncated) {
-      free_exit_subscription_list(proc_info);
-      hash_del_rcu(&proc_info->node);
-      kfree_rcu(proc_info, rcu_head);
-    }
     break;
   }
 
-  ioctl_ret->ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
-
   up_write(&global_htables_rwsem);
   return 0;
+}
+
+void ioctl_commit_exit_process(
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
+  bool * ret_daemon_should_exit)
+{
+  down_write(&global_htables_rwsem);
+
+  if (global_pid >= 0) {
+    struct process_info * proc_info = find_process_info(global_pid);
+    if (proc_info) {
+      // Delete the first committed_count entries (matching the read-only copy order).
+      uint32_t deleted = 0;
+      struct exit_subscription_entry * entry;
+      struct exit_subscription_entry * tmp_entry;
+      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
+      {
+        if (deleted >= committed_count) break;
+        list_del(&entry->list);
+        kfree(entry);
+        proc_info->exit_subscription_count--;
+        deleted++;
+      }
+
+      // Free proc_info only when all subscription entries have been consumed.
+      if (list_empty(&proc_info->exit_subscription_list)) {
+        free_exit_subscription_list(proc_info);
+        hash_del_rcu(&proc_info->node);
+        kfree_rcu(proc_info, rcu_head);
+      }
+    }
+  }
+
+  *ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
+
+  up_write(&global_htables_rwsem);
 }
 
 int agnocast_ioctl_get_topic_list(
@@ -2663,12 +2696,12 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     }
 
     memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
-    ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size);
+    pid_t global_pid = -1;
+    ret =
+      ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
 
-    // If copy_to_user fails here, the subscription info in the kernel buffer is lost
-    // (proc_info was already freed). This is acceptable because copy_to_user failure
-    // indicates a broken user-space caller, and the leaked MQs will be cleaned up on
-    // module unload.
+    // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
+    // for the next poll (ioctl_commit_exit_process is not called).
     if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
       uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
       if (copy_to_user(
@@ -2679,6 +2712,12 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       }
     }
     kfree(mq_info_buf);
+
+    // Commit: delete copied entries and free proc_info. Computes ret_daemon_should_exit.
+    bool daemon_should_exit = false;
+    ioctl_commit_exit_process(
+      ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+    get_exit_process_args.ret_daemon_should_exit = daemon_should_exit;
 
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,

@@ -186,7 +186,8 @@ void poll_for_unlink()
       get_exit_process_args = {};
       get_exit_process_args.subscription_mq_info_buffer_addr =
         reinterpret_cast<uint64_t>(mq_info_buf.data());
-      get_exit_process_args.subscription_mq_info_buffer_size = MAX_SUBSCRIPTION_NUM_PER_PROCESS;
+      get_exit_process_args.subscription_mq_info_buffer_size =
+        static_cast<uint32_t>(mq_info_buf.size());
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
