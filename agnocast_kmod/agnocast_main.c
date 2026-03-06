@@ -3161,6 +3161,12 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 }
 
 // Ring buffer (fast path) + overflow linked list (fallback) to hold exited pids
+struct exit_pid_node
+{
+  struct list_head list;
+  pid_t pid;
+};
+
 static DEFINE_SPINLOCK(pid_queue_lock);
 static pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 static uint32_t queue_head;
@@ -3246,7 +3252,8 @@ static int exit_worker_thread(void * data)
     if (kthread_should_stop()) break;
 
     // Drain all queued PIDs in a single wake-up cycle.
-    // First drain the ring buffer, then the overflow list.
+    // First drain the ring buffer, then the overflow list. Strict FIFO is not required
+    // because each PID's cleanup is independent (no ordering dependency between PIDs).
     while (true) {
       pid_t pid;
       unsigned long flags;
@@ -3294,17 +3301,21 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
     exit_pid_queue[queue_tail] = pid;
     queue_tail = next;
   } else {
-    // Overflow: ring buffer is full, allocate a list node
+    // Overflow: ring buffer is full. Drop the lock to allocate without IRQs disabled.
+    spin_unlock_irqrestore(&pid_queue_lock, flags);
+
     struct exit_pid_node * entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
     if (!entry) {
-      spin_unlock_irqrestore(&pid_queue_lock, flags);
 #ifndef KUNIT_BUILD
       dev_warn(
         agnocast_device, "failed to allocate exit_pid_node for pid=%d. (enqueue_exit_pid)\n", pid);
 #endif
       return;
     }
+
     entry->pid = pid;
+
+    spin_lock_irqsave(&pid_queue_lock, flags);
     list_add_tail(&entry->list, &exit_pid_overflow_list);
   }
 
@@ -3541,16 +3552,23 @@ void agnocast_exit_kthread(void)
 {
   struct exit_pid_node * entry;
   struct exit_pid_node * tmp;
+  unsigned long flags;
 
   wake_up_interruptible(&worker_wait);
   kthread_stop(worker_task);
 
-  // Free any remaining entries in the overflow list
+  // Free any remaining entries in the overflow list and ring buffer.
+  // The exit hook is already unregistered, so no new enqueues can arrive.
+  // Take the lock defensively for safety.
+  spin_lock_irqsave(&pid_queue_lock, flags);
   list_for_each_entry_safe(entry, tmp, &exit_pid_overflow_list, list)
   {
     list_del(&entry->list);
     kfree(entry);
   }
+  queue_head = 0;
+  queue_tail = 0;
+  spin_unlock_irqrestore(&pid_queue_lock, flags);
 }
 
 void agnocast_exit_exit_hook(void)
@@ -3571,8 +3589,9 @@ void agnocast_exit_device(void)
 #ifndef KUNIT_BUILD
 static void agnocast_exit(void)
 {
-  agnocast_exit_kthread();
+  // Unregister the exit hook first to prevent new enqueues, then stop the worker thread.
   agnocast_exit_exit_hook();
+  agnocast_exit_kthread();
 
   agnocast_exit_free_data();
   cleanup_memory_allocator();

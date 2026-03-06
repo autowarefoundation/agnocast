@@ -338,12 +338,6 @@ union ioctl_topic_info_args {
 #define EXIT_QUEUE_SIZE (1U << EXIT_QUEUE_SIZE_BITS)
 #define EXIT_QUEUE_MASK (EXIT_QUEUE_SIZE - 1)
 
-struct exit_pid_node
-{
-  struct list_head list;
-  pid_t pid;
-};
-
 int agnocast_init_device(void);
 int agnocast_init_kthread(void);
 int agnocast_init_exit_hook(void);
