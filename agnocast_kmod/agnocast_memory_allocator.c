@@ -10,15 +10,15 @@ MODULE_LICENSE("Dual BSD/GPL");
 static struct mempool_entry mempool_entries[MEMPOOL_NUM];
 static DEFINE_SPINLOCK(mempool_lock);
 
-// Module parameter: mempool size in GB (default: 8GB)
-int mempool_size_gb = 8;
+// Module parameter: mempool size in GB (default: 16GB)
+int mempool_size_gb = 16;
 module_param(mempool_size_gb, int, 0444);
-MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 8)");
+MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 16)");
 
 uint64_t mempool_size_bytes = 0;
 
 // Default mempool size in GB
-#define DEFAULT_MEMPOOL_SIZE_GB 8
+#define DEFAULT_MEMPOOL_SIZE_GB 16
 
 void init_memory_allocator(void)
 {
