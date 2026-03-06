@@ -11,10 +11,10 @@
  * balance the number of calling ioctl and the overhead of copying data between user and kernel
  * space. */
 #define MAX_RECEIVE_NUM 10
-#define MAX_RELEASE_NUM 3          // Maximum number of entries that can be released at one ioctl
+#define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
-#define VERSION_BUFFER_LEN 32      // Maximum size of version number represented as a string
+#define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
 struct publisher_shm_info
@@ -175,8 +175,8 @@ union ioctl_get_publisher_num_args {
 
 /* Max subscription MQ info entries buffered per process during exit cleanup.
  * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
- * These entries live in kernel memory from process exit until the daemon polls them (typically ~1s).
- * If the daemon is dead, they persist until module unload — but that scenario already leaves
+ * These entries live in kernel memory from process exit until the daemon polls them (typically
+ * ~1s). If the daemon is dead, they persist until module unload — but that scenario already leaves
  * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
 #define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
 
