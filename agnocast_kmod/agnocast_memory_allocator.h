@@ -3,11 +3,11 @@
 #include <linux/list.h>
 #include <linux/types.h>
 
-// Default is 1024, can be overridden by insmod parameter mempool_num
+// Default is 4096, can be overridden by insmod parameter mempool_num
 extern int mempool_num;
 // Default is 0x40000000000, can be overridden by insmod parameter mempool_start_addr
 extern unsigned long mempool_start_addr;
-// Default is 8GB, can be overridden by insmod parameter mempool_size_gb
+// Default is 16GB, can be overridden by insmod parameter mempool_size_gb
 extern int mempool_size_gb;
 // Mempool size in bytes (calculated from mempool_size_gb)
 extern uint64_t mempool_size_bytes;

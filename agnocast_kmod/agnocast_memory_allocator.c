@@ -10,14 +10,14 @@ MODULE_LICENSE("Dual BSD/GPL");
 static struct mempool_entry * mempool_entries;
 static DEFINE_SPINLOCK(mempool_lock);
 
-#define DEFAULT_MEMPOOL_NUM 1024
+#define DEFAULT_MEMPOOL_NUM 4096
 #define DEFAULT_MEMPOOL_START_ADDR 0x40000000000ULL
-#define DEFAULT_MEMPOOL_SIZE_GB 8
+#define DEFAULT_MEMPOOL_SIZE_GB 16
 
 // Module parameter: number of memory pools
 int mempool_num = DEFAULT_MEMPOOL_NUM;
 module_param(mempool_num, int, 0444);
-MODULE_PARM_DESC(mempool_num, "Number of memory pools (default: 1024)");
+MODULE_PARM_DESC(mempool_num, "Number of memory pools (default: 4096)");
 
 // Module parameter: start address of the allocator
 unsigned long mempool_start_addr = DEFAULT_MEMPOOL_START_ADDR;
@@ -28,7 +28,7 @@ MODULE_PARM_DESC(
 // Module parameter: mempool size in GB
 int mempool_size_gb = DEFAULT_MEMPOOL_SIZE_GB;
 module_param(mempool_size_gb, int, 0444);
-MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 8)");
+MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 16)");
 
 uint64_t mempool_size_bytes = 0;
 
