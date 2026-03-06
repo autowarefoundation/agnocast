@@ -1504,7 +1504,7 @@ static void free_exit_subscription_list(struct process_info * proc_info)
   proc_info->exit_subscription_count = 0;
 }
 
-static int ioctl_get_exit_process(
+int ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
   struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size)
 {
@@ -1522,24 +1522,30 @@ static int ioctl_get_exit_process(
       continue;
     }
 
+    // Skip this proc_info if it has subscription entries but no buffer to receive them.
+    // It will be picked up on the next poll when a proper buffer is provided.
+    if (
+      !list_empty(&proc_info->exit_subscription_list) &&
+      (mq_info_buf == NULL || mq_info_buf_size == 0)) {
+      continue;
+    }
+
     ioctl_ret->ret_pid = proc_info->local_pid;
 
     // Copy subscription info to kernel buffer for user-space MQ cleanup
     uint32_t count = 0;
-    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
-      struct exit_subscription_entry * entry;
-      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
-      {
-        if (count >= mq_info_buf_size) {
-          dev_warn(
-            agnocast_device,
-            "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
-          break;
-        }
-        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
-        mq_info_buf[count].subscriber_id = entry->subscriber_id;
-        count++;
+    struct exit_subscription_entry * entry;
+    list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
+    {
+      if (count >= mq_info_buf_size) {
+        dev_warn(
+          agnocast_device,
+          "mq_info_buf is full, some subscription MQs may leak. (ioctl_get_exit_process)\n");
+        break;
       }
+      strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
+      mq_info_buf[count].subscriber_id = entry->subscriber_id;
+      count++;
     }
     ioctl_ret->ret_subscription_mq_info_num = count;
 
@@ -2644,6 +2650,10 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
     memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
     ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size);
 
+    // If copy_to_user fails here, the subscription info in the kernel buffer is lost
+    // (proc_info was already freed). This is acceptable because copy_to_user failure
+    // indicates a broken user-space caller, and the leaked MQs will be cleaned up on
+    // module unload.
     if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
       uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
       if (copy_to_user(
@@ -3151,18 +3161,26 @@ static void pre_handler_subscriber_exit(
     const topic_local_id_t subscriber_id = sub_info->id;
 
     // Save subscription info for daemon cleanup before deleting the subscriber
-    struct exit_subscription_entry * exit_entry =
-      kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
-    if (exit_entry) {
-      strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
-      exit_entry->subscriber_id = subscriber_id;
-      list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
-      proc_info->exit_subscription_count++;
-    } else {
+    if (proc_info->exit_subscription_count >= MAX_SUBSCRIPTION_NUM_PER_PROCESS) {
       dev_warn(
         agnocast_device,
-        "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
-        "(pre_handler_subscriber_exit)\n");
+        "exit_subscription_list is full for pid=%d, subscription MQ may leak. "
+        "(pre_handler_subscriber_exit)\n",
+        pid);
+    } else {
+      struct exit_subscription_entry * exit_entry =
+        kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
+      if (exit_entry) {
+        strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
+        exit_entry->subscriber_id = subscriber_id;
+        list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
+        proc_info->exit_subscription_count++;
+      } else {
+        dev_warn(
+          agnocast_device,
+          "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
+          "(pre_handler_subscriber_exit)\n");
+      }
     }
 
     hash_del(&sub_info->node);
@@ -3581,6 +3599,7 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
+    free_exit_subscription_list(proc_info);
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
