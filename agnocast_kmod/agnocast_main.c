@@ -1077,11 +1077,17 @@ int agnocast_ioctl_publish_msg(
     // AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD), the next publish automatically includes
     // the bridge subscriber again, and message flow resumes.
     //
+    // Exception: when the bridge subscriber uses TRANSIENT_LOCAL QoS, it must always
+    // receive messages so the bridge's ROS 2 publisher can retain them in DDS history.
+    // A late-joining ROS 2 TRANSIENT_LOCAL subscriber expects to receive historical
+    // messages, which requires the bridge to have accumulated them beforehand.
+    //
     // Trade-off: ros2_subscriber_num is updated by polling (~1s interval), so there is
     // a brief window where messages are not forwarded when a ROS 2 subscriber first
-    // appears. This is acceptable for volatile QoS topics; transient local semantics
-    // across the bridge boundary are not supported regardless.
-    if (sub_info->is_bridge && wrapper->topic.ros2_subscriber_num == 0) {
+    // appears on volatile QoS topics.
+    if (
+      sub_info->is_bridge && !sub_info->qos_is_transient_local &&
+      wrapper->topic.ros2_subscriber_num == 0) {
       continue;
     }
     subscriber_ids_out[subscriber_num] = sub_info->id;

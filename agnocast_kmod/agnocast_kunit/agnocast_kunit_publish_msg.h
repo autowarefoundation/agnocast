@@ -16,7 +16,8 @@
     KUNIT_CASE(test_case_ignore_local_diff_pid_enabled),                                      \
     KUNIT_CASE(test_case_ignore_local_diff_pid_disabled),                                     \
     KUNIT_CASE(test_case_bridge_sub_skipped_when_no_ros2_sub),                                \
-    KUNIT_CASE(test_case_bridge_sub_included_when_ros2_sub_exists)
+    KUNIT_CASE(test_case_bridge_sub_included_when_ros2_sub_exists),                           \
+    KUNIT_CASE(test_case_transient_local_bridge_sub_not_skipped_when_no_ros2_sub)
 
 void test_case_publish_msg_no_topic(struct kunit * test);
 void test_case_publish_msg_no_publisher(struct kunit * test);
@@ -34,3 +35,4 @@ void test_case_ignore_local_diff_pid_enabled(struct kunit * test);
 void test_case_ignore_local_diff_pid_disabled(struct kunit * test);
 void test_case_bridge_sub_skipped_when_no_ros2_sub(struct kunit * test);
 void test_case_bridge_sub_included_when_ros2_sub_exists(struct kunit * test);
+void test_case_transient_local_bridge_sub_not_skipped_when_no_ros2_sub(struct kunit * test);
