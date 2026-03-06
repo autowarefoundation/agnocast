@@ -122,9 +122,11 @@ void test_case_do_exit(struct kunit * test)
 
 void test_case_do_exit_many(struct kunit * test)
 {
-  // Arrange
+  // Arrange: register all mempool processes plus some non-agnocast PIDs.
+  // The non-agnocast PIDs are not registered in the process hash table, but the worker must
+  // still dequeue and skip them without errors.
   const int agnocast_process_num = mempool_num;
-  const int non_agnocast_process_num = EXIT_QUEUE_SIZE - agnocast_process_num;
+  const int non_agnocast_process_num = mempool_num;
   setup_processes(test, agnocast_process_num);
 
   // Act
@@ -133,9 +135,11 @@ void test_case_do_exit_many(struct kunit * test)
     agnocast_enqueue_exit_pid(pid);
   }
 
-  // wait for exit_worker_thread to handle process exit:
-  // this value is conservatively estimated to be large enough
-  msleep(100);
+  // Wait for exit_worker_thread to drain all PIDs (poll instead of fixed sleep)
+  for (int i = 0; i < 100; i++) {
+    if (agnocast_get_alive_proc_num() == 0) break;
+    msleep(10);
+  }
 
   // Assert
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 0);
@@ -152,6 +156,7 @@ void test_case_do_exit_overflow(struct kunit * test)
   const int agnocast_process_num = mempool_num;
   const int total_enqueue_num = EXIT_QUEUE_SIZE + agnocast_process_num;
   setup_processes(test, agnocast_process_num);
+  agnocast_reset_exit_overflow_count();
 
   // Act: enqueue enough PIDs to overflow the ring buffer
   for (int i = 0; i < total_enqueue_num; i++) {
@@ -159,8 +164,14 @@ void test_case_do_exit_overflow(struct kunit * test)
     agnocast_enqueue_exit_pid(pid);
   }
 
-  // wait for exit_worker_thread to handle process exit
-  msleep(200);
+  // Wait for exit_worker_thread to drain all PIDs (poll instead of fixed sleep)
+  for (int i = 0; i < 100; i++) {
+    if (agnocast_get_alive_proc_num() == 0) break;
+    msleep(10);
+  }
+
+  // Assert: overflow path was actually taken
+  KUNIT_EXPECT_GT(test, agnocast_get_exit_overflow_count(), 0);
 
   // Assert: all agnocast processes must have been cleaned up (none dropped)
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 0);

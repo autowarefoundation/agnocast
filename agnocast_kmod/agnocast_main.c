@@ -3172,6 +3172,19 @@ static pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 static uint32_t queue_head;
 static uint32_t queue_tail;
 static LIST_HEAD(exit_pid_overflow_list);
+static atomic_t exit_overflow_count = ATOMIC_INIT(0);
+
+#ifdef KUNIT_BUILD
+int agnocast_get_exit_overflow_count(void)
+{
+  return atomic_read(&exit_overflow_count);
+}
+
+void agnocast_reset_exit_overflow_count(void)
+{
+  atomic_set(&exit_overflow_count, 0);
+}
+#endif
 
 // For controling the kernel thread
 static struct task_struct * worker_task;
@@ -3252,8 +3265,8 @@ static int exit_worker_thread(void * data)
     if (kthread_should_stop()) break;
 
     // Drain all queued PIDs in a single wake-up cycle.
-    // First drain the ring buffer, then the overflow list. Strict FIFO is not required
-    // because each PID's cleanup is independent (no ordering dependency between PIDs).
+    // Ring entries are always the oldest (enqueue routes to overflow while the overflow list
+    // is non-empty), so drain the ring first, then the overflow list.
     while (true) {
       pid_t pid;
       unsigned long flags;
@@ -3296,12 +3309,16 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 
   next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
-  if (next != queue_head) {
-    // Fast path: ring buffer has space
+  if (likely(next != queue_head && list_empty(&exit_pid_overflow_list))) {
+    // Fast path: ring buffer has space and no overflow backlog.
+    // We must also check the overflow list so that new entries don't bypass older overflow entries,
+    // which would break FIFO ordering and could starve the overflow list.
     exit_pid_queue[queue_tail] = pid;
     queue_tail = next;
   } else {
-    // Overflow: ring buffer is full. Drop the lock to allocate without IRQs disabled.
+    atomic_inc(&exit_overflow_count);
+    // Overflow: ring buffer is full or overflow backlog exists.
+    // Drop the lock to allocate without IRQs disabled.
     spin_unlock_irqrestore(&pid_queue_lock, flags);
 
     struct exit_pid_node * entry = kmalloc(sizeof(*entry), GFP_ATOMIC);

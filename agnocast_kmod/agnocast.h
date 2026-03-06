@@ -333,8 +333,14 @@ union ioctl_topic_info_args {
 // ================================================
 // public macros and functions in agnocast_main.c
 
-// From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10
+// From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10.
+// Use a smaller ring in KUnit builds so test_case_do_exit_overflow can trigger
+// the overflow linked-list path without enqueuing 65k+ PIDs.
+#ifdef KUNIT_BUILD
+#define EXIT_QUEUE_SIZE_BITS 10
+#else
 #define EXIT_QUEUE_SIZE_BITS 16
+#endif
 #define EXIT_QUEUE_SIZE (1U << EXIT_QUEUE_SIZE_BITS)
 #define EXIT_QUEUE_MASK (EXIT_QUEUE_SIZE - 1)
 
@@ -470,4 +476,6 @@ int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
+int agnocast_get_exit_overflow_count(void);
+void agnocast_reset_exit_overflow_count(void);
 #endif
