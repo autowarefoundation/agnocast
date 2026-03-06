@@ -53,11 +53,6 @@ extern "C" PerformanceBridgeResult create_a2r_bridge(
   auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<@(cpp_type)> msg) {
-    // The kernel module already skips notifying bridge subscribers when ros2_subscriber_num == 0,
-    // but this serves as a fallback since ros2_subscriber_num updates are periodic.
-    if (ros_pub->get_subscription_count() == 0) {
-      return;
-    }
     auto loaned_msg = ros_pub->borrow_loaned_message();
     if (loaned_msg.is_valid()) {
       loaned_msg.get() = *msg;
