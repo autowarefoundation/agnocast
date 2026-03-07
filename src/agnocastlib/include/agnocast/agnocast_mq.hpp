@@ -12,7 +12,6 @@ inline pid_t standard_bridge_manager_pid = 0;
 inline constexpr pid_t PERFORMANCE_BRIDGE_VIRTUAL_PID = -1;
 
 inline constexpr size_t SHARED_LIB_PATH_BUFFER_SIZE = 4096;  // Linux PATH_MAX is 4096
-inline constexpr size_t TOPIC_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t SYMBOL_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t MESSAGE_TYPE_BUFFER_SIZE = 256;
 
