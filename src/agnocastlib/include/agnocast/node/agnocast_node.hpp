@@ -372,7 +372,7 @@ public:
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
       static_cast<const void *>(node_base_.get()), callback_addr,
-      static_cast<const void *>(group.get()), callback_symbol, period.count());
+      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
     return timer;
   }
@@ -435,6 +435,9 @@ private:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
     auto timer = std::make_shared<GenericTimer<CallbackT>>(
       timer_id, period_ns, clock, std::forward<CallbackT>(callback));
 
@@ -442,8 +445,8 @@ private:
 
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
-      static_cast<const void *>(node_base_.get()), static_cast<const void *>(&callback),
-      static_cast<const void *>(group.get()), tracetools::get_symbol(callback), period_ns.count());
+      static_cast<const void *>(node_base_.get()), callback_addr,
+      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
     return timer;
   }
