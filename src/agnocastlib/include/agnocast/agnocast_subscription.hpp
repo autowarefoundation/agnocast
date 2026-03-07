@@ -37,6 +37,7 @@ void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t
 // Defined in .cpp to avoid circular inclusion between agnocast_subscription.hpp and
 // agnocast_node.hpp.
 rclcpp::CallbackGroup::SharedPtr create_dummy_callback_group(agnocast::Node * node);
+const void * get_node_base_address(Node * node);
 
 struct SubscriptionOptions
 {
@@ -184,9 +185,10 @@ public:
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
       TRACEPOINT(
         agnocast_subscription_init, static_cast<const void *>(this),
-        static_cast<const void *>(node), static_cast<const void *>(&callback),
-        static_cast<const void *>(callback_group.get()), tracetools::get_symbol(callback),
-        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
+        static_cast<const void *>(get_node_base_address(node)),
+        static_cast<const void *>(&callback), static_cast<const void *>(callback_group.get()),
+        tracetools::get_symbol(callback), topic_name_.c_str(), actual_qos.depth(),
+        pid_callback_info_id);
     }
   }
 
@@ -275,9 +277,9 @@ public:
       std::string dummy_cb_symbols = "dummy_take" + topic_name;
       TRACEPOINT(
         agnocast_subscription_init, static_cast<const void *>(this),
-        static_cast<const void *>(node), static_cast<const void *>(&dummy_cb),
-        static_cast<const void *>(dummy_cbg.get()), dummy_cb_symbols.c_str(), topic_name_.c_str(),
-        actual_qos.depth(), 0);
+        static_cast<const void *>(get_node_base_address(node)),
+        static_cast<const void *>(&dummy_cb), static_cast<const void *>(dummy_cbg.get()),
+        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos.depth(), 0);
     }
   }
 

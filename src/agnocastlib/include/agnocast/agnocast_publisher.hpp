@@ -28,6 +28,8 @@ namespace agnocast
 {
 class Node;
 
+const void * get_node_base_address(Node * node);
+
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
@@ -137,8 +139,9 @@ public:
     const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, false);
 
     TRACEPOINT(
-      agnocast_publisher_init, static_cast<const void *>(this), static_cast<const void *>(node),
-      topic_name_.c_str(), actual_qos.depth());
+      agnocast_publisher_init, static_cast<const void *>(this),
+      static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
+      actual_qos.depth());
   }
 
   ~BasicPublisher()
