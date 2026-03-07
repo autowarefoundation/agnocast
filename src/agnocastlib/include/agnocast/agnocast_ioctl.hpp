@@ -23,6 +23,8 @@ namespace agnocast
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define NODE_NAME_BUFFER_SIZE 256
+#define TOPIC_NAME_BUFFER_SIZE 256
+#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -213,10 +215,21 @@ union ioctl_get_publisher_num_args {
 };
 #pragma GCC diagnostic pop
 
+struct exit_subscription_mq_info
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  topic_local_id_t subscriber_id;
+};
+
 struct ioctl_get_exit_process_args
 {
+  // input: user-space buffer for subscription MQ info
+  uint64_t subscription_mq_info_buffer_addr;
+  uint32_t subscription_mq_info_buffer_size;
+  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
+  uint32_t ret_subscription_mq_info_num;
 };
 
 struct topic_info_ret
@@ -338,7 +351,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
