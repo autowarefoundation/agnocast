@@ -1070,6 +1070,36 @@ int agnocast_ioctl_publish_msg(
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
+    // Skip the A2R bridge subscriber when no ROS 2 subscribers exist on this topic.
+    //
+    // Background: The A2R (Agnocast-to-ROS2) bridge node creates an Agnocast subscriber
+    // that receives messages and republishes them to ROS 2. Without this check, the bridge
+    // subscriber is always included in the publish notification list, causing:
+    //   1. User-space sends an MQ wakeup to the bridge subscriber
+    //   2. Bridge subscriber wakes, issues a receive ioctl, sets its bitmap bit
+    //   3. Bridge node does a ROS 2 publish — to no one
+    // This is pure waste when no ROS 2 subscriber exists on the topic.
+    //
+    // By excluding the bridge subscriber from the returned list here, user-space never
+    // sends an MQ wakeup to it, so the bridge stays idle with zero overhead.
+    //
+    // When ros2_subscriber_num later becomes > 0 (updated by the bridge manager via
+    // AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD), the next publish automatically includes
+    // the bridge subscriber again, and message flow resumes.
+    //
+    // Exception: when the bridge subscriber uses TRANSIENT_LOCAL QoS, it must always
+    // receive messages so the bridge's ROS 2 publisher can retain them in DDS history.
+    // A late-joining ROS 2 TRANSIENT_LOCAL subscriber expects to receive historical
+    // messages, which requires the bridge to have accumulated them beforehand.
+    //
+    // Trade-off: ros2_subscriber_num is updated by polling (~1s interval), so there is
+    // a brief window where messages are not forwarded when a ROS 2 subscriber first
+    // appears on volatile QoS topics.
+    if (
+      sub_info->is_bridge && !sub_info->qos_is_transient_local &&
+      wrapper->topic.ros2_subscriber_num == 0) {
+      continue;
+    }
     subscriber_ids_out[subscriber_num] = sub_info->id;
     subscriber_num++;
   }

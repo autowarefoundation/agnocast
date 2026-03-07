@@ -14,6 +14,7 @@ static pid_t publisher_pid = 2000;
 static pid_t common_pid = 3000;
 static bool is_take_sub = false;
 static bool is_bridge = false;
+static bool is_bridge_true = true;
 
 static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
@@ -495,4 +496,97 @@ void test_case_ignore_local_diff_pid_disabled(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 1);
   KUNIT_EXPECT_EQ(test, subscriber_ids_buf[0], subscriber_id);
+}
+
+static void setup_one_bridge_subscriber(
+  struct kunit * test, topic_local_id_t * subscriber_id, bool ignore_local_publications,
+  bool is_transient_local)
+{
+  subscriber_pid++;
+
+  union ioctl_add_process_args add_process_args;
+  int ret1 =
+    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret2 = agnocast_ioctl_add_subscriber(
+    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth, is_transient_local,
+    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge_true, &add_subscriber_args);
+  *subscriber_id = add_subscriber_args.ret_id;
+
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+  KUNIT_ASSERT_EQ(test, ret2, 0);
+}
+
+void test_case_bridge_sub_skipped_when_no_ros2_sub(struct kunit * test)
+{
+  // Arrange: publisher + volatile bridge subscriber, ros2_subscriber_num defaults to 0
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  topic_local_id_t bridge_sub_id;
+  setup_one_bridge_subscriber(test, &bridge_sub_id, false, false);
+  (void)bridge_sub_id;
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
+
+  // Assert: bridge subscriber should be excluded from the notification list
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 0);
+}
+
+void test_case_bridge_sub_included_when_ros2_sub_exists(struct kunit * test)
+{
+  // Arrange: publisher + volatile bridge subscriber + ros2_subscriber_num = 1
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  topic_local_id_t bridge_sub_id;
+  setup_one_bridge_subscriber(test, &bridge_sub_id, false, false);
+
+  int set_ret = agnocast_ioctl_set_ros2_subscriber_num(topic_name, current->nsproxy->ipc_ns, 1);
+  KUNIT_ASSERT_EQ(test, set_ret, 0);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
+
+  // Assert: bridge subscriber should be included in the notification list
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 1);
+  KUNIT_EXPECT_EQ(test, subscriber_ids_buf[0], bridge_sub_id);
+}
+
+void test_case_transient_local_bridge_sub_not_skipped_when_no_ros2_sub(struct kunit * test)
+{
+  // Arrange: publisher + transient local bridge subscriber, ros2_subscriber_num defaults to 0
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  topic_local_id_t bridge_sub_id;
+  setup_one_bridge_subscriber(test, &bridge_sub_id, false, true);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, subscriber_ids_buf,
+    ARRAY_SIZE(subscriber_ids_buf), &ioctl_publish_msg_ret);
+
+  // Assert: transient local bridge subscriber must NOT be skipped — it needs to accumulate
+  // messages so the bridge's ROS 2 publisher can retain them for late-joining subscribers.
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_subscriber_num, 1);
+  KUNIT_EXPECT_EQ(test, subscriber_ids_buf[0], bridge_sub_id);
 }
