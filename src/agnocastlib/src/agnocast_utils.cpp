@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_utils.hpp"
 
 #include "agnocast/agnocast_mq.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -106,6 +107,11 @@ uint64_t agnocast_get_timestamp()
 {
   auto now = std::chrono::system_clock::now();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+}
+
+const void * get_node_base_address(agnocast::Node * node)
+{
+  return static_cast<const void *>(node->get_node_base_interface().get());
 }
 
 }  // namespace agnocast
