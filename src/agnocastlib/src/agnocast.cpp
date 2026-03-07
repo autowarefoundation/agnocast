@@ -13,8 +13,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <span>
+#include <vector>
 
 namespace agnocast
 {
@@ -175,12 +177,18 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode brid
 
 void poll_for_unlink()
 {
+  std::vector<exit_subscription_mq_info> mq_info_buf(MAX_SUBSCRIPTION_NUM_PER_PROCESS);
+
   while (true) {
     sleep(1);
 
     struct ioctl_get_exit_process_args get_exit_process_args = {};
     do {
       get_exit_process_args = {};
+      get_exit_process_args.subscription_mq_info_buffer_addr =
+        reinterpret_cast<uint64_t>(mq_info_buf.data());
+      get_exit_process_args.subscription_mq_info_buffer_size =
+        static_cast<uint32_t>(mq_info_buf.size());
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
@@ -195,6 +203,15 @@ void poll_for_unlink()
         // all exited processes to avoid the complexity of checking the process type.
         const std::string mq_name = create_mq_name_for_bridge(get_exit_process_args.ret_pid);
         mq_unlink(mq_name.c_str());
+
+        // Unlink subscription MQs that the exited process owned
+        for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+          const std::string topic_name(mq_info_buf[i].topic_name);
+          const std::string sub_mq_name =
+            create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
+          mq_unlink(sub_mq_name.c_str());
+        }
       }
     } while (get_exit_process_args.ret_pid > 0);
 
