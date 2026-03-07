@@ -704,7 +704,7 @@ void test_case_do_exit_subscription_mq_info(struct kunit * test)
   KUNIT_EXPECT_EQ(test, mq_info_buf[0].subscriber_id, sub_id);
 
   bool daemon_should_exit = false;
-  agnocast_ioctl_commit_exit_process(
+  agnocast_commit_exit_process(
     current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
     &daemon_should_exit);
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
@@ -761,7 +761,7 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, found_topic_2);
 
   bool daemon_should_exit = false;
-  agnocast_ioctl_commit_exit_process(
+  agnocast_commit_exit_process(
     current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
     &daemon_should_exit);
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);

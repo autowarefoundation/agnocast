@@ -464,7 +464,7 @@ int agnocast_ioctl_get_exit_process(
   struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
   pid_t * out_global_pid);
 
-void agnocast_ioctl_commit_exit_process(
+void agnocast_commit_exit_process(
   const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
   bool * ret_daemon_should_exit);
 
