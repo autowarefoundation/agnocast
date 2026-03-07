@@ -1057,6 +1057,7 @@ int agnocast_ioctl_publish_msg(
   hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
+    if (sub_info->is_bridge && wrapper->topic.ros2_subscriber_num == 0) continue;
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
