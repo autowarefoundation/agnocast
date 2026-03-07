@@ -106,10 +106,9 @@ void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription)
   }
 }
 
-rclcpp::CallbackGroup::SharedPtr create_dummy_callback_group(agnocast::Node * node)
+rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnocast::Node * node)
 {
-  return node->get_node_base_interface()->create_callback_group(
-    rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  return node->get_node_base_interface()->get_default_callback_group();
 }
 
 }  // namespace agnocast
