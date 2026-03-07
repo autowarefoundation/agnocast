@@ -26,8 +26,11 @@ public:
     return parsed_arguments_.is_valid() ? parsed_arguments_.get() : nullptr;
   }
 
+  bool is_rosout_enabled() const { return enable_rosout_logs_; }
+
 private:
   bool initialized_ = false;
+  bool enable_rosout_logs_ = false;
   ParsedArguments parsed_arguments_;
 };
 
