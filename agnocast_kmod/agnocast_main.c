@@ -6,6 +6,7 @@
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/mm.h>  // kvzalloc, kvfree
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/tracepoint.h>
@@ -45,9 +46,6 @@ static DECLARE_RWSEM(global_htables_rwsem);
 #define PUB_INFO_HASH_BITS 3
 #define SUB_INFO_HASH_BITS 5
 #define PROC_INFO_HASH_BITS 10
-
-// Maximum number of topic info ret
-#define MAX_TOPIC_INFO_RET_NUM max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 // Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
 // the daemon successfully copies the data to user-space.
@@ -1788,7 +1786,7 @@ unlock:
   return ret;
 }
 
-static int ioctl_get_topic_subscriber_info(
+int agnocast_ioctl_get_topic_subscriber_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
@@ -1805,42 +1803,50 @@ static int ioctl_get_topic_subscriber_info(
 
   down_read(&wrapper->topic_rwsem);
 
-  uint32_t subscriber_num = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
 
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
-  struct topic_info_ret * topic_info_mem =
-    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
-  if (!topic_info_mem) {
-    ret = -ENOMEM;
-    goto unlock;
-  }
-
+  // Count actual subscribers first
+  uint32_t subscriber_num = 0;
   hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
   {
-    if (
-      subscriber_num >= MAX_TOPIC_INFO_RET_NUM ||
-      subscriber_num >= topic_info_args->topic_info_ret_buffer_size) {
-      dev_warn(
-        agnocast_device,
-        "Subscriber count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, "
-        "topic_info_ret_buffer_size=%u\n",
-        MAX_TOPIC_INFO_RET_NUM, topic_info_args->topic_info_ret_buffer_size);
-      kfree(topic_info_mem);
-      ret = -ENOBUFS;
+    subscriber_num++;
+  }
+
+  uint32_t copy_num = min(subscriber_num, topic_info_args->topic_info_ret_buffer_size);
+  if (subscriber_num > topic_info_args->topic_info_ret_buffer_size) {
+    dev_warn(
+      agnocast_device,
+      "Subscriber count exceeds limit: subscriber_num=%u, "
+      "topic_info_ret_buffer_size=%u\n",
+      subscriber_num, topic_info_args->topic_info_ret_buffer_size);
+  }
+
+  struct topic_info_ret * topic_info_mem = NULL;
+  if (copy_num > 0) {
+    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * copy_num, GFP_KERNEL);
+    if (!topic_info_mem) {
+      ret = -ENOMEM;
       goto unlock;
     }
+  }
+
+  uint32_t idx = 0;
+  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    // cppcheck-suppress unsignedLessThanZero
+    if (idx >= copy_num) break;
 
     if (!sub_info->node_name) {
-      kfree(topic_info_mem);
+      kvfree(topic_info_mem);
       ret = -EFAULT;
       goto unlock;
     }
 
-    struct topic_info_ret * temp_info = &topic_info_mem[subscriber_num];
+    struct topic_info_ret * temp_info = &topic_info_mem[idx];
 
     strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
     temp_info->qos_depth = sub_info->qos_depth;
@@ -1848,17 +1854,19 @@ static int ioctl_get_topic_subscriber_info(
     temp_info->qos_is_reliable = sub_info->qos_is_reliable;
     temp_info->is_bridge = sub_info->is_bridge;
 
-    subscriber_num++;
+    idx++;
   }
 
-  if (copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * subscriber_num)) {
-    kfree(topic_info_mem);
+  if (
+    copy_num > 0 &&
+    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * copy_num)) {
+    kvfree(topic_info_mem);
     ret = -EFAULT;
     goto unlock;
   }
 
-  kfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = subscriber_num;
+  kvfree(topic_info_mem);
+  topic_info_args->ret_topic_info_ret_num = copy_num;
 
 unlock:
   up_read(&wrapper->topic_rwsem);
@@ -1866,7 +1874,7 @@ unlock:
   return ret;
 }
 
-static int ioctl_get_topic_publisher_info(
+int agnocast_ioctl_get_topic_publisher_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
@@ -1883,41 +1891,50 @@ static int ioctl_get_topic_publisher_info(
 
   down_read(&wrapper->topic_rwsem);
 
-  uint32_t publisher_num = 0;
   struct publisher_info * pub_info;
   int bkt_pub_info;
 
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
 
-  struct topic_info_ret * topic_info_mem =
-    kzalloc(sizeof(struct topic_info_ret) * MAX_TOPIC_INFO_RET_NUM, GFP_KERNEL);
-  if (!topic_info_mem) {
-    ret = -ENOMEM;
-    goto unlock;
-  }
-
+  // Count actual publishers first
+  uint32_t publisher_num = 0;
   hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
   {
-    if (
-      publisher_num >= MAX_TOPIC_INFO_RET_NUM ||
-      publisher_num >= topic_info_args->topic_info_ret_buffer_size) {
-      dev_warn(
-        agnocast_device,
-        "Publisher count exceeds limit: MAX_TOPIC_INFO_RET_NUM=%d, topic_info_ret_buffer_size=%u\n",
-        MAX_TOPIC_INFO_RET_NUM, topic_info_args->topic_info_ret_buffer_size);
-      kfree(topic_info_mem);
-      ret = -ENOBUFS;
+    publisher_num++;
+  }
+
+  uint32_t copy_num = min(publisher_num, topic_info_args->topic_info_ret_buffer_size);
+  if (publisher_num > topic_info_args->topic_info_ret_buffer_size) {
+    dev_warn(
+      agnocast_device,
+      "Publisher count exceeds limit: publisher_num=%u, "
+      "topic_info_ret_buffer_size=%u\n",
+      publisher_num, topic_info_args->topic_info_ret_buffer_size);
+  }
+
+  struct topic_info_ret * topic_info_mem = NULL;
+  if (copy_num > 0) {
+    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * copy_num, GFP_KERNEL);
+    if (!topic_info_mem) {
+      ret = -ENOMEM;
       goto unlock;
     }
+  }
+
+  uint32_t idx = 0;
+  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    // cppcheck-suppress unsignedLessThanZero
+    if (idx >= copy_num) break;
 
     if (!pub_info->node_name) {
-      kfree(topic_info_mem);
+      kvfree(topic_info_mem);
       ret = -EFAULT;
       goto unlock;
     }
 
-    struct topic_info_ret * temp_info = &topic_info_mem[publisher_num];
+    struct topic_info_ret * temp_info = &topic_info_mem[idx];
 
     strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
     temp_info->qos_depth = pub_info->qos_depth;
@@ -1925,17 +1942,19 @@ static int ioctl_get_topic_publisher_info(
     temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
     temp_info->is_bridge = pub_info->is_bridge;
 
-    publisher_num++;
+    idx++;
   }
 
-  if (copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * publisher_num)) {
-    kfree(topic_info_mem);
+  if (
+    copy_num > 0 &&
+    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * copy_num)) {
+    kvfree(topic_info_mem);
     ret = -EFAULT;
     goto unlock;
   }
 
-  kfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = publisher_num;
+  kvfree(topic_info_mem);
+  topic_info_args->ret_topic_info_ret_num = copy_num;
 
 unlock:
   up_read(&wrapper->topic_rwsem);
@@ -2820,7 +2839,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
     }
     topic_name_buf[topic_info_sub_args.topic_name.len] = '\0';
-    ret = ioctl_get_topic_subscriber_info(topic_name_buf, ipc_ns, &topic_info_sub_args);
+    ret = agnocast_ioctl_get_topic_subscriber_info(topic_name_buf, ipc_ns, &topic_info_sub_args);
     kfree(topic_name_buf);
     if (ret == 0) {
       if (copy_to_user(
@@ -2844,7 +2863,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
     }
     topic_name_buf[topic_info_pub_args.topic_name.len] = '\0';
-    ret = ioctl_get_topic_publisher_info(topic_name_buf, ipc_ns, &topic_info_pub_args);
+    ret = agnocast_ioctl_get_topic_publisher_info(topic_name_buf, ipc_ns, &topic_info_pub_args);
     kfree(topic_name_buf);
     if (ret == 0) {
       if (copy_to_user(
