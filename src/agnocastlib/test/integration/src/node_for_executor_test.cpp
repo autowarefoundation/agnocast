@@ -21,7 +21,11 @@ NodeForExecutorTest::NodeForExecutorTest(
   for (int64_t i = 0; i < num_agnocast_sub_cbs; i++) {
     add_agnocast_sub_cb();
   }
-  agnocast_sub_cbs_called_.assign(num_agnocast_sub_cbs + num_agnocast_cbs_to_be_added, false);
+  num_total_agnocast_sub_cbs_ = num_agnocast_sub_cbs + num_agnocast_cbs_to_be_added;
+  agnocast_sub_cbs_called_ = std::make_unique<std::atomic<bool>[]>(num_total_agnocast_sub_cbs_);
+  for (size_t i = 0; i < num_total_agnocast_sub_cbs_; i++) {
+    agnocast_sub_cbs_called_[i].store(false, std::memory_order_relaxed);
+  }
 
   // For ROS 2
   ros2_pub_ = create_publisher<std_msgs::msg::Bool>(ros2_topic_name_, 1);
@@ -38,7 +42,11 @@ NodeForExecutorTest::NodeForExecutorTest(
       [this, i](const std::shared_ptr<const std_msgs::msg::Bool> msg) { ros2_sub_cb(msg, i); },
       options));
   }
-  ros2_sub_cbs_called_.assign(num_ros2_sub_cbs, false);
+  num_ros2_sub_cbs_ = num_ros2_sub_cbs;
+  ros2_sub_cbs_called_ = std::make_unique<std::atomic<bool>[]>(num_ros2_sub_cbs_);
+  for (size_t i = 0; i < num_ros2_sub_cbs_; i++) {
+    ros2_sub_cbs_called_[i].store(false, std::memory_order_relaxed);
+  }
 }
 
 NodeForExecutorTest::~NodeForExecutorTest()
@@ -139,7 +147,7 @@ void NodeForExecutorTest::agnocast_timer_cb()
   }
 
   // Add new agnocast sub callbacks
-  if (mq_receivers_.size() < agnocast_sub_cbs_called_.size()) {
+  if (mq_receivers_.size() < num_total_agnocast_sub_cbs_) {
     add_agnocast_sub_cb();
   }
 }
@@ -152,8 +160,7 @@ void NodeForExecutorTest::agnocast_sub_cb(
     is_mutually_exclusive_agnocast_ = false;
   }
 
-  // Each callback only accesses its own index, so it's safe to access the vector without a mutex.
-  agnocast_sub_cbs_called_[cb_i] = true;
+  agnocast_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
   dummy_work(cb_exec_time_);
 }
 
@@ -172,23 +179,28 @@ void NodeForExecutorTest::ros2_sub_cb(
     is_mutually_exclusive_ros2_ = false;
   }
 
-  // Each callback only accesses its own index, so it's safe to access the vector without a mutex.
-  ros2_sub_cbs_called_[cb_i] = true;
+  ros2_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
   dummy_work(cb_exec_time_);
 }
 
 bool NodeForExecutorTest::is_all_ros2_sub_cbs_called() const
 {
-  return std::all_of(ros2_sub_cbs_called_.begin(), ros2_sub_cbs_called_.end(), [](bool is_called) {
-    return is_called;
-  });
+  for (size_t i = 0; i < num_ros2_sub_cbs_; i++) {
+    if (!ros2_sub_cbs_called_[i].load(std::memory_order_acquire)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool NodeForExecutorTest::is_all_agnocast_sub_cbs_called() const
 {
-  return std::all_of(
-    agnocast_sub_cbs_called_.begin(), agnocast_sub_cbs_called_.end(),
-    [](bool is_called) { return is_called; });
+  for (size_t i = 0; i < num_total_agnocast_sub_cbs_; i++) {
+    if (!agnocast_sub_cbs_called_[i].load(std::memory_order_acquire)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool NodeForExecutorTest::is_mutually_exclusive_agnocast() const
