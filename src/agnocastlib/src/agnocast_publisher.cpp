@@ -1,5 +1,7 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/node/agnocast_node.hpp"
+
 #include <sys/types.h>
 
 #include <array>
