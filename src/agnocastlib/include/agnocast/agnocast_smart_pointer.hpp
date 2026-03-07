@@ -243,6 +243,23 @@ public:
     return *this;
   }
 
+  // Aliasing constructor: shares ownership with r but stores ptr.
+  template <typename U>
+  ipc_shared_ptr(const ipc_shared_ptr<U> & r, T * ptr) noexcept : ptr_(ptr), control_(r.control_)
+  {
+    if (control_) {
+      control_->increment();
+    }
+  }
+
+  // Aliasing move constructor: transfers ownership from r but stores ptr.
+  template <typename U>
+  ipc_shared_ptr(ipc_shared_ptr<U> && r, T * ptr) noexcept : ptr_(ptr), control_(r.control_)
+  {
+    r.ptr_ = nullptr;
+    r.control_ = nullptr;
+  }
+
   T & operator*() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
@@ -299,5 +316,18 @@ public:
     control_ = nullptr;
   }
 };
+
+template <typename T, typename U>
+ipc_shared_ptr<T> static_ipc_shared_ptr_cast(const ipc_shared_ptr<U> & r) noexcept
+{
+  T * ptr = static_cast<T *>(r.get());
+  return ipc_shared_ptr<T>(r, ptr);
+}
+template <typename T, typename U>
+ipc_shared_ptr<T> static_ipc_shared_ptr_cast(ipc_shared_ptr<U> && r) noexcept
+{
+  T * ptr = static_cast<T *>(r.get());
+  return ipc_shared_ptr<T>(std::move(r), ptr);
+}
 
 }  // namespace agnocast
