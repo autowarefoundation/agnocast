@@ -3343,7 +3343,9 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
   }
 }
 
-// Ring buffer to hold exited pids
+// Ring buffer to hold exited pids.
+// EXIT_QUEUE_SIZE (65536) far exceeds mempool_num (default 4096), and only Agnocast PIDs are
+// enqueued (via is_agnocast_pid()), each exiting at most once, so the ring buffer cannot overflow.
 static DEFINE_SPINLOCK(pid_queue_lock);
 static pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 static uint32_t queue_head;
