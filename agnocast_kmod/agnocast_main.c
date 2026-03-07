@@ -46,11 +46,17 @@ static DECLARE_RWSEM(global_htables_rwsem);
 #define SUB_INFO_HASH_BITS 5
 #define PROC_INFO_HASH_BITS 10
 
-// Maximum length of topic name: 256 characters
-#define TOPIC_NAME_BUFFER_SIZE 256
-
 // Maximum number of topic info ret
 #define MAX_TOPIC_INFO_RET_NUM max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
+
+// Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
+// the daemon successfully copies the data to user-space.
+struct exit_subscription_entry
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  topic_local_id_t subscriber_id;
+  struct list_head list;
+};
 
 struct process_info
 {
@@ -64,6 +70,8 @@ struct process_info
   pid_t local_pid;
   struct mempool_entry * mempool_entry;
   const struct ipc_namespace * ipc_ns;
+  struct list_head exit_subscription_list;
+  uint32_t exit_subscription_count;
   struct hlist_node node;
   struct rcu_head rcu_head;
 };
@@ -809,6 +817,8 @@ int agnocast_ioctl_add_process(
 
   new_proc_info->exited = false;
   new_proc_info->is_performance_bridge_manager = is_performance_bridge_manager;
+  INIT_LIST_HEAD(&new_proc_info->exit_subscription_list);
+  new_proc_info->exit_subscription_count = 0;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -1513,32 +1523,133 @@ int agnocast_ioctl_get_publisher_num(
   return 0;
 }
 
-static int ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret)
+static void free_exit_subscription_list(struct process_info * proc_info)
+{
+  struct exit_subscription_entry * entry;
+  struct exit_subscription_entry * tmp_entry;
+  list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
+  {
+    list_del(&entry->list);
+    kfree(entry);
+  }
+  proc_info->exit_subscription_count = 0;
+}
+
+// Two-phase ioctl for exit process cleanup:
+//   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
+//   buffer.
+//   Phase 2 (agnocast_commit_exit_process): delete entries and free proc_info.
+//
+// The primary motivation for the two-phase split is to avoid holding the global write lock during
+// copy_to_user, which can trigger page faults with potentially unbounded latency. Since the write
+// lock blocks all publish/receive operations across every topic, a page fault during copy_to_user
+// would stall the entire data plane. By releasing the lock between phases, the dispatch handler
+// performs copy_to_user without any lock held.
+//
+// As a secondary benefit, Phase 2 runs only after the critical copies (ret_pid and
+// ret_subscription_mq_info_num) succeed, so subscription entries are never permanently lost.
+// ret_daemon_should_exit is patched via a separate copy_to_user after Phase 2; if that final copy
+// fails, the daemon merely stays alive one extra poll cycle — no resource leak.
+int agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
+  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
 {
   ioctl_ret->ret_pid = -1;
+  ioctl_ret->ret_subscription_mq_info_num = 0;
+  ioctl_ret->ret_daemon_should_exit = false;
+  *out_global_pid = -1;
 
   down_write(&global_htables_rwsem);
 
   struct process_info * proc_info;
   int bkt;
-  struct hlist_node * tmp;
-  hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
+  hash_for_each(proc_info_htable, bkt, proc_info, node)
   {
     if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
       continue;
     }
 
+    // If there are subscription entries but no buffer to receive them, discard the entries
+    // and warn. The subscription MQs will leak, but shm/bridge cleanup can still proceed and
+    // the daemon won't hang indefinitely.
+    if (
+      !list_empty(&proc_info->exit_subscription_list) &&
+      (mq_info_buf == NULL || mq_info_buf_size == 0)) {
+      dev_warn(
+        agnocast_device,
+        "No MQ info buffer provided for pid=%d with %u subscription entries; "
+        "subscription MQs will leak. (agnocast_ioctl_get_exit_process)\n",
+        proc_info->global_pid, proc_info->exit_subscription_count);
+      free_exit_subscription_list(proc_info);
+    }
+
     ioctl_ret->ret_pid = proc_info->local_pid;
-    hash_del_rcu(&proc_info->node);
-    kfree_rcu(proc_info, rcu_head);
+    *out_global_pid = proc_info->global_pid;
+
+    // Read-only copy of subscription info to kernel buffer. Entries are NOT deleted here;
+    // deletion is deferred to agnocast_commit_exit_process() after copy_to_user succeeds.
+    uint32_t count = 0;
+    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
+      struct exit_subscription_entry * entry;
+      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
+      {
+        // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard
+        // above
+        if (count >= mq_info_buf_size) {
+          dev_warn(
+            agnocast_device,
+            "mq_info_buf is full, remaining entries kept for next poll. "
+            "(agnocast_ioctl_get_exit_process)\n");
+          break;
+        }
+        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
+        mq_info_buf[count].subscriber_id = entry->subscriber_id;
+        count++;
+      }
+    }
+    ioctl_ret->ret_subscription_mq_info_num = count;
     break;
   }
 
-  ioctl_ret->ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
-
   up_write(&global_htables_rwsem);
   return 0;
+}
+
+void agnocast_commit_exit_process(
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
+  bool * ret_daemon_should_exit)
+{
+  down_write(&global_htables_rwsem);
+
+  if (global_pid >= 0) {
+    struct process_info * proc_info = find_process_info(global_pid);
+    if (proc_info) {
+      // Delete the first committed_count entries (matching the read-only copy order).
+      uint32_t deleted = 0;
+      struct exit_subscription_entry * entry;
+      struct exit_subscription_entry * tmp_entry;
+      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
+      {
+        // cppcheck-suppress unsignedLessThanZero ; both are uint32_t, committed_count == 0
+        // correctly skips the loop
+        if (deleted >= committed_count) break;
+        list_del(&entry->list);
+        kfree(entry);
+        proc_info->exit_subscription_count--;
+        deleted++;
+      }
+
+      // Free proc_info only when all subscription entries have been consumed.
+      if (list_empty(&proc_info->exit_subscription_list)) {
+        hash_del_rcu(&proc_info->node);
+        kfree_rcu(proc_info, rcu_head);
+      }
+    }
+  }
+
+  *ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
+
+  up_write(&global_htables_rwsem);
 }
 
 int agnocast_ioctl_get_topic_list(
@@ -2611,11 +2722,58 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       return -EFAULT;
   } else if (cmd == AGNOCAST_GET_EXIT_PROCESS_CMD) {
     struct ioctl_get_exit_process_args get_exit_process_args;
-    memset(&get_exit_process_args, 0, sizeof(get_exit_process_args));
-    ret = ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
+    if (copy_from_user(
+          &get_exit_process_args, (struct ioctl_get_exit_process_args __user *)arg,
+          sizeof(get_exit_process_args)))
+      return -EFAULT;
+
+    uint32_t mq_buf_size = get_exit_process_args.subscription_mq_info_buffer_size;
+    if (mq_buf_size > MAX_SUBSCRIPTION_NUM_PER_PROCESS) return -EINVAL;
+
+    uint64_t mq_buf_addr = get_exit_process_args.subscription_mq_info_buffer_addr;
+    if (mq_buf_size > 0 && mq_buf_addr == 0) return -EINVAL;
+
+    struct exit_subscription_mq_info * mq_info_buf = NULL;
+    if (mq_buf_size > 0) {
+      mq_info_buf = kmalloc_array(mq_buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
+      if (!mq_info_buf) return -ENOMEM;
+    }
+
+    pid_t global_pid = -1;
+    agnocast_ioctl_get_exit_process(
+      ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
+
+    // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
+    // for the next poll (agnocast_commit_exit_process is not called).
+    if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
+      uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
+      if (copy_to_user(
+            (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
+            copy_count * sizeof(struct exit_subscription_mq_info))) {
+        kfree(mq_info_buf);
+        return -EFAULT;
+      }
+    }
+    kfree(mq_info_buf);
+
+    // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
+    // ret_daemon_should_exit is not yet known and will be patched after commit.
     if (copy_to_user(
           (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
           sizeof(get_exit_process_args)))
+      return -EFAULT;
+
+    // Commit: delete copied entries and free proc_info. Safe because user-space already
+    // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
+    bool daemon_should_exit = false;
+    agnocast_commit_exit_process(
+      ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+
+    // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
+    // alive one extra poll cycle — no resource leak.
+    if (copy_to_user(
+          &((struct ioctl_get_exit_process_args __user *)arg)->ret_daemon_should_exit,
+          &daemon_should_exit, sizeof(daemon_should_exit)))
       return -EFAULT;
   } else if (cmd == AGNOCAST_GET_TOPIC_LIST_CMD) {
     union ioctl_topic_list_args topic_list_args;
@@ -3096,7 +3254,8 @@ static void remove_entry_node(struct topic_wrapper * wrapper, struct entry_node 
   kfree(en);
 }
 
-static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
+static void pre_handler_subscriber_exit(
+  struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)
 {
   struct subscriber_info * sub_info;
   int bkt_sub_info;
@@ -3106,6 +3265,30 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
     if (sub_info->pid != pid) continue;
 
     const topic_local_id_t subscriber_id = sub_info->id;
+
+    // Save subscription info for daemon cleanup before deleting the subscriber
+    if (proc_info->exit_subscription_count >= MAX_SUBSCRIPTION_NUM_PER_PROCESS) {
+      dev_warn(
+        agnocast_device,
+        "exit_subscription_list is full for pid=%d, subscription MQ may leak. "
+        "(pre_handler_subscriber_exit)\n",
+        pid);
+    } else {
+      struct exit_subscription_entry * exit_entry =
+        kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
+      if (exit_entry) {
+        strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
+        exit_entry->subscriber_id = subscriber_id;
+        list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
+        proc_info->exit_subscription_count++;
+      } else {
+        dev_warn(
+          agnocast_device,
+          "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
+          "(pre_handler_subscriber_exit)\n");
+      }
+    }
+
     hash_del(&sub_info->node);
     kfree(sub_info->node_name);
     kfree(sub_info);
@@ -3134,8 +3317,8 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * proc_info = find_process_info(pub_info->pid);
-          if (!proc_info || proc_info->exited) {
+          const struct process_info * pub_proc_info = find_process_info(pub_info->pid);
+          if (!pub_proc_info || pub_proc_info->exited) {
             publisher_exited = true;
           }
           break;
@@ -3236,7 +3419,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
-    pre_handler_subscriber_exit(wrapper, pid);
+    pre_handler_subscriber_exit(wrapper, pid, proc_info);
 
     // Check if we can release the topic_wrapper
     if (get_size_pub_info_htable(wrapper) == 0 && get_size_sub_info_htable(wrapper) == 0) {
@@ -3522,6 +3705,7 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
+    free_exit_subscription_list(proc_info);
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
