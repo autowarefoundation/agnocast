@@ -333,8 +333,8 @@ union ioctl_topic_info_args {
 // ================================================
 // public macros and functions in agnocast_main.c
 
-// From experience, EXIT_QUEUE_SIZE_BITS should be greater than 10.
-// Use a smaller ring in KUnit builds so test_case_do_exit_overflow can trigger
+// In production, EXIT_QUEUE_SIZE_BITS should be greater than 10 based on experience.
+// KUnit builds intentionally use a smaller value so test_case_do_exit_overflow can trigger
 // the overflow linked-list path without enqueuing 65k+ PIDs.
 #ifdef KUNIT_BUILD
 #define EXIT_QUEUE_SIZE_BITS 10
