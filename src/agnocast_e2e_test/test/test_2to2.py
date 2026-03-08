@@ -68,9 +68,10 @@ def generate_test_description():
                                     "transient_local": False,
                                     "init_pub_num": 0,
                                     "pub_num": PUB_NUM,
-                                    # In agno2agno mode, no bridge is created (no external ROS 2 pub/sub exists).
+                                    # For agno2agno mode, no ROS 2 bridge is created (no external ROS 2 pub/sub exists), so 0 planned ROS 2 publishers.
+                                    # For agno2ros with Standard bridge enabled, exactly 1 ROS 2 publisher is expected to be created by the bridge.
                                     "planned_pub_count": 1 if (IS_STANDARD_BRIDGE and TEST_MODE != 'agno2agno') else 0,
-                                     # Number of external Agnocast.
+                                     # Number of external Agnocast subscribers.
                                     "planned_sub_count": 2,
                                     "forever": FOREVER,
                                 }
