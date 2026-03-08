@@ -163,7 +163,7 @@ void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topi
   remove_bridge_args.topic_name = {topic_name.c_str(), topic_name.size()};
   remove_bridge_args.is_r2a = is_r2a;
 
-  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args) != 0) {
+  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args) < 0) {
     RCLCPP_ERROR(
       logger_, "Rollback AGNOCAST_REMOVE_BRIDGE_CMD failed for topic '%s': %s", topic_name.c_str(),
       strerror(errno));
@@ -220,7 +220,8 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
 
   } catch (const std::exception & e) {
     RCLCPP_ERROR(
-      logger_, "Failed to activate bridge for topic '%s': %s", topic_name.c_str(), e.what());
+      logger_, "Failed to activate bridge for topic '%s': %s", topic_name_with_direction.c_str(),
+      e.what());
     return false;
   }
 }
@@ -365,11 +366,12 @@ void StandardBridgeManager::check_managed_bridges()
     const auto & topic_name = it->first;
     auto & info = it->second;
 
-    // Clean up requests when Agnocast entity no longer exists
-    if (info.req_r2a && get_agnocast_subscriber_count(topic_name).count <= 0) {
+    // Clean up requests when Agnocast entity no longer exists (count == 0)
+    // Note: count < 0 indicates an error, so we keep the request in that case
+    if (info.req_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
       info.req_r2a.reset();
     }
-    if (info.req_a2r && get_agnocast_publisher_count(topic_name).count <= 0) {
+    if (info.req_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
       info.req_a2r.reset();
     }
 
