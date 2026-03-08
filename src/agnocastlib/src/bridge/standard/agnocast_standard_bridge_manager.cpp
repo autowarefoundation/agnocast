@@ -163,7 +163,11 @@ void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topi
   remove_bridge_args.topic_name = {topic_name.c_str(), topic_name.size()};
   remove_bridge_args.is_r2a = is_r2a;
 
-  ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args);
+  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args) != 0) {
+    RCLCPP_ERROR(
+      logger_, "Rollback AGNOCAST_REMOVE_BRIDGE_CMD failed for topic '%s': %s", topic_name.c_str(),
+      strerror(errno));
+  }
 }
 
 bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
@@ -174,18 +178,6 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
 
   if (active_bridges_.count(topic_name_with_direction) != 0U) {
     return true;  // Already active, no rollback needed
-  }
-
-  if (
-    (is_r2a ? get_agnocast_subscriber_count(topic_name).count
-            : get_agnocast_publisher_count(topic_name).count) <= 0) {
-    return false;
-  }
-
-  if (
-    is_r2a ? !has_external_ros2_publisher(container_node_.get(), topic_name)
-           : !has_external_ros2_subscriber(container_node_.get(), topic_name)) {
-    return false;
   }
 
   try {
@@ -226,7 +218,9 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
 
     return true;
 
-  } catch (const std::exception &) {
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      logger_, "Failed to activate bridge for topic '%s': %s", topic_name.c_str(), e.what());
     return false;
   }
 }
@@ -262,6 +256,18 @@ void StandardBridgeManager::process_managed_bridge(
   }
 
   bool is_r2a = (req->direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+  // Check demand before adding bridge to kernel to avoid unnecessary add+remove cycles
+  if (
+    (is_r2a ? get_agnocast_subscriber_count(topic_name).count
+            : get_agnocast_publisher_count(topic_name).count) <= 0) {
+    return;
+  }
+  if (
+    is_r2a ? !has_external_ros2_publisher(container_node_.get(), topic_name)
+           : !has_external_ros2_subscriber(container_node_.get(), topic_name)) {
+    return;
+  }
 
   auto [status, owner_pid, kernel_has_r2a, kernel_has_a2r] =
     try_add_bridge_to_kernel(topic_name, is_r2a);
