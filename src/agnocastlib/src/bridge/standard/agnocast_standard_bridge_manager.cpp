@@ -306,7 +306,7 @@ void StandardBridgeManager::check_parent_alive()
 
 void StandardBridgeManager::check_active_bridges()
 {
-  std::vector<std::string> to_remove;
+  std::vector<std::pair<std::string, bool>> to_remove;  // (key, keep_managed)
   to_remove.reserve(active_bridges_.size());
 
   for (const auto & [key, bridge] : active_bridges_) {
@@ -327,29 +327,31 @@ void StandardBridgeManager::check_active_bridges()
       count = get_agnocast_subscriber_count(topic_name_str).count;
       is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name_str);
       if (!update_ros2_publisher_num(container_node_.get(), topic_name_str)) {
-        to_remove.push_back(key);
+        to_remove.emplace_back(key, false);
         continue;
       }
     } else {
       count = get_agnocast_publisher_count(topic_name_str).count;
       is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name_str);
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name_str)) {
-        to_remove.push_back(key);
+        to_remove.emplace_back(key, false);
         continue;
       }
     }
 
-    if (count <= 0 || !is_demanded_by_ros2) {
+    if (count <= 0) {
       if (count < 0) {
         RCLCPP_ERROR(
           logger_, "Failed to get connection count for %s. Removing bridge.", key.c_str());
       }
-      to_remove.push_back(key);
+      to_remove.emplace_back(key, false);
+    } else if (!is_demanded_by_ros2) {
+      to_remove.emplace_back(key, true);  // keep_managed when only ROS 2 demand is missing
     }
   }
 
-  for (const auto & key : to_remove) {
-    remove_active_bridge(key);
+  for (const auto & [key, keep_managed] : to_remove) {
+    remove_active_bridge(key, keep_managed);
   }
 }
 
@@ -381,7 +383,8 @@ void StandardBridgeManager::check_should_exit()
   }
 }
 
-void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)
+void StandardBridgeManager::remove_active_bridge(
+  const std::string & topic_name_with_direction, bool keep_managed)
 {
   if (topic_name_with_direction.size() <= SUFFIX_LEN) {
     return;
@@ -410,6 +413,10 @@ void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_
   }
 
   active_bridges_.erase(topic_name_with_direction);
+
+  if (keep_managed) {
+    return;
+  }
 
   std::string raw_topic_name(topic_name_view);
   auto it = managed_bridges_.find(raw_topic_name);
