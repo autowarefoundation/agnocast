@@ -171,6 +171,13 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
     return;
   }
 
+  bool is_demanded_by_ros2 = is_r2a
+                               ? has_external_ros2_publisher(container_node_.get(), topic_name)
+                               : has_external_ros2_subscriber(container_node_.get(), topic_name);
+  if (!is_demanded_by_ros2) {
+    return;
+  }
+
   try {
     rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, req.target.target_id)
                                     : get_publisher_qos(topic_name, req.target.target_id);
@@ -290,23 +297,27 @@ void StandardBridgeManager::check_active_bridges()
     std::string_view topic_name_view = key_view.substr(0, key_view.size() - SUFFIX_LEN);
 
     bool is_r2a = (suffix == SUFFIX_R2A);
+    std::string topic_name_str(topic_name_view);
 
     int count = 0;
+    bool is_demanded_by_ros2 = false;
     if (is_r2a) {
-      count = get_agnocast_subscriber_count(std::string(topic_name_view)).count;
-      if (!update_ros2_publisher_num(container_node_.get(), std::string(topic_name_view))) {
+      count = get_agnocast_subscriber_count(topic_name_str).count;
+      is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name_str);
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name_str)) {
         to_remove.push_back(key);
         continue;
       }
     } else {
-      count = get_agnocast_publisher_count(std::string(topic_name_view)).count;
-      if (!update_ros2_subscriber_num(container_node_.get(), std::string(topic_name_view))) {
+      count = get_agnocast_publisher_count(topic_name_str).count;
+      is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name_str);
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name_str)) {
         to_remove.push_back(key);
         continue;
       }
     }
 
-    if (count <= 0) {
+    if (count <= 0 || !is_demanded_by_ros2) {
       if (count < 0) {
         RCLCPP_ERROR(
           logger_, "Failed to get connection count for %s. Removing bridge.", key.c_str());
