@@ -6,8 +6,8 @@
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/mm.h>  // kvcalloc, kvfree
 #include <linux/rwsem.h>
-#include <linux/mm.h>    // kvcalloc, kvfree
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/tracepoint.h>
 #include <linux/version.h>
