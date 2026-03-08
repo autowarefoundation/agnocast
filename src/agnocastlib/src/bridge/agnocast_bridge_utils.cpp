@@ -151,11 +151,13 @@ bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & 
   }
 
   const std::string self_name = node->get_name();
+  const std::string self_ns = node->get_namespace();
   const auto publishers = node->get_publishers_info_by_topic(topic_name);
 
-  return std::any_of(publishers.begin(), publishers.end(), [&self_name](const auto & info) {
-    return info.node_name() != self_name;
-  });
+  return std::any_of(
+    publishers.begin(), publishers.end(), [&self_name, &self_ns](const auto & info) {
+      return info.node_name() != self_name || info.node_namespace() != self_ns;
+    });
 }
 
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name)
@@ -165,11 +167,13 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
   }
 
   const std::string self_name = node->get_name();
+  const std::string self_ns = node->get_namespace();
   const auto subscribers = node->get_subscriptions_info_by_topic(topic_name);
 
-  return std::any_of(subscribers.begin(), subscribers.end(), [&self_name](const auto & info) {
-    return info.node_name() != self_name;
-  });
+  return std::any_of(
+    subscribers.begin(), subscribers.end(), [&self_name, &self_ns](const auto & info) {
+      return info.node_name() != self_name || info.node_namespace() != self_ns;
+    });
 }
 
 }  // namespace agnocast
