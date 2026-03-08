@@ -177,7 +177,7 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
   std::string topic_name_with_direction = topic_name + std::string(suffix);
 
   if (active_bridges_.count(topic_name_with_direction) != 0U) {
-    return true;  // Already active, no rollback needed
+    return true;
   }
 
   try {
