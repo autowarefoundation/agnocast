@@ -357,16 +357,30 @@ void StandardBridgeManager::check_active_bridges()
 
 void StandardBridgeManager::check_managed_bridges()
 {
-  for (auto & managed_bridge : managed_bridges_) {
+  for (auto it = managed_bridges_.begin(); it != managed_bridges_.end();) {
     if (shutdown_requested_) {
       break;
     }
 
-    const auto & topic_name = managed_bridge.first;
-    auto & info = managed_bridge.second;
+    const auto & topic_name = it->first;
+    auto & info = it->second;
+
+    // Clean up requests when Agnocast entity no longer exists
+    if (info.req_r2a && get_agnocast_subscriber_count(topic_name).count <= 0) {
+      info.req_r2a.reset();
+    }
+    if (info.req_a2r && get_agnocast_publisher_count(topic_name).count <= 0) {
+      info.req_a2r.reset();
+    }
+
+    if (!info.req_r2a && !info.req_a2r) {
+      it = managed_bridges_.erase(it);
+      continue;
+    }
 
     process_managed_bridge(topic_name, info.req_r2a);
     process_managed_bridge(topic_name, info.req_a2r);
+    ++it;
   }
 }
 
