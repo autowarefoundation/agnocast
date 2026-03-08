@@ -155,27 +155,37 @@ StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_
   return BridgeKernelResult{AddBridgeResult::ERROR, 0, false, false};
 }
 
-void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
+void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a)
+{
+  struct ioctl_remove_bridge_args remove_bridge_args
+  {
+  };
+  remove_bridge_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  remove_bridge_args.is_r2a = is_r2a;
+
+  ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args);
+}
+
+bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
 {
   bool is_r2a = (req.direction == BridgeDirection::ROS2_TO_AGNOCAST);
   std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
   std::string topic_name_with_direction = topic_name + std::string(suffix);
 
   if (active_bridges_.count(topic_name_with_direction) != 0U) {
-    return;
+    return true;  // Already active, no rollback needed
   }
 
   if (
     (is_r2a ? get_agnocast_subscriber_count(topic_name).count
             : get_agnocast_publisher_count(topic_name).count) <= 0) {
-    return;
+    return false;
   }
 
-  bool is_demanded_by_ros2 = is_r2a
-                               ? has_external_ros2_publisher(container_node_.get(), topic_name)
-                               : has_external_ros2_subscriber(container_node_.get(), topic_name);
-  if (!is_demanded_by_ros2) {
-    return;
+  if (
+    is_r2a ? !has_external_ros2_publisher(container_node_.get(), topic_name)
+           : !has_external_ros2_subscriber(container_node_.get(), topic_name)) {
+    return false;
   }
 
   try {
@@ -190,7 +200,7 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
         RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
       }
       shutdown_requested_ = true;
-      return;
+      return false;
     }
 
     if (is_r2a) {
@@ -214,8 +224,10 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
         callback_group, container_node_->get_node_base_interface(), true);
     }
 
+    return true;
+
   } catch (const std::exception &) {
-    return;
+    return false;
   }
 }
 
@@ -251,23 +263,16 @@ void StandardBridgeManager::process_managed_bridge(
 
   bool is_r2a = (req->direction == BridgeDirection::ROS2_TO_AGNOCAST);
 
-  // Check if ROS2 pub/sub exists before trying to add bridge to kernel.
-  // This prevents registering a bridge in the kernel when there's no ROS2 counterpart,
-  // which would cause delegation issues (other processes would see EEXIST but no actual bridge).
-  bool is_demanded_by_ros2 = is_r2a
-                               ? has_external_ros2_publisher(container_node_.get(), topic_name)
-                               : has_external_ros2_subscriber(container_node_.get(), topic_name);
-  if (!is_demanded_by_ros2) {
-    return;
-  }
-
   auto [status, owner_pid, kernel_has_r2a, kernel_has_a2r] =
     try_add_bridge_to_kernel(topic_name, is_r2a);
   bool is_active_in_owner = is_r2a ? kernel_has_r2a : kernel_has_a2r;
 
   switch (status) {
     case AddBridgeResult::SUCCESS:
-      activate_bridge(*req, topic_name);
+      if (!activate_bridge(*req, topic_name)) {
+        // Rollback: remove bridge from kernel if activation failed
+        rollback_bridge_from_kernel(topic_name, is_r2a);
+      }
       break;
 
     case AddBridgeResult::EXIST:
