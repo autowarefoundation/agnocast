@@ -6,6 +6,7 @@
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/mm.h>  // kvcalloc, kvfree
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/tracepoint.h>
@@ -2705,7 +2706,7 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
 
     struct exit_subscription_mq_info * mq_info_buf = NULL;
     if (mq_buf_size > 0) {
-      mq_info_buf = kmalloc_array(mq_buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
+      mq_info_buf = kvcalloc(mq_buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
       if (!mq_info_buf) return -ENOMEM;
     }
 
@@ -2720,11 +2721,11 @@ static long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long a
       if (copy_to_user(
             (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
             copy_count * sizeof(struct exit_subscription_mq_info))) {
-        kfree(mq_info_buf);
+        kvfree(mq_info_buf);
         return -EFAULT;
       }
     }
-    kfree(mq_info_buf);
+    kvfree(mq_info_buf);
 
     // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
     // ret_daemon_should_exit is not yet known and will be patched after commit.

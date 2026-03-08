@@ -5,6 +5,7 @@
 
 #include <kunit/test.h>
 #include <linux/delay.h>
+#include <linux/mm.h>
 #include <linux/string.h>
 
 static const pid_t PID_BASE = 1000;
@@ -689,7 +690,7 @@ void test_case_do_exit_subscription_mq_info(struct kunit * test)
   struct ioctl_get_exit_process_args get_exit_args;
   const uint32_t buf_size = 4;
   struct exit_subscription_mq_info * mq_info_buf =
-    kmalloc_array(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
+    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
   KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
 
   memset(&get_exit_args, 0, sizeof(get_exit_args));
@@ -709,7 +710,7 @@ void test_case_do_exit_subscription_mq_info(struct kunit * test)
     &daemon_should_exit);
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
 
-  kfree(mq_info_buf);
+  kvfree(mq_info_buf);
 }
 
 // Test that multiple subscriptions across topics are all captured on exit
@@ -730,7 +731,7 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
   struct ioctl_get_exit_process_args get_exit_args;
   const uint32_t buf_size = 4;
   struct exit_subscription_mq_info * mq_info_buf =
-    kmalloc_array(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
+    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
   KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
 
   memset(&get_exit_args, 0, sizeof(get_exit_args));
@@ -766,5 +767,5 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
     &daemon_should_exit);
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
 
-  kfree(mq_info_buf);
+  kvfree(mq_info_buf);
 }
