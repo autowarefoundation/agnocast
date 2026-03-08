@@ -1816,18 +1816,19 @@ int agnocast_ioctl_get_topic_subscriber_info(
     subscriber_num++;
   }
 
-  uint32_t copy_num = min(subscriber_num, topic_info_args->topic_info_ret_buffer_size);
   if (subscriber_num > topic_info_args->topic_info_ret_buffer_size) {
     dev_warn(
       agnocast_device,
       "Subscriber count exceeds limit: subscriber_num=%u, "
       "topic_info_ret_buffer_size=%u\n",
       subscriber_num, topic_info_args->topic_info_ret_buffer_size);
+    ret = -ENOBUFS;
+    goto unlock;
   }
 
   struct topic_info_ret * topic_info_mem = NULL;
-  if (copy_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * copy_num, GFP_KERNEL);
+  if (subscriber_num > 0) {
+    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * subscriber_num, GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;
@@ -1837,9 +1838,6 @@ int agnocast_ioctl_get_topic_subscriber_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
   {
-    // cppcheck-suppress unsignedLessThanZero
-    if (idx >= copy_num) break;
-
     if (!sub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
@@ -1858,15 +1856,15 @@ int agnocast_ioctl_get_topic_subscriber_info(
   }
 
   if (
-    copy_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * copy_num)) {
+    subscriber_num > 0 &&
+    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * subscriber_num)) {
     kvfree(topic_info_mem);
     ret = -EFAULT;
     goto unlock;
   }
 
   kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = copy_num;
+  topic_info_args->ret_topic_info_ret_num = subscriber_num;
 
 unlock:
   up_read(&wrapper->topic_rwsem);
@@ -1904,18 +1902,19 @@ int agnocast_ioctl_get_topic_publisher_info(
     publisher_num++;
   }
 
-  uint32_t copy_num = min(publisher_num, topic_info_args->topic_info_ret_buffer_size);
   if (publisher_num > topic_info_args->topic_info_ret_buffer_size) {
     dev_warn(
       agnocast_device,
       "Publisher count exceeds limit: publisher_num=%u, "
       "topic_info_ret_buffer_size=%u\n",
       publisher_num, topic_info_args->topic_info_ret_buffer_size);
+    ret = -ENOBUFS;
+    goto unlock;
   }
 
   struct topic_info_ret * topic_info_mem = NULL;
-  if (copy_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * copy_num, GFP_KERNEL);
+  if (publisher_num > 0) {
+    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * publisher_num, GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;
@@ -1925,9 +1924,6 @@ int agnocast_ioctl_get_topic_publisher_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
   {
-    // cppcheck-suppress unsignedLessThanZero
-    if (idx >= copy_num) break;
-
     if (!pub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
@@ -1946,15 +1942,15 @@ int agnocast_ioctl_get_topic_publisher_info(
   }
 
   if (
-    copy_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * copy_num)) {
+    publisher_num > 0 &&
+    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * publisher_num)) {
     kvfree(topic_info_mem);
     ret = -EFAULT;
     goto unlock;
   }
 
   kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = copy_num;
+  topic_info_args->ret_topic_info_ret_num = publisher_num;
 
 unlock:
   up_read(&wrapper->topic_rwsem);
