@@ -250,6 +250,17 @@ void StandardBridgeManager::process_managed_bridge(
   }
 
   bool is_r2a = (req->direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+  // Check if ROS2 pub/sub exists before trying to add bridge to kernel.
+  // This prevents registering a bridge in the kernel when there's no ROS2 counterpart,
+  // which would cause delegation issues (other processes would see EEXIST but no actual bridge).
+  bool is_demanded_by_ros2 = is_r2a
+                               ? has_external_ros2_publisher(container_node_.get(), topic_name)
+                               : has_external_ros2_subscriber(container_node_.get(), topic_name);
+  if (!is_demanded_by_ros2) {
+    return;
+  }
+
   auto [status, owner_pid, kernel_has_r2a, kernel_has_a2r] =
     try_add_bridge_to_kernel(topic_name, is_r2a);
   bool is_active_in_owner = is_r2a ? kernel_has_r2a : kernel_has_a2r;
