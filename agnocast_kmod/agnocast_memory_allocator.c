@@ -1,5 +1,6 @@
 #include "agnocast_memory_allocator.h"
 
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/overflow.h>
@@ -66,7 +67,7 @@ int init_memory_allocator(void)
     return -EINVAL;
   }
 
-  mempool_entries = kmalloc_array(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
+  mempool_entries = kvcalloc(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
   if (!mempool_entries) {
     pr_err("Agnocast: Failed to allocate mempool_entries array\n");
     return -ENOMEM;
@@ -224,6 +225,6 @@ void cleanup_memory_allocator(void)
   }
 
   exit_memory_allocator();
-  kfree(mempool_entries);
+  kvfree(mempool_entries);
   mempool_entries = NULL;
 }

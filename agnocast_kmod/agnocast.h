@@ -439,6 +439,14 @@ int agnocast_ioctl_remove_bridge(
 
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 
+int agnocast_ioctl_get_topic_subscriber_info(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  union ioctl_topic_info_args * topic_info_args);
+
+int agnocast_ioctl_get_topic_publisher_info(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  union ioctl_topic_info_args * topic_info_args);
+
 int agnocast_ioctl_get_node_subscriber_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args);

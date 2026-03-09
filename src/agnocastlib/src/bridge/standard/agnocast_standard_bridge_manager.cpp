@@ -155,20 +155,29 @@ StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_
   return BridgeKernelResult{AddBridgeResult::ERROR, 0, false, false};
 }
 
-void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
+void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a)
+{
+  struct ioctl_remove_bridge_args remove_bridge_args
+  {
+  };
+  remove_bridge_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  remove_bridge_args.is_r2a = is_r2a;
+
+  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args) < 0) {
+    RCLCPP_ERROR(
+      logger_, "Rollback AGNOCAST_REMOVE_BRIDGE_CMD failed for topic '%s': %s", topic_name.c_str(),
+      strerror(errno));
+  }
+}
+
+bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
 {
   bool is_r2a = (req.direction == BridgeDirection::ROS2_TO_AGNOCAST);
   std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
   std::string topic_name_with_direction = topic_name + std::string(suffix);
 
   if (active_bridges_.count(topic_name_with_direction) != 0U) {
-    return;
-  }
-
-  if (
-    (is_r2a ? get_agnocast_subscriber_count(topic_name).count
-            : get_agnocast_publisher_count(topic_name).count) <= 0) {
-    return;
+    return true;
   }
 
   try {
@@ -183,7 +192,7 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
         RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
       }
       shutdown_requested_ = true;
-      return;
+      return false;
     }
 
     if (is_r2a) {
@@ -207,8 +216,13 @@ void StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
         callback_group, container_node_->get_node_base_interface(), true);
     }
 
-  } catch (const std::exception &) {
-    return;
+    return true;
+
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      logger_, "Failed to activate bridge for topic '%s': %s", topic_name_with_direction.c_str(),
+      e.what());
+    return false;
   }
 }
 
@@ -243,13 +257,29 @@ void StandardBridgeManager::process_managed_bridge(
   }
 
   bool is_r2a = (req->direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+  // Check demand before adding bridge to kernel to avoid unnecessary add+remove cycles
+  if (
+    (is_r2a ? get_agnocast_subscriber_count(topic_name).count
+            : get_agnocast_publisher_count(topic_name).count) <= 0) {
+    return;
+  }
+  if (
+    is_r2a ? !has_external_ros2_publisher(container_node_.get(), topic_name)
+           : !has_external_ros2_subscriber(container_node_.get(), topic_name)) {
+    return;
+  }
+
   auto [status, owner_pid, kernel_has_r2a, kernel_has_a2r] =
     try_add_bridge_to_kernel(topic_name, is_r2a);
   bool is_active_in_owner = is_r2a ? kernel_has_r2a : kernel_has_a2r;
 
   switch (status) {
     case AddBridgeResult::SUCCESS:
-      activate_bridge(*req, topic_name);
+      if (!activate_bridge(*req, topic_name)) {
+        // Rollback: remove bridge from kernel if activation failed
+        rollback_bridge_from_kernel(topic_name, is_r2a);
+      }
       break;
 
     case AddBridgeResult::EXIST:
@@ -277,7 +307,7 @@ void StandardBridgeManager::check_parent_alive()
 
 void StandardBridgeManager::check_active_bridges()
 {
-  std::vector<std::string> to_remove;
+  std::vector<std::pair<std::string, bool>> to_remove;  // (key, keep_managed)
   to_remove.reserve(active_bridges_.size());
 
   for (const auto & [key, bridge] : active_bridges_) {
@@ -290,18 +320,22 @@ void StandardBridgeManager::check_active_bridges()
     std::string_view topic_name_view = key_view.substr(0, key_view.size() - SUFFIX_LEN);
 
     bool is_r2a = (suffix == SUFFIX_R2A);
+    std::string topic_name_str(topic_name_view);
 
     int count = 0;
+    bool is_demanded_by_ros2 = false;
     if (is_r2a) {
-      count = get_agnocast_subscriber_count(std::string(topic_name_view)).count;
-      if (!update_ros2_publisher_num(container_node_.get(), std::string(topic_name_view))) {
-        to_remove.push_back(key);
+      count = get_agnocast_subscriber_count(topic_name_str).count;
+      is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name_str);
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name_str)) {
+        to_remove.emplace_back(key, false);
         continue;
       }
     } else {
-      count = get_agnocast_publisher_count(std::string(topic_name_view)).count;
-      if (!update_ros2_subscriber_num(container_node_.get(), std::string(topic_name_view))) {
-        to_remove.push_back(key);
+      count = get_agnocast_publisher_count(topic_name_str).count;
+      is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name_str);
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name_str)) {
+        to_remove.emplace_back(key, false);
         continue;
       }
     }
@@ -311,27 +345,44 @@ void StandardBridgeManager::check_active_bridges()
         RCLCPP_ERROR(
           logger_, "Failed to get connection count for %s. Removing bridge.", key.c_str());
       }
-      to_remove.push_back(key);
+      to_remove.emplace_back(key, false);
+    } else if (!is_demanded_by_ros2) {
+      to_remove.emplace_back(key, true);  // keep_managed when only ROS 2 demand is missing
     }
   }
 
-  for (const auto & key : to_remove) {
-    remove_active_bridge(key);
+  for (const auto & [key, keep_managed] : to_remove) {
+    remove_active_bridge(key, keep_managed);
   }
 }
 
 void StandardBridgeManager::check_managed_bridges()
 {
-  for (auto & managed_bridge : managed_bridges_) {
+  for (auto it = managed_bridges_.begin(); it != managed_bridges_.end();) {
     if (shutdown_requested_) {
       break;
     }
 
-    const auto & topic_name = managed_bridge.first;
-    auto & info = managed_bridge.second;
+    const auto & topic_name = it->first;
+    auto & info = it->second;
+
+    // Clean up requests when Agnocast entity no longer exists (count == 0)
+    // Note: count < 0 indicates an error, so we keep the request in that case
+    if (info.req_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
+      info.req_r2a.reset();
+    }
+    if (info.req_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
+      info.req_a2r.reset();
+    }
+
+    if (!info.req_r2a && !info.req_a2r) {
+      it = managed_bridges_.erase(it);
+      continue;
+    }
 
     process_managed_bridge(topic_name, info.req_r2a);
     process_managed_bridge(topic_name, info.req_a2r);
+    ++it;
   }
 }
 
@@ -348,7 +399,8 @@ void StandardBridgeManager::check_should_exit()
   }
 }
 
-void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_with_direction)
+void StandardBridgeManager::remove_active_bridge(
+  const std::string & topic_name_with_direction, bool keep_managed)
 {
   if (topic_name_with_direction.size() <= SUFFIX_LEN) {
     return;
@@ -377,6 +429,10 @@ void StandardBridgeManager::remove_active_bridge(const std::string & topic_name_
   }
 
   active_bridges_.erase(topic_name_with_direction);
+
+  if (keep_managed) {
+    return;
+  }
 
   std::string raw_topic_name(topic_name_view);
   auto it = managed_bridges_.find(raw_topic_name);
