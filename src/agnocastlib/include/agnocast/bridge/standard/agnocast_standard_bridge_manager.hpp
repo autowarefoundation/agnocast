@@ -75,7 +75,8 @@ private:
   void check_managed_bridges();
   void check_should_exit();
 
-  void remove_active_bridge(const std::string & topic_name_with_direction, bool keep_managed = false);
+  void remove_active_bridge(
+    const std::string & topic_name_with_direction, bool keep_managed = false);
 
   static std::pair<std::string, std::string> extract_topic_info(const MqMsgBridge & req);
 };
