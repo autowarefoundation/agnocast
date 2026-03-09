@@ -88,12 +88,12 @@ TRACEPOINT_EVENT(
   TRACEPOINT_PROVIDER,
   agnocast_timer_init,
   TP_ARGS(
-    const void *, timer_handle_arg,      
-    const void *, node_handle_arg,      
-    const void *, callback_arg,          
-    const void *, callback_group_arg,    
-    const char *, symbol_arg,            
-    int64_t, period_arg                     
+    const void *, timer_handle_arg,
+    const void *, node_handle_arg,
+    const void *, callback_arg,
+    const void *, callback_group_arg,
+    const char *, symbol_arg,
+    int64_t, period_arg
   ),
   TP_FIELDS(
     ctf_integer_hex(const void *, timer_handle, timer_handle_arg)
@@ -154,8 +154,8 @@ TRACEPOINT_EVENT(
   TRACEPOINT_PROVIDER,
   agnocast_create_timer_callable,
   TP_ARGS(
-    const void *, callable_arg,         
-    const void *, timer_handle_arg      
+    const void *, callable_arg,
+    const void *, timer_handle_arg
   ),
   TP_FIELDS(
     ctf_integer_hex(const void *, callable, callable_arg)
