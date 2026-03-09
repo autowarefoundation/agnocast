@@ -2,6 +2,9 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.2.0 (2026-02-19)
 ------------------
 * fix: change package names from cie\_* to agnocast_cie* (`#1071 <https://github.com/tier4/agnocast/issues/1071>`_)
