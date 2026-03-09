@@ -1,4 +1,4 @@
-Source: agnocast-heaphook-v2.2.0
+Source: agnocast-heaphook-v2.3.0
 Section: libs
 Priority: optional
 Maintainer: Takahiro Ishikawa-Aso <sykwer@gmail.com>
@@ -6,7 +6,7 @@ Build-Depends: debhelper (>= 13), cargo, rustc, dh-cargo
 Standards-Version: 4.6.1
 Homepage: https://github.com/tier4/agnocast
 
-Package: agnocast-heaphook-v2.2.0
+Package: agnocast-heaphook-v2.3.0
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Provides: agnocast-heaphook

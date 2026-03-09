@@ -6,7 +6,7 @@ if ! command -v debuild &> /dev/null; then
   exit 1
 fi
 
-VERSION="2.2.0"
+VERSION="2.3.0"
 
 cp -r agnocast_heaphook agnocast-heaphook-v${VERSION}-${VERSION}
 rm -f agnocast-heaphook-v${VERSION}-${VERSION}/Cargo.lock
