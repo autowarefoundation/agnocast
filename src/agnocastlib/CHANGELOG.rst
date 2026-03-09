@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.0 (2026-03-09)
+------------------
 * fix(agnocastlib): fix tracepoint bugs introduced in PR `#1093 <https://github.com/autowarefoundation/agnocast/issues/1093>`_ (`#1161 <https://github.com/autowarefoundation/agnocast/issues/1161>`_)
 * fix(bridge): create bridge with checking ros2 pub/sub (`#1164 <https://github.com/autowarefoundation/agnocast/issues/1164>`_)
 * fix [need-minor-update]: unlink subscription MQs on abnormal process exit (`#1155 <https://github.com/autowarefoundation/agnocast/issues/1155>`_)

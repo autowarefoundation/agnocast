@@ -2,8 +2,8 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.0 (2026-03-09)
+------------------
 * feat(agnocastlib): align with rclcpp for Timer api. (`#1127 <https://github.com/autowarefoundation/agnocast/issues/1127>`_)
 * fix(components): move tests for component container in `agnocast_components` (`#1126 <https://github.com/autowarefoundation/agnocast/issues/1126>`_)
 * feat(agnocastlib): Support ROS_TIME for create_timer (`#990 <https://github.com/autowarefoundation/agnocast/issues/990>`_)

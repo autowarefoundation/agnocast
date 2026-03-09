@@ -2,8 +2,8 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.0 (2026-03-09)
+------------------
 * fix(components): move tests for component container in `agnocast_components` (`#1126 <https://github.com/autowarefoundation/agnocast/issues/1126>`_)
 * fix: prevent signed integer overflow in ms-to-ns conversion (`#1136 <https://github.com/autowarefoundation/agnocast/issues/1136>`_)
 * feat(agnocast_component_container_cie): support callback group created after spin() (`#1095 <https://github.com/autowarefoundation/agnocast/issues/1095>`_)
