@@ -2,6 +2,9 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.0 (2026-03-09)
+------------------
+
 2.2.0 (2026-02-19)
 ------------------
 * fix(bridge): unify r2a and a2r plugin into one to improve build time (`#1064 <https://github.com/tier4/agnocast/issues/1064>`_)
