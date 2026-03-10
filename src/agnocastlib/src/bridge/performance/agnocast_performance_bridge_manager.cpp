@@ -303,13 +303,13 @@ void PerformanceBridgeManager::create_bridge_if_needed(
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
         }
-        active_r2a_bridges_[topic_name] = result.entity_handle;
+        active_r2a_bridges_[topic_name] = result;
       } else {
         if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
         }
-        active_a2r_bridges_[topic_name] = result.entity_handle;
+        active_a2r_bridges_[topic_name] = result;
       }
 
       if (result.callback_group) {
