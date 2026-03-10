@@ -118,3 +118,58 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, cancel)
   // Assert
   EXPECT_TRUE(spin_finished) << "Spin should have finished after cancel";
 }
+
+// Regression test: cancel() called from within a child thread's callback must not deadlock.
+// cancel() acquires child_resources_mutex_, so spin()'s shutdown path must not hold
+// that mutex while joining child threads.
+//
+// Deadlock sequence if child_resources_mutex_ is held during thread join:
+//   1. Timer callback fires in a child thread, starts a long sleep
+//   2. External cancel() sets spinning=false, causing spin()'s monitoring loop to exit
+//   3. spin()'s shutdown acquires child_resources_mutex_ and tries to join child threads
+//   4. Timer callback wakes from sleep, calls cancel(), blocks on child_resources_mutex_
+//   5. Child thread can't exit → spin() can't join → deadlock
+TEST_F(CallbackIsolatedAgnocastExecutorTest, cancel_from_child_callback_does_not_deadlock)
+{
+  // Arrange
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  std::atomic_bool callback_started{false};
+  auto timer = node->create_wall_timer(std::chrono::milliseconds(10), [&]() {
+    callback_started = true;
+    // Keep this callback alive while external cancel triggers spin()'s shutdown path.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Call cancel() on the parent executor. If child_resources_mutex_ is held during
+    // thread join in spin()'s shutdown, this blocks and causes a deadlock.
+    executor->cancel();
+  });
+  executor->add_node(node);
+
+  std::atomic_bool spin_finished{false};
+  std::thread spin_thread([this, &spin_finished]() {
+    executor->spin();
+    spin_finished = true;
+  });
+
+  // Wait for the child callback to start executing.
+  while (!callback_started) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  // Act: cancel externally while the child callback is still sleeping.
+  executor->cancel();
+
+  // Assert: spin() must exit within the timeout. A deadlock would hang forever.
+  auto start = std::chrono::steady_clock::now();
+  constexpr auto timeout = std::chrono::seconds(10);
+  while (!spin_finished) {
+    ASSERT_LT(std::chrono::steady_clock::now() - start, timeout)
+      << "Deadlock detected: spin() did not exit after cancel() from child callback";
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+
+  EXPECT_TRUE(spin_finished);
+}

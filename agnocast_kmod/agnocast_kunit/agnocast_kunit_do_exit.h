@@ -12,7 +12,9 @@
     KUNIT_CASE(test_case_do_exit_with_entry),                                                  \
     KUNIT_CASE(test_case_do_exit_with_entry_with_subscriber_reference),                        \
     KUNIT_CASE(test_case_do_exit_with_multi_references_publisher_exit_first),                  \
-    KUNIT_CASE(test_case_do_exit_with_multi_references_subscriber_exit_first)
+    KUNIT_CASE(test_case_do_exit_with_multi_references_subscriber_exit_first),                 \
+    KUNIT_CASE(test_case_do_exit_subscription_mq_info),                                        \
+    KUNIT_CASE(test_case_do_exit_subscription_mq_info_multi_topic)
 
 void test_case_is_agnocast_pid(struct kunit * test);
 void test_case_do_exit(struct kunit * test);
@@ -30,3 +32,5 @@ void test_case_do_exit_with_entry(struct kunit * test);
 void test_case_do_exit_with_entry_with_subscriber_reference(struct kunit * test);
 void test_case_do_exit_with_multi_references_publisher_exit_first(struct kunit * test);
 void test_case_do_exit_with_multi_references_subscriber_exit_first(struct kunit * test);
+void test_case_do_exit_subscription_mq_info(struct kunit * test);
+void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test);

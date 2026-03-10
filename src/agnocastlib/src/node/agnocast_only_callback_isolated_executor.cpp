@@ -12,6 +12,8 @@
 namespace agnocast
 {
 
+constexpr int CV_TIMEOUT_MS = 100;
+
 AgnocastOnlyCallbackIsolatedExecutor::AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms)
 : next_exec_timeout_ms_(next_exec_timeout_ms)
 {
@@ -120,8 +122,9 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
   while (spinning_.load()) {
     {
       std::unique_lock<std::mutex> lock(callback_group_created_cv_mutex_);
-      callback_group_created_cv_.wait(
-        lock, [this] { return callback_group_created_ || !spinning_.load(); });
+      callback_group_created_cv_.wait_for(lock, std::chrono::milliseconds(CV_TIMEOUT_MS), [this] {
+        return callback_group_created_ || !spinning_.load();
+      });
       callback_group_created_ = false;
     }
 
@@ -168,20 +171,27 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
     }
   }
 
-  // Join all child threads after monitoring loop exits
-  std::lock_guard<std::mutex> guard{child_resources_mutex_};
-  for (auto & weak_child_executor : weak_child_executors_) {
-    if (auto child_executor = weak_child_executor.lock()) {
-      child_executor->cancel();
+  // Join all child threads after monitoring loop exits.
+  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
+  // A child thread's callback may call cancel() which acquires child_resources_mutex_,
+  // so holding it during thread.join() would deadlock.
+  std::vector<std::thread> threads_to_join;
+  {
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    for (auto & weak_child_executor : weak_child_executors_) {
+      if (auto child_executor = weak_child_executor.lock()) {
+        child_executor->cancel();
+      }
     }
+    threads_to_join = std::move(child_threads_);
+    child_threads_.clear();
+    weak_child_executors_.clear();
   }
-  for (auto & thread : child_threads_) {
+  for (auto & thread : threads_to_join) {
     if (thread.joinable()) {
       thread.join();
     }
   }
-  child_threads_.clear();
-  weak_child_executors_.clear();
 }
 
 void AgnocastOnlyCallbackIsolatedExecutor::cancel()

@@ -2,6 +2,13 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.0 (2026-03-09)
+------------------
+* fix(bridge): create bridge with checking ros2 pub/sub (`#1164 <https://github.com/autowarefoundation/agnocast/issues/1164>`_)
+* fix(components): move tests for component container in `agnocast_components` (`#1126 <https://github.com/autowarefoundation/agnocast/issues/1126>`_)
+* fix(scripts): add shebang and file extension (`#1133 <https://github.com/autowarefoundation/agnocast/issues/1133>`_)
+* test: parallel execution mode available in e2e_test 1to1 (`#1092 <https://github.com/autowarefoundation/agnocast/issues/1092>`_)
+
 2.2.0 (2026-02-19)
 ------------------
 * fix e2e test (`#1075 <https://github.com/tier4/agnocast/issues/1075>`_)

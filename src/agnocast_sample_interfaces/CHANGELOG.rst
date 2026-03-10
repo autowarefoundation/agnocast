@@ -2,6 +2,9 @@
 Changelog for package agnocast_sample_interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.0 (2026-03-09)
+------------------
+
 2.2.0 (2026-02-19)
 ------------------
 * chore: add sample service/client application (`#709 <https://github.com/tier4/agnocast/issues/709>`_)

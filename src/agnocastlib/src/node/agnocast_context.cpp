@@ -23,14 +23,14 @@ void Context::init(int argc, char const * const * argv)
 
   parsed_arguments_ = parse_arguments(args);
   initialized_ = true;
+
+  TRACEPOINT(agnocast_init, static_cast<const void *>(this));
 }
 
 void init(int argc, char const * const * argv)
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
   g_context.init(argc, argv);
-
-  TRACEPOINT(agnocast_init, static_cast<const void *>(&g_context));
 }
 
 }  // namespace agnocast

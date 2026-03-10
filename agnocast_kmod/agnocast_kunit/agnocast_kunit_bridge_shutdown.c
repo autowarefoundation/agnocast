@@ -6,7 +6,7 @@
 
 static pid_t pid_bs = 8000;
 
-// Registering with is_bridge_manager=true should succeed and set the flag
+// Registering with is_performance_bridge_manager=true should succeed and set the flag
 // so that subsequent processes see ret_performance_bridge_daemon_exist=true
 void test_case_bridge_manager_flag_set_on_registration(struct kunit * test)
 {
@@ -42,7 +42,7 @@ void test_case_bridge_manager_detected_by_new_process(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, normal_args.ret_performance_bridge_daemon_exist);
 }
 
-// notify_bridge_shutdown clears is_bridge_manager, so a new process
+// notify_bridge_shutdown clears is_performance_bridge_manager, so a new process
 // should receive ret_performance_bridge_daemon_exist=false
 void test_case_notify_bridge_shutdown_clears_flag(struct kunit * test)
 {

@@ -101,12 +101,14 @@ void ros_trace_agnocast_timer_init(
 
 void ros_trace_agnocast_add_callback_group(
   const void * executor_addr,
+  const void * node_handle,
   const void * callback_group_addr,
   const char * group_type_name)
 {
   CONDITIONAL_TP(
     agnocast_add_callback_group,
     executor_addr,
+    node_handle,
     callback_group_addr,
     group_type_name);
 }

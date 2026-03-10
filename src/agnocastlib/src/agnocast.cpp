@@ -13,8 +13,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <span>
+#include <vector>
 
 namespace agnocast
 {
@@ -145,15 +147,17 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
   }
 }
 
-initialize_agnocast_result acquire_agnocast_resources_for_bridge()
+initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode bridge_mode)
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_bridge_manager = true;
+  add_process_args.is_performance_bridge_manager = (bridge_mode == BridgeMode::Performance);
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (add_process_args.ret_performance_bridge_daemon_exist) {
+  if (
+    bridge_mode == BridgeMode::Performance &&
+    add_process_args.ret_performance_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -173,12 +177,18 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 
 void poll_for_unlink()
 {
+  std::vector<exit_subscription_mq_info> mq_info_buf(MAX_SUBSCRIPTION_NUM_PER_PROCESS);
+
   while (true) {
     sleep(1);
 
     struct ioctl_get_exit_process_args get_exit_process_args = {};
     do {
       get_exit_process_args = {};
+      get_exit_process_args.subscription_mq_info_buffer_addr =
+        reinterpret_cast<uint64_t>(mq_info_buf.data());
+      get_exit_process_args.subscription_mq_info_buffer_size =
+        static_cast<uint32_t>(mq_info_buf.size());
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
@@ -193,6 +203,15 @@ void poll_for_unlink()
         // all exited processes to avoid the complexity of checking the process type.
         const std::string mq_name = create_mq_name_for_bridge(get_exit_process_args.ret_pid);
         mq_unlink(mq_name.c_str());
+
+        // Unlink subscription MQs that the exited process owned
+        for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+          const std::string topic_name(mq_info_buf[i].topic_name);
+          const std::string sub_mq_name =
+            create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
+          mq_unlink(sub_mq_name.c_str());
+        }
       }
     } while (get_exit_process_args.ret_pid > 0);
 
@@ -212,10 +231,9 @@ void poll_for_unlink()
 void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
 {
   try {
-    const auto resources = acquire_agnocast_resources_for_bridge();
-    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-
     auto bridge_mode = get_bridge_mode();
+    const auto resources = acquire_agnocast_resources_for_bridge(bridge_mode);
+    initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     if (bridge_mode == BridgeMode::Standard) {
       StandardBridgeManager manager(target_pid);
       manager.run();

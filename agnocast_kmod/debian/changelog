@@ -1,3 +1,33 @@
+agnocast-kmod-v2.3.0 (2.3.0-1) noble; urgency=medium
+
+  * fix(kmod): fix page allocation failure in topic info ioctl (#1162 <https://github.com/tier4/agnocast/issues/1162>)
+  * fix(kmod): use kvcalloc beside kmalloc_array (#1165 <https://github.com/tier4/agnocast/issues/1165>)
+  * docs(kmod): clarify exit PID ring buffer cannot overflow in production (#1163 <https://github.com/tier4/agnocast/issues/1163>)
+  * fix [need-minor-update]: unlink subscription MQs on abnormal process exit (#1155 <https://github.com/tier4/agnocast/issues/1155>)
+  * feat(kmod): add insmod options for mempool_num and mempool_start_addr (#1153 <https://github.com/tier4/agnocast/issues/1153>)
+  * feat(kmod): bump capacity constants and default mempool size (#1151 <https://github.com/tier4/agnocast/issues/1151>)
+  * fix(bridge)[need-minor-update]: fix bridge shutdown contention (#1149 <https://github.com/tier4/agnocast/issues/1149>)
+  * Revert "fix(bridge)[need-minor-update]: fix bridge shutdown contention" (#1146 <https://github.com/tier4/agnocast/issues/1146>)
+  * fix(bridge)[need-minor-update]: fix bridge shutdown contention (#1140 <https://github.com/tier4/agnocast/issues/1140>)
+  * feat[need-minor-update]: implement `get_publisher_count` API (#1102 <https://github.com/tier4/agnocast/issues/1102>)
+  * agnocast(kmod): include <linux/fs.h> (#1125 <https://github.com/tier4/agnocast/issues/1125>)
+  * fix(kmod): fix bug for `ignore_local_publications` (#1118 <https://github.com/tier4/agnocast/issues/1118>)
+  * refactor(kmod)[need-minor-update]: to use `tgid` inside kmod for bridge related ioctl commands (#1114 <https://github.com/tier4/agnocast/issues/1114>)
+  * fix(kmod)[need-minor-update]: add `topic_name_buffer_size` field for `get_agnocast_pub/sub_topics` (#1113 <https://github.com/tier4/agnocast/issues/1113>)
+  * perf(kmod): skip non-leader threads early in process exit handler (#1120 <https://github.com/tier4/agnocast/issues/1120>)
+  * fix(kmod): use `kzalloc`, `kcalloc`,`memset` in kmod (#1112 <https://github.com/tier4/agnocast/issues/1112>)
+  * fix(kmod): add error handling for topic_local_id overflow (#1110 <https://github.com/tier4/agnocast/issues/1110>)
+  * perf(agnocast_kmod): optimize exit worker and filter non-Agnocast PIDs (#1083 <https://github.com/tier4/agnocast/issues/1083>)
+  * fix(agnocast_kmod): save subscriber_ids_buffer_addr before publish_msg called (#1107 <https://github.com/tier4/agnocast/issues/1107>)
+  * feat(agnocast_kmod): replace do_exit kprobe with sched_process_exit tracepoint (#1089 <https://github.com/tier4/agnocast/issues/1089>)
+  * fix(kmod): ioctl functions name (#1094 <https://github.com/tier4/agnocast/issues/1094>)
+  * fix(agnocast_kmod): fix string handling bugs in node queries and get_version (#1085 <https://github.com/tier4/agnocast/issues/1085>)
+  * fix(agnocast_kmod): add error handling to agnocast_init_device (#1084 <https://github.com/tier4/agnocast/issues/1084>)
+  * fix(agnocast_kmod): guard copy_to_user on error paths in ioctl handler (#1086 <https://github.com/tier4/agnocast/issues/1086>)
+  * fix(agnocast_kmod): add .owner = THIS_MODULE to file_operations (#1080 <https://github.com/tier4/agnocast/issues/1080>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Mon, 09 Mar 2026 23:09:00 +0900
+
 agnocast-kmod-v2.2.0 (2.2.0-6) noble; urgency=medium
 
   * fix(kmod)[need-minor-update]: delete unnecessary tests along with the abolish of `MAX_PROCESS_NUM_PER_MEMPOOL` (#1073 <https://github.com/tier4/agnocast/issues/1073>)
