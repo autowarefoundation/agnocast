@@ -34,8 +34,8 @@ private:
 
   std::atomic_bool shutdown_requested_ = false;
 
-  std::unordered_map<std::string, std::shared_ptr<void>> active_r2a_bridges_;
-  std::unordered_map<std::string, std::shared_ptr<void>> active_a2r_bridges_;
+  std::unordered_map<std::string, PerformanceBridgeResult> active_r2a_bridges_;
+  std::unordered_map<std::string, PerformanceBridgeResult> active_a2r_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   void start_ros_execution();
