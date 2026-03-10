@@ -16,8 +16,8 @@
 namespace agnocast
 {
 
-template <typename ServiceT>
-class Service
+template <typename ServiceT, typename BridgeRequestPolicy>
+class BasicService
 {
 private:
   // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
@@ -32,7 +32,7 @@ private:
   };
 
 private:
-  using ServiceResponsePublisher = BasicPublisher<ResponseT, agnocast::NoBridgeRequestPolicy>;
+  using ServiceResponsePublisher = BasicPublisher<ResponseT, NoBridgeRequestPolicy>;
   using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRequestPolicy>;
 
   std::variant<rclcpp::Node *, agnocast::Node *> node_;
@@ -43,10 +43,10 @@ private:
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
 public:
-  using SharedPtr = std::shared_ptr<Service<ServiceT>>;
+  using SharedPtr = std::shared_ptr<BasicService<ServiceT, BridgeRequestPolicy>>;
 
   template <typename Func, typename NodeT>
-  Service(
+  BasicService(
     NodeT * node, const std::string & service_name, Func && callback, const rclcpp::QoS & qos,
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
@@ -115,7 +115,14 @@ public:
     std::string topic_name = create_service_request_topic_name(service_name_);
     subscriber_ = std::make_shared<BasicSubscription<RequestT, NoBridgeRequestPolicy>>(
       node, topic_name, qos, std::move(subscriber_callback), options);
+
+    BridgeRequestPolicy::template request_bridge<ServiceT>(service_name_, qos);
   }
 };
+
+struct RosToAgnocastServiceRequestPolicy;
+
+template <typename ServiceT>
+using Service = BasicService<ServiceT, RosToAgnocastServiceRequestPolicy>;
 
 }  // namespace agnocast

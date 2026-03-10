@@ -108,9 +108,17 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
   auto * msg = reinterpret_cast<MqMsgPerformanceBridge *>(buffer.data());
 
-  std::string topic_name = static_cast<const char *>(msg->target.topic_name);
-  topic_local_id_t target_id = msg->target.target_id;
-  std::string message_type = static_cast<const char *>(msg->message_type);
+  // TODO(bdm-k): For debugging purposes. Remove this later.
+  if (msg->is_service) {
+    RCLCPP_INFO(
+      logger_, "Received service bridge request for '%s' with type '%s'", msg->srv_target.name,
+      msg->srv_target.type);
+    return;
+  }
+
+  std::string topic_name = static_cast<const char *>(msg->pubsub_target.topic_name);
+  topic_local_id_t target_id = msg->pubsub_target.target_id;
+  std::string message_type = static_cast<const char *>(msg->pubsub_target.message_type);
 
   request_cache_[topic_name][target_id] = *msg;
 
@@ -140,7 +148,7 @@ void PerformanceBridgeManager::check_and_create_bridges()
     }
 
     const std::string message_type =
-      static_cast<const char *>(requests.begin()->second.message_type);
+      static_cast<const char *>(requests.begin()->second.pubsub_target.message_type);
 
     create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
     create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
