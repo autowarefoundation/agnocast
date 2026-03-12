@@ -1,4 +1,4 @@
-#include "agnocast_shared.h"
+#include "agnocast_internal.h"
 
 #ifndef KUNIT_BUILD
 // Kernel module uses global PIDs, whereas user-space and the interface between them use local PIDs.

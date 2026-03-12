@@ -3,7 +3,11 @@ ccflags-y += -Wall -Werror -DVERSION='"$(VERSION)"'
 
 ifneq ($(KUNIT_BUILD),y)
   obj-m := agnocast.o
-  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o agnocast_ioctl.o
+  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o \
+  	agnocast_init.o \
+	agnocast_exit.o \
+	agnocast_ioctl.o \
+	agnocast_internal.o
 else
   ifeq ($(CONFIG_KUNIT)$(CONFIG_GCOV_KERNEL),yy)
     obj-m := agnocast_kunit.o
