@@ -8,6 +8,7 @@
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_single_threaded_executor.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
 #include "agnocast/node/agnocast_context.hpp"
@@ -185,6 +186,14 @@ TimerBase::SharedPtr create_timer(
     timer_id, period_ns, clock, std::forward<CallbackT>(callback));
 
   register_timer_info(timer_id, timer, period_ns, group, clock);
+
+  const void * callback_addr = static_cast<const void *>(&callback);
+  const char * callback_symbol = tracetools::get_symbol(callback);
+
+  TRACEPOINT(
+    agnocast_timer_init, static_cast<const void *>(timer.get()),
+    static_cast<const void *>(node->get_node_base_interface().get()), callback_addr,
+    static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
   return timer;
 }
