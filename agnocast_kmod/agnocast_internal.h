@@ -147,17 +147,17 @@ struct bridge_info
 
 extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
-int get_size_sub_info_htable(struct topic_wrapper * wrapper);
+int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 
-int get_size_pub_info_htable(struct topic_wrapper * wrapper);
+int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper);
 
-bool is_referenced(struct entry_node * en);
+bool agnocast_is_referenced(struct entry_node * en);
 
-struct process_info * find_process_info(const pid_t pid);
+struct process_info * agnocast_find_process_info(const pid_t pid);
 
-void free_exit_subscription_list(struct process_info * proc_info);
+void agnocast_free_exit_subscription_list(struct process_info * proc_info);
 
-void remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
+void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 

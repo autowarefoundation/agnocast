@@ -13,7 +13,7 @@ static void remove_all_topics(void)
     while (node) {
       struct entry_node * en = rb_entry(node, struct entry_node, node);
       node = rb_next(node);
-      remove_entry_node(wrapper, en);
+      agnocast_remove_entry_node(wrapper, en);
     }
 
     struct publisher_info * pub_info;
@@ -49,7 +49,7 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
-    free_exit_subscription_list(proc_info);
+    agnocast_free_exit_subscription_list(proc_info);
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }

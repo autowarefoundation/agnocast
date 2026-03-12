@@ -75,7 +75,7 @@ static void pre_handler_subscriber_exit(
       // The subscriber may not have referenced this entry, so the bit may already be 0.
       clear_bit(subscriber_id, en->referencing_subscribers);
 
-      if (is_referenced(en)) continue;
+      if (agnocast_is_referenced(en)) continue;
 
       bool publisher_exited = false;
       struct publisher_info * pub_info;
@@ -83,7 +83,7 @@ static void pre_handler_subscriber_exit(
       hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * pub_proc_info = find_process_info(pub_info->pid);
+          const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
           if (!pub_proc_info || pub_proc_info->exited) {
             publisher_exited = true;
           }
@@ -92,7 +92,7 @@ static void pre_handler_subscriber_exit(
       }
       if (!publisher_exited) continue;
 
-      remove_entry_node(wrapper, en);
+      agnocast_remove_entry_node(wrapper, en);
 
       pub_info->entries_num--;
       if (pub_info->entries_num == 0) {
@@ -125,9 +125,9 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
       if (en->publisher_id != publisher_id) continue;
 
-      if (!is_referenced(en)) {
+      if (!agnocast_is_referenced(en)) {
         pub_info->entries_num--;
-        remove_entry_node(wrapper, en);
+        agnocast_remove_entry_node(wrapper, en);
       }
     }
 
@@ -177,7 +177,9 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     pre_handler_subscriber_exit(wrapper, pid, proc_info);
 
     // Check if we can release the topic_wrapper
-    if (get_size_pub_info_htable(wrapper) == 0 && get_size_sub_info_htable(wrapper) == 0) {
+    if (
+      agnocast_get_size_pub_info_htable(wrapper) == 0 &&
+      agnocast_get_size_sub_info_htable(wrapper) == 0) {
       hash_del(&wrapper->node);
       if (wrapper->key) {
         kfree(wrapper->key);

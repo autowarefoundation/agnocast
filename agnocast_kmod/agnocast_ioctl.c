@@ -111,7 +111,7 @@ static int insert_subscriber_info(
   const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
   struct subscriber_info ** new_info)
 {
-  int count = get_size_sub_info_htable(wrapper);
+  int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
     dev_warn(
       agnocast_device,
@@ -213,7 +213,7 @@ static int insert_publisher_info(
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
   struct publisher_info ** new_info)
 {
-  int count = get_size_pub_info_htable(wrapper);
+  int count = agnocast_get_size_pub_info_htable(wrapper);
   if (count == MAX_PUBLISHER_NUM) {
     dev_warn(
       agnocast_device,
@@ -514,7 +514,7 @@ static int set_publisher_shm_info(
       continue;
     }
 
-    const struct process_info * proc_info = find_process_info(pub_info->pid);
+    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
       continue;
     }
@@ -599,7 +599,7 @@ int agnocast_ioctl_add_process(
 
   down_write(&global_htables_rwsem);
 
-  if (find_process_info(pid)) {
+  if (agnocast_find_process_info(pid)) {
     dev_warn(
       agnocast_device, "Process (pid=%d) already exists. (agnocast_ioctl_add_process)\n", pid);
     ret = -EINVAL;
@@ -782,7 +782,7 @@ static int release_msgs_to_meet_depth(
     num_search_entries--;
 
     // This is not counted in a Queue size of QoS.
-    if (is_referenced(en)) continue;
+    if (agnocast_is_referenced(en)) continue;
 
     ioctl_ret->ret_released_addrs[ioctl_ret->ret_released_num] = en->msg_virtual_address;
     ioctl_ret->ret_released_num++;
@@ -839,7 +839,7 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  struct process_info * proc_info = find_process_info(pub_info->pid);
+  struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
   if (!proc_info) {
     dev_warn(
       agnocast_device, "Process (pid=%d) does not exist. (ioctl_publish_msg)\n", pub_info->pid);
@@ -946,7 +946,7 @@ static int receive_msg_core(
       return -ENODATA;
     }
 
-    const struct process_info * proc_info = find_process_info(pub_info->pid);
+    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
       continue;
     }
@@ -1091,7 +1091,7 @@ int agnocast_ioctl_take_msg(
       goto unlock_all;
     }
 
-    const struct process_info * proc_info = find_process_info(pub_info->pid);
+    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
       continue;
     }
@@ -1268,7 +1268,7 @@ int agnocast_ioctl_get_publisher_num(
 
   down_read(&wrapper->topic_rwsem);
 
-  ioctl_ret->ret_publisher_num = get_size_pub_info_htable(wrapper);
+  ioctl_ret->ret_publisher_num = agnocast_get_size_pub_info_htable(wrapper);
   ioctl_ret->ret_ros2_publisher_num = wrapper->topic.ros2_publisher_num;
 
   struct publisher_info * pub_info;
@@ -1297,7 +1297,7 @@ int agnocast_ioctl_get_publisher_num(
   return 0;
 }
 
-void free_exit_subscription_list(struct process_info * proc_info)
+void agnocast_free_exit_subscription_list(struct process_info * proc_info)
 {
   struct exit_subscription_entry * entry;
   struct exit_subscription_entry * tmp_entry;
@@ -1354,7 +1354,7 @@ int agnocast_ioctl_get_exit_process(
         "No MQ info buffer provided for pid=%d with %u subscription entries; "
         "subscription MQs will leak. (agnocast_ioctl_get_exit_process)\n",
         proc_info->global_pid, proc_info->exit_subscription_count);
-      free_exit_subscription_list(proc_info);
+      agnocast_free_exit_subscription_list(proc_info);
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
@@ -1396,7 +1396,7 @@ void agnocast_commit_exit_process(
   down_write(&global_htables_rwsem);
 
   if (global_pid >= 0) {
-    struct process_info * proc_info = find_process_info(global_pid);
+    struct process_info * proc_info = agnocast_find_process_info(global_pid);
     if (proc_info) {
       // Delete the first committed_count entries (matching the read-only copy order).
       uint32_t deleted = 0;
@@ -1890,7 +1890,7 @@ int agnocast_ioctl_remove_subscriber(
     // The subscriber may not have referenced this entry, so the bit may already be 0.
     clear_bit(subscriber_id, en->referencing_subscribers);
 
-    if (is_referenced(en)) continue;
+    if (agnocast_is_referenced(en)) continue;
 
     bool publisher_exited = false;
     struct publisher_info * pub_info;
@@ -1898,7 +1898,7 @@ int agnocast_ioctl_remove_subscriber(
     hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
     {
       if (pub_info->id == en->publisher_id) {
-        const struct process_info * proc_info = find_process_info(pub_info->pid);
+        const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
         if (!proc_info || proc_info->exited) {
           publisher_exited = true;
         }
@@ -1907,7 +1907,7 @@ int agnocast_ioctl_remove_subscriber(
     }
     if (!publisher_exited) continue;
 
-    remove_entry_node(wrapper, en);
+    agnocast_remove_entry_node(wrapper, en);
 
     pub_info->entries_num--;
     if (pub_info->entries_num == 0) {
@@ -1917,7 +1917,9 @@ int agnocast_ioctl_remove_subscriber(
     }
   }
 
-  if (get_size_pub_info_htable(wrapper) == 0 && get_size_sub_info_htable(wrapper) == 0) {
+  if (
+    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
+    agnocast_get_size_sub_info_htable(wrapper) == 0) {
     struct rb_node * n = rb_first(&wrapper->topic.entries);
     while (n) {
       struct entry_node * en = rb_entry(n, struct entry_node, node);
@@ -1969,9 +1971,9 @@ int agnocast_ioctl_remove_publisher(
 
     if (en->publisher_id != publisher_id) continue;
 
-    if (!is_referenced(en)) {
+    if (!agnocast_is_referenced(en)) {
       pub_info->entries_num--;
-      remove_entry_node(wrapper, en);
+      agnocast_remove_entry_node(wrapper, en);
     }
   }
 
@@ -1984,12 +1986,14 @@ int agnocast_ioctl_remove_publisher(
       agnocast_device, "Publisher (id=%d) removed from topic %s.\n", publisher_id, topic_name);
   }
 
-  if (get_size_pub_info_htable(wrapper) == 0 && get_size_sub_info_htable(wrapper) == 0) {
+  if (
+    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
+    agnocast_get_size_sub_info_htable(wrapper) == 0) {
     struct rb_node * n = rb_first(&wrapper->topic.entries);
     while (n) {
       struct entry_node * en = rb_entry(n, struct entry_node, node);
       n = rb_next(n);
-      remove_entry_node(wrapper, en);
+      agnocast_remove_entry_node(wrapper, en);
     }
 
     hash_del(&wrapper->node);
@@ -2175,7 +2179,7 @@ static int get_process_num(const struct ipc_namespace * ipc_ns)
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
 {
   down_write(&global_htables_rwsem);
-  struct process_info * proc_info = find_process_info(pid);
+  struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
     // Unconditionally clear the flag; standard bridge managers also call this for consistency.
     proc_info->is_performance_bridge_manager = false;
@@ -2191,7 +2195,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   down_write(&global_htables_rwsem);
   // Request shutdown if there is no other process excluding poll_for_unlink.
   if (get_process_num(ipc_ns) <= 1) {
-    struct process_info * proc_info = find_process_info(pid);
+    struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
       proc_info->is_performance_bridge_manager = false;
     }

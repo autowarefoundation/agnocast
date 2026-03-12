@@ -39,7 +39,7 @@ int has_new_pid = false;
 
 struct tracepoint * tp_sched_process_exit;
 
-int get_size_sub_info_htable(struct topic_wrapper * wrapper)
+int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper)
 {
   int count = 0;
   struct subscriber_info * sub_info;
@@ -51,7 +51,7 @@ int get_size_sub_info_htable(struct topic_wrapper * wrapper)
   return count;
 }
 
-int get_size_pub_info_htable(struct topic_wrapper * wrapper)
+int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper)
 {
   int count = 0;
   struct publisher_info * pub_info;
@@ -63,12 +63,12 @@ int get_size_pub_info_htable(struct topic_wrapper * wrapper)
   return count;
 }
 
-bool is_referenced(struct entry_node * en)
+bool agnocast_is_referenced(struct entry_node * en)
 {
   return !bitmap_empty(en->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 }
 
-struct process_info * find_process_info(const pid_t pid)
+struct process_info * agnocast_find_process_info(const pid_t pid)
 {
   struct process_info * proc_info;
   uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
@@ -82,7 +82,7 @@ struct process_info * find_process_info(const pid_t pid)
   return NULL;
 }
 
-void remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
+void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
 {
   rb_erase(&en->node, &wrapper->topic.entries);
   kfree(en);
