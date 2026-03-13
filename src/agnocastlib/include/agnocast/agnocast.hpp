@@ -190,12 +190,18 @@ TimerBase::SharedPtr create_timer(
   const void * callback_addr = static_cast<const void *>(&callback);
   const char * callback_symbol = tracetools::get_symbol(callback);
 
+  const void * node_handle;
+  if constexpr (std::is_base_of_v<rclcpp::Node, NodePtrT>) {
+    node_handle = static_cast<const void *>(
+      node->get_node_base_interface()->get_shared_rcl_node_handle().get());
+  } else {
+    node_handle = get_node_base_address(node);
+  }
+
   TRACEPOINT(
-    agnocast_timer_init, static_cast<const void *>(timer.get()),
-    static_cast<const void *>(node->get_node_base_interface().get()), callback_addr,
+    agnocast_timer_init, static_cast<const void *>(timer.get()), node_handle, callback_addr,
     static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
   return timer;
-}
 
 }  // namespace agnocast
