@@ -182,13 +182,13 @@ TimerBase::SharedPtr create_timer(
   const uint32_t timer_id = allocate_timer_id();
   const auto period_ns = period.to_chrono<std::chrono::nanoseconds>();
 
+  const void * callback_addr = static_cast<const void *>(&callback);
+  const char * callback_symbol = tracetools::get_symbol(callback);
+
   auto timer = std::make_shared<GenericTimer<CallbackT>>(
     timer_id, period_ns, clock, std::forward<CallbackT>(callback));
 
   register_timer_info(timer_id, timer, period_ns, group, clock);
-
-  const void * callback_addr = static_cast<const void *>(&callback);
-  const char * callback_symbol = tracetools::get_symbol(callback);
 
   const void * node_handle;
   if constexpr (std::is_base_of_v<rclcpp::Node, NodePtrT>) {
@@ -203,6 +203,5 @@ TimerBase::SharedPtr create_timer(
     static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
   return timer;
-}
 
 }  // namespace agnocast
