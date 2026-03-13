@@ -203,5 +203,6 @@ TimerBase::SharedPtr create_timer(
     static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
   return timer;
+}
 
 }  // namespace agnocast
