@@ -295,8 +295,13 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # ======== Subscribers ========
             print("  Subscribers:")
+            agnocast_sub_set = set(agnocast_subscribers)
             for sub in subscribers:
-                print(f"    {sub.name}: {', '.join(sub.types)}")
+                if sub.name in agnocast_sub_set:
+                    label = get_agnocast_label(sub.name, ros2_sub_topics, ros2_pub_topics)
+                    print(f"    {sub.name}: {', '.join(sub.types)} {label}")
+                else:
+                    print(f"    {sub.name}: {', '.join(sub.types)}")
 
             for agnocast_sub in agnocast_subscribers:
                 if agnocast_sub in [sub.name for sub in subscribers]:
@@ -310,8 +315,13 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # ======== Publishers ========
             print("  Publishers:")
+            agnocast_pub_set = set(agnocast_publishers)
             for pub in publishers:
-                print(f"    {pub.name}: {', '.join(pub.types)}")
+                if pub.name in agnocast_pub_set:
+                    label = get_agnocast_label(pub.name, ros2_sub_topics, ros2_pub_topics)
+                    print(f"    {pub.name}: {', '.join(pub.types)} {label}")
+                else:
+                    print(f"    {pub.name}: {', '.join(pub.types)}")
 
             for agnocast_pub in agnocast_publishers:
                 if agnocast_pub in [pub.name for pub in publishers]:
