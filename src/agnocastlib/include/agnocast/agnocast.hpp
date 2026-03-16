@@ -195,7 +195,7 @@ TimerBase::SharedPtr create_timer(
     node_handle = static_cast<const void *>(
       node->get_node_base_interface()->get_shared_rcl_node_handle().get());
   } else {
-    node_handle = get_node_base_address(node);
+    node_handle = static_cast<const void *>(node->get_node_base_interface().get());
   }
 
   TRACEPOINT(
