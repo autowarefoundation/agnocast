@@ -1,3 +1,7 @@
+agnocast-kmod-v2.3.1 (2.3.1-1) noble; urgency=medium
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 17 Mar 2026 19:03:00 +0900
+
 agnocast-kmod-v2.3.0 (2.3.0-1) noble; urgency=medium
 
   * fix(kmod): fix page allocation failure in topic info ioctl (#1162 <https://github.com/tier4/agnocast/issues/1162>)

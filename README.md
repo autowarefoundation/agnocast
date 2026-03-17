@@ -56,7 +56,7 @@ Since ROS packages under `src/` such as `agnocastlib` are not yet distributed fr
 Therefore, to perform the source build, first check out the specific version as follows:
 
 ```bash
-git clone --branch 2.3.0 https://github.com/autowarefoundation/agnocast.git
+git clone --branch 2.3.1 https://github.com/autowarefoundation/agnocast.git
 cd agnocast
 ```
 
@@ -163,7 +163,7 @@ EOF
 
 # Install packages
 sudo apt update
-sudo apt install agnocast-heaphook-v2.3.0 agnocast-kmod-v2.3.0
+sudo apt install agnocast-heaphook-v2.3.1 agnocast-kmod-v2.3.1
 ```
 
 </details>
