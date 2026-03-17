@@ -2,6 +2,9 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.0 (2026-03-09)
 ------------------
 * feat(kmod): bump capacity constants and default mempool size (`#1151 <https://github.com/autowarefoundation/agnocast/issues/1151>`_)

@@ -2,6 +2,9 @@
 Changelog for package agnocast_cie_config_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.0 (2026-03-09)
 ------------------
 

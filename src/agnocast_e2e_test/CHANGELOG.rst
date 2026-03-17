@@ -2,6 +2,9 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.0 (2026-03-09)
 ------------------
 * fix(bridge): create bridge with checking ros2 pub/sub (`#1164 <https://github.com/autowarefoundation/agnocast/issues/1164>`_)

@@ -2,6 +2,9 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.0 (2026-03-09)
 ------------------
 

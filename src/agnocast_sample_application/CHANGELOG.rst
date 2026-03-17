@@ -2,6 +2,9 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.0 (2026-03-09)
 ------------------
 * feat(agnocastlib): align with rclcpp for Timer api. (`#1127 <https://github.com/autowarefoundation/agnocast/issues/1127>`_)
