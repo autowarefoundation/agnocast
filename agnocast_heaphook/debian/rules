@@ -19,7 +19,7 @@ override_dh_auto_install:
 		ROS_DISTRO=jazzy; \
 	fi; \
 	install -D -m 0755 target/release/libagnocast_heaphook.so \
-		debian/agnocast-heaphook-v2.3.0/opt/ros/$$ROS_DISTRO/lib/libagnocast_heaphook.so
+		debian/agnocast-heaphook-v2.3.1/opt/ros/$$ROS_DISTRO/lib/libagnocast_heaphook.so
 
 override_dh_auto_test:
 	# Skipping tests during package build
