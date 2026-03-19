@@ -21,20 +21,18 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>ament_index_cpp</depend>
+  <depend>libgoogle-glog-dev</depend>
+  <depend>liblttng-ust-dev</depend>
+  <depend>message_filters</depend>
+  <depend>rcl_yaml_param_parser</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
-  <depend>rcl_yaml_param_parser</depend>
-  <depend>std_msgs</depend>
-  <depend>tracetools</depend>
-  <depend>liblttng-ust-dev</depend>
   <depend>rosgraph_msgs</depend>
-  <depend>ament_index_cpp</depend>
-
-  <depend>libgoogle-glog-dev</depend>
+  <depend>tracetools</depend>
 
   <depend>agnocast_cie_config_msgs</depend>
   <depend>agnocast_cie_thread_configurator</depend>
-  <depend>agnocast_sample_interfaces</depend>
 
   <!-- Uncomment when agnocast_kmod is released from PPA -->
   <!-- <exec_depend>agnocast_kmod</exec_depend> -->
@@ -46,6 +44,7 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>std_msgs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
