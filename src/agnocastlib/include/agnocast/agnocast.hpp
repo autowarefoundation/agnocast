@@ -206,3 +206,11 @@ TimerBase::SharedPtr create_timer(
 }
 
 }  // namespace agnocast
+
+// Message filters are included after the agnocast namespace closes because
+// subscriber.hpp depends on agnocast::create_subscription defined above.
+#include "agnocast/message_filters/pass_through.hpp"
+#include "agnocast/message_filters/subscriber.hpp"
+#include "agnocast/message_filters/sync_policies/approximate_time.hpp"
+#include "agnocast/message_filters/sync_policies/exact_time.hpp"
+#include "agnocast/message_filters/synchronizer.hpp"
