@@ -1,12 +1,15 @@
 #pragma once
 
-#include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/message_filters/simple_filter.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
 #include <memory>
 #include <string>
+#include <type_traits>
 
 namespace agnocast
 {
@@ -272,7 +275,11 @@ public:
       topic_ = topic;
       qos_ = qos;
       options_ = options;
-      sub_ = agnocast::create_subscription<M>(
+      static_assert(
+        std::is_base_of_v<rclcpp::Node, NodeType> ||
+          std::is_base_of_v<agnocast::Node, NodeType>,
+        "NodeType must be rclcpp::Node or agnocast::Node (or derived from them)");
+      sub_ = std::make_shared<BasicSubscription<M, RosToAgnocastRequestPolicy>>(
         node, topic, detail::to_rclcpp_qos(qos),
         [this](ipc_shared_ptr<M> msg) { this->cb(std::move(msg)); }, options);
       node_raw_ = node;
