@@ -276,8 +276,7 @@ public:
       qos_ = qos;
       options_ = options;
       static_assert(
-        std::is_base_of_v<rclcpp::Node, NodeType> ||
-          std::is_base_of_v<agnocast::Node, NodeType>,
+        std::is_base_of_v<rclcpp::Node, NodeType> || std::is_base_of_v<agnocast::Node, NodeType>,
         "NodeType must be rclcpp::Node or agnocast::Node (or derived from them)");
       sub_ = std::make_shared<BasicSubscription<M, RosToAgnocastRequestPolicy>>(
         node, topic, detail::to_rclcpp_qos(qos),
