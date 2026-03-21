@@ -5,6 +5,16 @@ VERSION="2.3.1"
 
 case "$1" in
     configure)
+        # Remove all other agnocast DKMS registrations to avoid conflicts.
+        # Normally Conflicts/Replaces in debian/control handles package removal,
+        # but old packages may not have had proper prerm scripts for DKMS cleanup.
+        for old_ver in $(dkms status -m agnocast 2>/dev/null | sed -n 's/^agnocast[,/] *\([^,]*\),.*/\1/p' | sort -u); do
+            if [ "$old_ver" != "$VERSION" ]; then
+                echo "Removing agnocast DKMS version: $old_ver"
+                dkms remove -m agnocast -v "$old_ver" --all || true
+            fi
+        done
+
         dkms add -m agnocast -v "$VERSION"
         dkms build -m agnocast -v "$VERSION"
         dkms install -m agnocast -v "$VERSION"
