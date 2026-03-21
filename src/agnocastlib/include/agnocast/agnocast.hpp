@@ -11,6 +11,11 @@
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/message_filters/pass_through.hpp"
+#include "agnocast/message_filters/subscriber.hpp"
+#include "agnocast/message_filters/sync_policies/approximate_time.hpp"
+#include "agnocast/message_filters/sync_policies/exact_time.hpp"
+#include "agnocast/message_filters/synchronizer.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_callback_isolated_executor.hpp"
@@ -206,11 +211,3 @@ TimerBase::SharedPtr create_timer(
 }
 
 }  // namespace agnocast
-
-// Message filters are included after the agnocast namespace closes because
-// subscriber.hpp depends on agnocast::create_subscription defined above.
-#include "agnocast/message_filters/pass_through.hpp"
-#include "agnocast/message_filters/subscriber.hpp"
-#include "agnocast/message_filters/sync_policies/approximate_time.hpp"
-#include "agnocast/message_filters/sync_policies/exact_time.hpp"
-#include "agnocast/message_filters/synchronizer.hpp"
