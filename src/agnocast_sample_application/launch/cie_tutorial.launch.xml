@@ -1,0 +1,5 @@
+<launch>
+    <!-- LD_PRELOAD for libagnocast_heaphook.so is not needed here because this tutorial does not use Agnocast pub/sub. -->
+    <node pkg="agnocast_sample_application" exec="cie_tutorial_node" name="cie_tutorial_node" output="screen">
+    </node>
+</launch>
