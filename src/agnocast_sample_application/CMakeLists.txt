@@ -20,6 +20,9 @@ target_include_directories(talker PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
+add_executable(cie_tutorial_node src/cie_tutorial_node.cpp)
+ament_target_dependencies(cie_tutorial_node rclcpp agnocastlib)
+
 add_executable(cie_talker src/cie_publisher.cpp)
 ament_target_dependencies(cie_talker rclcpp agnocastlib agnocast_sample_interfaces)
 target_include_directories(cie_talker PRIVATE
@@ -125,6 +128,9 @@ install(TARGETS talker
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS cie_talker
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS cie_tutorial_node
   DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_no_rclcpp_listener_component)
