@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+VERSION="2.3.1"
+
+case "$1" in
+    remove|upgrade)
+        if dkms status -m agnocast -v "$VERSION" 2>/dev/null | grep -q agnocast; then
+            dkms remove -m agnocast -v "$VERSION" --all || true
+        fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0
