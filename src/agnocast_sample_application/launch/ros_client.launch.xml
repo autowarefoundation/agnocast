@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="agnocast_sample_application" exec="ros_client" name="ros_client_node" output="screen">
+        <remap from="/sum_int_array" to="/srv/sum_int_array" />
+    </node>
+</launch>

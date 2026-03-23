@@ -1,5 +1,5 @@
 <launch>
-    <node pkg="agnocast_sample_application" exec="server" name="server_node" output="screen">
+    <node pkg="agnocast_sample_application" exec="server" name="server_node" output="screen" emulate_tty="true">
         <remap from="/sum_int_array" to="/srv/sum_int_array" />
 
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />

@@ -96,6 +96,9 @@ target_include_directories(sim_time_timer PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
+add_executable(ros_client src/ros_client.cpp)
+ament_target_dependencies(ros_client rclcpp agnocast_sample_interfaces)
+
 add_library(listener_component SHARED src/minimal_subscriber.cpp)
 ament_target_dependencies(listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
 target_include_directories(listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
@@ -158,6 +161,9 @@ install(TARGETS no_rclcpp_client
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS sim_time_timer
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS ros_client
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch
