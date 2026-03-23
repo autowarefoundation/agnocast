@@ -303,8 +303,9 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 else:
                     print(f"    {sub.name}: {', '.join(sub.types)}")
 
+            ros2_sub_name_set = {sub.name for sub in subscribers}
             for agnocast_sub in agnocast_subscribers:
-                if agnocast_sub in [sub.name for sub in subscribers]:
+                if agnocast_sub in ros2_sub_name_set:
                     continue
                 matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_sub]
                 if matching_topics:
@@ -323,8 +324,9 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 else:
                     print(f"    {pub.name}: {', '.join(pub.types)}")
 
+            ros2_pub_name_set = {pub.name for pub in publishers}
             for agnocast_pub in agnocast_publishers:
-                if agnocast_pub in [pub.name for pub in publishers]:
+                if agnocast_pub in ros2_pub_name_set:
                     continue
                 matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_pub]
                 if matching_topics:
