@@ -27,6 +27,10 @@ public:
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
+  PerformanceServiceBridgeResult create_r2a_service_bridge(
+    rclcpp::Node::SharedPtr node, const std::string & service_name,
+    const std::string & service_type, const rmw_qos_profile_t & qos);
+
 private:
   rclcpp::Logger logger_;
 
@@ -34,10 +38,13 @@ private:
   std::unordered_map<std::string, void *> loaded_libraries_;
 
   static std::string convert_type_to_snake_case(const std::string & message_type);
-  static std::vector<std::string> generate_library_paths(const std::string & snake_type);
+  static std::vector<std::string> generate_library_paths(
+    const std::string & snake_type, bool is_service);
   void * load_library_from_paths(const std::vector<std::string> & paths);
   void * get_bridge_factory_symbol(
     const std::string & message_type, const std::string & symbol_name);
+  void * get_service_bridge_factory_symbol(
+    const std::string & service_type, const std::string & symbol_name);
 };
 
 }  // namespace agnocast

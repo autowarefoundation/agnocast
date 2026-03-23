@@ -51,6 +51,19 @@ PerformanceBridgeResult PerformanceBridgeLoader::create_a2r_bridge(
   return factory(std::move(node), topic_name, qos);
 }
 
+PerformanceServiceBridgeResult PerformanceBridgeLoader::create_r2a_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
+  const rmw_qos_profile_t & qos)
+{
+  void * symbol = get_service_bridge_factory_symbol(service_type, "create_r2a_service_bridge");
+  if (symbol == nullptr) {
+    return {nullptr, nullptr, nullptr};
+  }
+
+  auto factory = reinterpret_cast<BridgeEntryServiceR2A>(symbol);
+  return factory(std::move(node), service_name, qos);
+}
+
 std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::string & message_type)
 {
   std::string result = message_type;
@@ -59,10 +72,11 @@ std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::strin
 }
 
 std::vector<std::string> PerformanceBridgeLoader::generate_library_paths(
-  const std::string & snake_type)
+  const std::string & snake_type, bool is_service)
 {
   std::vector<std::string> paths;
-  const std::string lib_name = "libbridge_plugin_" + snake_type + ".so";
+  const std::string lib_name =
+    (is_service ? "libservice_bridge_plugin_" : "libbridge_plugin_") + snake_type + ".so";
 
   // 1. Check environment variable AGNOCAST_BRIDGE_PLUGINS_PATH (colon-separated)
   const char * env_path = std::getenv("AGNOCAST_BRIDGE_PLUGINS_PATH");
@@ -129,7 +143,7 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const std::string & message_type, const std::string & symbol_name)
 {
   std::string snake_type = convert_type_to_snake_case(message_type);
-  std::vector<std::string> lib_paths = generate_library_paths(snake_type);
+  std::vector<std::string> lib_paths = generate_library_paths(snake_type, false);
 
   void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
@@ -153,6 +167,40 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
       "Symbol '%s' was found for message type '%s' but returned NULL, which is invalid for a "
       "factory function.",
       symbol_name.c_str(), message_type.c_str());
+    return nullptr;
+  }
+
+  return symbol;
+}
+
+void * PerformanceBridgeLoader::get_service_bridge_factory_symbol(
+  const std::string & service_type, const std::string & symbol_name)
+{
+  std::string snake_type = convert_type_to_snake_case(service_type);
+  std::vector<std::string> lib_paths = generate_library_paths(snake_type, true);
+
+  void * handle = load_library_from_paths(lib_paths);
+  if (handle == nullptr) {
+    return nullptr;
+  }
+
+  dlerror();
+  void * symbol = dlsym(handle, symbol_name.c_str());
+
+  const char * dlsym_error = dlerror();
+  if (dlsym_error != nullptr) {
+    RCLCPP_ERROR(
+      logger_, "Failed to find symbol '%s' for service type '%s': %s", symbol_name.c_str(),
+      service_type.c_str(), dlsym_error);
+    return nullptr;
+  }
+
+  if (symbol == nullptr) {
+    RCLCPP_ERROR(
+      logger_,
+      "Symbol '%s' was found for service type '%s' but returned NULL, which is invalid for a "
+      "factory function.",
+      symbol_name.c_str(), service_type.c_str());
     return nullptr;
   }
 

@@ -23,5 +23,10 @@ extern "C" PerformanceBridgeResult create_r2a_bridge(
 extern "C" PerformanceBridgeResult create_a2r_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
+extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const rmw_qos_profile_t & qos);
+
 using BridgeEntryR2A = decltype(&create_r2a_bridge);
 using BridgeEntryA2R = decltype(&create_a2r_bridge);
+
+using BridgeEntryServiceR2A = decltype(&create_r2a_service_bridge);
