@@ -36,6 +36,7 @@ private:
 
   std::unordered_map<std::string, std::shared_ptr<void>> active_r2a_bridges_;
   std::unordered_map<std::string, std::shared_ptr<void>> active_a2r_bridges_;
+  std::unordered_map<std::string, PerformanceServiceBridgeResult> active_r2a_service_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   void start_ros_execution();
@@ -49,6 +50,7 @@ private:
   void check_and_request_shutdown();
 
   bool should_create_bridge(const std::string & topic_name, BridgeDirection direction) const;
+  bool should_create_service_bridge(const std::string & service_name) const;
   void create_bridge_if_needed(
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
