@@ -2,6 +2,9 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.1 (2026-03-17)
+------------------
+
 2.3.0 (2026-03-09)
 ------------------
 * fix(components): move tests for component container in `agnocast_components` (`#1126 <https://github.com/autowarefoundation/agnocast/issues/1126>`_)

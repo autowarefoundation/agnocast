@@ -5,6 +5,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 
+#ifndef SCHED_ATTR_SIZE_VER1
 struct sched_attr
 {
   uint32_t size;
@@ -23,6 +24,7 @@ struct sched_attr
   uint64_t sched_deadline;
   uint64_t sched_period;
 };
+#endif
 
 int sched_setattr(pid_t pid, const struct sched_attr * attr, unsigned int flags)
 {
