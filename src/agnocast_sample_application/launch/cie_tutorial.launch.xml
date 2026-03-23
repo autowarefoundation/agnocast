@@ -1,0 +1,4 @@
+<launch>
+    <node pkg="agnocast_sample_application" exec="cie_tutorial_node" name="cie_tutorial_node" output="screen">
+    </node>
+</launch>
