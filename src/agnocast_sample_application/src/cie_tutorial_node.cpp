@@ -18,20 +18,11 @@ class CieTutorialNode : public rclcpp::Node
   rclcpp::TimerBase::SharedPtr processing_timer_;
   rclcpp::TimerBase::SharedPtr logging_timer_;
 
-  void sensor_callback()
-  {
-    RCLCPP_INFO(get_logger(), "[sensor] reading data");
-  }
+  void sensor_callback() { RCLCPP_INFO(get_logger(), "[sensor] reading data"); }
 
-  void processing_callback()
-  {
-    RCLCPP_INFO(get_logger(), "[processing] computing");
-  }
+  void processing_callback() { RCLCPP_INFO(get_logger(), "[processing] computing"); }
 
-  void logging_callback()
-  {
-    RCLCPP_INFO(get_logger(), "[logging] writing log");
-  }
+  void logging_callback() { RCLCPP_INFO(get_logger(), "[logging] writing log"); }
 
 public:
   CieTutorialNode() : Node("cie_tutorial_node")
@@ -40,12 +31,12 @@ public:
     processing_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     logging_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-    sensor_timer_ = create_wall_timer(100ms, std::bind(&CieTutorialNode::sensor_callback, this),
-                                      sensor_group_);
+    sensor_timer_ =
+      create_wall_timer(100ms, std::bind(&CieTutorialNode::sensor_callback, this), sensor_group_);
     processing_timer_ = create_wall_timer(
       200ms, std::bind(&CieTutorialNode::processing_callback, this), processing_group_);
-    logging_timer_ = create_wall_timer(1s, std::bind(&CieTutorialNode::logging_callback, this),
-                                       logging_group_);
+    logging_timer_ =
+      create_wall_timer(1s, std::bind(&CieTutorialNode::logging_callback, this), logging_group_);
   }
 };
 
