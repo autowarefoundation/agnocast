@@ -8,8 +8,14 @@
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_single_threaded_executor.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/message_filters/pass_through.hpp"
+#include "agnocast/message_filters/subscriber.hpp"
+#include "agnocast/message_filters/sync_policies/approximate_time.hpp"
+#include "agnocast/message_filters/sync_policies/exact_time.hpp"
+#include "agnocast/message_filters/synchronizer.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_callback_isolated_executor.hpp"
@@ -181,10 +187,25 @@ TimerBase::SharedPtr create_timer(
   const uint32_t timer_id = allocate_timer_id();
   const auto period_ns = period.to_chrono<std::chrono::nanoseconds>();
 
+  const void * callback_addr = static_cast<const void *>(&callback);
+  const char * callback_symbol = tracetools::get_symbol(callback);
+
   auto timer = std::make_shared<GenericTimer<CallbackT>>(
     timer_id, period_ns, clock, std::forward<CallbackT>(callback));
 
   register_timer_info(timer_id, timer, period_ns, group, clock);
+
+  const void * node_handle;
+  if constexpr (std::is_base_of_v<rclcpp::Node, NodePtrT>) {
+    node_handle = static_cast<const void *>(
+      node->get_node_base_interface()->get_shared_rcl_node_handle().get());
+  } else {
+    node_handle = static_cast<const void *>(node->get_node_base_interface().get());
+  }
+
+  TRACEPOINT(
+    agnocast_timer_init, static_cast<const void *>(timer.get()), node_handle, callback_addr,
+    static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
 
   return timer;
 }

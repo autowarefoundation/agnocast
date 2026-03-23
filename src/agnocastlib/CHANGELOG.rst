@@ -2,6 +2,12 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.1 (2026-03-17)
+------------------
+* fix(agnocastlib): use correct rosdep key libgoogle-glog-dev (`#1184 <https://github.com/autowarefoundation/agnocast/issues/1184>`_)
+* feat(agnocastlib): add timer init tracepoint (`#1178 <https://github.com/autowarefoundation/agnocast/issues/1178>`_)
+* fix(bridge): persist callback_group in performance bridge to prevent premature destruction (`#1171 <https://github.com/autowarefoundation/agnocast/issues/1171>`_)
+
 2.3.0 (2026-03-09)
 ------------------
 * fix(agnocastlib): fix tracepoint bugs introduced in PR `#1093 <https://github.com/autowarefoundation/agnocast/issues/1093>`_ (`#1161 <https://github.com/autowarefoundation/agnocast/issues/1161>`_)

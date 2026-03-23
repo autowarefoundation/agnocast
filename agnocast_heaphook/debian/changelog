@@ -1,3 +1,7 @@
+agnocast-heaphook-v2.3.1 (2.3.1-1) noble; urgency=medium
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 17 Mar 2026 19:03:00 +0900
+
 agnocast-heaphook-v2.3.0 (2.3.0-1) noble; urgency=medium
 
   * fix(agnocast_heaphook): use strict less-than in is_shared boundary check (#1124 <https://github.com/tier4/agnocast/issues/1124>)
