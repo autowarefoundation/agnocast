@@ -5,8 +5,8 @@ VERSION="2.3.1"
 
 case "$1" in
     remove|upgrade)
-        if dkms status -m agnocast -v "$VERSION" 2>/dev/null | grep -q agnocast; then
-            dkms remove -m agnocast -v "$VERSION" --all || true
+        if command -v dkms >/dev/null 2>&1 && dkms status -m agnocast -v "$VERSION" 2>/dev/null | grep -q agnocast; then
+            dkms remove -m agnocast -v "$VERSION" --all >/dev/null 2>&1 || true
         fi
     ;;
 esac
