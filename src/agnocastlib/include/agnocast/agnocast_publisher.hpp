@@ -59,18 +59,7 @@ struct PublisherOptions
   rclcpp::QosOverridingOptions qos_overriding_options{};
 };
 
-/**
- * @brief Zero-copy publisher that allocates messages in shared memory. Use
- * borrow_loaned_message() to obtain a message, populate its fields, then call publish() to
- * transfer it to subscribers without copying.
- *
- * @note Users should use the type alias agnocast::Publisher<MessageT> rather than
- *       instantiating this template directly.
- *
- * @tparam MessageT  ROS message type to publish.
- * @tparam BridgeRequestPolicy  Policy controlling Agnocast-ROS 2 bridge behaviour (internal).
- */
-AGNOCAST_PUBLIC
+// Internal implementation — users should use agnocast::Publisher<MessageT> instead.
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicPublisher
 {

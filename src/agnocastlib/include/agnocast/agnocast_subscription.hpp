@@ -112,17 +112,7 @@ public:
   }
 };
 
-/**
- * @brief Event-driven subscription that invokes a callback on each new message. The callback
- * signature is void(const agnocast::ipc_shared_ptr<const MessageT>&).
- *
- * @note Users should use the type alias agnocast::Subscription<MessageT> rather than
- *       instantiating this template directly.
- *
- * @tparam MessageT  ROS message type.
- * @tparam BridgeRequestPolicy  Bridge policy (internal).
- */
-AGNOCAST_PUBLIC
+// Internal implementation — users should use agnocast::Subscription<MessageT> instead.
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicSubscription : public SubscriptionBase
 {
@@ -229,16 +219,7 @@ public:
   }
 };
 
-/**
- * @brief Polling-based subscription that retrieves messages on demand via take().
- *
- * Unlike BasicSubscription, no callback is invoked automatically. Call take() to
- * retrieve the latest message. Useful in timer callbacks or control loops.
- *
- * @tparam MessageT  ROS message type.
- * @tparam BridgeRequestPolicy  Bridge policy (internal).
- */
-AGNOCAST_PUBLIC
+// Internal implementation — users should use agnocast::TakeSubscription<MessageT> instead.
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicTakeSubscription : public SubscriptionBase
 {
@@ -387,14 +368,7 @@ public:
   }
 };
 
-/**
- * @brief Polling subscription that retrieves messages on demand. Wraps TakeSubscription with a
- * simplified interface.
- *
- * @tparam MessageT  ROS message type.
- * @tparam BridgeRequestPolicy  Bridge policy (internal).
- */
-AGNOCAST_PUBLIC
+// Internal implementation — users should use agnocast::PollingSubscriber<MessageT> instead.
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicPollingSubscriber
 {
