@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rcpputils/thread_safety_annotations.hpp"

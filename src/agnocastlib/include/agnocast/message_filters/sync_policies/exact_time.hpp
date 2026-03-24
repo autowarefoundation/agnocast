@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/message_filters/signal9.hpp"
 #include "agnocast/message_filters/synchronizer.hpp"
 
@@ -28,7 +29,8 @@ using ::message_filters::NullType;
 template <
   typename M0, typename M1, typename M2 = NullType, typename M3 = NullType, typename M4 = NullType,
   typename M5 = NullType, typename M6 = NullType, typename M7 = NullType, typename M8 = NullType>
-struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
+/// Sync policy that matches messages with exactly equal timestamps. Supports 2-9 message types.
+AGNOCAST_PUBLIC struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
 {
   using Sync = Synchronizer<ExactTime>;
   using Super = PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>;
@@ -47,7 +49,12 @@ struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
   using M8Event = typename Super::M8Event;
   using Tuple = Events;
 
-  explicit ExactTime(uint32_t queue_size) : parent_(nullptr), queue_size_(queue_size) {}
+  /// Construct with a queue size.
+  /// @param queue_size Maximum number of messages to buffer per input.
+  AGNOCAST_PUBLIC explicit ExactTime(uint32_t queue_size)
+  : parent_(nullptr), queue_size_(queue_size)
+  {
+  }
 
   ExactTime(const ExactTime & e) { *this = e; }
 

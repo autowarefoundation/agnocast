@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/message_filters/message_event.hpp"
 #include "agnocast/message_filters/signal9.hpp"
 
@@ -23,7 +24,7 @@ using ::message_filters::NullFilter;
 using ::message_filters::NullType;
 
 template <class Policy>
-class Synchronizer : public noncopyable, public Policy
+AGNOCAST_PUBLIC class Synchronizer : public noncopyable, public Policy
 {
 public:
   using Messages = typename Policy::Messages;
@@ -52,50 +53,52 @@ public:
 
   static const uint8_t MAX_MESSAGES = 9;
 
+  /// Construct a synchronizer with 2-9 input filters.
   template <class F0, class F1>
-  Synchronizer(F0 & f0, F1 & f1)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1)
   {
     connectInput(f0, f1);
     init();
   }
 
   template <class F0, class F1, class F2>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1, F2 & f2)
   {
     connectInput(f0, f1, f2);
     init();
   }
 
   template <class F0, class F1, class F2, class F3>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3)
   {
     connectInput(f0, f1, f2, f3);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4)
   {
     connectInput(f0, f1, f2, f3, f4);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
   {
     connectInput(f0, f1, f2, f3, f4, f5);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
+  AGNOCAST_PUBLIC Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
   {
     connectInput(f0, f1, f2, f3, f4, f5, f6);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7)
+  AGNOCAST_PUBLIC Synchronizer(
+    F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7)
   {
     connectInput(f0, f1, f2, f3, f4, f5, f6, f7);
     init();
@@ -103,44 +106,53 @@ public:
 
   template <
     class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7, class F8>
-  Synchronizer(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7, F8 & f8)
+  AGNOCAST_PUBLIC Synchronizer(
+    F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7, F8 & f8)
   {
     connectInput(f0, f1, f2, f3, f4, f5, f6, f7, f8);
     init();
   }
 
-  Synchronizer() { init(); }
+  /// Construct an unconnected synchronizer. Call connectInput() to connect filters.
+  AGNOCAST_PUBLIC Synchronizer() { init(); }
 
+  /// Construct a synchronizer with a policy and 2–9 input filters.
+  /// @param policy Sync policy instance.
+  /// @param f0 First input filter.
+  /// @param f1 Second input filter.
   template <class F0, class F1>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1) : Policy(policy)
+  AGNOCAST_PUBLIC Synchronizer(const Policy & policy, F0 & f0, F1 & f1) : Policy(policy)
   {
     connectInput(f0, f1);
     init();
   }
 
   template <class F0, class F1, class F2>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2) : Policy(policy)
+  AGNOCAST_PUBLIC Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2) : Policy(policy)
   {
     connectInput(f0, f1, f2);
     init();
   }
 
   template <class F0, class F1, class F2, class F3>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3) : Policy(policy)
+  AGNOCAST_PUBLIC Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3)
+  : Policy(policy)
   {
     connectInput(f0, f1, f2, f3);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4) : Policy(policy)
+  AGNOCAST_PUBLIC Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4)
+  : Policy(policy)
   {
     connectInput(f0, f1, f2, f3, f4);
     init();
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
+  AGNOCAST_PUBLIC Synchronizer(
+    const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
   : Policy(policy)
   {
     connectInput(f0, f1, f2, f3, f4, f5);
@@ -148,7 +160,8 @@ public:
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6>
-  Synchronizer(const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
+  AGNOCAST_PUBLIC Synchronizer(
+    const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
   : Policy(policy)
   {
     connectInput(f0, f1, f2, f3, f4, f5, f6);
@@ -156,7 +169,7 @@ public:
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7>
-  Synchronizer(
+  AGNOCAST_PUBLIC Synchronizer(
     const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7)
   : Policy(policy)
   {
@@ -166,7 +179,7 @@ public:
 
   template <
     class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7, class F8>
-  Synchronizer(
+  AGNOCAST_PUBLIC Synchronizer(
     const Policy & policy, F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7,
     F8 & f8)
   : Policy(policy)
@@ -175,7 +188,9 @@ public:
     init();
   }
 
-  explicit Synchronizer(const Policy & policy) : Policy(policy) { init(); }
+  /// Construct a synchronizer with a policy but no input filters.
+  /// @param policy Sync policy instance.
+  AGNOCAST_PUBLIC explicit Synchronizer(const Policy & policy) : Policy(policy) { init(); }
 
   ~Synchronizer() { disconnectAll(); }
 
@@ -256,26 +271,40 @@ public:
       std::bind(&Synchronizer::template cb<8>, this, std::placeholders::_1)));
   }
 
+  /// Register a callback invoked when matching messages are found.
+  /// @param callback Callback to register.
+  /// @return Connection object for disconnecting.
   template <class C>
-  Connection registerCallback(C & callback)
+  AGNOCAST_PUBLIC Connection registerCallback(C & callback)
   {
     return signal_.addCallback(callback);
   }
 
+  /// Register a const callback.
+  /// @param callback Callback to register.
+  /// @return Connection object.
   template <class C>
-  Connection registerCallback(const C & callback)
+  AGNOCAST_PUBLIC Connection registerCallback(const C & callback)
   {
     return signal_.addCallback(callback);
   }
 
+  /// Register a member function callback.
+  /// @param callback Member function pointer.
+  /// @param t Object to call the member function on.
+  /// @return Connection object.
   template <class C, typename T>
-  Connection registerCallback(const C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerCallback(const C & callback, T * t)
   {
     return signal_.addCallback(callback, t);
   }
 
+  /// Register a member function callback.
+  /// @param callback Member function pointer.
+  /// @param t Object to call the member function on.
+  /// @return Connection object.
   template <class C, typename T>
-  Connection registerCallback(C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerCallback(C & callback, T * t)
   {
     return signal_.addCallback(callback, t);
   }
