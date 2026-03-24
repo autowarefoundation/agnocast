@@ -1,4 +1,4 @@
-agnocast-heaphook-v2.3.2 (2.3.2-1) noble; urgency=medium
+agnocast-heaphook-v2.3.2 (2.3.2-2) noble; urgency=medium
 
   * fix: add Conflicts/Replaces for kmod and clean up stale DKMS on install (#1191 <https://github.com/tier4/agnocast/issues/1191>)
 
