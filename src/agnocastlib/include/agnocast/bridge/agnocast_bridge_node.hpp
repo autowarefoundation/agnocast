@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_client.hpp"
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
@@ -35,6 +36,9 @@ template <typename MessageT>
 void send_performance_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename ServiceT>
+void send_service_bridge_request(
+  const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction);
+template <typename ServiceT>
 void send_performance_service_bridge_request(
   const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction);
 
@@ -56,7 +60,7 @@ void request_service_bridge_core(
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
-    throw std::runtime_error("Service bridges are not yet implemented for standard mode");
+    send_service_bridge_request<ServiceT>(service_name, qos, direction);
   } else {
     send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
   }
@@ -207,9 +211,53 @@ public:
   rclcpp::CallbackGroup::SharedPtr get_callback_group() const override { return agno_cb_group_; }
 };
 
+template <typename ServiceT>
+class RosToAgnocastServiceBridge : public ServiceBridgeBase
+{
+  typename rclcpp::Service<ServiceT>::SharedPtr ros_srv_;
+  typename agnocast::Client<ServiceT>::SharedPtr agno_client_;
+  rclcpp::CallbackGroup::SharedPtr ros_srv_cb_group_;
+  rclcpp::CallbackGroup::SharedPtr agno_client_cb_group_;
+
+public:
+  explicit RosToAgnocastServiceBridge(
+    const rclcpp::Node::SharedPtr & parent_node, const std::string & service_name,
+    const rmw_qos_profile_t & qos)
+  {
+    ros_srv_cb_group_ =
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    agno_client_cb_group_ =
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+
+    agno_client_ = std::make_shared<agnocast::Client<ServiceT>>(
+      parent_node.get(), service_name, rclcpp::ServicesQoS(), agno_client_cb_group_);
+
+    ros_srv_ = parent_node->create_service<ServiceT>(
+      service_name,
+      [this](
+        const typename ServiceT::Request::SharedPtr ros_req,
+        typename ServiceT::Response::SharedPtr ros_res) {
+        auto agno_req = this->agno_client_->borrow_loaned_request();
+        *agno_req = *ros_req;
+
+        auto future = this->agno_client_->async_send_request(std::move(agno_req));
+
+        auto agno_res = future.get();
+        *ros_res = *agno_res;
+      },
+      qos, ros_srv_cb_group_);
+  }
+
+  std::pair<rclcpp::CallbackGroup::SharedPtr, rclcpp::CallbackGroup::SharedPtr>
+  get_callback_groups() const override
+  {
+    return {ros_srv_cb_group_, agno_client_cb_group_};
+  }
+};
+
 template <typename MessageT>
 std::shared_ptr<void> start_ros_to_agno_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
+  rclcpp::Node::SharedPtr node, const PubsubBridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
   return std::make_shared<RosToAgnocastBridge<MessageT>>(node, topic_name, qos);
@@ -217,10 +265,18 @@ std::shared_ptr<void> start_ros_to_agno_node(
 
 template <typename MessageT>
 std::shared_ptr<void> start_agno_to_ros_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
+  rclcpp::Node::SharedPtr node, const PubsubBridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
   return std::make_shared<AgnocastToRosBridge<MessageT>>(node, topic_name, qos);
+}
+
+template <typename ServiceT>
+std::shared_ptr<void> start_ros_to_agno_service_node(
+  rclcpp::Node::SharedPtr node, const ServiceBridgeTargetInfo & info, const rmw_qos_profile_t & qos)
+{
+  std::string service_name(static_cast<const char *>(info.name));
+  return std::make_shared<RosToAgnocastServiceBridge<ServiceT>>(node, service_name, qos);
 }
 
 template <typename MsgStruct>
@@ -274,55 +330,51 @@ void send_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_bridge_requester");
+
   // We capture 'fn_reverse' because bridge_manager is responsible for managing both directions
   // independently. Storing the reverse factory allows us to instantiate the return path on-demand
   // within the same process.
-  auto fn_current = (direction == BridgeDirection::ROS2_TO_AGNOCAST)
-                      ? &start_ros_to_agno_node<MessageT>
-                      : &start_agno_to_ros_node<MessageT>;
-  auto fn_reverse = (direction == BridgeDirection::ROS2_TO_AGNOCAST)
-                      ? &start_agno_to_ros_node<MessageT>
-                      : &start_ros_to_agno_node<MessageT>;
-
-  Dl_info info = {};
-  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || !info.dli_fname) {
-    RCLCPP_ERROR(logger, "dladdr failed or filename NULL.");
-    return;
-  }
-
-  std::error_code ec;
-  auto self_path = std::filesystem::read_symlink("/proc/self/exe", ec);
-
-  bool is_self_executable = false;
-  if (!ec) {
-    std::filesystem::path factory_lib_path(info.dli_fname);
-    if (std::filesystem::equivalent(factory_lib_path, self_path, ec)) {
-      is_self_executable = true;
-    } else if (ec) {
-      RCLCPP_WARN(
-        logger, "Filesystem check error for '%s' vs '%s': %s", info.dli_fname, self_path.c_str(),
-        ec.message().c_str());
-    }
-  }
-
-  const char * symbol_to_send = MAIN_EXECUTABLE_SYMBOL;
-  if (!is_self_executable && info.dli_sname != nullptr) {
-    symbol_to_send = info.dli_sname;
-  }
+  auto fn_current = reinterpret_cast<uintptr_t>(
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_ros_to_agno_node<MessageT>
+                                                     : &start_agno_to_ros_node<MessageT>);
+  auto fn_reverse = reinterpret_cast<uintptr_t>(
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_agno_to_ros_node<MessageT>
+                                                     : &start_ros_to_agno_node<MessageT>);
 
   MqMsgBridge msg = {};
   msg.direction = direction;
-  msg.target.target_id = id;
+  msg.is_service = false;
+  msg.pubsub_target.target_id = id;
   snprintf(
-    static_cast<char *>(msg.target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
+    static_cast<char *>(msg.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
+    topic_name.c_str());
+  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
+    return;
+  };
+
+  std::string mq_name = create_mq_name_for_bridge(standard_bridge_manager_pid);
+  send_mq_message(mq_name, msg, BRIDGE_MQ_MESSAGE_SIZE, logger);
+}
+
+template <typename ServiceT>
+void send_service_bridge_request(
+  const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction)
+{
+  static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
+
+  // FIXME(bdm-k): Assume the direction is ROS2_TO_AGNOCAST for now.
+  auto fn_current = reinterpret_cast<uintptr_t>(&start_ros_to_agno_service_node<ServiceT>);
+  uintptr_t fn_reverse = 0;
+
+  MqMsgBridge msg = {};
+  msg.direction = direction;
+  msg.is_service = true;
+  msg.srv_target.qos = qos.get_rmw_qos_profile();
   snprintf(
-    static_cast<char *>(msg.factory.shared_lib_path), SHARED_LIB_PATH_BUFFER_SIZE, "%s",
-    info.dli_fname);
-  snprintf(
-    static_cast<char *>(msg.factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
-  auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
-  msg.factory.fn_offset = reinterpret_cast<uintptr_t>(fn_current) - base_addr;
-  msg.factory.fn_offset_reverse = reinterpret_cast<uintptr_t>(fn_reverse) - base_addr;
+    static_cast<char *>(msg.srv_target.name), SERVICE_NAME_BUFFER_SIZE, "%s", service_name.c_str());
+  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
+    return;
+  }
 
   std::string mq_name = create_mq_name_for_bridge(standard_bridge_manager_pid);
   send_mq_message(mq_name, msg, BRIDGE_MQ_MESSAGE_SIZE, logger);

@@ -106,6 +106,13 @@ void StandardBridgeManager::on_mq_request(mqd_t fd)
     if (shutdown_requested_) {
       break;
     }
+
+    if (req.is_service) {
+      // TODO(bdm-k): For debugging purposes. Remove this later.
+      RCLCPP_INFO(logger_, "Received service bridge request for name='%s'", req.srv_target.name);
+      return;
+    }
+
     register_request(req);
   }
 }
@@ -181,8 +188,8 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
   }
 
   try {
-    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, req.target.target_id)
-                                    : get_publisher_qos(topic_name, req.target.target_id);
+    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, req.pubsub_target.target_id)
+                                    : get_publisher_qos(topic_name, req.pubsub_target.target_id);
 
     auto bridge = loader_.create(req, topic_name_with_direction, container_node_, target_qos);
 
@@ -454,7 +461,8 @@ std::pair<std::string, std::string> StandardBridgeManager::extract_topic_info(
   const MqMsgBridge & req)
 {
   std::string raw_name(
-    &req.target.topic_name[0], strnlen(&req.target.topic_name[0], sizeof(req.target.topic_name)));
+    &req.pubsub_target.topic_name[0],
+    strnlen(&req.pubsub_target.topic_name[0], sizeof(req.pubsub_target.topic_name)));
 
   std::string_view suffix =
     (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? SUFFIX_R2A : SUFFIX_A2R;

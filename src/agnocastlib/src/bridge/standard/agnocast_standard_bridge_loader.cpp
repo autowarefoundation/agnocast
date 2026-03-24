@@ -38,12 +38,13 @@ std::shared_ptr<void> StandardBridgeLoader::create(
     return nullptr;
   }
 
-  return create_bridge_instance(entry_func, lib_handle, node, req.target, qos);
+  return create_bridge_instance(entry_func, lib_handle, node, req.pubsub_target, qos);
 }
 
 std::shared_ptr<void> StandardBridgeLoader::create_bridge_instance(
   BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
-  const rclcpp::Node::SharedPtr & node, const BridgeTargetInfo & target, const rclcpp::QoS & qos)
+  const rclcpp::Node::SharedPtr & node, const PubsubBridgeTargetInfo & target,
+  const rclcpp::QoS & qos)
 {
   try {
     auto bridge_resource = entry_func(node, target, qos);
@@ -136,7 +137,7 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
   // Register Reverse Function
   std::string_view suffix =
     (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? SUFFIX_A2R : SUFFIX_R2A;
-  std::string topic_name_with_reverse(static_cast<const char *>(req.target.topic_name));
+  std::string topic_name_with_reverse(static_cast<const char *>(req.pubsub_target.topic_name));
   topic_name_with_reverse += suffix;
 
   uintptr_t reverse_addr = base_addr + req.factory.fn_offset_reverse;

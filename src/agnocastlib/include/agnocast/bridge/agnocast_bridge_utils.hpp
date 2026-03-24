@@ -1,10 +1,12 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/agnocast_mq.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
 #include <string>
+#include <utility>
 
 namespace agnocast
 {
@@ -20,6 +22,14 @@ class BridgeBase
 public:
   virtual ~BridgeBase() = default;
   virtual rclcpp::CallbackGroup::SharedPtr get_callback_group() const = 0;
+};
+
+class ServiceBridgeBase
+{
+public:
+  virtual ~ServiceBridgeBase() = default;
+  virtual std::pair<rclcpp::CallbackGroup::SharedPtr, rclcpp::CallbackGroup::SharedPtr>
+  get_callback_groups() const = 0;
 };
 
 struct SubscriberCountResult
@@ -43,5 +53,9 @@ bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & t
 bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name);
+// TODO(bdm-k): Write documentation for this function.
+bool build_bridge_factory_info(
+  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
+  const rclcpp::Logger & logger);
 
 }  // namespace agnocast
