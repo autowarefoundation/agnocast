@@ -33,11 +33,13 @@ public:
 
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
-  AGNOCAST_PUBLIC virtual bool is_steady() const { return true; }
+  AGNOCAST_PUBLIC
+  virtual bool is_steady() const { return true; }
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
-  AGNOCAST_PUBLIC virtual rclcpp::Clock::SharedPtr get_clock() const = 0;
+  AGNOCAST_PUBLIC
+  virtual rclcpp::Clock::SharedPtr get_clock() const = 0;
 
   virtual void execute_callback() = 0;
 
@@ -90,14 +92,16 @@ public:
 
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
-  AGNOCAST_PUBLIC bool is_steady() const override
+  AGNOCAST_PUBLIC
+  bool is_steady() const override
   {
     return clock_->get_clock_type() == RCL_STEADY_TIME;
   }
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
-  AGNOCAST_PUBLIC rclcpp::Clock::SharedPtr get_clock() const override { return clock_; }
+  AGNOCAST_PUBLIC
+  rclcpp::Clock::SharedPtr get_clock() const override { return clock_; }
 
 protected:
   RCLCPP_DISABLE_COPY(GenericTimer)

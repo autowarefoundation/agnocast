@@ -57,8 +57,13 @@ struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
   {
   }
 
+  /// Copy constructor.
+  AGNOCAST_PUBLIC
   ExactTime(const ExactTime & e) { *this = e; }
 
+  /// Copy assignment.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   // cppcheck-suppress operatorEqVarError  // drop_signal_ is not copyable (contains std::mutex)
   ExactTime & operator=(const ExactTime & rhs)
   {

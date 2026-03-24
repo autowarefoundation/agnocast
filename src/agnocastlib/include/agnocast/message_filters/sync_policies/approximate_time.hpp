@@ -96,12 +96,17 @@ struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
     assert(queue_size_ > 0);
   }
 
+  /// Copy constructor.
+  AGNOCAST_PUBLIC
   ApproximateTime(const ApproximateTime & e)
   : max_interval_duration_(rclcpp::Duration(std::numeric_limits<int32_t>::max(), 999999999))
   {
     *this = e;
   }
 
+  /// Copy assignment.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   ApproximateTime & operator=(const ApproximateTime & rhs)
   {
     parent_ = rhs.parent_;

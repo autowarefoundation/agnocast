@@ -56,8 +56,6 @@ public:
   AGNOCAST_PUBLIC
   explicit AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms = 50);
 
-  /// Destroy the executor and clean up child threads.
-  AGNOCAST_PUBLIC
   ~AgnocastOnlyCallbackIsolatedExecutor() override;
 
   /// Block the calling thread and process Agnocast callbacks in a loop until cancel() is called.
