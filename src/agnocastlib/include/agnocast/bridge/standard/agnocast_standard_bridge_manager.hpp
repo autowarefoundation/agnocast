@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/agnocast_multi_threaded_executor.hpp"
+#include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/bridge/standard/agnocast_standard_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/standard/agnocast_standard_bridge_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -50,7 +50,7 @@ private:
   std::atomic_bool shutdown_requested_ = false;
 
   rclcpp::Node::SharedPtr container_node_;
-  std::shared_ptr<agnocast::MultiThreadedAgnocastExecutor> executor_;
+  std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
 
   std::map<std::string, std::shared_ptr<void>> active_bridges_;

@@ -1,9 +1,9 @@
 
 #include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
 
+#include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_mq.hpp"
-#include "agnocast/agnocast_multi_threaded_executor.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
@@ -76,7 +76,7 @@ void PerformanceBridgeManager::start_ros_execution()
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
-  executor_ = std::make_shared<agnocast::MultiThreadedAgnocastExecutor>();
+  executor_ = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>();
   executor_->add_node(container_node_);
 
   executor_thread_ = std::thread([this]() {
@@ -310,11 +310,6 @@ void PerformanceBridgeManager::create_bridge_if_needed(
             logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
         }
         active_a2r_bridges_[topic_name] = result;
-      }
-
-      if (result.callback_group) {
-        executor_->add_callback_group(
-          result.callback_group, container_node_->get_node_base_interface(), true);
       }
     }
 
