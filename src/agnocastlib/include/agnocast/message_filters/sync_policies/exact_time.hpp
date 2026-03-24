@@ -87,26 +87,30 @@ AGNOCAST_PUBLIC struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6,
     checkTuple(t);
   }
 
+  /// Register a callback invoked when messages are dropped due to queue overflow or missing
+  /// matches.
+  /// @param callback Callback to register.
+  /// @return Connection object for disconnecting.
   template <class C>
-  Connection registerDropCallback(const C & callback)
+  AGNOCAST_PUBLIC Connection registerDropCallback(const C & callback)
   {
     return drop_signal_.addCallback(callback);
   }
 
   template <class C>
-  Connection registerDropCallback(C & callback)
+  AGNOCAST_PUBLIC Connection registerDropCallback(C & callback)
   {
     return drop_signal_.addCallback(callback);
   }
 
   template <class C, typename T>
-  Connection registerDropCallback(const C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerDropCallback(const C & callback, T * t)
   {
     return drop_signal_.addCallback(callback, t);
   }
 
   template <class C, typename T>
-  Connection registerDropCallback(C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerDropCallback(C & callback, T * t)
   {
     return drop_signal_.addCallback(callback, t);
   }

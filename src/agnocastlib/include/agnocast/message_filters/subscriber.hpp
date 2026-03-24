@@ -315,19 +315,15 @@ public:
     return sub_;
   }
 
-  /**
-   * \brief Does nothing.  Provided so that Subscriber may be used in a message_filters::Chain
-   */
+  /// No-op. Provided for compatibility with message_filters::Chain.
   template <typename F>
-  void connectInput(F & f)
+  AGNOCAST_PUBLIC void connectInput(F & f)
   {
     (void)f;
   }
 
-  /**
-   * \brief Does nothing.  Provided so that Subscriber may be used in a message_filters::Chain
-   */
-  void add(const EventType & e) { (void)e; }
+  /// No-op. Provided for compatibility with message_filters::Chain.
+  AGNOCAST_PUBLIC void add(const EventType & e) { (void)e; }
 
 private:
   void cb(ipc_shared_ptr<M> msg) { this->signalMessage(EventType(std::move(msg))); }

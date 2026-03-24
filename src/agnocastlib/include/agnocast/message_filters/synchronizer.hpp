@@ -205,50 +205,54 @@ public:
 
   void init() { Policy::initParent(this); }
 
+  /// Connect 2–9 input filters to this synchronizer. Replaces any previous connections.
+  /// @param f0 First input filter.
+  /// @param f1 Second input filter.
   template <class F0, class F1>
-  void connectInput(F0 & f0, F1 & f1)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1)
   {
     NullFilter<M2> f2;
     connectInput(f0, f1, f2);
   }
 
   template <class F0, class F1, class F2>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1, F2 & f2)
   {
     NullFilter<M3> f3;
     connectInput(f0, f1, f2, f3);
   }
 
   template <class F0, class F1, class F2, class F3>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3)
   {
     NullFilter<M4> f4;
     connectInput(f0, f1, f2, f3, f4);
   }
 
   template <class F0, class F1, class F2, class F3, class F4>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4)
   {
     NullFilter<M5> f5;
     connectInput(f0, f1, f2, f3, f4, f5);
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5)
   {
     NullFilter<M6> f6;
     connectInput(f0, f1, f2, f3, f4, f5, f6);
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
+  AGNOCAST_PUBLIC void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6)
   {
     NullFilter<M7> f7;
     connectInput(f0, f1, f2, f3, f4, f5, f6, f7);
   }
 
   template <class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7)
+  AGNOCAST_PUBLIC void connectInput(
+    F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7)
   {
     NullFilter<M8> f8;
     connectInput(f0, f1, f2, f3, f4, f5, f6, f7, f8);
@@ -256,7 +260,8 @@ public:
 
   template <
     class F0, class F1, class F2, class F3, class F4, class F5, class F6, class F7, class F8>
-  void connectInput(F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7, F8 & f8)
+  AGNOCAST_PUBLIC void connectInput(
+    F0 & f0, F1 & f1, F2 & f2, F3 & f3, F4 & f4, F5 & f5, F6 & f6, F7 & f7, F8 & f8)
   {
     disconnectAll();
 
@@ -330,7 +335,10 @@ public:
     signal_.call(e0, e1, e2, e3, e4, e5, e6, e7, e8);
   }
 
-  Policy * getPolicy() { return static_cast<Policy *>(this); }
+  /// Return a pointer to the sync policy. Use this to configure policy parameters after
+  /// construction (e.g., `sync.getPolicy()->setAgePenalty(0.5)`).
+  /// @return Pointer to the policy object.
+  AGNOCAST_PUBLIC Policy * getPolicy() { return static_cast<Policy *>(this); }
 
   using Policy::add;
 
