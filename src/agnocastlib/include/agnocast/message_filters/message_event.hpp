@@ -15,13 +15,6 @@ namespace agnocast
 namespace message_filters
 {
 
-/**
- * \brief Event type for subscriptions in agnocast message_filters.
- *
- * In agnocast, ipc_shared_ptr always points to read-only shared memory,
- * so MessageEvent only supports const messages (M const).
- * Non-const M is not supported - use MessageEvent<M const> instead.
- */
 /// Wrapper around a message pointer that carries metadata for message filter pipelines.
 template <typename M>
 AGNOCAST_PUBLIC class MessageEvent

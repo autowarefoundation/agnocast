@@ -226,8 +226,9 @@ typename Service<ServiceT>::SharedPtr create_service(
     node, service_name, std::forward<Func>(callback), qos, group);
 }
 
-/// Create a timer with a given clock
 /**
+ * @brief Create a timer with a given clock.
+ *
  * This free function mirrors the rclcpp::create_timer() API for portability.
  *
  * \param[in] node Node providing get_node_base_interface() for the default callback group.

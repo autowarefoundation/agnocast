@@ -69,7 +69,7 @@ public:
   const rcl_arguments_t * get_local_args() const { return local_args_; }
   const rcl_arguments_t * get_global_args() const { return global_args_; }
 
-  /// Register a callback to be invoked when a new callback group is created.
+  // Register a callback to be invoked when a new callback group is created.
   void set_on_callback_group_created(std::function<void()> callback);
 
 private:

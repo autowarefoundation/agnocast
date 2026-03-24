@@ -18,13 +18,6 @@ namespace message_filters
 using ::message_filters::Connection;
 using ::message_filters::noncopyable;
 
-/**
- * \brief Convenience base-class for simple filters which output a single message
- *
- * SimpleFilter provides some of the tricky callback registering functionality, so that
- * simple filters do not have to duplicate it.  It also provides getName()/setName() for debugging
- * purposes.
- */
 /// Base class for simple one-output filters. Provides callback registration and signal dispatch.
 template <class M>
 AGNOCAST_PUBLIC class SimpleFilter : public noncopyable
@@ -76,18 +69,14 @@ public:
   AGNOCAST_PUBLIC const std::string & getName() const { return name_; }
 
 protected:
-  /**
-   * \brief Call all registered callbacks, passing them the specified message
-   */
+  // Call all registered callbacks, passing them the specified message
   void signalMessage(const MConstPtr & msg)
   {
     MessageEvent<M const> event(msg);
     signal_.call(event);
   }
 
-  /**
-   * \brief Call all registered callbacks, passing them the specified message
-   */
+  // Call all registered callbacks, passing them the specified message
   void signalMessage(const MessageEvent<M const> & event) { signal_.call(event); }
 
 private:

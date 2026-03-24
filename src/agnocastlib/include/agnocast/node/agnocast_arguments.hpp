@@ -39,13 +39,9 @@ private:
 
 ParsedArguments parse_arguments(const std::vector<std::string> & arguments);
 
-/// Resolve parameter overrides from multiple sources.
-/// Corresponds to rclcpp::detail::resolve_parameter_overrides.
-/// Priority (later overwrites earlier): global_args < local_args < parameter_overrides
-/// @param node_fqn Fully qualified name of the node (used for node-specific filtering)
-/// @param parameter_overrides Parameters from NodeOptions::parameter_overrides()
-/// @param local_args Parsed arguments from NodeOptions::arguments()
-/// @param global_args Parsed arguments from command line (via agnocast::init)
+// Resolve parameter overrides from multiple sources.
+// Corresponds to rclcpp::detail::resolve_parameter_overrides.
+// Priority (later overwrites earlier): global_args < local_args < parameter_overrides
 std::map<std::string, rclcpp::ParameterValue> resolve_parameter_overrides(
   const std::string & node_fqn, const std::vector<rclcpp::Parameter> & parameter_overrides,
   const rcl_arguments_t * local_args, const rcl_arguments_t * global_args);
