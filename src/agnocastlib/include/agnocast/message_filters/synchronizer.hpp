@@ -23,6 +23,15 @@ using ::message_filters::noncopyable;
 using ::message_filters::NullFilter;
 using ::message_filters::NullType;
 
+/**
+ * @brief Synchronizes messages from 2–9 input filters based on a time policy.
+ *
+ * Drop-in replacement for `message_filters::Synchronizer<Policy>`. When matching messages are
+ * found according to the policy, the registered callback is invoked with one
+ * `agnocast::ipc_shared_ptr<const M>` per input.
+ *
+ * @tparam Policy Sync policy type (`ExactTime` or `ApproximateTime`).
+ */
 template <class Policy>
 AGNOCAST_PUBLIC class Synchronizer : public noncopyable, public Policy
 {

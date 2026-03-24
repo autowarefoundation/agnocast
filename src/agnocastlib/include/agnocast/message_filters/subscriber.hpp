@@ -303,6 +303,8 @@ public:
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
   AGNOCAST_PUBLIC void unsubscribe() override { sub_.reset(); }
 
+  /// Return the topic name this subscriber is subscribed to.
+  /// @return Topic name string.
   AGNOCAST_PUBLIC std::string getTopic() const { return topic_; }
 
   /**
