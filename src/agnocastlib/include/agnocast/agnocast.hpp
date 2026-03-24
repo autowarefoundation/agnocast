@@ -41,7 +41,7 @@
 namespace agnocast
 {
 
-/// Type trait to extract the pointed-to node type from raw pointers and smart pointers.
+// Type trait to extract the pointed-to node type from raw pointers and smart pointers.
 template <typename T, typename = void>
 struct node_pointer_traits
 {
