@@ -13,8 +13,9 @@ namespace message_filters
 /**
  * \brief Simple passthrough filter.  What comes in goes out immediately.
  */
+AGNOCAST_PUBLIC
 template <class M>
-AGNOCAST_PUBLIC class PassThrough : public SimpleFilter<M>
+class PassThrough : public SimpleFilter<M>
 {
 public:
   using MConstPtr = ipc_shared_ptr<M const>;

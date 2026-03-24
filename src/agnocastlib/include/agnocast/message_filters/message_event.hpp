@@ -16,8 +16,9 @@ namespace message_filters
 {
 
 /// Wrapper around a message pointer that carries metadata for message filter pipelines.
+AGNOCAST_PUBLIC
 template <typename M>
-AGNOCAST_PUBLIC class MessageEvent
+class MessageEvent
 {
   static_assert(
     std::is_const<M>::value,

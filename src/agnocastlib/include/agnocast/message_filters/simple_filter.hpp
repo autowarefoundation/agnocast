@@ -19,8 +19,9 @@ using ::message_filters::Connection;
 using ::message_filters::noncopyable;
 
 /// Base class for simple one-output filters. Provides callback registration and signal dispatch.
+AGNOCAST_PUBLIC
 template <class M>
-AGNOCAST_PUBLIC class SimpleFilter : public noncopyable
+class SimpleFilter : public noncopyable
 {
 public:
   using MConstPtr = ipc_shared_ptr<M const>;

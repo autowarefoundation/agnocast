@@ -28,8 +28,9 @@ inline rclcpp::QoS to_rclcpp_qos(const rmw_qos_profile_t & rmw_qos)
 
 /// Base class for Subscriber, allowing subscription management without knowing the message type.
 /// Used for type-erased subscriber collections.
+AGNOCAST_PUBLIC
 template <class NodeType = rclcpp::Node>
-AGNOCAST_PUBLIC class SubscriberBase
+class SubscriberBase
 {
 public:
   using NodePtr = std::shared_ptr<NodeType>;
@@ -133,8 +134,9 @@ using SubscriberBasePtr = std::shared_ptr<SubscriberBase<T>>;
 void callback(const agnocast::ipc_shared_ptr<M const>&);
 \endverbatim
  */
+AGNOCAST_PUBLIC
 template <class M, class NodeType = rclcpp::Node>
-AGNOCAST_PUBLIC class Subscriber : public SubscriberBase<NodeType>, public SimpleFilter<M>
+class Subscriber : public SubscriberBase<NodeType>, public SimpleFilter<M>
 {
 public:
   using NodePtr = std::shared_ptr<NodeType>;

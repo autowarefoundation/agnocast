@@ -32,8 +32,9 @@ using ::message_filters::NullType;
  *
  * @tparam Policy Sync policy type (`ExactTime` or `ApproximateTime`).
  */
+AGNOCAST_PUBLIC
 template <class Policy>
-AGNOCAST_PUBLIC class Synchronizer : public noncopyable, public Policy
+class Synchronizer : public noncopyable, public Policy
 {
 public:
   using Messages = typename Policy::Messages;

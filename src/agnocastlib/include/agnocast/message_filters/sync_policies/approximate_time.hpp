@@ -31,12 +31,13 @@ namespace sync_policies
 using ::message_filters::Connection;
 using ::message_filters::NullType;
 
+/// Sync policy that matches messages with approximately equal timestamps using cost-based
+/// optimization. Supports 2-9 message types.
+AGNOCAST_PUBLIC
 template <
   typename M0, typename M1, typename M2 = NullType, typename M3 = NullType, typename M4 = NullType,
   typename M5 = NullType, typename M6 = NullType, typename M7 = NullType, typename M8 = NullType>
-/// Sync policy that matches messages with approximately equal timestamps using cost-based
-/// optimization. Supports 2-9 message types.
-AGNOCAST_PUBLIC struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
+struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
 {
   using Sync = Synchronizer<ApproximateTime>;
   using Super = PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>;
