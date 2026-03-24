@@ -93,10 +93,7 @@ public:
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
   AGNOCAST_PUBLIC
-  bool is_steady() const override
-  {
-    return clock_->get_clock_type() == RCL_STEADY_TIME;
-  }
+  bool is_steady() const override { return clock_->get_clock_type() == RCL_STEADY_TIME; }
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
