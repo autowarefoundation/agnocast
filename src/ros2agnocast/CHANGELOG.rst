@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.2 (2026-03-24)
+------------------
 * refactor(bridge): use CallbackIsolatedAgnocastExecutor for bridge callback scheduling (`#1170 <https://github.com/autowarefoundation/agnocast/issues/1170>`_)
 * fix(ros2agnocast): show Agnocast label for topics that exist in both ROS2 and Agnocast (`#1180 <https://github.com/autowarefoundation/agnocast/issues/1180>`_)
 

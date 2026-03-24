@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.2 (2026-03-24)
+------------------
 * feat: exposed API reference (`#1195 <https://github.com/autowarefoundation/agnocast/issues/1195>`_)
 * refactor(bridge): use CallbackIsolatedAgnocastExecutor for bridge callback scheduling (`#1170 <https://github.com/autowarefoundation/agnocast/issues/1170>`_)
 * feat(agnocastlib): include message_filters headers in agnocast.hpp without circular dependency (`#1189 <https://github.com/autowarefoundation/agnocast/issues/1189>`_)
