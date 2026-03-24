@@ -26,11 +26,10 @@ inline rclcpp::QoS to_rclcpp_qos(const rmw_qos_profile_t & rmw_qos)
 }
 }  // namespace detail
 
-/**
- * \brief Base class for Subscriber, allows subscription without knowing the message type.
- */
+/// Base class for Subscriber, allowing subscription management without knowing the message type.
+/// Used for type-erased subscriber collections.
 template <class NodeType = rclcpp::Node>
-class SubscriberBase
+AGNOCAST_PUBLIC class SubscriberBase
 {
 public:
   using NodePtr = std::shared_ptr<NodeType>;
@@ -46,7 +45,7 @@ public:
    * \param topic The topic to subscribe to.
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodePtr node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) = 0;
 
@@ -59,7 +58,7 @@ public:
    * \param topic The topic to subscribe to.
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodeType * node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) = 0;
 
@@ -74,7 +73,7 @@ public:
    * \param qos The rmw qos profile to use to subscribe.
    * \param options The subscription options to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodePtr node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
   {
@@ -91,7 +90,7 @@ public:
    * \param qos The rmw qos profile to use to subscribe.
    * \param options The subscription options to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodeType * node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
   {
@@ -103,12 +102,12 @@ public:
    * \brief Re-subscribe to a topic.  Only works if this subscriber has previously been subscribed
    * to a topic.
    */
-  virtual void subscribe() = 0;
+  AGNOCAST_PUBLIC virtual void subscribe() = 0;
 
   /**
    * \brief Force immediate unsubscription of this subscriber from its topic
    */
-  virtual void unsubscribe() = 0;
+  AGNOCAST_PUBLIC virtual void unsubscribe() = 0;
 };
 
 template <typename T>

@@ -323,9 +323,13 @@ public:
     return signal_.addCallback(callback, t);
   }
 
-  void setName(const std::string & name) { name_ = name; }
+  /// Set the name of this synchronizer (for debugging).
+  /// @param name Name string.
+  AGNOCAST_PUBLIC void setName(const std::string & name) { name_ = name; }
 
-  const std::string & getName() { return name_; }
+  /// Return the name of this synchronizer.
+  /// @return Name string.
+  AGNOCAST_PUBLIC const std::string & getName() { return name_; }
 
   void signal(
     const M0Event & e0, const M1Event & e1, const M2Event & e2, const M3Event & e3,
