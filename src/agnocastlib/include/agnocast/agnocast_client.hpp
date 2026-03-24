@@ -43,14 +43,16 @@ class Client
 {
 public:
   // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
-  /// Request type extending `ServiceT::Request` with internal metadata. Use this in `borrow_loaned_request()` return types.
+  /// Request type extending `ServiceT::Request` with internal metadata. Use this in
+  /// `borrow_loaned_request()` return types.
   // AGNOCAST_PUBLIC
   struct RequestT : public ServiceT::Request
   {
     std::string _node_name;
     int64_t _sequence_number;
   };
-  /// Response type extending `ServiceT::Response` with internal metadata. Received via Future or SharedFuture.
+  /// Response type extending `ServiceT::Response` with internal metadata. Received via Future or
+  /// SharedFuture.
   // AGNOCAST_PUBLIC
   struct ResponseT : public ServiceT::Response
   {
@@ -59,15 +61,17 @@ public:
 
   using SharedPtr = std::shared_ptr<Client<ServiceT>>;
 
-  /// Future that resolves to the service response. Returned by async_send_request() (no-callback overload).
+  /// Future that resolves to the service response. Returned by async_send_request() (no-callback
+  /// overload).
   // AGNOCAST_PUBLIC
   using Future = std::future<ipc_shared_ptr<ResponseT>>;
-  /// Shared future that resolves to the service response. Passed to the callback in async_send_request().
+  /// Shared future that resolves to the service response. Passed to the callback in
+  /// async_send_request().
   // AGNOCAST_PUBLIC
   using SharedFuture = std::shared_future<ipc_shared_ptr<ResponseT>>;
 
-  /// Return type of async_send_request() (no-callback overload). Contains a Future and the request ID.
-  /// Access the future via the `future` member and the request ID via `request_id`.
+  /// Return type of async_send_request() (no-callback overload). Contains a Future and the request
+  /// ID. Access the future via the `future` member and the request ID via `request_id`.
   // AGNOCAST_PUBLIC
   struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
   {
@@ -76,8 +80,9 @@ public:
     // AGNOCAST_PUBLIC
     SharedFuture share() noexcept { return this->future.share(); }
   };
-  /// Return type of async_send_request() (callback overload). Contains a SharedFuture and the request ID.
-  /// Access the shared future via the `future` member and the request ID via `request_id`.
+  /// Return type of async_send_request() (callback overload). Contains a SharedFuture and the
+  /// request ID. Access the shared future via the `future` member and the request ID via
+  /// `request_id`.
   // AGNOCAST_PUBLIC
   struct SharedFutureAndRequestId : rclcpp::detail::FutureAndRequestId<SharedFuture>
   {
@@ -202,8 +207,10 @@ public:
 
   /** @brief Send a request asynchronously and invoke a callback when the response arrives.
    *  @param request Request from borrow_loaned_request(). Must be moved in.
-   *  @param callback Invoked with a SharedFuture when the response arrives. Call future.get() to obtain the response.
-   *  @return A SharedFutureAndRequestId containing the shared future (`.future`) and a sequence number (`.request_id`). */
+   *  @param callback Invoked with a SharedFuture when the response arrives. Call future.get() to
+   * obtain the response.
+   *  @return A SharedFutureAndRequestId containing the shared future (`.future`) and a sequence
+   * number (`.request_id`). */
   // AGNOCAST_PUBLIC
   SharedFutureAndRequestId async_send_request(
     ipc_shared_ptr<RequestT> && request, std::function<void(SharedFuture)> callback)
@@ -223,7 +230,8 @@ public:
 
   /** @brief Send a request asynchronously and return a future for the response.
    *  @param request Request from borrow_loaned_request(). Must be moved in.
-   *  @return A FutureAndRequestId containing the future (`.future`) and a sequence number (`.request_id`). Call `.future.get()` to block until the response arrives. */
+   *  @return A FutureAndRequestId containing the future (`.future`) and a sequence number
+   * (`.request_id`). Call `.future.get()` to block until the response arrives. */
   // AGNOCAST_PUBLIC
   FutureAndRequestId async_send_request(ipc_shared_ptr<RequestT> && request)
   {

@@ -6,7 +6,9 @@
 namespace agnocast
 {
 
-/** @brief Callback-isolated executor for Stage 1. Assigns a dedicated thread to each callback group, ensuring that callbacks in different groups never run concurrently on the same thread. Handles both ROS 2 and Agnocast callbacks. */
+/** @brief Callback-isolated executor for Stage 1. Assigns a dedicated thread to each callback
+ * group, ensuring that callbacks in different groups never run concurrently on the same thread.
+ * Handles both ROS 2 and Agnocast callbacks. */
 AGNOCAST_PUBLIC
 class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
 {
@@ -57,7 +59,8 @@ public:
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
     int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
 
-  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or the executor is cancelled.
+  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or
+  /// the executor is cancelled.
   AGNOCAST_PUBLIC
   void spin() override;
 

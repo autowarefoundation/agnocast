@@ -29,14 +29,16 @@ class Service
 {
 public:
   // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
-  /// Request type extending `ServiceT::Request` with internal metadata. Received in the service callback's first argument.
+  /// Request type extending `ServiceT::Request` with internal metadata. Received in the service
+  /// callback's first argument.
   // AGNOCAST_PUBLIC
   struct RequestT : public ServiceT::Request
   {
     std::string _node_name;
     int64_t _sequence_number;
   };
-  /// Response type extending `ServiceT::Response` with internal metadata. Populated in the service callback's second argument.
+  /// Response type extending `ServiceT::Response` with internal metadata. Populated in the service
+  /// callback's second argument.
   // AGNOCAST_PUBLIC
   struct ResponseT : public ServiceT::Response
   {

@@ -566,7 +566,8 @@ public:
   }
 
   /// Create a service server.
-  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&, agnocast::ipc_shared_ptr<ResponseT>&).
+  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&,
+  /// agnocast::ipc_shared_ptr<ResponseT>&).
   /// @param service_name Service name.
   /// @param callback Callback invoked on each request.
   /// @param qos Quality of service profile.

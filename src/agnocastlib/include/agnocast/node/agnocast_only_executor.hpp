@@ -21,7 +21,8 @@ using WeakCallbackGroupsToNodesMap = std::map<
 struct AgnocastExecutable;
 class Node;
 
-/** @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with agnocast::Node. */
+/** @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
+ * agnocast::Node. */
 AGNOCAST_PUBLIC
 class AgnocastOnlyExecutor
 {

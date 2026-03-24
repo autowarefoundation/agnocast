@@ -1,10 +1,10 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_info.hpp"
-#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/agnocast_client.hpp"
 #include "agnocast/agnocast_multi_threaded_executor.hpp"
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_single_threaded_executor.hpp"
@@ -208,7 +208,8 @@ typename Client<ServiceT>::SharedPtr create_client(
 
 /// @brief Create an Agnocast service server (Stage 1 free function).
 /// @tparam ServiceT ROS service type.
-/// @tparam Func Callable with signature `void(const agnocast::ipc_shared_ptr<const RequestT>&, agnocast::ipc_shared_ptr<ResponseT>&)`.
+/// @tparam Func Callable with signature `void(const agnocast::ipc_shared_ptr<const RequestT>&,
+/// agnocast::ipc_shared_ptr<ResponseT>&)`.
 /// @param node Pointer to rclcpp::Node.
 /// @param service_name Service name.
 /// @param callback Callback invoked on each request.

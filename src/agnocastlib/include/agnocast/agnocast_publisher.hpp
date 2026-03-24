@@ -273,7 +273,8 @@ struct AgnocastToRosRequestPolicy;
 
 /**
  * @brief The user-facing Agnocast publisher type.
- * Alias for `BasicPublisher<MessageT>`. Use this type (not BasicPublisher directly) when declaring publisher variables.
+ * Alias for `BasicPublisher<MessageT>`. Use this type (not BasicPublisher directly) when declaring
+ * publisher variables.
  * @tparam MessageT  ROS message type.
  */
 AGNOCAST_PUBLIC

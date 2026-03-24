@@ -9,7 +9,8 @@
 namespace agnocast
 {
 
-/** @brief Multi-threaded executor for Stage 1 with configurable thread counts for ROS 2 and Agnocast callbacks. */
+/** @brief Multi-threaded executor for Stage 1 with configurable thread counts for ROS 2 and
+ * Agnocast callbacks. */
 AGNOCAST_PUBLIC
 class MultiThreadedAgnocastExecutor : public agnocast::AgnocastExecutor
 {
@@ -31,7 +32,8 @@ public:
   /// @param options Executor options.
   /// @param number_of_ros2_threads Number of threads for ROS 2 callbacks (0 = auto).
   /// @param number_of_agnocast_threads Number of threads for Agnocast callbacks (0 = auto).
-  /// @param yield_before_execute If true, call std::this_thread::yield() before each callback execution to reduce CPU usage at the cost of latency.
+  /// @param yield_before_execute If true, call std::this_thread::yield() before each callback
+  /// execution to reduce CPU usage at the cost of latency.
   /// @param ros2_next_exec_timeout Timeout for ROS 2 executables.
   /// @param agnocast_next_exec_timeout_ms Timeout in ms for Agnocast executables.
   AGNOCAST_PUBLIC
@@ -42,7 +44,8 @@ public:
     std::chrono::nanoseconds ros2_next_exec_timeout = std::chrono::nanoseconds(-1),
     int agnocast_next_exec_timeout_ms = 50);
 
-  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or the executor is cancelled.
+  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or
+  /// the executor is cancelled.
   AGNOCAST_PUBLIC
   void spin() override;
 };

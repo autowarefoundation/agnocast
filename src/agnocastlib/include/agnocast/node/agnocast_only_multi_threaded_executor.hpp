@@ -7,7 +7,8 @@
 namespace agnocast
 {
 
-/** @brief Multi-threaded executor for Stage 2 (Agnocast-only) with configurable thread count. Used with agnocast::Node. */
+/** @brief Multi-threaded executor for Stage 2 (Agnocast-only) with configurable thread count. Used
+ * with agnocast::Node. */
 AGNOCAST_PUBLIC
 class AgnocastOnlyMultiThreadedExecutor : public AgnocastOnlyExecutor
 {

@@ -22,7 +22,8 @@ namespace agnocast
 class Node;
 class AgnocastOnlySingleThreadedExecutor;
 
-/** @brief Callback-isolated executor for Stage 2 (Agnocast-only). Assigns a dedicated thread to each callback group. Used with agnocast::Node. */
+/** @brief Callback-isolated executor for Stage 2 (Agnocast-only). Assigns a dedicated thread to
+ * each callback group. Used with agnocast::Node. */
 AGNOCAST_PUBLIC
 class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
 {

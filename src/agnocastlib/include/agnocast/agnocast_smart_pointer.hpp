@@ -81,8 +81,9 @@ struct control_block
  *
  * `ipc_shared_ptr` manages the lifetime of messages allocated in shared memory. Publishers
  * obtain an instance via Publisher::borrow_loaned_message(), fill in message fields, and
- * transfer ownership with Publisher::publish(). Subscribers receive `ipc_shared_ptr<const MessageT>`
- * in their callbacks; the kernel-side reference is released when all copies are destroyed.
+ * transfer ownership with Publisher::publish(). Subscribers receive `ipc_shared_ptr<const
+ * MessageT>` in their callbacks; the kernel-side reference is released when all copies are
+ * destroyed.
  *
  * @par Thread Safety
  * Multiple threads can safely hold and destroy **different copies** of the same pointer

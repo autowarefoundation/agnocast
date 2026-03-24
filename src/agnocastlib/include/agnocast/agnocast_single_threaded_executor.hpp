@@ -8,7 +8,8 @@
 namespace agnocast
 {
 
-/** @brief Single-threaded executor for Stage 1 that processes both ROS 2 and Agnocast callbacks on one thread. */
+/** @brief Single-threaded executor for Stage 1 that processes both ROS 2 and Agnocast callbacks on
+ * one thread. */
 AGNOCAST_PUBLIC
 class SingleThreadedAgnocastExecutor : public agnocast::AgnocastExecutor
 {
@@ -31,7 +32,8 @@ public:
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
     int next_exec_timeout_ms = 50);
 
-  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or the executor is cancelled.
+  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or
+  /// the executor is cancelled.
   AGNOCAST_PUBLIC
   void spin() override;
 

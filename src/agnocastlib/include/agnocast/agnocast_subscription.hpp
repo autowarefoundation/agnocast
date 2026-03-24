@@ -431,20 +431,23 @@ public:
 struct RosToAgnocastRequestPolicy;
 
 /// @brief The user-facing event-driven subscription type.
-/// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when declaring subscription variables.
+/// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when
+/// declaring subscription variables.
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
 
 /// @brief The user-facing polling take-subscription type.
-/// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly) when declaring take-subscription variables.
+/// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly)
+/// when declaring take-subscription variables.
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using TakeSubscription =
   agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
 
 /// @brief The user-facing polling subscriber type.
-/// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber directly) when declaring polling subscriber variables.
+/// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber
+/// directly) when declaring polling subscriber variables.
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using PollingSubscriber =

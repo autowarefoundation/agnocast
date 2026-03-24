@@ -17,7 +17,8 @@ struct AgnocastExecutable
   rclcpp::CallbackGroup::SharedPtr callback_group{nullptr};
 };
 
-/** @brief Base class for Stage 1 executors that handle both ROS 2 (RMW) and Agnocast callbacks. Inherits from rclcpp::Executor. */
+/** @brief Base class for Stage 1 executors that handle both ROS 2 (RMW) and Agnocast callbacks.
+ * Inherits from rclcpp::Executor. */
 AGNOCAST_PUBLIC
 class AgnocastExecutor : public rclcpp::Executor
 {
@@ -48,7 +49,8 @@ public:
 
   virtual ~AgnocastExecutor();
 
-  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or the executor is cancelled.
+  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or
+  /// the executor is cancelled.
   AGNOCAST_PUBLIC
   virtual void spin() override = 0;
 };
