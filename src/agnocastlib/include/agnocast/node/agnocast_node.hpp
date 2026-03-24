@@ -66,21 +66,26 @@ public:
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
   /// Return the name of the node.
+  /// @return Node name.
   AGNOCAST_PUBLIC
   std::string get_name() const { return node_base_->get_name(); }
   /// Return the logger associated with this node.
+  /// @return Logger instance.
   AGNOCAST_PUBLIC
   rclcpp::Logger get_logger() const { return logger_; }
   /// Return the namespace of the node.
+  /// @return Node namespace.
   AGNOCAST_PUBLIC
   std::string get_namespace() const { return node_base_->get_namespace(); }
   /// Return the fully qualified name (namespace + node name).
+  /// @return Fully qualified name string.
   AGNOCAST_PUBLIC
   std::string get_fully_qualified_name() const { return node_base_->get_fully_qualified_name(); }
 
   /// Create a callback group.
   /// @param group_type Type of callback group.
   /// @param automatically_add_to_executor_with_node Whether to auto-add to executor.
+  /// @return Shared pointer to the created callback group.
   AGNOCAST_PUBLIC
   rclcpp::CallbackGroup::SharedPtr create_callback_group(
     rclcpp::CallbackGroupType group_type, bool automatically_add_to_executor_with_node = true)
@@ -150,6 +155,7 @@ public:
   /// @param default_value Default value.
   /// @param descriptor Optional descriptor.
   /// @param ignore_override If true, ignore launch-file overrides.
+  /// @return The parameter value.
   AGNOCAST_PUBLIC
   const ParameterValue & declare_parameter(
     const std::string & name, const ParameterValue & default_value,
@@ -163,6 +169,7 @@ public:
   /// @param type Parameter type.
   /// @param descriptor Optional descriptor.
   /// @param ignore_override If true, ignore launch-file overrides.
+  /// @return The parameter value.
   AGNOCAST_PUBLIC
   const ParameterValue & declare_parameter(
     const std::string & name, rclcpp::ParameterType type,
@@ -177,6 +184,7 @@ public:
   /// @param default_value Default value.
   /// @param descriptor Optional descriptor.
   /// @param ignore_override If true, ignore launch-file overrides.
+  /// @return The parameter value.
   AGNOCAST_PUBLIC
   template <typename ParameterT>
   auto declare_parameter(
@@ -197,6 +205,7 @@ public:
   /// @param name Parameter name.
   /// @param descriptor Optional descriptor.
   /// @param ignore_override If true, ignore launch-file overrides.
+  /// @return The parameter value.
   AGNOCAST_PUBLIC
   template <typename ParameterT>
   auto declare_parameter(
@@ -215,6 +224,7 @@ public:
   }
 
   /// Check whether a parameter has been declared.
+  /// @return True if the parameter exists.
   AGNOCAST_PUBLIC
   bool has_parameter(const std::string & name) const
   {
@@ -229,6 +239,7 @@ public:
   }
 
   /// Get a parameter by name.
+  /// @return The requested parameter.
   AGNOCAST_PUBLIC
   rclcpp::Parameter get_parameter(const std::string & name) const
   {
@@ -236,6 +247,7 @@ public:
   }
 
   /// Get a parameter by name, returning success status via bool.
+  /// @return True if the parameter was found.
   AGNOCAST_PUBLIC
   bool get_parameter(const std::string & name, rclcpp::Parameter & parameter) const
   {
@@ -244,6 +256,7 @@ public:
 
   /// Get a parameter and extract its typed value.
   /// @tparam ParameterT C++ type to extract.
+  /// @return True if the parameter was found.
   AGNOCAST_PUBLIC
   template <typename ParameterT>
   bool get_parameter(const std::string & name, ParameterT & parameter) const
@@ -257,6 +270,7 @@ public:
   }
 
   /// Get multiple parameters by name.
+  /// @return Vector of requested parameters.
   AGNOCAST_PUBLIC
   std::vector<rclcpp::Parameter> get_parameters(const std::vector<std::string> & names) const
   {
@@ -265,6 +279,7 @@ public:
 
   /// Get parameters matching a prefix into a typed map.
   /// @tparam ParameterT C++ type to extract.
+  /// @return True if any parameters matched the prefix.
   AGNOCAST_PUBLIC
   template <typename ParameterT>
   bool get_parameters(const std::string & prefix, std::map<std::string, ParameterT> & values) const
@@ -281,6 +296,7 @@ public:
   }
 
   /// Set a single parameter.
+  /// @return Result of the set operation.
   AGNOCAST_PUBLIC
   rcl_interfaces::msg::SetParametersResult set_parameter(const rclcpp::Parameter & parameter)
   {
@@ -288,6 +304,7 @@ public:
   }
 
   /// Set multiple parameters, one at a time.
+  /// @return Vector of results.
   AGNOCAST_PUBLIC
   std::vector<rcl_interfaces::msg::SetParametersResult> set_parameters(
     const std::vector<rclcpp::Parameter> & parameters)
@@ -296,6 +313,7 @@ public:
   }
 
   /// Set multiple parameters atomically (all-or-nothing).
+  /// @return Result of the atomic operation.
   AGNOCAST_PUBLIC
   rcl_interfaces::msg::SetParametersResult set_parameters_atomically(
     const std::vector<rclcpp::Parameter> & parameters)
@@ -304,6 +322,7 @@ public:
   }
 
   /// Describe a single parameter.
+  /// @return Parameter descriptor.
   AGNOCAST_PUBLIC
   rcl_interfaces::msg::ParameterDescriptor describe_parameter(const std::string & name) const
   {
@@ -321,6 +340,7 @@ public:
   }
 
   /// Describe multiple parameters.
+  /// @return Vector of parameter descriptors.
   AGNOCAST_PUBLIC
   std::vector<rcl_interfaces::msg::ParameterDescriptor> describe_parameters(
     const std::vector<std::string> & names) const
@@ -329,6 +349,7 @@ public:
   }
 
   /// Get the types of the given parameters.
+  /// @return Vector of parameter type identifiers.
   AGNOCAST_PUBLIC
   std::vector<uint8_t> get_parameter_types(const std::vector<std::string> & names) const
   {
@@ -336,6 +357,7 @@ public:
   }
 
   /// List parameters matching the given prefixes up to the given depth.
+  /// @return Matching parameter names and prefixes.
   AGNOCAST_PUBLIC
   rcl_interfaces::msg::ListParametersResult list_parameters(
     const std::vector<std::string> & prefixes, uint64_t depth) const
@@ -344,6 +366,7 @@ public:
   }
 
   /// Register a callback invoked before parameters are set.
+  /// @return Handle to the registered callback.
   AGNOCAST_PUBLIC
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     OnSetParametersCallbackType callback)
@@ -360,18 +383,22 @@ public:
   }
 
   /// Get the clock used by this node.
+  /// @return Shared pointer to the clock.
   AGNOCAST_PUBLIC
   rclcpp::Clock::SharedPtr get_clock() { return node_clock_->get_clock(); }
 
   /// Get the clock used by this node (const).
+  /// @return Shared pointer to the clock.
   AGNOCAST_PUBLIC
   rclcpp::Clock::ConstSharedPtr get_clock() const { return node_clock_->get_clock(); }
 
   /// Return the current time according to this node's clock.
+  /// @return Current time.
   AGNOCAST_PUBLIC
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
   /// Return the number of publishers on a topic.
+  /// @return Publisher count.
   AGNOCAST_PUBLIC
   size_t count_publishers(const std::string & topic_name) const
   {
@@ -379,6 +406,7 @@ public:
   }
 
   /// Return the number of subscribers on a topic.
+  /// @return Subscriber count.
   AGNOCAST_PUBLIC
   size_t count_subscribers(const std::string & topic_name) const
   {
@@ -485,6 +513,7 @@ public:
   /// @param callback Callback invoked on each tick.
   /// @param group Callback group (nullptr = default).
   /// @param autostart Whether to start immediately (not yet supported; always true).
+  /// @return Shared pointer to the created timer.
   AGNOCAST_PUBLIC
   template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
   typename WallTimer<CallbackT>::SharedPtr create_wall_timer(
@@ -527,6 +556,7 @@ public:
   /// @param callback Callback invoked on each tick.
   /// @param group Callback group (nullptr = default).
   /// @param autostart Whether to start immediately (not yet supported; always true).
+  /// @return Shared pointer to the created timer.
   AGNOCAST_PUBLIC
   template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
   typename GenericTimer<CallbackT>::SharedPtr create_timer(

@@ -183,6 +183,7 @@ public:
 
   /// Copy assignment. Releases the current reference and shares ownership with `r`.
   /// Same thread-safety guarantees as the copy constructor.
+  /// @return Reference to `*this`.
   AGNOCAST_PUBLIC
   ipc_shared_ptr & operator=(const ipc_shared_ptr & r)
   {
@@ -208,6 +209,7 @@ public:
 
   /// Move assignment. Releases the current reference and takes ownership from `r`.
   /// Not thread-safe: the caller must ensure no other thread accesses `r` concurrently.
+  /// @return Reference to `*this`.
   AGNOCAST_PUBLIC
   ipc_shared_ptr & operator=(ipc_shared_ptr && r) noexcept
   {
@@ -247,6 +249,7 @@ public:
 
   /// Converting copy assignment (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
   /// Enabled only when `U*` is implicitly convertible to `T*`.
+  /// @return Reference to `*this`.
   AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr & operator=(const ipc_shared_ptr<U> & r)
@@ -262,6 +265,7 @@ public:
 
   /// Converting move assignment (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
   /// Enabled only when `U*` is implicitly convertible to `T*`.
+  /// @return Reference to `*this`.
   AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr & operator=(ipc_shared_ptr<U> && r)
