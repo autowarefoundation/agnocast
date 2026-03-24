@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_callback_info.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_mq.hpp"
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
@@ -39,10 +40,17 @@ void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t
 rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnocast::Node * node);
 const void * get_node_base_address(Node * node);
 
+/**
+ * @brief Options for configuring an Agnocast subscription.
+ */
+AGNOCAST_PUBLIC
 struct SubscriptionOptions
 {
+  /// Callback group for the subscription (nullptr = default group).
   rclcpp::CallbackGroup::SharedPtr callback_group{nullptr};
+  /// If true, messages from publishers in the same process are ignored.
   bool ignore_local_publications{false};
+  /// QoS parameter override options (same semantics as rclcpp).
   rclcpp::QosOverridingOptions qos_overriding_options{};
 };
 
@@ -85,7 +93,6 @@ public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
   SubscriptionBase(agnocast::Node * node, const std::string & topic_name);
 
-  // Returns the publisher count for this topic (excluding bridge publishers).
   uint32_t get_publisher_count() const { return get_publisher_count_core(topic_name_); }
 
   virtual ~SubscriptionBase()
@@ -105,6 +112,17 @@ public:
   }
 };
 
+/**
+ * @brief Event-driven subscription that invokes a callback on each new message. The callback
+ * signature is void(const agnocast::ipc_shared_ptr<const MessageT>&).
+ *
+ * @note Users should use the type alias agnocast::Subscription<MessageT> rather than
+ *       instantiating this template directly.
+ *
+ * @tparam MessageT  ROS message type.
+ * @tparam BridgeRequestPolicy  Bridge policy (internal).
+ */
+AGNOCAST_PUBLIC
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicSubscription : public SubscriptionBase
 {
@@ -211,6 +229,16 @@ public:
   }
 };
 
+/**
+ * @brief Polling-based subscription that retrieves messages on demand via take().
+ *
+ * Unlike BasicSubscription, no callback is invoked automatically. Call take() to
+ * retrieve the latest message. Useful in timer callbacks or control loops.
+ *
+ * @tparam MessageT  ROS message type.
+ * @tparam BridgeRequestPolicy  Bridge policy (internal).
+ */
+AGNOCAST_PUBLIC
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicTakeSubscription : public SubscriptionBase
 {
@@ -286,6 +314,14 @@ public:
     }
   }
 
+  /**
+   * @brief Retrieve the latest message from the topic.
+   * @param allow_same_message  If true, may return the same message as the previous call
+   *                            (useful for always having the latest value). If false, returns
+   *                            only new messages since the last take.
+   * @return Shared pointer to the message, or empty if unavailable.
+   */
+  AGNOCAST_PUBLIC
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
   {
     publisher_shm_info pub_shm_infos[MAX_PUBLISHER_NUM]{};
@@ -351,7 +387,14 @@ public:
   }
 };
 
-// Wrapper of BasicTakeSubscription for Autoware
+/**
+ * @brief Polling subscription that retrieves messages on demand. Wraps TakeSubscription with a
+ * simplified interface.
+ *
+ * @tparam MessageT  ROS message type.
+ * @tparam BridgeRequestPolicy  Bridge policy (internal).
+ */
+AGNOCAST_PUBLIC
 template <typename MessageT, typename BridgeRequestPolicy>
 class BasicPollingSubscriber
 {
@@ -376,20 +419,33 @@ public:
       node, topic_name, qos, options);
   };
 
-  // `takeData()` is remaining for backward compatibility.
+  /// @deprecated Use take_data() instead.
   const agnocast::ipc_shared_ptr<const MessageT> takeData() { return subscriber_->take(true); };
+  /// @brief Retrieve the latest message. Always returns the most recent message even if already
+  /// retrieved. Returns an empty pointer if no message has been published yet.
+  /// @return Shared pointer to the latest message.
+  AGNOCAST_PUBLIC
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
 };
 
 struct RosToAgnocastRequestPolicy;
 
+/// @brief The user-facing event-driven subscription type.
+/// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when declaring subscription variables.
+AGNOCAST_PUBLIC
 template <typename MessageT>
 using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
 
+/// @brief The user-facing polling take-subscription type.
+/// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly) when declaring take-subscription variables.
+AGNOCAST_PUBLIC
 template <typename MessageT>
 using TakeSubscription =
   agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
 
+/// @brief The user-facing polling subscriber type.
+/// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber directly) when declaring polling subscriber variables.
+AGNOCAST_PUBLIC
 template <typename MessageT>
 using PollingSubscriber =
   agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastRequestPolicy>;

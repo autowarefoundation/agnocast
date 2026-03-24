@@ -1,10 +1,13 @@
 #pragma once
 #include "agnocast/agnocast_executor.hpp"
+#include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace agnocast
 {
 
+/** @brief Callback-isolated executor for Stage 1. Assigns a dedicated thread to each callback group, ensuring that callbacks in different groups never run concurrently on the same thread. Handles both ROS 2 and Agnocast callbacks. */
+AGNOCAST_PUBLIC
 class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
 {
   RCLCPP_DISABLE_COPY(CallbackIsolatedAgnocastExecutor)
@@ -45,48 +48,79 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     RCPPUTILS_TSA_REQUIRES(mutex_);
 
 public:
-  RCLCPP_PUBLIC
+  /// Construct the executor.
+  /// @param options Executor options.
+  /// @param next_exec_timeout_ms Timeout in ms for waiting on the next executable.
+  /// @param monitor_polling_interval_ms Polling interval in ms for monitoring new callback groups.
+  AGNOCAST_PUBLIC
   explicit CallbackIsolatedAgnocastExecutor(
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
     int next_exec_timeout_ms = 50, int monitor_polling_interval_ms = 100);
 
-  RCLCPP_PUBLIC
+  /// Block the calling thread and process callbacks in a loop until rclcpp::shutdown() is called or the executor is cancelled.
+  AGNOCAST_PUBLIC
   void spin() override;
 
-  RCLCPP_PUBLIC
+  /// Request the executor to stop spinning. Causes the current or next spin() call to return.
+  AGNOCAST_PUBLIC
   void cancel();
 
-  RCLCPP_PUBLIC
+  /// Add a callback group to this executor.
+  /// @param group_ptr Callback group to add.
+  /// @param node_ptr Node the group belongs to.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void add_callback_group(
     rclcpp::CallbackGroup::SharedPtr group_ptr,
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_ptr, bool notify = true) override;
 
-  RCLCPP_PUBLIC
+  /// Return all callback groups known to this executor.
+  /// @return Vector of weak pointers to callback groups.
+  AGNOCAST_PUBLIC
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_all_callback_groups() override;
 
-  RCLCPP_PUBLIC
+  /// Return callback groups that were manually added.
+  /// @return Vector of weak pointers to callback groups.
+  AGNOCAST_PUBLIC
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_manually_added_callback_groups() override;
 
-  RCLCPP_PUBLIC
+  /// Return callback groups automatically discovered from added nodes.
+  /// @return Vector of weak pointers to callback groups.
+  AGNOCAST_PUBLIC
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_automatically_added_callback_groups_from_nodes()
     override;
 
-  RCLCPP_PUBLIC
+  /// Remove a callback group from this executor.
+  /// @param group_ptr Callback group to remove.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void remove_callback_group(
     rclcpp::CallbackGroup::SharedPtr group_ptr, bool notify = true) override;
 
-  RCLCPP_PUBLIC
+  /// Add a node to this executor.
+  /// @param node_ptr Node to add.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void add_node(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_ptr, bool notify = true) override;
 
-  RCLCPP_PUBLIC
+  /// Add a node to this executor.
+  /// @param node_ptr Node to add.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void add_node(rclcpp::Node::SharedPtr node_ptr, bool notify = true) override;
 
-  RCLCPP_PUBLIC
+  /// Remove a node from this executor.
+  /// @param node_ptr Node to remove.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void remove_node(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_ptr, bool notify = true) override;
 
-  RCLCPP_PUBLIC
+  /// Remove a node from this executor.
+  /// @param node_ptr Node to remove.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void remove_node(rclcpp::Node::SharedPtr node_ptr, bool notify = true) override;
 };
 

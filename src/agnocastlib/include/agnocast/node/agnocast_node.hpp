@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_client.hpp"
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_subscription.hpp"
@@ -29,6 +30,8 @@ namespace agnocast
 
 using ParameterDescriptor = rcl_interfaces::msg::ParameterDescriptor;
 
+/// @brief Agnocast-only node. Drop-in replacement for rclcpp::Node in pure-Agnocast processes.
+AGNOCAST_PUBLIC
 class Node
 {
 public:
@@ -46,24 +49,47 @@ public:
     rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType;
 #endif
 
+  /// Construct a node with the given name.
+  /// @param node_name Name of the node.
+  /// @param options Node options.
+  AGNOCAST_PUBLIC
   explicit Node(
     const std::string & node_name, const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
+  /// Construct a node with the given name and namespace.
+  /// @param node_name Name of the node.
+  /// @param namespace_ Namespace of the node.
+  /// @param options Node options.
+  AGNOCAST_PUBLIC
   explicit Node(
     const std::string & node_name, const std::string & namespace_,
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
+  /// Return the name of the node.
+  AGNOCAST_PUBLIC
   std::string get_name() const { return node_base_->get_name(); }
+  /// Return the logger associated with this node.
+  AGNOCAST_PUBLIC
   rclcpp::Logger get_logger() const { return logger_; }
+  /// Return the namespace of the node.
+  AGNOCAST_PUBLIC
   std::string get_namespace() const { return node_base_->get_namespace(); }
+  /// Return the fully qualified name (namespace + node name).
+  AGNOCAST_PUBLIC
   std::string get_fully_qualified_name() const { return node_base_->get_fully_qualified_name(); }
 
+  /// Create a callback group.
+  /// @param group_type Type of callback group.
+  /// @param automatically_add_to_executor_with_node Whether to auto-add to executor.
+  AGNOCAST_PUBLIC
   rclcpp::CallbackGroup::SharedPtr create_callback_group(
     rclcpp::CallbackGroupType group_type, bool automatically_add_to_executor_with_node = true)
   {
     return node_base_->create_callback_group(group_type, automatically_add_to_executor_with_node);
   }
 
+  /// Iterate over all callback groups, invoking the given function on each.
+  AGNOCAST_PUBLIC
   void for_each_callback_group(
     const rclcpp::node_interfaces::NodeBaseInterface::CallbackGroupFunction & func)
   {
@@ -119,6 +145,12 @@ public:
     return node_logging_;
   }
 
+  /// Declare a parameter with a default value.
+  /// @param name Parameter name.
+  /// @param default_value Default value.
+  /// @param descriptor Optional descriptor.
+  /// @param ignore_override If true, ignore launch-file overrides.
+  AGNOCAST_PUBLIC
   const ParameterValue & declare_parameter(
     const std::string & name, const ParameterValue & default_value,
     const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
@@ -126,6 +158,12 @@ public:
     return node_parameters_->declare_parameter(name, default_value, descriptor, ignore_override);
   }
 
+  /// Declare a parameter with a given type (no default value).
+  /// @param name Parameter name.
+  /// @param type Parameter type.
+  /// @param descriptor Optional descriptor.
+  /// @param ignore_override If true, ignore launch-file overrides.
+  AGNOCAST_PUBLIC
   const ParameterValue & declare_parameter(
     const std::string & name, rclcpp::ParameterType type,
     const ParameterDescriptor & descriptor = ParameterDescriptor{}, bool ignore_override = false)
@@ -133,6 +171,13 @@ public:
     return node_parameters_->declare_parameter(name, type, descriptor, ignore_override);
   }
 
+  /// Declare a parameter with a typed default value.
+  /// @tparam ParameterT C++ type of the parameter.
+  /// @param name Parameter name.
+  /// @param default_value Default value.
+  /// @param descriptor Optional descriptor.
+  /// @param ignore_override If true, ignore launch-file overrides.
+  AGNOCAST_PUBLIC
   template <typename ParameterT>
   auto declare_parameter(
     const std::string & name, const ParameterT & default_value,
@@ -147,6 +192,12 @@ public:
     }
   }
 
+  /// Declare a parameter using only its type (default-constructed).
+  /// @tparam ParameterT C++ type of the parameter.
+  /// @param name Parameter name.
+  /// @param descriptor Optional descriptor.
+  /// @param ignore_override If true, ignore launch-file overrides.
+  AGNOCAST_PUBLIC
   template <typename ParameterT>
   auto declare_parameter(
     const std::string & name, const ParameterDescriptor & descriptor = ParameterDescriptor{},
@@ -163,26 +214,37 @@ public:
     }
   }
 
+  /// Check whether a parameter has been declared.
+  AGNOCAST_PUBLIC
   bool has_parameter(const std::string & name) const
   {
     return node_parameters_->has_parameter(name);
   }
 
+  /// Undeclare a previously declared parameter.
+  AGNOCAST_PUBLIC
   void undeclare_parameter(const std::string & name)
   {
     node_parameters_->undeclare_parameter(name);
   }
 
+  /// Get a parameter by name.
+  AGNOCAST_PUBLIC
   rclcpp::Parameter get_parameter(const std::string & name) const
   {
     return node_parameters_->get_parameter(name);
   }
 
+  /// Get a parameter by name, returning success status via bool.
+  AGNOCAST_PUBLIC
   bool get_parameter(const std::string & name, rclcpp::Parameter & parameter) const
   {
     return node_parameters_->get_parameter(name, parameter);
   }
 
+  /// Get a parameter and extract its typed value.
+  /// @tparam ParameterT C++ type to extract.
+  AGNOCAST_PUBLIC
   template <typename ParameterT>
   bool get_parameter(const std::string & name, ParameterT & parameter) const
   {
@@ -194,11 +256,16 @@ public:
     return result;
   }
 
+  /// Get multiple parameters by name.
+  AGNOCAST_PUBLIC
   std::vector<rclcpp::Parameter> get_parameters(const std::vector<std::string> & names) const
   {
     return node_parameters_->get_parameters(names);
   }
 
+  /// Get parameters matching a prefix into a typed map.
+  /// @tparam ParameterT C++ type to extract.
+  AGNOCAST_PUBLIC
   template <typename ParameterT>
   bool get_parameters(const std::string & prefix, std::map<std::string, ParameterT> & values) const
   {
@@ -213,23 +280,31 @@ public:
     return result;
   }
 
+  /// Set a single parameter.
+  AGNOCAST_PUBLIC
   rcl_interfaces::msg::SetParametersResult set_parameter(const rclcpp::Parameter & parameter)
   {
     return set_parameters_atomically({parameter});
   }
 
+  /// Set multiple parameters, one at a time.
+  AGNOCAST_PUBLIC
   std::vector<rcl_interfaces::msg::SetParametersResult> set_parameters(
     const std::vector<rclcpp::Parameter> & parameters)
   {
     return node_parameters_->set_parameters(parameters);
   }
 
+  /// Set multiple parameters atomically (all-or-nothing).
+  AGNOCAST_PUBLIC
   rcl_interfaces::msg::SetParametersResult set_parameters_atomically(
     const std::vector<rclcpp::Parameter> & parameters)
   {
     return node_parameters_->set_parameters_atomically(parameters);
   }
 
+  /// Describe a single parameter.
+  AGNOCAST_PUBLIC
   rcl_interfaces::msg::ParameterDescriptor describe_parameter(const std::string & name) const
   {
     auto result = node_parameters_->describe_parameters({name});
@@ -245,51 +320,78 @@ public:
     return result.front();
   }
 
+  /// Describe multiple parameters.
+  AGNOCAST_PUBLIC
   std::vector<rcl_interfaces::msg::ParameterDescriptor> describe_parameters(
     const std::vector<std::string> & names) const
   {
     return node_parameters_->describe_parameters(names);
   }
 
+  /// Get the types of the given parameters.
+  AGNOCAST_PUBLIC
   std::vector<uint8_t> get_parameter_types(const std::vector<std::string> & names) const
   {
     return node_parameters_->get_parameter_types(names);
   }
 
+  /// List parameters matching the given prefixes up to the given depth.
+  AGNOCAST_PUBLIC
   rcl_interfaces::msg::ListParametersResult list_parameters(
     const std::vector<std::string> & prefixes, uint64_t depth) const
   {
     return node_parameters_->list_parameters(prefixes, depth);
   }
 
+  /// Register a callback invoked before parameters are set.
+  AGNOCAST_PUBLIC
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr add_on_set_parameters_callback(
     OnSetParametersCallbackType callback)
   {
     return node_parameters_->add_on_set_parameters_callback(callback);
   }
 
+  /// Remove a previously registered on-set-parameters callback.
+  AGNOCAST_PUBLIC
   void remove_on_set_parameters_callback(
     const rclcpp::node_interfaces::OnSetParametersCallbackHandle * const handler)
   {
     node_parameters_->remove_on_set_parameters_callback(handler);
   }
 
+  /// Get the clock used by this node.
+  AGNOCAST_PUBLIC
   rclcpp::Clock::SharedPtr get_clock() { return node_clock_->get_clock(); }
 
+  /// Get the clock used by this node (const).
+  AGNOCAST_PUBLIC
   rclcpp::Clock::ConstSharedPtr get_clock() const { return node_clock_->get_clock(); }
 
+  /// Return the current time according to this node's clock.
+  AGNOCAST_PUBLIC
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  /// Return the number of publishers on a topic.
+  AGNOCAST_PUBLIC
   size_t count_publishers(const std::string & topic_name) const
   {
     return get_publisher_count_core(node_topics_->resolve_topic_name(topic_name));
   }
 
+  /// Return the number of subscribers on a topic.
+  AGNOCAST_PUBLIC
   size_t count_subscribers(const std::string & topic_name) const
   {
     return get_subscription_count_core(node_topics_->resolve_topic_name(topic_name));
   }
 
+  /// Create a publisher (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @param options Publisher options.
+  /// @return Shared pointer to the created publisher.
+  AGNOCAST_PUBLIC
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, const rclcpp::QoS & qos,
@@ -298,6 +400,13 @@ public:
     return std::make_shared<Publisher<MessageT>>(this, topic_name, qos, options);
   }
 
+  /// Create a publisher (queue-size overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param queue_size History depth for the QoS profile.
+  /// @param options Publisher options.
+  /// @return Shared pointer to the created publisher.
+  AGNOCAST_PUBLIC
   template <typename MessageT>
   typename agnocast::Publisher<MessageT>::SharedPtr create_publisher(
     const std::string & topic_name, size_t queue_size,
@@ -307,6 +416,15 @@ public:
       topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), options);
   }
 
+  /// Create a subscription (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @tparam Func Callback type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @param callback Callback invoked on each received message.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created subscription.
+  AGNOCAST_PUBLIC
   template <typename MessageT, typename Func>
   typename agnocast::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
@@ -316,6 +434,15 @@ public:
       this, topic_name, qos, std::forward<Func>(callback), options);
   }
 
+  /// Create a subscription (queue-size overload).
+  /// @tparam MessageT ROS message type.
+  /// @tparam Func Callback type.
+  /// @param topic_name Topic name.
+  /// @param queue_size History depth for the QoS profile.
+  /// @param callback Callback invoked on each received message.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created subscription.
+  AGNOCAST_PUBLIC
   template <typename MessageT, typename Func>
   typename agnocast::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, size_t queue_size, Func && callback,
@@ -326,6 +453,12 @@ public:
       options);
   }
 
+  /// Create a polling subscription (history-depth overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos_history_depth History depth for the QoS profile.
+  /// @return Shared pointer to the created polling subscription.
+  AGNOCAST_PUBLIC
   template <typename MessageT>
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
@@ -334,6 +467,12 @@ public:
       this, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)));
   }
 
+  /// Create a polling subscription (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @return Shared pointer to the created polling subscription.
+  AGNOCAST_PUBLIC
   template <typename MessageT>
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
@@ -341,6 +480,12 @@ public:
     return std::make_shared<PollingSubscriber<MessageT>>(this, topic_name, qos);
   }
 
+  /// Create a wall timer.
+  /// @param period Timer period.
+  /// @param callback Callback invoked on each tick.
+  /// @param group Callback group (nullptr = default).
+  /// @param autostart Whether to start immediately (not yet supported; always true).
+  AGNOCAST_PUBLIC
   template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
   typename WallTimer<CallbackT>::SharedPtr create_wall_timer(
     std::chrono::duration<DurationRepT, DurationT> period, CallbackT callback,
@@ -377,6 +522,12 @@ public:
     return timer;
   }
 
+  /// Create a timer using the node's clock.
+  /// @param period Timer period.
+  /// @param callback Callback invoked on each tick.
+  /// @param group Callback group (nullptr = default).
+  /// @param autostart Whether to start immediately (not yet supported; always true).
+  AGNOCAST_PUBLIC
   template <typename DurationRepT = int64_t, typename DurationT = std::milli, typename CallbackT>
   typename GenericTimer<CallbackT>::SharedPtr create_timer(
     std::chrono::duration<DurationRepT, DurationT> period, CallbackT callback,
@@ -400,6 +551,12 @@ public:
     return create_timer_impl(period, std::forward<CallbackT>(callback), group, clock);
   }
 
+  /// Create a service client.
+  /// @param service_name Service name.
+  /// @param qos Quality of service profile.
+  /// @param group Callback group (nullptr = default).
+  /// @return Shared pointer to the created client.
+  // AGNOCAST_PUBLIC
   template <typename ServiceT>
   typename agnocast::Client<ServiceT>::SharedPtr create_client(
     const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
@@ -408,6 +565,14 @@ public:
     return std::make_shared<Client<ServiceT>>(this, service_name, qos, group);
   }
 
+  /// Create a service server.
+  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&, agnocast::ipc_shared_ptr<ResponseT>&).
+  /// @param service_name Service name.
+  /// @param callback Callback invoked on each request.
+  /// @param qos Quality of service profile.
+  /// @param group Callback group (nullptr = default).
+  /// @return Shared pointer to the created service.
+  // AGNOCAST_PUBLIC
   template <typename ServiceT, typename Func>
   typename agnocast::Service<ServiceT>::SharedPtr create_service(
     const std::string & service_name, Func && callback,
