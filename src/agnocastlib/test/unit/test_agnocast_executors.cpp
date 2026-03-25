@@ -145,8 +145,8 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, stop_callback_group_waits_and_stops
     group_a);
 
   std::atomic_int callback_b_count{0};
-  auto timer_b = node->create_wall_timer(
-    std::chrono::milliseconds(10), [&]() { callback_b_count++; }, group_b);
+  auto timer_b =
+    node->create_wall_timer(std::chrono::milliseconds(10), [&]() { callback_b_count++; }, group_b);
 
   executor->add_node(node);
 

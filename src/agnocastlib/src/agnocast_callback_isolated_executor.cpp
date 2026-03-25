@@ -410,7 +410,8 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
     if (
       child_callback_groups_.size() != weak_child_executors_.size() ||
       child_callback_groups_.size() != child_threads_.size()) {
-      RCLCPP_ERROR(logger, "Child executor vectors are misaligned. Skipping stop_callback_group().");
+      RCLCPP_ERROR(
+        logger, "Child executor vectors are misaligned. Skipping stop_callback_group().");
       return;
     }
     for (size_t i = 0; i < child_callback_groups_.size(); ++i) {
