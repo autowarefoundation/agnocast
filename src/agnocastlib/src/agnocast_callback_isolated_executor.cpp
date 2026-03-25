@@ -431,7 +431,14 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
   }
 
   if (found && thread_to_join.joinable()) {
-    thread_to_join.join();
+    if (thread_to_join.get_id() == std::this_thread::get_id()) {
+      RCLCPP_ERROR(
+        logger,
+        "stop_callback_group() called from its own child thread. Detaching to avoid self-join UB.");
+      thread_to_join.detach();
+    } else {
+      thread_to_join.join();
+    }
   }
 }
 
