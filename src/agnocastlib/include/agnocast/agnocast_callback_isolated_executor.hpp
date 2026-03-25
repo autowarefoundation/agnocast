@@ -32,7 +32,7 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
     weak_groups_to_nodes_ RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  // Mutex to protect weak_child_executors_ and child_threads_
+  // Mutex to protect child_callback_groups_, weak_child_executors_, and child_threads_
   mutable std::mutex child_resources_mutex_;
 
   // Callback groups corresponding to each child executor, used by stop_callback_group()
@@ -73,8 +73,9 @@ public:
   void cancel();
 
   /// Stop the child executor running the given callback group, join its thread, and remove it.
+  /// If group_ptr is nullptr or not found, this is a no-op.
   AGNOCAST_PUBLIC
-  void stop_callback_group(rclcpp::CallbackGroup::SharedPtr group_ptr);
+  void stop_callback_group(const rclcpp::CallbackGroup::SharedPtr & group_ptr);
 
   /// Add a callback group to this executor.
   /// @param group_ptr Callback group to add.

@@ -423,9 +423,8 @@ void StandardBridgeManager::remove_active_bridge(
   // Stop the child executor for this bridge's callback group before destroying the bridge.
   // This ensures any in-flight callback completes before the subscription is destroyed,
   // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
-  auto & bridge_ptr = active_bridges_[topic_name_with_direction];
-  if (bridge_ptr) {
-    auto * bridge = static_cast<BridgeBase *>(bridge_ptr.get());
+  auto & bridge = active_bridges_[topic_name_with_direction];
+  if (bridge) {
     auto cb_group = bridge->get_callback_group();
     if (cb_group) {
       executor_->stop_callback_group(cb_group);

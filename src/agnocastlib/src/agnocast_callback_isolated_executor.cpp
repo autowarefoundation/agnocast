@@ -396,8 +396,12 @@ void CallbackIsolatedAgnocastExecutor::cancel()
 }
 
 void CallbackIsolatedAgnocastExecutor::stop_callback_group(
-  rclcpp::CallbackGroup::SharedPtr group_ptr)
+  const rclcpp::CallbackGroup::SharedPtr & group_ptr)
 {
+  if (!group_ptr) {
+    return;
+  }
+
   std::thread thread_to_join;
   bool found = false;
 
