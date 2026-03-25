@@ -74,7 +74,6 @@ public:
 
   /// Stop the child executor running the given callback group, join its thread, and remove it.
   /// If group_ptr is nullptr or not found, this is a no-op.
-  AGNOCAST_PUBLIC
   void stop_callback_group(const rclcpp::CallbackGroup::SharedPtr & group_ptr);
 
   /// Add a callback group to this executor.
