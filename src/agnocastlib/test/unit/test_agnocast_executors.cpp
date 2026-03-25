@@ -153,8 +153,13 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, stop_callback_group_waits_and_stops
   std::thread spin_thread([this]() { executor->spin(); });
 
   // Wait for group_a's callback to start (it will sleep for 300ms inside).
-  while (!callback_a_started) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!callback_a_started) {
+      ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "Timed out waiting for callback_a to start";
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
   }
 
   // Act: stop group_a while its callback is in-flight.
@@ -208,8 +213,13 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, stop_callback_group_does_not_deadlo
     spin_finished = true;
   });
 
-  while (!callback_started) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!callback_started) {
+      ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "Timed out waiting for callback to start";
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
   }
 
   // Race: stop_callback_group and cancel at the same time.
