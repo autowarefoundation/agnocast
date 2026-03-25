@@ -49,12 +49,12 @@ public:
   }
 
   std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> get_received_messages_for_node(
-    const std::string & node_name)
+    const std::string & node_name) const
   {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> filtered;
     for (const auto & msg : received_messages_) {
-      if (msg.callback_group_id.find(node_name) == 0) {
+      if (msg.callback_group_id.rfind(node_name, 0) == 0) {
         filtered.push_back(msg);
       }
     }
@@ -63,7 +63,7 @@ public:
 
 private:
   rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr subscription_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> received_messages_;
 };
 
@@ -99,7 +99,7 @@ TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, test_spin_publishes_callback_gr
   std::thread callback_isolated_thread(
     [&callback_isolated_executor]() { callback_isolated_executor->spin(); });
 
-  const std::string test_node_name = "/agnocast_only_dummy_node";
+  const std::string test_node_name = test_node->get_fully_qualified_name();
   auto start_time = std::chrono::steady_clock::now();
   constexpr auto timeout = std::chrono::seconds(10);
   while (receiver_node->get_received_messages_for_node(test_node_name).size() < 3u) {
