@@ -420,7 +420,6 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
         if (auto executor = weak_child_executors_[i].lock()) {
           executor->cancel();
         }
-        grp->get_associated_with_executor_atomic().store(false);
         thread_to_join = std::move(child_threads_[i]);
         child_callback_groups_.erase(child_callback_groups_.begin() + i);
         weak_child_executors_.erase(weak_child_executors_.begin() + i);
