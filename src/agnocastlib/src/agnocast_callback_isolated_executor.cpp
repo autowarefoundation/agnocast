@@ -407,12 +407,19 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
 
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    if (
+      child_callback_groups_.size() != weak_child_executors_.size() ||
+      child_callback_groups_.size() != child_threads_.size()) {
+      RCLCPP_ERROR(logger, "Child executor vectors are misaligned. Skipping stop_callback_group().");
+      return;
+    }
     for (size_t i = 0; i < child_callback_groups_.size(); ++i) {
       auto grp = child_callback_groups_[i].lock();
       if (grp && grp == group_ptr) {
         if (auto executor = weak_child_executors_[i].lock()) {
           executor->cancel();
         }
+        grp->get_associated_with_executor_atomic().store(false);
         thread_to_join = std::move(child_threads_[i]);
         child_callback_groups_.erase(child_callback_groups_.begin() + i);
         weak_child_executors_.erase(weak_child_executors_.begin() + i);
