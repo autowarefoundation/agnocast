@@ -155,6 +155,60 @@ TEST_F(AgnocastPublisherTest, test_publish_loan_num_and_pub_num_mismatch)
   EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
 }
 
+TEST_F(AgnocastPublisherTest, test_multiple_borrows_in_single_callback)
+{
+  // Scenario: two borrows, then two publishes — counter tracks correctly.
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg1 = dummy_publisher->borrow_loaned_message();
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 1);
+
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg2 = dummy_publisher->borrow_loaned_message();
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 2);
+
+  dummy_publisher->publish(std::move(msg1));
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 1);
+
+  dummy_publisher->publish(std::move(msg2));
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+  EXPECT_EQ(publish_core_mock_called_count, 2);
+}
+
+TEST_F(AgnocastPublisherTest, test_borrow_dropped_without_publish)
+{
+  // Scenario: borrow a message but let it go out of scope without publishing.
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+
+  {
+    agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg = dummy_publisher->borrow_loaned_message();
+    EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 1);
+  }  // msg destroyed here — decrement via ipc_shared_ptr destructor.
+
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+  EXPECT_EQ(publish_core_mock_called_count, 0);
+}
+
+TEST_F(AgnocastPublisherTest, test_multiple_borrows_mixed_publish_and_drop)
+{
+  // Scenario: three borrows — publish first, drop second via scope, publish third.
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg1 = dummy_publisher->borrow_loaned_message();
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg3 = dummy_publisher->borrow_loaned_message();
+  {
+    agnocast::ipc_shared_ptr<std_msgs::msg::Int32> msg2 = dummy_publisher->borrow_loaned_message();
+    EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 3);
+  }  // msg2 dropped without publish.
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 2);
+
+  dummy_publisher->publish(std::move(msg1));
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 1);
+
+  dummy_publisher->publish(std::move(msg3));
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+  EXPECT_EQ(publish_core_mock_called_count, 2);
+}
+
 // =========================================
 // ipc_shared_ptr tests
 // =========================================
