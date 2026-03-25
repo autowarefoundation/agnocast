@@ -32,15 +32,18 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
     weak_groups_to_nodes_ RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  // Mutex to protect weak_child_executors_ and child_threads_
+  // Mutex to protect child_entries_
   mutable std::mutex child_resources_mutex_;
 
-  // Child executors created during spin()
-  std::vector<rclcpp::Executor::WeakPtr> weak_child_executors_
-    RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+  struct ChildExecutorEntry
+  {
+    rclcpp::CallbackGroup::WeakPtr callback_group;
+    rclcpp::Executor::SharedPtr executor;
+    std::thread thread;
+  };
 
-  // Child threads created during spin()
-  std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+  // Child executors and their associated callback groups/threads, created during spin()
+  std::vector<ChildExecutorEntry> child_entries_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_manually_added_callback_groups_internal() const
     RCPPUTILS_TSA_REQUIRES(mutex_);
@@ -67,6 +70,10 @@ public:
   /// Request the executor to stop spinning. Causes the current or next spin() call to return.
   AGNOCAST_PUBLIC
   void cancel();
+
+  /// Stop the child executor running the given callback group, join its thread, and remove it.
+  AGNOCAST_PUBLIC
+  void stop_callback_group(rclcpp::CallbackGroup::SharedPtr group_ptr);
 
   /// Add a callback group to this executor.
   /// @param group_ptr Callback group to add.

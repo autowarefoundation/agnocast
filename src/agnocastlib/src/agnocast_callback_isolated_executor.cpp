@@ -87,19 +87,22 @@ void CallbackIsolatedAgnocastExecutor::spin()
           ->dedicate_to_callback_group(group, node);
       }
 
-      weak_child_executors_.push_back(executor);
+      ChildExecutorEntry entry;
+      entry.callback_group = group;
+      entry.executor = executor;
+      entry.thread = std::thread(
+        [executor, callback_group_id = std::move(callback_group_id), &client_publisher,
+         &client_publisher_mutex]() {
+          auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
-      child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
-                                   &client_publisher, &client_publisher_mutex]() {
-        auto tid = static_cast<pid_t>(syscall(SYS_gettid));
+          {
+            std::lock_guard<std::mutex> lock{client_publisher_mutex};
+            agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
+          }
 
-        {
-          std::lock_guard<std::mutex> lock{client_publisher_mutex};
-          agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
-        }
-
-        executor->spin();
-      });
+          executor->spin();
+        });
+      child_entries_.push_back(std::move(entry));
     };
 
   {
@@ -160,24 +163,23 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }
 
   // Join all child threads after monitoring loop exits.
-  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
+  // Cancel child executors and move entries out under the lock, then join OUTSIDE the lock.
   // A child thread's callback may call cancel() which acquires child_resources_mutex_,
   // so holding it during thread.join() would deadlock.
-  std::vector<std::thread> threads_to_join;
+  std::vector<ChildExecutorEntry> entries_to_join;
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    for (auto & weak_child_executor : weak_child_executors_) {
-      if (auto child_executor = weak_child_executor.lock()) {
-        child_executor->cancel();
+    for (auto & entry : child_entries_) {
+      if (entry.executor) {
+        entry.executor->cancel();
       }
     }
-    threads_to_join = std::move(child_threads_);
-    child_threads_.clear();
-    weak_child_executors_.clear();
+    entries_to_join = std::move(child_entries_);
+    child_entries_.clear();
   }
-  for (auto & thread : threads_to_join) {
-    if (thread.joinable()) {
-      thread.join();
+  for (auto & entry : entries_to_join) {
+    if (entry.thread.joinable()) {
+      entry.thread.join();
     }
   }
 }
@@ -386,10 +388,37 @@ void CallbackIsolatedAgnocastExecutor::cancel()
 {
   spinning.store(false);
   std::lock_guard<std::mutex> guard{child_resources_mutex_};
-  for (auto & weak_child_executor : weak_child_executors_) {
-    if (auto child_executor = weak_child_executor.lock()) {
-      child_executor->cancel();
+  for (auto & entry : child_entries_) {
+    if (entry.executor) {
+      entry.executor->cancel();
     }
+  }
+}
+
+void CallbackIsolatedAgnocastExecutor::stop_callback_group(
+  rclcpp::CallbackGroup::SharedPtr group_ptr)
+{
+  ChildExecutorEntry target_entry;
+  bool found = false;
+
+  {
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    for (auto it = child_entries_.begin(); it != child_entries_.end(); ++it) {
+      auto grp = it->callback_group.lock();
+      if (grp && grp == group_ptr) {
+        if (it->executor) {
+          it->executor->cancel();
+        }
+        target_entry = std::move(*it);
+        child_entries_.erase(it);
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (found && target_entry.thread.joinable()) {
+    target_entry.thread.join();
   }
 }
 
