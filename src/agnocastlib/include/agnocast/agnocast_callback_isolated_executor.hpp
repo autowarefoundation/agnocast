@@ -32,14 +32,18 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
     weak_groups_to_nodes_ RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  // Mutex to protect child executor vectors
+  // Mutex to protect weak_child_executors_ and child_threads_
   mutable std::mutex child_resources_mutex_;
 
-  // Parallel vectors: index i of each vector corresponds to the same child executor.
+  // Callback groups corresponding to each child executor, used by stop_callback_group()
   std::vector<rclcpp::CallbackGroup::WeakPtr> child_callback_groups_
     RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Child executors created during spin()
   std::vector<rclcpp::Executor::WeakPtr> weak_child_executors_
     RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Child threads created during spin()
   std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_manually_added_callback_groups_internal() const
