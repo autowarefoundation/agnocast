@@ -1,0 +1,23 @@
+<launch>
+  <arg name="prerun" default="false" description="Launch prerun_node when true, otherwise launch thread_configurator_node"/>
+  <arg name="domains" default="" description="Comma-separated ROS domain IDs for prerun discovery (e.g. 0,1)"/>
+  <arg name="config_file" default="" description="Path to YAML thread configuration file"/>
+
+  <node
+    pkg="agnocast_cie_thread_configurator"
+    exec="prerun_node"
+    name="prerun_node"
+    output="screen"
+    if="$(var prerun)">
+    <param name="domains" value="$(var domains)"/>
+  </node>
+
+  <node
+    pkg="agnocast_cie_thread_configurator"
+    exec="thread_configurator_node"
+    name="thread_configurator_node"
+    output="screen"
+    unless="$(var prerun)">
+    <param name="config_file" value="$(var config_file)"/>
+  </node>
+</launch>

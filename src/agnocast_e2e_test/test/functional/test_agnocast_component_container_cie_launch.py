@@ -13,10 +13,9 @@ from launch_ros.descriptions import ComposableNode
 def generate_test_description():
     thread_configurator_node = launch_ros.actions.Node(
         package='agnocast_cie_thread_configurator',
-        executable='thread_configurator_node',
+        executable='prerun_node',
         name='thread_configurator_node',
-        output='screen',
-        arguments=['--prerun']
+        output='screen'
     )
 
     component_container = ComposableNodeContainer(

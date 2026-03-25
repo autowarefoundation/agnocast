@@ -34,10 +34,16 @@ agnocast_components_register_node(
 
 #### Multiple ROS domain support
 
-`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use the `--domains` option to specify domain IDs you use:
+`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use launch arguments to specify domain IDs:
 
 ```bash
-ros2 run agnocast_cie_thread_configurator thread_configurator_node --prerun --domains 0,1
+ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=true domains:=0,1
+```
+
+To apply a generated or prepared YAML configuration, launch the configurator node with `config_file`:
+
+```bash
+ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=false config_file:=/path/to/template.yaml
 ```
 
 #### RT Throttling
