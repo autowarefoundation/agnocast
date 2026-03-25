@@ -11,6 +11,8 @@
 namespace agnocast
 {
 
+class BridgeBase;
+
 using BridgeFn = std::shared_ptr<BridgeBase> (*)(
   rclcpp::Node::SharedPtr, const BridgeTargetInfo &, const rclcpp::QoS &);
 
