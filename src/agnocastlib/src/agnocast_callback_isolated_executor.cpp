@@ -87,22 +87,20 @@ void CallbackIsolatedAgnocastExecutor::spin()
           ->dedicate_to_callback_group(group, node);
       }
 
-      ChildExecutorEntry entry;
-      entry.callback_group = group;
-      entry.executor = executor;
-      entry.thread = std::thread(
-        [executor, callback_group_id = std::move(callback_group_id), &client_publisher,
-         &client_publisher_mutex]() {
-          auto tid = static_cast<pid_t>(syscall(SYS_gettid));
+      child_callback_groups_.push_back(group);
+      weak_child_executors_.push_back(executor);
 
-          {
-            std::lock_guard<std::mutex> lock{client_publisher_mutex};
-            agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
-          }
+      child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
+                                   &client_publisher, &client_publisher_mutex]() {
+        auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
-          executor->spin();
-        });
-      child_entries_.push_back(std::move(entry));
+        {
+          std::lock_guard<std::mutex> lock{client_publisher_mutex};
+          agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
+        }
+
+        executor->spin();
+      });
     };
 
   {
@@ -163,23 +161,25 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }
 
   // Join all child threads after monitoring loop exits.
-  // Cancel child executors and move entries out under the lock, then join OUTSIDE the lock.
+  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
   // A child thread's callback may call cancel() which acquires child_resources_mutex_,
   // so holding it during thread.join() would deadlock.
-  std::vector<ChildExecutorEntry> entries_to_join;
+  std::vector<std::thread> threads_to_join;
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    for (auto & entry : child_entries_) {
-      if (entry.executor) {
-        entry.executor->cancel();
+    for (auto & weak_child_executor : weak_child_executors_) {
+      if (auto child_executor = weak_child_executor.lock()) {
+        child_executor->cancel();
       }
     }
-    entries_to_join = std::move(child_entries_);
-    child_entries_.clear();
+    threads_to_join = std::move(child_threads_);
+    child_threads_.clear();
+    weak_child_executors_.clear();
+    child_callback_groups_.clear();
   }
-  for (auto & entry : entries_to_join) {
-    if (entry.thread.joinable()) {
-      entry.thread.join();
+  for (auto & thread : threads_to_join) {
+    if (thread.joinable()) {
+      thread.join();
     }
   }
 }
@@ -388,9 +388,9 @@ void CallbackIsolatedAgnocastExecutor::cancel()
 {
   spinning.store(false);
   std::lock_guard<std::mutex> guard{child_resources_mutex_};
-  for (auto & entry : child_entries_) {
-    if (entry.executor) {
-      entry.executor->cancel();
+  for (auto & weak_child_executor : weak_child_executors_) {
+    if (auto child_executor = weak_child_executor.lock()) {
+      child_executor->cancel();
     }
   }
 }
@@ -398,27 +398,29 @@ void CallbackIsolatedAgnocastExecutor::cancel()
 void CallbackIsolatedAgnocastExecutor::stop_callback_group(
   rclcpp::CallbackGroup::SharedPtr group_ptr)
 {
-  ChildExecutorEntry target_entry;
+  std::thread thread_to_join;
   bool found = false;
 
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    for (auto it = child_entries_.begin(); it != child_entries_.end(); ++it) {
-      auto grp = it->callback_group.lock();
+    for (size_t i = 0; i < child_callback_groups_.size(); ++i) {
+      auto grp = child_callback_groups_[i].lock();
       if (grp && grp == group_ptr) {
-        if (it->executor) {
-          it->executor->cancel();
+        if (auto executor = weak_child_executors_[i].lock()) {
+          executor->cancel();
         }
-        target_entry = std::move(*it);
-        child_entries_.erase(it);
+        thread_to_join = std::move(child_threads_[i]);
+        child_callback_groups_.erase(child_callback_groups_.begin() + i);
+        weak_child_executors_.erase(weak_child_executors_.begin() + i);
+        child_threads_.erase(child_threads_.begin() + i);
         found = true;
         break;
       }
     }
   }
 
-  if (found && target_entry.thread.joinable()) {
-    target_entry.thread.join();
+  if (found && thread_to_join.joinable()) {
+    thread_to_join.join();
   }
 }
 
