@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/mm.h>  // kvzalloc, kvfree
+#include <linux/module.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/tracepoint.h>
