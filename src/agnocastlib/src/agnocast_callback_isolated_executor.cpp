@@ -421,9 +421,10 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
           executor->cancel();
         }
         thread_to_join = std::move(child_threads_[i]);
-        child_callback_groups_.erase(child_callback_groups_.begin() + i);
-        weak_child_executors_.erase(weak_child_executors_.begin() + i);
-        child_threads_.erase(child_threads_.begin() + i);
+        auto idx = static_cast<std::ptrdiff_t>(i);
+        child_callback_groups_.erase(child_callback_groups_.begin() + idx);
+        weak_child_executors_.erase(weak_child_executors_.begin() + idx);
+        child_threads_.erase(child_threads_.begin() + idx);
         found = true;
         break;
       }
