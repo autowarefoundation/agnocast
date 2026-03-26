@@ -51,6 +51,9 @@ void init(int argc, char const * const * argv)
 void shutdown()
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
+  if (!g_context.is_initialized()) {
+    return;
+  }
 
   // TODO(Koichi98): Add SignalHandler cleanup (uninstall signal handlers, reset state)
   // and notify all executors to stop spinning via SignalHandler::notify_all_executors().
