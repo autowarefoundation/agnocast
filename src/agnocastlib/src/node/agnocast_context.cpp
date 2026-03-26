@@ -4,7 +4,6 @@
 
 #include <rcl/error_handling.h>
 #include <rcl/logging.h>
-#include <rcutils/allocator.h>
 #include <rcutils/logging_macros.h>
 
 namespace agnocast
@@ -31,7 +30,7 @@ void Context::init(int argc, char const * const * argv)
 
   // Initialize rcl logging so that RCLCPP_INFO/WARN/etc. are written to
   // ~/.ros/log/ files via rcl_logging_spdlog, matching rclcpp::init() behavior.
-  rcl_allocator_t allocator = rcutils_get_default_allocator();
+  rcl_allocator_t allocator = rcl_get_default_allocator();
   rcl_ret_t ret = rcl_logging_configure_with_output_handler(
     parsed_arguments_.get(), &allocator, rcl_logging_multiple_output_handler);
   if (ret != RCL_RET_OK) {
