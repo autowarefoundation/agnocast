@@ -78,7 +78,7 @@ protected:
   void TearDown() override
   {
     rclcpp::shutdown();
-    // TODO(Koichi98): Call agnocast::shutdown() once available.
+    agnocast::shutdown();
   }
 };
 

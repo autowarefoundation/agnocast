@@ -43,6 +43,6 @@ int main(int argc, char * argv[])
   RCLCPP_INFO(node->get_logger(), "Result2: %ld", future.get()->sum);
 
   spin_thread.join();
-  // TODO(Koichi98): Add agnocast::shutdown() here
+  agnocast::shutdown();
   return 0;
 }

@@ -26,7 +26,6 @@ void Context::init(int argc, char const * const * argv)
   }
 
   parsed_arguments_ = parse_arguments(args);
-  initialized_ = true;
 
   // Initialize rcl logging so that RCLCPP_INFO/WARN/etc. are written to
   // ~/.ros/log/ files via rcl_logging_spdlog, matching rclcpp::init() behavior.
@@ -39,6 +38,7 @@ void Context::init(int argc, char const * const * argv)
     rcl_reset_error();
   }
 
+  initialized_ = true;
   TRACEPOINT(agnocast_init, static_cast<const void *>(this));
 }
 
@@ -46,6 +46,20 @@ void init(int argc, char const * const * argv)
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
   g_context.init(argc, argv);
+}
+
+void shutdown()
+{
+  std::lock_guard<std::mutex> lock(g_context_mtx);
+
+  // TODO(Koichi98): Add SignalHandler cleanup (uninstall signal handlers, reset state).
+
+  rcl_ret_t ret = rcl_logging_fini();
+  if (ret != RCL_RET_OK) {
+    RCUTILS_LOG_ERROR_NAMED(
+      "agnocast", "Failed to finalize logging: %s", rcl_get_error_string().str);
+    rcl_reset_error();
+  }
 }
 
 }  // namespace agnocast
