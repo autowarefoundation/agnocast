@@ -1,11 +1,11 @@
 #pragma once
 
 #include "rclcpp/rclcpp.hpp"
-#include "yaml-cpp/yaml.h"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 #include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -29,7 +29,7 @@ class ThreadConfiguratorNode : public rclcpp::Node
   };
 
 public:
-  explicit ThreadConfiguratorNode(const YAML::Node & yaml);
+  ThreadConfiguratorNode();
   ~ThreadConfiguratorNode();
   void print_all_unapplied();
   bool has_configured_once() const;
@@ -37,7 +37,8 @@ public:
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
 private:
-  void validate_rt_throttling(const YAML::Node & yaml);
+  void validate_rt_throttling(int runtime_us, int period_us);
+  void validate_hardware_info(const std::map<std::string, std::string> & hardware_info);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
   bool issue_syscalls(const ThreadConfig & config);
   void callback_group_callback(

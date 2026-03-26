@@ -37,18 +37,37 @@ agnocast_components_register_node(
 `agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use launch arguments to specify domain IDs:
 
 ```bash
-ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=true domains:=0,1
+ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=true domains:=[0,1]
 ```
 
-To apply a generated or prepared YAML configuration, launch the configurator node with `config_file`:
+To apply a generated or prepared ROS 2 parameter file, launch the configurator node with `config_file`:
 
 ```bash
-ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=false config_file:=/path/to/template.yaml
+ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=false config_file:=/path/to/thread_configurator.params.yaml
+```
+
+The parameter file format is:
+
+```yaml
+thread_configurator_node:
+  ros__parameters:
+    hardware_info:
+      model_name: ...
+      cpu_family: ...
+      model: ...
+      threads_per_core: ...
+    rt_throttling:
+      runtime_us: 0  # 0 means unset (skip sched_rt_runtime_us validation)
+      period_us: 0   # 0 means unset (skip sched_rt_period_us validation)
+    callback_groups:
+      - "{ id: .., domain_id: .., affinity: [], policy: .., priority: 0 }"
+    non_ros_threads:
+      - "{ name: .., affinity: [], policy: .., priority: 0 }"
 ```
 
 #### RT Throttling
 
-The `rt_throttling` feature configures the kernel's real-time scheduling bandwidth parameters (`sched_rt_period_us` and `sched_rt_runtime_us`). At startup, `agnocast_cie_thread_configurator` validates that the current kernel values match the configuration and reports an error if they differ.
+The `rt_throttling` feature configures the kernel's real-time scheduling bandwidth parameters (`sched_rt_period_us` and `sched_rt_runtime_us`). At startup, `agnocast_cie_thread_configurator` validates that the current kernel values match the configuration and reports an error if they differ. If `runtime_us` or `period_us` is set to `0`, that field is treated as unset and its validation is skipped.
 
 Since `/proc/sys/kernel/sched_rt_period_us` and `/proc/sys/kernel/sched_rt_runtime_us` can only be written by root (uid 0) — Linux capabilities such as `CAP_SYS_ADMIN` cannot bypass the `/proc/sys/` permission check — these values must be pre-configured via `/etc/sysctl.d/`:
 

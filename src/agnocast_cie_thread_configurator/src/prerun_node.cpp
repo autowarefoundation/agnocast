@@ -9,10 +9,36 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
+#include <sstream>
 #include <string>
 
-PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node")
+PrerunNode::PrerunNode() : Node("prerun_node")
 {
+  // https://docs.ros.org/en/rolling/Concepts/Intermediate/About-Domain-ID.html#choosing-a-domain-id-short-version
+  constexpr size_t max_domain_id = 101;
+
+  const auto domains =
+    this->declare_parameter<std::vector<int64_t>>("domains", std::vector<int64_t>{});
+  std::set<size_t> domain_ids;
+  for (const auto raw_domain_id : domains) {
+    if (raw_domain_id < 0) {
+      RCLCPP_WARN(
+        this->get_logger(), "Negative domain ID %ld is invalid. Skipping.", raw_domain_id);
+      continue;
+    }
+
+    const size_t domain_id = static_cast<size_t>(raw_domain_id);
+    if (domain_id > max_domain_id) {
+      RCLCPP_WARN(
+        this->get_logger(), "Domain ID %zu exceeds maximum valid value (%zu). Skipping.", domain_id,
+        max_domain_id);
+      continue;
+    }
+
+    domain_ids.insert(domain_id);
+  }
+
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
@@ -99,6 +125,11 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
 
   out << YAML::BeginMap;
 
+  out << YAML::Key << "thread_configurator_node";
+  out << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "ros__parameters";
+  out << YAML::Value << YAML::BeginMap;
+
   // Add hardware information section
   out << YAML::Key << "hardware_info";
   out << YAML::Value << YAML::BeginMap;
@@ -123,13 +154,10 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & [domain_id, callback_group_id] : domain_and_cbg_ids_) {
-    out << YAML::BeginMap;
-    out << YAML::Key << "id" << YAML::Value << callback_group_id;
-    out << YAML::Key << "domain_id" << YAML::Value << domain_id;
-    out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
-    out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
-    out << YAML::Key << "priority" << YAML::Value << 0;
-    out << YAML::EndMap;
+    std::ostringstream ss;
+    ss << "{ id: \"" << callback_group_id << "\", domain_id: " << domain_id
+       << ", affinity: [], policy: \"SCHED_OTHER\", priority: 0 }";
+    out << ss.str();
     out << YAML::Newline;
   }
 
@@ -140,16 +168,15 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & thread_name : non_ros_thread_names_) {
-    out << YAML::BeginMap;
-    out << YAML::Key << "name" << YAML::Value << thread_name;
-    out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
-    out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
-    out << YAML::Key << "priority" << YAML::Value << 0;
-    out << YAML::EndMap;
+    std::ostringstream ss;
+    ss << "{ name: \"" << thread_name << "\", affinity: [], policy: \"SCHED_OTHER\", priority: 0 }";
+    out << ss.str();
     out << YAML::Newline;
   }
 
   out << YAML::EndSeq;
+  out << YAML::EndMap;
+  out << YAML::EndMap;
   out << YAML::EndMap;
 
   std::ofstream fout(path / "template.yaml");

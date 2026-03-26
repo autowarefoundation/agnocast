@@ -13,7 +13,7 @@
 class PrerunNode : public rclcpp::Node
 {
 public:
-  explicit PrerunNode(const std::set<size_t> & domain_ids);
+  PrerunNode();
   void dump_yaml_config(std::filesystem::path path);
 
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;

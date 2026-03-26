@@ -12,23 +12,46 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
-ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
+ThreadConfiguratorNode::ThreadConfiguratorNode()
 : Node("thread_configurator_node"), unapplied_num_(0), cgroup_num_(0)
 {
-  validate_rt_throttling(yaml);
+  // 0 means unset: skip validation for the corresponding rt_throttling field.
+  const int runtime_us = this->declare_parameter<int>("rt_throttling.runtime_us", 0);
+  // 0 means unset: skip validation for the corresponding rt_throttling field.
+  const int period_us = this->declare_parameter<int>("rt_throttling.period_us", 0);
+  const auto callback_group_entries =
+    this->declare_parameter<std::vector<std::string>>("callback_groups", {});
+  const auto non_ros_thread_entries =
+    this->declare_parameter<std::vector<std::string>>("non_ros_threads", {});
 
-  YAML::Node callback_groups = yaml["callback_groups"];
-  YAML::Node non_ros_threads = yaml["non_ros_threads"];
+  // Collect hardware_info parameters from namespace
+  std::map<std::string, std::string> hardware_info;
+  const std::vector<std::string> hw_info_keys = {
+    "model_name",      "cpu_family",  "model",      "threads_per_core",
+    "frequency_boost", "cpu_max_mhz", "cpu_min_mhz"};
+  for (const auto & key : hw_info_keys) {
+    std::string param_name = "hardware_info." + key;
+    std::string value = this->declare_parameter<std::string>(param_name, "");
+    if (!value.empty()) {
+      hardware_info[key] = value;
+    }
+  }
 
-  unapplied_num_ = callback_groups.size() + non_ros_threads.size();
-  callback_group_configs_.resize(callback_groups.size());
-  non_ros_thread_configs_.resize(non_ros_threads.size());
+  validate_rt_throttling(runtime_us, period_us);
+  validate_hardware_info(hardware_info);
+
+  unapplied_num_ = callback_group_entries.size() + non_ros_thread_entries.size();
+  callback_group_configs_.resize(callback_group_entries.size());
+  non_ros_thread_configs_.resize(non_ros_thread_entries.size());
 
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
@@ -49,8 +72,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   };
 
   std::set<size_t> domain_ids;
-  for (size_t i = 0; i < callback_groups.size(); i++) {
-    const auto & callback_group = callback_groups[i];
+  for (size_t i = 0; i < callback_group_entries.size(); i++) {
+    const auto & callback_group = YAML::Load(callback_group_entries[i]);
     auto & config = callback_group_configs_[i];
 
     config.thread_str = remove_trailing_waitable(callback_group["id"].as<std::string>());
@@ -81,8 +104,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   }
 
   // Load non-ROS thread configurations
-  for (size_t i = 0; i < non_ros_threads.size(); i++) {
-    const auto & non_ros_thread = non_ros_threads[i];
+  for (size_t i = 0; i < non_ros_thread_entries.size(); i++) {
+    const auto & non_ros_thread = YAML::Load(non_ros_thread_entries[i]);
     auto & config = non_ros_thread_configs_[i];
 
     config.thread_str = non_ros_thread["name"].as<std::string>();
@@ -144,13 +167,52 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   }
 }
 
-void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
+void ThreadConfiguratorNode::validate_hardware_info(
+  const std::map<std::string, std::string> & hardware_info)
 {
-  if (!yaml["rt_throttling"]) {
+  if (hardware_info.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No hardware_info section found in configuration. Skipping hardware validation.");
     return;
   }
 
-  const auto & rt_bw = yaml["rt_throttling"];
+  auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+
+  bool all_match = true;
+  std::vector<std::string> mismatches;
+
+  for (const auto & [key, current_value] : current_hw_info) {
+    auto it = hardware_info.find(key);
+    if (it == hardware_info.end()) {
+      continue;
+    }
+
+    const std::string & expected_value = it->second;
+    if (expected_value != current_value) {
+      all_match = false;
+      mismatches.push_back(
+        key + ": expected '" + expected_value + "', got '" + current_value + "'");
+    }
+  }
+
+  if (!all_match) {
+    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
+    for (const auto & mismatch : mismatches) {
+      error_msg += "  - " + mismatch + "\n";
+    }
+    RCLCPP_ERROR(this->get_logger(), "%s", error_msg.c_str());
+  } else {
+    RCLCPP_INFO(
+      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
+  }
+}
+
+void ThreadConfiguratorNode::validate_rt_throttling(int runtime_us, int period_us)
+{
+  if (period_us == 0 && runtime_us == 0) {
+    return;
+  }
 
   // Writing to /proc/sys/kernel/sched_rt_{period,runtime}_us requires root (uid 0).
   // Linux capabilities (CAP_SYS_ADMIN etc.) cannot bypass the proc sysctl DAC check.
@@ -173,8 +235,8 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
 
   bool mismatch = false;
 
-  if (rt_bw["period_us"]) {
-    int expected = rt_bw["period_us"].as<int>();
+  if (period_us != 0) {
+    int expected = period_us;
     auto actual = read_sysctl("/proc/sys/kernel/sched_rt_period_us");
     if (actual.has_value()) {
       if (actual.value() != expected) {
@@ -188,8 +250,8 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     }
   }
 
-  if (rt_bw["runtime_us"]) {
-    int expected = rt_bw["runtime_us"].as<int>();
+  if (runtime_us != 0) {
+    int expected = runtime_us;
     auto actual = read_sysctl("/proc/sys/kernel/sched_rt_runtime_us");
     if (actual.has_value()) {
       if (actual.value() != expected) {
@@ -209,12 +271,11 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
       "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
       "(or run 'sudo sysctl --system'):\n";
 
-    if (rt_bw["period_us"]) {
-      message +=
-        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
+    if (period_us != 0) {
+      message += "  kernel.sched_rt_period_us = " + std::to_string(period_us) + "\n";
     }
-    if (rt_bw["runtime_us"]) {
-      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
+    if (runtime_us != 0) {
+      message += "  kernel.sched_rt_runtime_us = " + std::to_string(runtime_us);
     }
 
     RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
@@ -395,7 +456,7 @@ void ThreadConfiguratorNode::callback_group_callback(
   if (it == id_to_callback_group_config_.end()) {
     RCLCPP_INFO(
       this->get_logger(),
-      "Received CallbackGroupInfo: but the yaml file does not "
+      "Received CallbackGroupInfo: but parameters do not "
       "contain configuration for domain=%zu, id=%s (tid=%ld)",
       domain_id, msg->callback_group_id.c_str(), msg->thread_id);
     return;
@@ -457,7 +518,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   if (it == id_to_non_ros_thread_config_.end()) {
     RCLCPP_INFO(
       this->get_logger(),
-      "Received NonRosThreadInfo: but the yaml file does not "
+      "Received NonRosThreadInfo: but parameters do not "
       "contain configuration for name=%s (tid=%ld)",
       msg->thread_name.c_str(), msg->thread_id);
     return;
