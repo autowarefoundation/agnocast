@@ -52,7 +52,8 @@ void shutdown()
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
 
-  // TODO(Koichi98): Add SignalHandler cleanup (uninstall signal handlers, reset state).
+  // TODO(Koichi98): Add SignalHandler cleanup (uninstall signal handlers, reset state)
+  // and notify all executors to stop spinning via SignalHandler::notify_all_executors().
 
   rcl_ret_t ret = rcl_logging_fini();
   if (ret != RCL_RET_OK) {
