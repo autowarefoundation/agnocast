@@ -7,7 +7,7 @@
 static pid_t pid_carbs = 9000;
 
 // When only the bridge manager exists, check_and_request_bridge_shutdown
-// should return ret_should_shutdown=true and clear is_bridge_manager
+// should return ret_should_shutdown=true and clear is_performance_bridge_manager
 void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test)
 {
   // Register bridge manager only
@@ -23,7 +23,7 @@ void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_TRUE(test, shutdown_args.ret_should_shutdown);
 
-  // Verify is_bridge_manager was cleared - new process should not see bridge manager
+  // Verify is_performance_bridge_manager was cleared - new process should not see bridge manager
   pid_t normal_pid = pid_carbs++;
   union ioctl_add_process_args normal_args = {};
   ret = agnocast_ioctl_add_process(normal_pid, current->nsproxy->ipc_ns, false, &normal_args);
@@ -32,7 +32,7 @@ void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test)
 }
 
 // When other processes exist, check_and_request_bridge_shutdown
-// should return ret_should_shutdown=false and keep is_bridge_manager set
+// should return ret_should_shutdown=false and keep is_performance_bridge_manager set
 void test_case_check_and_request_bridge_shutdown_when_others_exist(struct kunit * test)
 {
   // Register bridge manager
@@ -54,7 +54,7 @@ void test_case_check_and_request_bridge_shutdown_when_others_exist(struct kunit 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_FALSE(test, shutdown_args.ret_should_shutdown);
 
-  // Verify is_bridge_manager is still set - new process should see bridge manager
+  // Verify is_performance_bridge_manager is still set - new process should see bridge manager
   pid_t new_pid = pid_carbs++;
   union ioctl_add_process_args new_args = {};
   ret = agnocast_ioctl_add_process(new_pid, current->nsproxy->ipc_ns, false, &new_args);

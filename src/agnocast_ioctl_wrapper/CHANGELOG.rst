@@ -2,6 +2,17 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.2 (2026-03-24)
+------------------
+
+2.3.1 (2026-03-17)
+------------------
+
+2.3.0 (2026-03-09)
+------------------
+* feat(kmod): bump capacity constants and default mempool size (`#1151 <https://github.com/autowarefoundation/agnocast/issues/1151>`_)
+* fix(kmod)[need-minor-update]: add `topic_name_buffer_size` field for `get_agnocast_pub/sub_topics` (`#1113 <https://github.com/autowarefoundation/agnocast/issues/1113>`_)
+
 2.2.0 (2026-02-19)
 ------------------
 * feat(kmod)[need-minor-update]: increase MAX_PUBLISHER_NUM (`#1060 <https://github.com/tier4/agnocast/issues/1060>`_)

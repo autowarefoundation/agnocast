@@ -56,7 +56,7 @@ Since ROS packages under `src/` such as `agnocastlib` are not yet distributed fr
 Therefore, to perform the source build, first check out the specific version as follows:
 
 ```bash
-git clone --branch 2.2.0 https://github.com/autowarefoundation/agnocast.git
+git clone --branch 2.3.1 https://github.com/autowarefoundation/agnocast.git
 cd agnocast
 ```
 
@@ -163,7 +163,7 @@ EOF
 
 # Install packages
 sudo apt update
-sudo apt install agnocast-heaphook-v2.2.0 agnocast-kmod-v2.2.0
+sudo apt install agnocast-heaphook-v2.3.1 agnocast-kmod-v2.3.1
 ```
 
 </details>
@@ -396,21 +396,20 @@ sudo rm -f /etc/apt/trusted.gpg.d/*agnocast*.gpg
 
 ### Shared memory and message queue cleanup
 
-Although Agnocast includes cleanup procedures for resources like shared memory and message queues, these resources may sometimes remain in the system. If you notice that available system memory decreases every time you run an Agnocast-enabled application, you'll need to remove leftover shared memory objects by running:
+Agnocast spawns a background daemon process (forked from the first Agnocast process) that automatically cleans up shared memory and message queues when processes exit. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes. If the daemon dies, cleanup stops and resources will leak. To avoid this, stop application processes individually (e.g., with `Ctrl+C` or by targeting specific PIDs).
+
+If shared memory or message queues are left behind, you can remove them manually:
 
 ```bash
+# Remove leftover shared memory
 rm /dev/shm/agnocast@*
-```
 
-Additionally, if you encounter the error `mq_open failed: No space left on device`, it means that the system has reached the maximum number of message queues. In that case, first try removing leftover message queues by running:
-
-```bash
+# Remove leftover message queues
 rm /dev/mqueue/agnocast@*
-rm /dev/mqueue/agnocast_bridge_manager_parent@*
-rm /dev/mqueue/agnocast_bridge_manager_daemon@*
+rm /dev/mqueue/agnocast_bridge_manager@*
 ```
 
-If the error persists after cleanup, you may need to increase the system-wide limit on the number of message queues. See the [System Configuration](#system-configuration) section above for how to increase `queues_max`.
+If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide limit. See the [System Configuration](#system-configuration) section for how to increase `queues_max`.
 
 ## Documents
 

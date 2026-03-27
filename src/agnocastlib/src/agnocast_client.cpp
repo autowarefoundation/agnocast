@@ -5,6 +5,7 @@
 
 #include <array>
 #include <chrono>
+#include <memory>
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -14,11 +15,12 @@ namespace agnocast
 
 uint32_t get_agnocast_sub_count(const std::string & topic_name)
 {
-  std::array<topic_info_ret, MAX_TOPIC_INFO_RET_NUM> topic_info_buffer{};
+  auto topic_info_buffer = std::make_unique<std::array<topic_info_ret, MAX_TOPIC_INFO_RET_NUM>>();
 
   ioctl_topic_info_args topic_info_args = {};
   topic_info_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  topic_info_args.topic_info_ret_buffer_addr = reinterpret_cast<uint64_t>(topic_info_buffer.data());
+  topic_info_args.topic_info_ret_buffer_addr =
+    reinterpret_cast<uint64_t>(topic_info_buffer->data());
   topic_info_args.topic_info_ret_buffer_size = MAX_TOPIC_INFO_RET_NUM;
   if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD failed: %s", strerror(errno));
@@ -59,7 +61,7 @@ bool wait_for_service_nanoseconds(
   nanoseconds time_to_wait =
     timeout > nanoseconds(0) ? timeout - (steady_clock::now() - start) : nanoseconds::max();
   do {
-    // TODO(Koichi98): agnocast::ok and agnocast::shutdown are planned to be implemented.
+    // TODO(Koichi98): agnocast::ok is planned to be implemented.
     // For standalone agnocast nodes (without rclcpp::init()), context->is_valid() returns false,
     // so we skip the rclcpp::ok() check in that case.
     if ((context && context->is_valid()) ? !rclcpp::ok(context) : false) {

@@ -1,5 +1,7 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/node/agnocast_node.hpp"
+
 #include <sys/types.h>
 
 #include <array>
@@ -16,16 +18,6 @@ extern "C" uint32_t agnocast_get_borrowed_publisher_num()
 
 void increment_borrowed_publisher_num()
 {
-  if (borrowed_publisher_num == 1) {
-    return;
-
-    // NOTE:
-    //   This is a workaround for the case where borrow_loaned_message() is called but publish() is
-    //   not. This implementation assumes only one loan/publish within a single callback and will
-    //   need to be modified in the future. For this future modification, the type of
-    //   borrowed_publisher_num is left as uint32_t.
-  }
-
   borrowed_publisher_num++;
 }
 

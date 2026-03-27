@@ -1,3 +1,20 @@
+agnocast-heaphook-v2.3.2 (2.3.2-2) noble; urgency=medium
+
+  * fix: add Conflicts/Replaces for kmod and clean up stale DKMS on install (#1191 <https://github.com/tier4/agnocast/issues/1191>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 24 Mar 2026 23:32:00 +0900
+
+agnocast-heaphook-v2.3.1 (2.3.1-1) noble; urgency=medium
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 17 Mar 2026 19:03:00 +0900
+
+agnocast-heaphook-v2.3.0 (2.3.0-1) noble; urgency=medium
+
+  * fix(agnocast_heaphook): use strict less-than in is_shared boundary check (#1124 <https://github.com/tier4/agnocast/issues/1124>)
+  * fix(agnocast_heaphook): fix data corruption in reallocate when aligned offset changes (#1109 <https://github.com/tier4/agnocast/issues/1109>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Mon, 09 Mar 2026 23:09:00 +0900
+
 agnocast-heaphook-v2.2.0 (2.2.0-6) noble; urgency=medium
 
   * fix(test): fix test failures in cie and heaphook test (#887 <https://github.com/tier4/agnocast/issues/887>)

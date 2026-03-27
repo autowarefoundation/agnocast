@@ -24,7 +24,7 @@ StandardBridgeLoader::~StandardBridgeLoader()
   cached_factories_.clear();
 }
 
-std::shared_ptr<void> StandardBridgeLoader::create(
+std::shared_ptr<BridgeBase> StandardBridgeLoader::create(
   const MqMsgBridge & req, const std::string & topic_name_with_direction,
   const rclcpp::Node::SharedPtr & node, const rclcpp::QoS & qos)
 {
@@ -41,7 +41,7 @@ std::shared_ptr<void> StandardBridgeLoader::create(
   return create_bridge_instance(entry_func, lib_handle, node, req.target, qos);
 }
 
-std::shared_ptr<void> StandardBridgeLoader::create_bridge_instance(
+std::shared_ptr<BridgeBase> StandardBridgeLoader::create_bridge_instance(
   BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
   const rclcpp::Node::SharedPtr & node, const BridgeTargetInfo & target, const rclcpp::QoS & qos)
 {
@@ -53,7 +53,7 @@ std::shared_ptr<void> StandardBridgeLoader::create_bridge_instance(
 
     if (lib_handle) {
       // Prevent library unload while bridge_resource is alive (aliasing constructor)
-      using BundleType = std::pair<std::shared_ptr<void>, std::shared_ptr<void>>;
+      using BundleType = std::pair<std::shared_ptr<void>, std::shared_ptr<BridgeBase>>;
       auto bundle = std::make_shared<BundleType>(lib_handle, bridge_resource);
       return {bundle, bridge_resource.get()};
     }

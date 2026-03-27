@@ -22,7 +22,7 @@ constexpr uint32_t SHUTDOWN_EVENT_FLAG = 0x20000000;  // For shutdown events (Ag
 constexpr uint32_t EPOLL_EVENT_ID_RESERVED_MASK =
   TIMER_EVENT_FLAG | CLOCK_EVENT_FLAG | SHUTDOWN_EVENT_FLAG;
 
-/// @return true if shutdown event detected, false otherwise
+// @return true if shutdown event detected, false otherwise
 bool wait_and_handle_epoll_event(
   int epoll_fd, pid_t my_pid, int timeout_ms, std::mutex & ready_agnocast_executables_mutex,
   std::vector<AgnocastExecutable> & ready_agnocast_executables);

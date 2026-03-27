@@ -87,6 +87,7 @@ void CallbackIsolatedAgnocastExecutor::spin()
           ->dedicate_to_callback_group(group, node);
       }
 
+      child_callback_groups_.push_back(group);
       weak_child_executors_.push_back(executor);
 
       child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
@@ -159,20 +160,28 @@ void CallbackIsolatedAgnocastExecutor::spin()
     }
   }
 
-  // Join all child threads after monitoring loop exits
-  std::lock_guard<std::mutex> guard{child_resources_mutex_};
-  for (auto & weak_child_executor : weak_child_executors_) {
-    if (auto child_executor = weak_child_executor.lock()) {
-      child_executor->cancel();
+  // Join all child threads after monitoring loop exits.
+  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
+  // A child thread's callback may call cancel() which acquires child_resources_mutex_,
+  // so holding it during thread.join() would deadlock.
+  std::vector<std::thread> threads_to_join;
+  {
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    for (auto & weak_child_executor : weak_child_executors_) {
+      if (auto child_executor = weak_child_executor.lock()) {
+        child_executor->cancel();
+      }
     }
+    threads_to_join = std::move(child_threads_);
+    child_threads_.clear();
+    weak_child_executors_.clear();
+    child_callback_groups_.clear();
   }
-  for (auto & thread : child_threads_) {
+  for (auto & thread : threads_to_join) {
     if (thread.joinable()) {
       thread.join();
     }
   }
-  child_threads_.clear();
-  weak_child_executors_.clear();
 }
 
 void CallbackIsolatedAgnocastExecutor::add_callback_group(
@@ -382,6 +391,54 @@ void CallbackIsolatedAgnocastExecutor::cancel()
   for (auto & weak_child_executor : weak_child_executors_) {
     if (auto child_executor = weak_child_executor.lock()) {
       child_executor->cancel();
+    }
+  }
+}
+
+void CallbackIsolatedAgnocastExecutor::stop_callback_group(
+  const rclcpp::CallbackGroup::SharedPtr & group_ptr)
+{
+  if (!group_ptr) {
+    return;
+  }
+
+  std::thread thread_to_join;
+  bool found = false;
+
+  {
+    std::lock_guard<std::mutex> guard{child_resources_mutex_};
+    if (
+      child_callback_groups_.size() != weak_child_executors_.size() ||
+      child_callback_groups_.size() != child_threads_.size()) {
+      RCLCPP_ERROR(
+        logger, "Child executor vectors are misaligned. Skipping stop_callback_group().");
+      return;
+    }
+    for (size_t i = 0; i < child_callback_groups_.size(); ++i) {
+      auto grp = child_callback_groups_[i].lock();
+      if (grp && grp == group_ptr) {
+        if (auto executor = weak_child_executors_[i].lock()) {
+          executor->cancel();
+        }
+        thread_to_join = std::move(child_threads_[i]);
+        auto idx = static_cast<std::ptrdiff_t>(i);
+        child_callback_groups_.erase(child_callback_groups_.begin() + idx);
+        weak_child_executors_.erase(weak_child_executors_.begin() + idx);
+        child_threads_.erase(child_threads_.begin() + idx);
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (found && thread_to_join.joinable()) {
+    if (thread_to_join.get_id() == std::this_thread::get_id()) {
+      RCLCPP_ERROR(
+        logger,
+        "stop_callback_group() called from its own child thread. Detaching to avoid self-join UB.");
+      thread_to_join.detach();
+    } else {
+      thread_to_join.join();
     }
   }
 }

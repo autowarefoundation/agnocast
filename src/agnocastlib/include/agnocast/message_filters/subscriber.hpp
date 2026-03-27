@@ -1,7 +1,10 @@
 #pragma once
 
-#include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_public_api.hpp"
+#include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/message_filters/simple_filter.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -23,9 +26,9 @@ inline rclcpp::QoS to_rclcpp_qos(const rmw_qos_profile_t & rmw_qos)
 }
 }  // namespace detail
 
-/**
- * \brief Base class for Subscriber, allows subscription without knowing the message type.
- */
+/// Base class for Subscriber, allowing subscription management without knowing the message type.
+/// Used for type-erased subscriber collections.
+AGNOCAST_PUBLIC
 template <class NodeType = rclcpp::Node>
 class SubscriberBase
 {
@@ -43,7 +46,7 @@ public:
    * \param topic The topic to subscribe to.
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodePtr node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) = 0;
 
@@ -56,7 +59,7 @@ public:
    * \param topic The topic to subscribe to.
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodeType * node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) = 0;
 
@@ -71,7 +74,7 @@ public:
    * \param qos The rmw qos profile to use to subscribe.
    * \param options The subscription options to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodePtr node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
   {
@@ -88,7 +91,7 @@ public:
    * \param qos The rmw qos profile to use to subscribe.
    * \param options The subscription options to use to subscribe.
    */
-  virtual void subscribe(
+  AGNOCAST_PUBLIC virtual void subscribe(
     NodeType * node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
   {
@@ -100,12 +103,12 @@ public:
    * \brief Re-subscribe to a topic.  Only works if this subscriber has previously been subscribed
    * to a topic.
    */
-  virtual void subscribe() = 0;
+  AGNOCAST_PUBLIC virtual void subscribe() = 0;
 
   /**
    * \brief Force immediate unsubscription of this subscriber from its topic
    */
-  virtual void unsubscribe() = 0;
+  AGNOCAST_PUBLIC virtual void unsubscribe() = 0;
 };
 
 template <typename T>
@@ -131,6 +134,7 @@ using SubscriberBasePtr = std::shared_ptr<SubscriberBase<T>>;
 void callback(const agnocast::ipc_shared_ptr<M const>&);
 \endverbatim
  */
+AGNOCAST_PUBLIC
 template <class M, class NodeType = rclcpp::Node>
 class Subscriber : public SubscriberBase<NodeType>, public SimpleFilter<M>
 {
@@ -148,7 +152,7 @@ public:
    * \param topic The topic to subscribe to.
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
-  Subscriber(
+  AGNOCAST_PUBLIC Subscriber(
     // cppcheck-suppress passedByValue  // shared_ptr by-value is intentional (shared ownership)
     NodePtr node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default)  // NOLINT
@@ -156,7 +160,7 @@ public:
     subscribe(node, topic, qos);
   }
 
-  Subscriber(
+  AGNOCAST_PUBLIC Subscriber(
     NodeType * node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default)  // NOLINT
   {
@@ -173,7 +177,7 @@ public:
    * \param qos The rmw qos profile to use to subscribe.
    * \param options The subscription options to use to subscribe.
    */
-  Subscriber(
+  AGNOCAST_PUBLIC Subscriber(
     // cppcheck-suppress passedByValue  // shared_ptr by-value is intentional (shared ownership)
     NodePtr node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
@@ -181,7 +185,7 @@ public:
     subscribe(node, topic, qos, options);
   }
 
-  Subscriber(
+  AGNOCAST_PUBLIC Subscriber(
     NodeType * node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options)
   {
@@ -191,7 +195,7 @@ public:
   /**
    * \brief Empty constructor, use subscribe() to subscribe to a topic
    */
-  Subscriber() = default;
+  AGNOCAST_PUBLIC Subscriber() = default;
 
   ~Subscriber() override { unsubscribe(); }
 
@@ -205,7 +209,7 @@ public:
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
-  void subscribe(
+  AGNOCAST_PUBLIC void subscribe(
     NodePtr node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) override
   {
@@ -224,7 +228,7 @@ public:
    * \param qos (optional) The rmw qos profile to use to subscribe.
    */
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
-  void subscribe(
+  AGNOCAST_PUBLIC void subscribe(
     NodeType * node, const std::string & topic,
     const rmw_qos_profile_t qos = rmw_qos_profile_default) override
   {
@@ -242,7 +246,7 @@ public:
    * \param options The subscription options to use to subscribe.
    */
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
-  void subscribe(
+  AGNOCAST_PUBLIC void subscribe(
     NodePtr node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options) override
   {
@@ -262,7 +266,7 @@ public:
    * \param options The subscription options to use to subscribe.
    */
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
-  void subscribe(
+  AGNOCAST_PUBLIC void subscribe(
     NodeType * node, const std::string & topic, const rmw_qos_profile_t qos,
     agnocast::SubscriptionOptions options) override
   {
@@ -272,7 +276,7 @@ public:
       topic_ = topic;
       qos_ = qos;
       options_ = options;
-      sub_ = agnocast::create_subscription<M>(
+      sub_ = std::make_shared<BasicSubscription<M, RosToAgnocastRequestPolicy>>(
         node, topic, detail::to_rclcpp_qos(qos),
         [this](ipc_shared_ptr<M> msg) { this->cb(std::move(msg)); }, options);
       node_raw_ = node;
@@ -283,7 +287,7 @@ public:
    * \brief Re-subscribe to a topic.  Only works if this subscriber has previously been subscribed
    * to a topic.
    */
-  void subscribe() override
+  AGNOCAST_PUBLIC void subscribe() override
   {
     if (!topic_.empty()) {
       if (node_raw_ != nullptr) {
@@ -298,28 +302,29 @@ public:
    * \brief Force immediate unsubscription of this subscriber from its topic
    */
   // cppcheck-suppress virtualCallInConstructor  // Subscriber is not intended to be derived
-  void unsubscribe() override { sub_.reset(); }
+  AGNOCAST_PUBLIC void unsubscribe() override { sub_.reset(); }
 
-  std::string getTopic() const { return topic_; }
+  /// Return the topic name this subscriber is subscribed to.
+  /// @return Topic name string.
+  AGNOCAST_PUBLIC std::string getTopic() const { return topic_; }
 
   /**
    * \brief Returns the internal agnocast::Subscription<M>::SharedPtr object
    */
-  const typename agnocast::Subscription<M>::SharedPtr getSubscriber() const { return sub_; }
+  AGNOCAST_PUBLIC const typename agnocast::Subscription<M>::SharedPtr getSubscriber() const
+  {
+    return sub_;
+  }
 
-  /**
-   * \brief Does nothing.  Provided so that Subscriber may be used in a message_filters::Chain
-   */
+  /// No-op. Provided for compatibility with message_filters::Chain.
   template <typename F>
-  void connectInput(F & f)
+  AGNOCAST_PUBLIC void connectInput(F & f)
   {
     (void)f;
   }
 
-  /**
-   * \brief Does nothing.  Provided so that Subscriber may be used in a message_filters::Chain
-   */
-  void add(const EventType & e) { (void)e; }
+  /// No-op. Provided for compatibility with message_filters::Chain.
+  AGNOCAST_PUBLIC void add(const EventType & e) { (void)e; }
 
 private:
   void cb(ipc_shared_ptr<M> msg) { this->signalMessage(EventType(std::move(msg))); }

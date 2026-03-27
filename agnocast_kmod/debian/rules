@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 
-PACKAGE = agnocast-kmod-v2.2.0
+PACKAGE = agnocast-kmod-v2.3.2
 VERSION = $(shell cat $(CURDIR)/version.txt)
 
 %:

@@ -23,7 +23,7 @@ extern "C" PerformanceBridgeResult create_r2a_bridge(
     agnocast::PublisherOptions{},
     true);
 
-  auto ros_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  auto ros_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   rclcpp::SubscriptionOptions ros_opts;
   ros_opts.ignore_local_publications = true;
@@ -50,7 +50,7 @@ extern "C" PerformanceBridgeResult create_a2r_bridge(
   auto ros_pub = node->create_publisher<@(cpp_type)>(
     topic_name, rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<@(cpp_type)> msg) {
     auto loaned_msg = ros_pub->borrow_loaned_message();

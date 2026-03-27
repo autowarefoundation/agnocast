@@ -24,7 +24,7 @@ Node::Node(
     options.use_intra_process_comms(), options.enable_topic_statistics());
 
   TRACEPOINT(
-    agnocast_node_init, static_cast<const void *>(this), this->get_name().c_str(),
+    agnocast_node_init, static_cast<const void *>(node_base_.get()), this->get_name().c_str(),
     this->get_namespace().c_str());
 
   logger_ = rclcpp::get_logger(node_base_->get_name());

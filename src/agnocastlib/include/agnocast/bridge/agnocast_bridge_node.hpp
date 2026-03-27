@@ -103,7 +103,7 @@ public:
       parent_node.get(), topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).transient_local(), agno_opts,
       true);
     ros_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     rclcpp::SubscriptionOptions ros_opts;
     ros_opts.ignore_local_publications = true;
@@ -151,7 +151,7 @@ public:
     ros_pub_ = parent_node->create_publisher<MessageT>(
       topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).reliable().transient_local());
     agno_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     agnocast::SubscriptionOptions agno_opts;
     agno_opts.ignore_local_publications = true;
@@ -178,7 +178,7 @@ public:
 };
 
 template <typename MessageT>
-std::shared_ptr<void> start_ros_to_agno_node(
+std::shared_ptr<BridgeBase> start_ros_to_agno_node(
   rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
@@ -186,7 +186,7 @@ std::shared_ptr<void> start_ros_to_agno_node(
 }
 
 template <typename MessageT>
-std::shared_ptr<void> start_agno_to_ros_node(
+std::shared_ptr<BridgeBase> start_agno_to_ros_node(
   rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));

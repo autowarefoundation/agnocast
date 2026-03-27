@@ -1,13 +1,23 @@
 #!/bin/sh
 set -e
 
-VERSION="2.2.0"
+VERSION="2.3.2"
 
 case "$1" in
     configure)
         dkms add -m agnocast -v "$VERSION"
         dkms build -m agnocast -v "$VERSION"
         dkms install -m agnocast -v "$VERSION"
+
+        # Remove stale agnocast DKMS registrations only after the new version is
+        # successfully installed, so a build/install failure never leaves the
+        # machine without a working module.
+        for old_ver in $(dkms status -m agnocast 2>/dev/null | sed -n 's/^agnocast[,/] *\([^,]*\),.*/\1/p' | sort -u); do
+            if [ "$old_ver" != "$VERSION" ]; then
+                echo "Removing stale agnocast DKMS version: $old_ver"
+                dkms remove -m agnocast -v "$old_ver" --all || true
+            fi
+        done
     ;;
 esac
 

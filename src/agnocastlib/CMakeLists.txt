@@ -26,7 +26,6 @@ find_package(LTTngUST REQUIRED)
 find_package(agnocast_cie_config_msgs REQUIRED)
 find_package(agnocast_cie_thread_configurator REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(glog REQUIRED)
@@ -123,6 +122,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
+  find_package(std_msgs REQUIRED)
 
   # Unit tests
   ament_add_gmock(test_unit_${PROJECT_NAME}

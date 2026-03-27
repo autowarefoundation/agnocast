@@ -19,8 +19,8 @@ if ! command -v backportpackage &> /dev/null; then
   exit 1
 fi
 
-VERSION="2.2.0"
-RELEASE="3"
+VERSION="2.3.2"
+RELEASE=$(dpkg-parsechangelog -l agnocast_heaphook/debian/changelog -S Version | cut -d'-' -f2)
 
 CHANGES_FILE="agnocast-heaphook-v${VERSION}_${VERSION}-${RELEASE}_source.changes"
 DSC_FILE="agnocast-heaphook-v${VERSION}_${VERSION}-${RELEASE}.dsc"
