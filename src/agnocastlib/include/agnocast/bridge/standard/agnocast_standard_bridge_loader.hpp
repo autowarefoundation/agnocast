@@ -13,6 +13,8 @@ namespace agnocast
 
 using BridgeFn = std::shared_ptr<void> (*)(
   rclcpp::Node::SharedPtr, const PubsubBridgeTargetInfo &, const rclcpp::QoS &);
+using ServiceBridgeFn =
+  std::shared_ptr<void> (*)(rclcpp::Node::SharedPtr, const ServiceBridgeTargetInfo &);
 
 class StandardBridgeLoader
 {
@@ -24,21 +26,27 @@ public:
   StandardBridgeLoader & operator=(const StandardBridgeLoader &) = delete;
 
   std::shared_ptr<void> create(
-    const MqMsgBridge & req, const std::string & topic_name_with_direction,
+    const MqMsgBridge & req, const std::string & bridge_target_key,
     const rclcpp::Node::SharedPtr & node, const rclcpp::QoS & qos);
+  std::shared_ptr<void> create_service(
+    const MqMsgBridge & req, const std::string & bridge_target_key,
+    const rclcpp::Node::SharedPtr & node);
 
 private:
   rclcpp::Logger logger_;
 
-  std::map<std::string, std::pair<BridgeFn, std::shared_ptr<void>>> cached_factories_;
+  std::map<std::string, std::pair<uintptr_t, std::shared_ptr<void>>> cached_factories_;
 
   std::shared_ptr<void> create_bridge_instance(
     BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
     const rclcpp::Node::SharedPtr & node, const PubsubBridgeTargetInfo & target,
     const rclcpp::QoS & qos);
+  std::shared_ptr<void> create_service_bridge_instance(
+    ServiceBridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
+    const rclcpp::Node::SharedPtr & node, const ServiceBridgeTargetInfo & target);
   static std::pair<void *, uintptr_t> load_library(const char * lib_path, const char * symbol_name);
-  std::pair<BridgeFn, std::shared_ptr<void>> resolve_factory_function(
-    const MqMsgBridge & req, const std::string & topic_name_with_direction);
+  std::pair<uintptr_t, std::shared_ptr<void>> resolve_factory_function(
+    const MqMsgBridge & req, const std::string & bridge_target_key);
   static bool is_address_in_library_code_segment(void * handle, uintptr_t addr);
 };
 

@@ -273,9 +273,10 @@ std::shared_ptr<void> start_agno_to_ros_node(
 
 template <typename ServiceT>
 std::shared_ptr<void> start_ros_to_agno_service_node(
-  rclcpp::Node::SharedPtr node, const ServiceBridgeTargetInfo & info, const rmw_qos_profile_t & qos)
+  rclcpp::Node::SharedPtr node, const ServiceBridgeTargetInfo & info)
 {
   std::string service_name(static_cast<const char *>(info.name));
+  const rmw_qos_profile_t & qos = info.qos;
   return std::make_shared<RosToAgnocastServiceBridge<ServiceT>>(node, service_name, qos);
 }
 
