@@ -26,7 +26,7 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
 
   auto ros_srv = node->create_service<ServiceT>(
     service_name,
-    [node, agno_client](
+    [agno_client](
       const ServiceT::Request::SharedPtr ros_req, ServiceT::Response::SharedPtr ros_res) {
       auto agno_req = agno_client->borrow_loaned_request();
       *agno_req = *ros_req;
