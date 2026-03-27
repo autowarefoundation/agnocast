@@ -48,9 +48,22 @@ public:
     return received_messages_;
   }
 
+  std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> get_received_messages_for_node(
+    const std::string & node_name) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> filtered;
+    for (const auto & msg : received_messages_) {
+      if (msg.callback_group_id.rfind(node_name, 0) == 0) {
+        filtered.push_back(msg);
+      }
+    }
+    return filtered;
+  }
+
 private:
   rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr subscription_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::vector<agnocast_cie_config_msgs::msg::CallbackGroupInfo> received_messages_;
 };
 
@@ -65,7 +78,7 @@ protected:
   void TearDown() override
   {
     rclcpp::shutdown();
-    // TODO(Koichi98): Call agnocast::shutdown() once available.
+    agnocast::shutdown();
   }
 };
 
@@ -86,9 +99,10 @@ TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, test_spin_publishes_callback_gr
   std::thread callback_isolated_thread(
     [&callback_isolated_executor]() { callback_isolated_executor->spin(); });
 
+  const std::string test_node_name = test_node->get_fully_qualified_name();
   auto start_time = std::chrono::steady_clock::now();
   constexpr auto timeout = std::chrono::seconds(10);
-  while (receiver_node->get_received_messages().size() < 3u) {
+  while (receiver_node->get_received_messages_for_node(test_node_name).size() < 3u) {
     ASSERT_LT(std::chrono::steady_clock::now() - start_time, timeout)
       << "Timed out waiting for 3 callback group info messages";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -103,8 +117,10 @@ TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, test_spin_publishes_callback_gr
     receiver_thread.join();
   }
 
-  // Assert
-  ASSERT_EQ(receiver_node->get_received_messages().size(), 3u);  // 1 default + 2 created
+  // Assert: only count messages from the test node, excluding bridge node messages
+  ASSERT_EQ(
+    receiver_node->get_received_messages_for_node(test_node_name).size(),
+    3u);  // 1 default + 2 created
 }
 
 // Regression test: calling cancel() through a base-class pointer must dispatch to

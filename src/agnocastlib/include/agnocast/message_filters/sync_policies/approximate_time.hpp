@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/message_filters/signal9.hpp"
 #include "agnocast/message_filters/synchronizer.hpp"
 
@@ -30,6 +31,9 @@ namespace sync_policies
 using ::message_filters::Connection;
 using ::message_filters::NullType;
 
+/// Sync policy that matches messages with approximately equal timestamps using cost-based
+/// optimization. Supports 2-9 message types.
+AGNOCAST_PUBLIC
 template <
   typename M0, typename M1, typename M2 = NullType, typename M3 = NullType, typename M4 = NullType,
   typename M5 = NullType, typename M6 = NullType, typename M7 = NullType, typename M8 = NullType>
@@ -74,7 +78,9 @@ struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
   using VectorTuple = std::tuple<
     M0Vector, M1Vector, M2Vector, M3Vector, M4Vector, M5Vector, M6Vector, M7Vector, M8Vector>;
 
-  explicit ApproximateTime(uint32_t queue_size)
+  /// Construct with a queue size.
+  /// @param queue_size Maximum number of messages to buffer per input.
+  AGNOCAST_PUBLIC explicit ApproximateTime(uint32_t queue_size)
   : parent_(nullptr),
     queue_size_(queue_size),
     num_non_empty_deques_(0),
@@ -90,12 +96,17 @@ struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
     assert(queue_size_ > 0);
   }
 
+  /// Copy constructor.
+  AGNOCAST_PUBLIC
   ApproximateTime(const ApproximateTime & e)
   : max_interval_duration_(rclcpp::Duration(std::numeric_limits<int32_t>::max(), 999999999))
   {
     *this = e;
   }
 
+  /// Copy assignment.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   ApproximateTime & operator=(const ApproximateTime & rhs)
   {
     parent_ = rhs.parent_;
@@ -212,7 +223,10 @@ struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
     }
   }
 
-  void setAgePenalty(double age_penalty)
+  /// Set the weight given to message age when computing match cost. Higher values prefer newer
+  /// messages.
+  /// @param age_penalty Age penalty weight (must be >= 0, default: 0.1).
+  AGNOCAST_PUBLIC void setAgePenalty(double age_penalty)
   {
     // For correctness we only need age_penalty > -1.0,
     // but most likely a negative age_penalty is a mistake.
@@ -220,14 +234,19 @@ struct ApproximateTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
     age_penalty_ = age_penalty;
   }
 
-  void setInterMessageLowerBound(int i, rclcpp::Duration lower_bound)
+  /// Set the minimum expected interval between consecutive messages for a given input.
+  /// @param i Input index (0-based).
+  /// @param lower_bound Minimum expected interval (default: 0, auto-estimated).
+  AGNOCAST_PUBLIC void setInterMessageLowerBound(int i, rclcpp::Duration lower_bound)
   {
     assert(i >= 0 && i < RealTypeCount::value);
     assert(lower_bound >= rclcpp::Duration(0, 0));
     inter_message_lower_bounds_[i] = lower_bound;
   }
 
-  void setMaxIntervalDuration(rclcpp::Duration max_interval_duration)
+  /// Set the maximum allowed time difference between matched messages.
+  /// @param max_interval_duration Maximum interval (default: no limit).
+  AGNOCAST_PUBLIC void setMaxIntervalDuration(rclcpp::Duration max_interval_duration)
   {
     assert(max_interval_duration >= rclcpp::Duration(0, 0));
     max_interval_duration_ = max_interval_duration;

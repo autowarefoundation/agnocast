@@ -420,6 +420,17 @@ void StandardBridgeManager::remove_active_bridge(
       std::string(topic_name_view).c_str(), strerror(errno));
   }
 
+  // Stop the child executor for this bridge's callback group before destroying the bridge.
+  // This ensures any in-flight callback completes before the subscription is destroyed,
+  // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
+  auto & bridge = active_bridges_[topic_name_with_direction];
+  if (bridge) {
+    auto cb_group = bridge->get_callback_group();
+    if (cb_group) {
+      executor_->stop_callback_group(cb_group);
+    }
+  }
+
   active_bridges_.erase(topic_name_with_direction);
 
   if (keep_managed) {

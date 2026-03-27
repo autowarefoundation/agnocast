@@ -172,6 +172,9 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     }
 
     if (result.count <= 0 || !is_demanded_by_ros2) {
+      if (r2a_it->second.callback_group) {
+        executor_->stop_callback_group(r2a_it->second.callback_group);
+      }
       r2a_it = active_r2a_bridges_.erase(r2a_it);
     } else {
       if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
@@ -199,6 +202,9 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     }
 
     if (result.count <= 0 || !is_demanded_by_ros2) {
+      if (a2r_it->second.callback_group) {
+        executor_->stop_callback_group(a2r_it->second.callback_group);
+      }
       a2r_it = active_a2r_bridges_.erase(a2r_it);
     } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {

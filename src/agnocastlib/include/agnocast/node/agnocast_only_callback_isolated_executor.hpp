@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -21,6 +22,9 @@ namespace agnocast
 class Node;
 class AgnocastOnlySingleThreadedExecutor;
 
+/** @brief Callback-isolated executor for Stage 2 (Agnocast-only). Assigns a dedicated thread to
+ * each callback group. Used with agnocast::Node. */
+AGNOCAST_PUBLIC
 class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
 {
   RCLCPP_DISABLE_COPY(AgnocastOnlyCallbackIsolatedExecutor)
@@ -47,26 +51,34 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
     RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
 public:
-  RCLCPP_PUBLIC
+  /// Construct the executor.
+  /// @param next_exec_timeout_ms Timeout in ms for waiting on the next executable.
+  AGNOCAST_PUBLIC
   explicit AgnocastOnlyCallbackIsolatedExecutor(int next_exec_timeout_ms = 50);
 
-  RCLCPP_PUBLIC
   ~AgnocastOnlyCallbackIsolatedExecutor() override;
 
-  RCLCPP_PUBLIC
+  /// Block the calling thread and process Agnocast callbacks in a loop until cancel() is called.
+  AGNOCAST_PUBLIC
   void spin() override;
 
-  RCLCPP_PUBLIC
+  /// Request the executor to stop spinning. Causes the current or next spin() call to return.
+  AGNOCAST_PUBLIC
   void cancel() override;
 
   /// Add a node to this executor. Unlike the base class add_node(), this does NOT set
   /// the has_executor atomic flag on the node or its callback groups, because the CIE
   /// distributes callback groups to child executors which claim ownership individually.
-  RCLCPP_PUBLIC
+  /// @param node_ptr Node to add.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void add_node(
     const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node_ptr, bool notify = false);
 
-  RCLCPP_PUBLIC
+  /// Add a node to this executor.
+  /// @param node_ptr Node to add.
+  /// @param notify If true, wake the executor so it picks up the change immediately.
+  AGNOCAST_PUBLIC
   void add_node(const agnocast::Node::SharedPtr & node_ptr, bool notify = false);
 };
 

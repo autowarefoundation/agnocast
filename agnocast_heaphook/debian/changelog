@@ -1,3 +1,9 @@
+agnocast-heaphook-v2.3.2 (2.3.2-2) noble; urgency=medium
+
+  * fix: add Conflicts/Replaces for kmod and clean up stale DKMS on install (#1191 <https://github.com/tier4/agnocast/issues/1191>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 24 Mar 2026 23:32:00 +0900
+
 agnocast-heaphook-v2.3.1 (2.3.1-1) noble; urgency=medium
 
  -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 17 Mar 2026 19:03:00 +0900

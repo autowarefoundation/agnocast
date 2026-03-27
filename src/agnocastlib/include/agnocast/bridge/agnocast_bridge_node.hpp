@@ -178,7 +178,7 @@ public:
 };
 
 template <typename MessageT>
-std::shared_ptr<void> start_ros_to_agno_node(
+std::shared_ptr<BridgeBase> start_ros_to_agno_node(
   rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));
@@ -186,7 +186,7 @@ std::shared_ptr<void> start_ros_to_agno_node(
 }
 
 template <typename MessageT>
-std::shared_ptr<void> start_agno_to_ros_node(
+std::shared_ptr<BridgeBase> start_agno_to_ros_node(
   rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
 {
   std::string topic_name(static_cast<const char *>(info.topic_name));

@@ -2,6 +2,10 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.2 (2026-03-24)
+------------------
+* dont define sched_attr for glibc 2.42 (`#1190 <https://github.com/autowarefoundation/agnocast/issues/1190>`_)
+
 2.3.1 (2026-03-17)
 ------------------
 
