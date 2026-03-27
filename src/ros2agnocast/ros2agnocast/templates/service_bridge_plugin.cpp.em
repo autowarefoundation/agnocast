@@ -12,7 +12,7 @@
 extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
   rclcpp::Node::SharedPtr node,
   const std::string & service_name,
-  const rmw_qos_profile_t & qos)
+  const rclcpp::QoS & qos /*QoS for the target Agnocast service*/)
 {
   using ServiceT = @(cpp_type);
 
@@ -22,7 +22,7 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
     node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto agno_client = agnocast::create_client<ServiceT>(
-    node.get(), service_name, rclcpp::ServicesQoS(), client_cb_group);
+    node.get(), service_name, qos, client_cb_group);
 
   auto ros_srv = node->create_service<ServiceT>(
     service_name,
@@ -36,7 +36,7 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
       auto agno_res = future.get();
       *ros_res = *agno_res;
     },
-    qos, srv_cb_group);
+    qos.get_rmw_qos_profile(), srv_cb_group);
 
   return {ros_srv, srv_cb_group, client_cb_group};
 }
