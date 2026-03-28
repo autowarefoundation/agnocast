@@ -299,13 +299,47 @@ void StandardBridgeManager::check_parent_alive()
 
 void StandardBridgeManager::check_active_bridges()
 {
-  std::vector<std::pair<std::string, bool>> to_remove;  // (key, keep_managed)
-  to_remove.reserve(active_bridges_.size());
-
-  for (const auto & [key, bridge] : active_bridges_) {
-    if (key.size() <= SUFFIX_LEN) {
-      continue;
+  auto should_remove = [this](
+                         const std::string & topic_name_str, bool is_r2a) -> std::pair<bool, bool> {
+    int count = 0;
+    bool is_demanded_by_ros2 = false;
+    bool ros2_count_ok = false;
+    if (is_r2a) {
+      count = get_agnocast_subscriber_count(topic_name_str).count;
+      is_demanded_by_ros2 =
+        has_external_ros2_publisher(this->container_node_.get(), topic_name_str);
+      ros2_count_ok = update_ros2_publisher_num(this->container_node_.get(), topic_name_str);
+    } else {
+      count = get_agnocast_publisher_count(topic_name_str).count;
+      is_demanded_by_ros2 =
+        has_external_ros2_subscriber(this->container_node_.get(), topic_name_str);
+      ros2_count_ok = update_ros2_subscriber_num(this->container_node_.get(), topic_name_str);
     }
+
+    bool remove = false;
+    bool keep_managed = false;
+    if (!ros2_count_ok) {
+      remove = true;
+      keep_managed = false;
+    } else if (count <= 0) {
+      if (count < 0) {
+        RCLCPP_ERROR(
+          this->logger_, "Failed to get connection count for %s. Removing bridge.",
+          topic_name_str.c_str());
+      }
+      remove = true;
+      keep_managed = false;
+    } else if (!is_demanded_by_ros2) {
+      remove = true;
+      keep_managed = true;
+    }
+
+    return {remove, keep_managed};
+  };
+
+  for (auto it = active_bridges_.begin(); it != active_bridges_.end();) {
+    const std::string & key = it->first;
+    const std::shared_ptr<BridgeBase> & bridge = it->second;
 
     std::string_view key_view = key;
     std::string_view suffix = key_view.substr(key_view.size() - SUFFIX_LEN);
@@ -314,37 +348,49 @@ void StandardBridgeManager::check_active_bridges()
     bool is_r2a = (suffix == SUFFIX_R2A);
     std::string topic_name_str(topic_name_view);
 
-    int count = 0;
-    bool is_demanded_by_ros2 = false;
-    if (is_r2a) {
-      count = get_agnocast_subscriber_count(topic_name_str).count;
-      is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name_str);
-      if (!update_ros2_publisher_num(container_node_.get(), topic_name_str)) {
-        to_remove.emplace_back(key, false);
-        continue;
-      }
-    } else {
-      count = get_agnocast_publisher_count(topic_name_str).count;
-      is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name_str);
-      if (!update_ros2_subscriber_num(container_node_.get(), topic_name_str)) {
-        to_remove.emplace_back(key, false);
-        continue;
-      }
+    auto [remove, keep_managed] = should_remove(topic_name_str, is_r2a);
+
+    if (!remove) {
+      ++it;
+      continue;
     }
 
-    if (count <= 0) {
-      if (count < 0) {
-        RCLCPP_ERROR(
-          logger_, "Failed to get connection count for %s. Removing bridge.", key.c_str());
-      }
-      to_remove.emplace_back(key, false);
-    } else if (!is_demanded_by_ros2) {
-      to_remove.emplace_back(key, true);  // keep_managed when only ROS 2 demand is missing
+    // Unregister the bridge from kernel module.
+    ioctl_remove_bridge_args args{};
+    args.topic_name = {topic_name_view.data(), topic_name_view.size()};
+    args.is_r2a = is_r2a;
+    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &args)) {
+      RCLCPP_ERROR(
+        logger_, "AGNOCAST_REMOVE_BRIDGE_CMD failed for key '%s': %s", key.c_str(),
+        strerror(errno));
     }
-  }
 
-  for (const auto & [key, keep_managed] : to_remove) {
-    remove_active_bridge(key, keep_managed);
+    // Stop the child executor for this bridge's callback group before destroying the bridge.
+    // This ensures any in-flight callback completes before the subscription is destroyed,
+    // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
+    auto cb_group = bridge->get_callback_group();
+    if (cb_group) {
+      executor_->stop_callback_group(cb_group);
+    }
+
+    // Erase the bridge in-place.
+    it = active_bridges_.erase(it);
+
+    // Update managed bridge table.
+    if (!keep_managed) {
+      auto mit = managed_bridges_.find(topic_name_str);
+      if (mit != managed_bridges_.end()) {
+        if (is_r2a) {
+          mit->second.req_r2a.reset();
+        } else {
+          mit->second.req_a2r.reset();
+        }
+
+        if (!mit->second.req_r2a && !mit->second.req_a2r) {
+          managed_bridges_.erase(mit);
+        }
+      }
+    }
   }
 }
 
@@ -387,68 +433,6 @@ void StandardBridgeManager::check_should_exit()
     shutdown_requested_ = true;
     if (executor_) {
       executor_->cancel();
-    }
-  }
-}
-
-void StandardBridgeManager::remove_active_bridge(
-  const std::string & topic_name_with_direction, bool keep_managed)
-{
-  if (topic_name_with_direction.size() <= SUFFIX_LEN) {
-    return;
-  }
-
-  if (active_bridges_.count(topic_name_with_direction) == 0) {
-    return;
-  }
-
-  std::string_view key_view(topic_name_with_direction);
-  std::string_view suffix = key_view.substr(key_view.size() - SUFFIX_LEN);
-  std::string_view topic_name_view = key_view.substr(0, key_view.size() - SUFFIX_LEN);
-
-  bool is_r2a = (suffix == SUFFIX_R2A);
-
-  struct ioctl_remove_bridge_args remove_bridge_args
-  {
-  };
-  remove_bridge_args.topic_name = {topic_name_view.data(), topic_name_view.size()};
-  remove_bridge_args.is_r2a = is_r2a;
-
-  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &remove_bridge_args) != 0) {
-    RCLCPP_ERROR(
-      logger_, "AGNOCAST_REMOVE_BRIDGE_CMD failed for topic '%s': %s",
-      std::string(topic_name_view).c_str(), strerror(errno));
-  }
-
-  // Stop the child executor for this bridge's callback group before destroying the bridge.
-  // This ensures any in-flight callback completes before the subscription is destroyed,
-  // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
-  auto & bridge = active_bridges_[topic_name_with_direction];
-  if (bridge) {
-    auto cb_group = bridge->get_callback_group();
-    if (cb_group) {
-      executor_->stop_callback_group(cb_group);
-    }
-  }
-
-  active_bridges_.erase(topic_name_with_direction);
-
-  if (keep_managed) {
-    return;
-  }
-
-  std::string raw_topic_name(topic_name_view);
-  auto it = managed_bridges_.find(raw_topic_name);
-
-  if (it != managed_bridges_.end()) {
-    if (is_r2a) {
-      it->second.req_r2a.reset();
-    } else {
-      it->second.req_a2r.reset();
-    }
-
-    if (!it->second.req_r2a && !it->second.req_a2r) {
-      managed_bridges_.erase(it);
     }
   }
 }
