@@ -340,6 +340,10 @@ void StandardBridgeManager::check_active_bridges()
   for (auto it = active_bridges_.begin(); it != active_bridges_.end();) {
     const std::string & key = it->first;
     const std::shared_ptr<BridgeBase> & bridge = it->second;
+    if (key.size() <= SUFFIX_LEN) {
+      ++it;
+      continue;
+    }
 
     std::string_view key_view = key;
     std::string_view suffix = key_view.substr(key_view.size() - SUFFIX_LEN);
