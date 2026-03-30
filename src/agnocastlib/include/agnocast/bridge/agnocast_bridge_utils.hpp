@@ -11,8 +11,10 @@
 namespace agnocast
 {
 
-inline constexpr std::string_view SUFFIX_R2A = "_R2A";
-inline constexpr std::string_view SUFFIX_A2R = "_A2R";
+inline constexpr std::string_view SUFFIX_R2A = "_P_R2A";
+inline constexpr std::string_view SUFFIX_A2R = "_P_A2R";
+inline constexpr std::string_view SUFFIX_SRV_R2A = "_S_R2A";
+inline constexpr std::string_view SUFFIX_SRV_A2R = "_S_A2R";
 inline constexpr size_t SUFFIX_LEN = SUFFIX_R2A.length();
 
 enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };

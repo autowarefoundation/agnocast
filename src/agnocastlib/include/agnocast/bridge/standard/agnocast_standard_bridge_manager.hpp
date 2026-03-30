@@ -55,6 +55,7 @@ private:
 
   std::map<std::string, std::shared_ptr<void>> active_bridges_;
   std::map<std::string, BridgeInfo> managed_bridges_;
+  std::map<std::string, std::shared_ptr<void>> active_r2a_service_bridges_;
 
   void start_ros_execution();
 
@@ -65,20 +66,23 @@ private:
 
   static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
   void rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
-  bool activate_bridge(const MqMsgBridge & req, const std::string & topic_name);
+  bool activate_bridge(const MqMsgBridge & req);
+  bool activate_service_bridge(const MqMsgBridge & req);
   void send_delegation(const MqMsgBridge & req, pid_t owner_pid);
   void process_managed_bridge(
     const std::string & topic_name, const std::optional<MqMsgBridge> & req);
 
   void check_parent_alive();
   void check_active_bridges();
+  void check_active_service_bridges();
   void check_managed_bridges();
   void check_should_exit();
 
   void remove_active_bridge(
     const std::string & topic_name_with_direction, bool keep_managed = false);
 
-  static std::pair<std::string, std::string> extract_topic_info(const MqMsgBridge & req);
+  static std::string derive_topic_or_service_name(const MqMsgBridge & req);
+  static std::string derive_bridge_target_key(const MqMsgBridge & req);
 };
 
 }  // namespace agnocast
