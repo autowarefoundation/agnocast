@@ -68,6 +68,7 @@ char ** get_agnocast_topics(int * topic_count)
       }
       free(topic_array);
       topic_array = nullptr;
+      *topic_count = 0;
       break;
     }
     std::strcpy(topic_array[i], agnocast_topic_buffer + i * TOPIC_NAME_BUFFER_SIZE);
