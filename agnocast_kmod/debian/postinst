@@ -5,14 +5,7 @@ VERSION="2.3.2"
 case "$1" in
     configure)
         if dkms status -m agnocast -v "$VERSION" 2>/dev/null | grep -q agnocast; then
-            # Already registered — rebuild in place without removing first,
-            # so a build failure does not destroy the existing working module.
-            if ! dkms build -m agnocast -v "$VERSION"; then
-                echo "WARNING: DKMS build failed for kernel $(uname -r). Keeping existing installation."
-                echo "If you need to rebuild, install linux-headers-$(uname -r) and run:"
-                echo "  sudo dkms build -m agnocast -v $VERSION && sudo dkms install -m agnocast -v $VERSION"
-                exit 0
-            fi
+            echo "agnocast DKMS version $VERSION is already registered. Skipping."
         else
             if ! dkms add -m agnocast -v "$VERSION"; then
                 echo "WARNING: DKMS add failed. The agnocast kernel module is not available."
