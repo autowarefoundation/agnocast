@@ -1,12 +1,22 @@
 #!/bin/sh
-set -e
 
 VERSION="2.3.2"
 
 case "$1" in
     configure)
+        if dkms status -m agnocast -v "$VERSION" 2>/dev/null | grep -q agnocast; then
+            dkms remove -m agnocast -v "$VERSION" --all 2>/dev/null || true
+        fi
+
         dkms add -m agnocast -v "$VERSION"
-        dkms build -m agnocast -v "$VERSION"
+
+        if ! dkms build -m agnocast -v "$VERSION"; then
+            echo "WARNING: DKMS build failed for kernel $(uname -r). The agnocast kernel module is not available."
+            echo "If you need the kernel module, install linux-headers-$(uname -r) and run:"
+            echo "  sudo dkms build -m agnocast -v $VERSION && sudo dkms install -m agnocast -v $VERSION"
+            exit 0
+        fi
+
         dkms install -m agnocast -v "$VERSION"
 
         # Remove stale agnocast DKMS registrations only after the new version is
