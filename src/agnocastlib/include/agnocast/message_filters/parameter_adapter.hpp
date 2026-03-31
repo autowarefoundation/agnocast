@@ -12,15 +12,12 @@ namespace agnocast
 namespace message_filters
 {
 
-/**
- * \brief Adapts a function parameter type into the message type, event type and parameter.
- *
- * In agnocast, all messages are const (ipc_shared_ptr points to read-only shared memory).
- * Supported callback parameter types:
- *   - const ipc_shared_ptr<M const>&
- *   - ipc_shared_ptr<M const>
- *   - const MessageEvent<M const>&
- */
+// Adapts a function parameter type into the message type, event type and parameter.
+// In agnocast, all messages are const (ipc_shared_ptr points to read-only shared memory).
+// Supported callback parameter types:
+//   - const ipc_shared_ptr<M const>&
+//   - ipc_shared_ptr<M const>
+//   - const MessageEvent<M const>&
 template <typename M>
 struct ParameterAdapter;
 

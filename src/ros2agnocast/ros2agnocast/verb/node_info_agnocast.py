@@ -295,11 +295,17 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # ======== Subscribers ========
             print("  Subscribers:")
+            agnocast_sub_set = set(agnocast_subscribers)
             for sub in subscribers:
-                print(f"    {sub.name}: {', '.join(sub.types)}")
+                if sub.name in agnocast_sub_set:
+                    label = get_agnocast_label(sub.name, ros2_sub_topics, ros2_pub_topics)
+                    print(f"    {sub.name}: {', '.join(sub.types)} {label}")
+                else:
+                    print(f"    {sub.name}: {', '.join(sub.types)}")
 
+            ros2_sub_name_set = {sub.name for sub in subscribers}
             for agnocast_sub in agnocast_subscribers:
-                if agnocast_sub in [sub.name for sub in subscribers]:
+                if agnocast_sub in ros2_sub_name_set:
                     continue
                 matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_sub]
                 if matching_topics:
@@ -310,11 +316,17 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # ======== Publishers ========
             print("  Publishers:")
+            agnocast_pub_set = set(agnocast_publishers)
             for pub in publishers:
-                print(f"    {pub.name}: {', '.join(pub.types)}")
+                if pub.name in agnocast_pub_set:
+                    label = get_agnocast_label(pub.name, ros2_sub_topics, ros2_pub_topics)
+                    print(f"    {pub.name}: {', '.join(pub.types)} {label}")
+                else:
+                    print(f"    {pub.name}: {', '.join(pub.types)}")
 
+            ros2_pub_name_set = {pub.name for pub in publishers}
             for agnocast_pub in agnocast_publishers:
-                if agnocast_pub in [pub.name for pub in publishers]:
+                if agnocast_pub in ros2_pub_name_set:
                     continue
                 matching_topics = [topic for topic in ros2_topic_dir if topic['name'] == agnocast_pub]
                 if matching_topics:

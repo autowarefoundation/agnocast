@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/message_filters/signal9.hpp"
 #include "agnocast/message_filters/synchronizer.hpp"
 
@@ -25,6 +26,8 @@ namespace sync_policies
 using ::message_filters::Connection;
 using ::message_filters::NullType;
 
+/// Sync policy that matches messages with exactly equal timestamps. Supports 2-9 message types.
+AGNOCAST_PUBLIC
 template <
   typename M0, typename M1, typename M2 = NullType, typename M3 = NullType, typename M4 = NullType,
   typename M5 = NullType, typename M6 = NullType, typename M7 = NullType, typename M8 = NullType>
@@ -47,10 +50,20 @@ struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
   using M8Event = typename Super::M8Event;
   using Tuple = Events;
 
-  explicit ExactTime(uint32_t queue_size) : parent_(nullptr), queue_size_(queue_size) {}
+  /// Construct with a queue size.
+  /// @param queue_size Maximum number of messages to buffer per input.
+  AGNOCAST_PUBLIC explicit ExactTime(uint32_t queue_size)
+  : parent_(nullptr), queue_size_(queue_size)
+  {
+  }
 
+  /// Copy constructor.
+  AGNOCAST_PUBLIC
   ExactTime(const ExactTime & e) { *this = e; }
 
+  /// Copy assignment.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   // cppcheck-suppress operatorEqVarError  // drop_signal_ is not copyable (contains std::mutex)
   ExactTime & operator=(const ExactTime & rhs)
   {
@@ -80,26 +93,30 @@ struct ExactTime : public PolicyBase<M0, M1, M2, M3, M4, M5, M6, M7, M8>
     checkTuple(t);
   }
 
+  /// Register a callback invoked when messages are dropped due to queue overflow or missing
+  /// matches.
+  /// @param callback Callback to register.
+  /// @return Connection object for disconnecting.
   template <class C>
-  Connection registerDropCallback(const C & callback)
+  AGNOCAST_PUBLIC Connection registerDropCallback(const C & callback)
   {
     return drop_signal_.addCallback(callback);
   }
 
   template <class C>
-  Connection registerDropCallback(C & callback)
+  AGNOCAST_PUBLIC Connection registerDropCallback(C & callback)
   {
     return drop_signal_.addCallback(callback);
   }
 
   template <class C, typename T>
-  Connection registerDropCallback(const C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerDropCallback(const C & callback, T * t)
   {
     return drop_signal_.addCallback(callback, t);
   }
 
   template <class C, typename T>
-  Connection registerDropCallback(C & callback, T * t)
+  AGNOCAST_PUBLIC Connection registerDropCallback(C & callback, T * t)
   {
     return drop_signal_.addCallback(callback, t);
   }

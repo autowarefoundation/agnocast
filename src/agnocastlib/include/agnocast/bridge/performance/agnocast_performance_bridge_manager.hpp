@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast/agnocast_multi_threaded_executor.hpp"
+#include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
@@ -29,7 +29,7 @@ private:
   PerformanceBridgeLoader loader_;
 
   std::shared_ptr<rclcpp::Node> container_node_;
-  std::shared_ptr<agnocast::MultiThreadedAgnocastExecutor> executor_;
+  std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
 
   std::atomic_bool shutdown_requested_ = false;

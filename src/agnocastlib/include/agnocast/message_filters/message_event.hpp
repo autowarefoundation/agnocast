@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -14,13 +15,8 @@ namespace agnocast
 namespace message_filters
 {
 
-/**
- * \brief Event type for subscriptions in agnocast message_filters.
- *
- * In agnocast, ipc_shared_ptr always points to read-only shared memory,
- * so MessageEvent only supports const messages (M const).
- * Non-const M is not supported - use MessageEvent<M const> instead.
- */
+/// Wrapper around a message pointer that carries metadata for message filter pipelines.
+AGNOCAST_PUBLIC
 template <typename M>
 class MessageEvent
 {
@@ -34,39 +30,45 @@ public:
   using Message = typename std::remove_const<M>::type;
   using ConstMessagePtr = ipc_shared_ptr<ConstMessage>;
 
-  MessageEvent() = default;
+  /// Default-construct an empty MessageEvent.
+  AGNOCAST_PUBLIC MessageEvent() = default;
 
-  MessageEvent(const MessageEvent & rhs) = default;
+  /// Copy constructor.
+  AGNOCAST_PUBLIC MessageEvent(const MessageEvent & rhs) = default;
 
-  explicit MessageEvent(const ConstMessagePtr & message)
+  /// Construct from a message pointer, recording the current time as receipt time.
+  AGNOCAST_PUBLIC explicit MessageEvent(const ConstMessagePtr & message)
   : message_(message), receipt_time_(rclcpp::Clock().now())
   {
   }
 
-  MessageEvent(const ConstMessagePtr & message, rclcpp::Time receipt_time)
+  /// Construct from a message pointer and an explicit receipt time.
+  AGNOCAST_PUBLIC MessageEvent(const ConstMessagePtr & message, rclcpp::Time receipt_time)
   : message_(message), receipt_time_(receipt_time)
   {
   }
 
-  MessageEvent & operator=(const MessageEvent & rhs) = default;
+  /// Copy assignment operator.
+  AGNOCAST_PUBLIC MessageEvent & operator=(const MessageEvent & rhs) = default;
 
   /**
    * \brief Retrieve the message.
    * Returns ipc_shared_ptr<M const> pointing to shared memory.
    */
-  const ConstMessagePtr & getMessage() const { return message_; }
+  AGNOCAST_PUBLIC const ConstMessagePtr & getMessage() const { return message_; }
 
   /**
    * \brief Retrieve a const version of the message (same as getMessage() in agnocast)
    */
-  const ConstMessagePtr & getConstMessage() const { return message_; }
+  AGNOCAST_PUBLIC const ConstMessagePtr & getConstMessage() const { return message_; }
 
   /**
    * \brief Returns the time at which this message was received
    */
-  rclcpp::Time getReceiptTime() const { return receipt_time_; }
+  AGNOCAST_PUBLIC rclcpp::Time getReceiptTime() const { return receipt_time_; }
 
-  bool operator<(const MessageEvent & rhs) const
+  /// Less-than comparison, ordered by pointer then receipt time.
+  AGNOCAST_PUBLIC bool operator<(const MessageEvent & rhs) const
   {
     if (message_.get() != rhs.message_.get()) {
       return message_.get() < rhs.message_.get();
@@ -75,12 +77,14 @@ public:
     return receipt_time_ < rhs.receipt_time_;
   }
 
-  bool operator==(const MessageEvent & rhs) const
+  /// Equality comparison.
+  AGNOCAST_PUBLIC bool operator==(const MessageEvent & rhs) const
   {
     return message_.get() == rhs.message_.get() && receipt_time_ == rhs.receipt_time_;
   }
 
-  bool operator!=(const MessageEvent & rhs) const { return !(*this == rhs); }
+  /// Inequality comparison.
+  AGNOCAST_PUBLIC bool operator!=(const MessageEvent & rhs) const { return !(*this == rhs); }
 
 private:
   ConstMessagePtr message_;

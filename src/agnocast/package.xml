@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>agnocast</name>
+  <version>2.3.2</version>
+  <description>
+    Metapackage for Agnocast: true zero-copy IPC middleware for ROS 2.
+  </description>
+  <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
+  <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
+  <license>Apache License 2.0</license>
+
+  <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend version_eq="2.3.2">agnocastlib</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_cie_config_msgs</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_cie_thread_configurator</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_components</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_ioctl_wrapper</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_sample_application</exec_depend>
+  <exec_depend version_eq="2.3.2">agnocast_sample_interfaces</exec_depend>
+  <exec_depend version_eq="2.3.2">ros2agnocast</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

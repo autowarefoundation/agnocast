@@ -2,6 +2,19 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.2 (2026-03-24)
+------------------
+* feat: exposed API reference (`#1195 <https://github.com/autowarefoundation/agnocast/issues/1195>`_)
+* refactor(bridge): use CallbackIsolatedAgnocastExecutor for bridge callback scheduling (`#1170 <https://github.com/autowarefoundation/agnocast/issues/1170>`_)
+* feat(agnocastlib): include message_filters headers in agnocast.hpp without circular dependency (`#1189 <https://github.com/autowarefoundation/agnocast/issues/1189>`_)
+* fix: correct internal dependency declarations in package.xml (`#1188 <https://github.com/autowarefoundation/agnocast/issues/1188>`_)
+
+2.3.1 (2026-03-17)
+------------------
+* fix(agnocastlib): use correct rosdep key libgoogle-glog-dev (`#1184 <https://github.com/autowarefoundation/agnocast/issues/1184>`_)
+* feat(agnocastlib): add timer init tracepoint (`#1178 <https://github.com/autowarefoundation/agnocast/issues/1178>`_)
+* fix(bridge): persist callback_group in performance bridge to prevent premature destruction (`#1171 <https://github.com/autowarefoundation/agnocast/issues/1171>`_)
+
 2.3.0 (2026-03-09)
 ------------------
 * fix(agnocastlib): fix tracepoint bugs introduced in PR `#1093 <https://github.com/autowarefoundation/agnocast/issues/1093>`_ (`#1161 <https://github.com/autowarefoundation/agnocast/issues/1161>`_)
