@@ -201,7 +201,7 @@ This provides the same argument parsing functionality as rcl.
 | `-r node:old:=new` | ✓ | **Full Support** | - | Node-specific remapping |
 | `--log-level` | ✗ | **Unsupported** | TBD | Set log level |
 | `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
-| `--disable-external-lib-logs` | ✗ | **Unsupported** | TBD | Disable external library logs |
+| `--disable-external-lib-logs` | ✓ | **Full Support** | - | Disable external library logs (file logging via rcl_logging_spdlog) |
 | `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |
 | `-e` (enclave) | ✗ | **Unsupported** | TBD | Specify security enclave |
 
@@ -394,6 +394,8 @@ agnocast::Node uses the following rcl/rclcpp functions, data structures, and cla
 - `rcl_arguments_get_param_overrides()` - Get parameter overrides
 - `rcl_arguments_fini()` - Argument cleanup
 - `rcl_get_default_allocator()` - Get default allocator
+- `rcl_logging_configure_with_output_handler()` - Configure rcl logging with file output via rcl_logging_spdlog
+- `rcl_logging_multiple_output_handler()` - Default output handler that dispatches to stdout and external lib (spdlog)
 - `rcl_enable_ros_time_override()` - Enable ROS time override for simulated time
 - `rcl_disable_ros_time_override()` - Disable ROS time override
 - `rcl_set_ros_time_override()` - Set ROS time override value

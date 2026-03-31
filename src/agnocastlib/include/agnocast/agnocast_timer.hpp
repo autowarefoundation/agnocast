@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/clock.hpp"
 #include "rclcpp/macros.hpp"
 
@@ -12,6 +13,13 @@
 namespace agnocast
 {
 
+/**
+ * @brief Base class for Agnocast timers providing periodic callback execution.
+ *
+ * Defines the common interface for all timer types, including callback execution,
+ * clock access, and period storage.
+ */
+AGNOCAST_PUBLIC
 class TimerBase
 {
 public:
@@ -23,8 +31,14 @@ public:
   // void cancel(), bool is_canceled(), void reset(), std::chrono::nanoseconds time_until_trigger(),
   // etc.
 
+  /** @brief Return whether this timer uses a steady clock.
+   *  @return True if the clock is steady. */
+  AGNOCAST_PUBLIC
   virtual bool is_steady() const { return true; }
 
+  /** @brief Get the clock associated with this timer.
+   *  @return Shared pointer to the clock. */
+  AGNOCAST_PUBLIC
   virtual rclcpp::Clock::SharedPtr get_clock() const = 0;
 
   virtual void execute_callback() = 0;
@@ -39,6 +53,16 @@ protected:
   std::chrono::nanoseconds period_;
 };
 
+/**
+ * @brief Timer that fires periodically using a user-provided clock.
+ *
+ * @tparam FunctorT Callback type; must be invocable as `void()` or `void(TimerBase&)`.
+ *
+ * The callback signature is detected at compile time: if the functor accepts a
+ * `TimerBase&` argument it receives a reference to this timer, otherwise it is
+ * called with no arguments.
+ */
+AGNOCAST_PUBLIC
 template <typename FunctorT>
 class GenericTimer : public TimerBase
 {
@@ -66,8 +90,14 @@ public:
     }
   }
 
+  /** @brief Return whether this timer uses a steady clock.
+   *  @return True if the clock is steady. */
+  AGNOCAST_PUBLIC
   bool is_steady() const override { return clock_->get_clock_type() == RCL_STEADY_TIME; }
 
+  /** @brief Get the clock associated with this timer.
+   *  @return Shared pointer to the clock. */
+  AGNOCAST_PUBLIC
   rclcpp::Clock::SharedPtr get_clock() const override { return clock_; }
 
 protected:
@@ -77,6 +107,15 @@ protected:
   FunctorT callback_;
 };
 
+/**
+ * @brief Timer that uses a steady (wall) clock.
+ *
+ * @tparam FunctorT Callback type; must be invocable as `void()` or `void(TimerBase&)`.
+ *
+ * Convenience specialization of GenericTimer that automatically creates an
+ * `RCL_STEADY_TIME` clock, suitable for wall-time periodic execution.
+ */
+AGNOCAST_PUBLIC
 template <typename FunctorT>
 class WallTimer : public GenericTimer<FunctorT>
 {

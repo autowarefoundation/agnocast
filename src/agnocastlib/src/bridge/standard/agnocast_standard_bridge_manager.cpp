@@ -83,7 +83,7 @@ void StandardBridgeManager::start_ros_execution()
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
-  executor_ = std::make_shared<agnocast::MultiThreadedAgnocastExecutor>();
+  executor_ = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>();
   executor_->add_node(container_node_);
 
   executor_thread_ = std::thread([this]() {
@@ -207,14 +207,6 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
       }
     }
     active_bridges_[topic_name_with_direction] = bridge;
-
-    auto cast_bridge = std::static_pointer_cast<agnocast::BridgeBase>(bridge);
-
-    auto callback_group = cast_bridge->get_callback_group();
-    if (callback_group) {
-      executor_->add_callback_group(
-        callback_group, container_node_->get_node_base_interface(), true);
-    }
 
     return true;
 
@@ -426,6 +418,17 @@ void StandardBridgeManager::remove_active_bridge(
     RCLCPP_ERROR(
       logger_, "AGNOCAST_REMOVE_BRIDGE_CMD failed for topic '%s': %s",
       std::string(topic_name_view).c_str(), strerror(errno));
+  }
+
+  // Stop the child executor for this bridge's callback group before destroying the bridge.
+  // This ensures any in-flight callback completes before the subscription is destroyed,
+  // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
+  auto & bridge = active_bridges_[topic_name_with_direction];
+  if (bridge) {
+    auto cb_group = bridge->get_callback_group();
+    if (cb_group) {
+      executor_->stop_callback_group(cb_group);
+    }
   }
 
   active_bridges_.erase(topic_name_with_direction);

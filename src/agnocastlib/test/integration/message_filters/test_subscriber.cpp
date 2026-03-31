@@ -268,8 +268,7 @@ protected:
     }
     executor_.reset();
     node_.reset();
-    // TODO(Koichi98): Call agnocast::shutdown() once available.
-    // See https://github.com/autowarefoundation/agnocast/issues/1019
+    agnocast::shutdown();
   }
 
   void waitFor(

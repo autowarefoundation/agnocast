@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_utils.hpp"
 
 #include <fcntl.h>
@@ -30,7 +31,6 @@
 namespace agnocast
 {
 
-// These are cut out of the class for information hiding.
 void release_subscriber_reference(
   const std::string & topic_name, const topic_local_id_t pubsub_id, const int64_t entry_id);
 void decrement_borrowed_publisher_num();
@@ -76,15 +76,28 @@ struct control_block
 
 }  // namespace detail
 
-// A smart pointer for IPC message sharing between publishers and subscribers.
-//
-// Thread Safety:
-//   This class is thread-safe. Multiple threads can safely access different instances that share
-//   ownership (i.e., copies of the same pointer). The reference counting uses atomic operations
-//   to ensure correct cleanup when the last reference is destroyed.
-//
-//   Note: Concurrent access to the *same* instance (e.g., one thread calling reset() while another
-//   reads) still requires external synchronization, same as std::shared_ptr.
+/**
+ * @brief Smart pointer for zero-copy IPC message sharing between publishers and subscribers.
+ *
+ * `ipc_shared_ptr` manages the lifetime of messages allocated in shared memory. Publishers
+ * obtain an instance via Publisher::borrow_loaned_message(), fill in message fields, and
+ * transfer ownership with Publisher::publish(). Subscribers receive `ipc_shared_ptr<const
+ * MessageT>` in their callbacks; the kernel-side reference is released when all copies are
+ * destroyed.
+ *
+ * @par Thread Safety
+ * Multiple threads can safely hold and destroy **different copies** of the same pointer
+ * (reference counting is atomic). Concurrent access to the **same instance** requires
+ * external synchronization, same as `std::shared_ptr`.
+ *
+ * @par Invalidation
+ * After publish(), every copy sharing the same control block becomes **invalidated**:
+ * - `get()` returns `nullptr`, `operator bool()` returns `false`.
+ * - `operator->()` and `operator*()` call `std::terminate()`.
+ *
+ * @tparam T  The message type (or `const`-qualified message type on the subscriber side).
+ */
+AGNOCAST_PUBLIC
 template <typename T>
 class ipc_shared_ptr
 {
@@ -139,6 +152,8 @@ public:
   topic_local_id_t get_pubsub_id() const { return control_ ? control_->pubsub_id : -1; }
   int64_t get_entry_id() const { return control_ ? control_->entry_id : ENTRY_ID_NOT_ASSIGNED; }
 
+  /// Construct an empty (null) `ipc_shared_ptr`.
+  AGNOCAST_PUBLIC
   ipc_shared_ptr() = default;
 
   // Subscriber-side constructor (entry_id already assigned).
@@ -154,8 +169,11 @@ public:
 
   ~ipc_shared_ptr() { reset(); }
 
-  // Thread-safe: atomically increments reference count.
-  // Metadata (topic_name, pubsub_id, entry_id) is stored in control block, so no string copying.
+  /// Copy constructor. Creates a new reference to the same message.
+  /// The reference count is incremented atomically, so it is safe to copy
+  /// **from** an instance that another thread also copies from.
+  /// However, two threads must not copy-from and write-to the **same** instance concurrently.
+  AGNOCAST_PUBLIC
   ipc_shared_ptr(const ipc_shared_ptr & r) : ptr_(r.ptr_), control_(r.control_)
   {
     if (control_) {
@@ -163,8 +181,10 @@ public:
     }
   }
 
-  // Thread-safe: atomically decrements old ref count and increments new ref count.
-  // Metadata (topic_name, pubsub_id, entry_id) is stored in control block, so no string copying.
+  /// Copy assignment. Releases the current reference and shares ownership with `r`.
+  /// Same thread-safety guarantees as the copy constructor.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   ipc_shared_ptr & operator=(const ipc_shared_ptr & r)
   {
     if (this != &r) {
@@ -178,14 +198,19 @@ public:
     return *this;
   }
 
-  // Move constructor: transfers ownership without changing ref count.
+  /// Move constructor. Transfers ownership from `r` without changing the reference count.
+  /// Not thread-safe: the caller must ensure no other thread accesses `r` concurrently.
+  AGNOCAST_PUBLIC
   ipc_shared_ptr(ipc_shared_ptr && r) noexcept : ptr_(r.ptr_), control_(r.control_)
   {
     r.ptr_ = nullptr;
     r.control_ = nullptr;
   }
 
-  // Move assignment: transfers ownership without changing ref count.
+  /// Move assignment. Releases the current reference and takes ownership from `r`.
+  /// Not thread-safe: the caller must ensure no other thread accesses `r` concurrently.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   ipc_shared_ptr & operator=(ipc_shared_ptr && r) noexcept
   {
     if (this != &r) {
@@ -199,7 +224,9 @@ public:
     return *this;
   }
 
-  // Converting copy constructor (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  /// Converting copy constructor (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
+  /// Enabled only when `U*` is implicitly convertible to `T*`.
+  AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr(const ipc_shared_ptr<U> & r)  // NOLINT(google-explicit-constructor)
   : ptr_(r.ptr_), control_(r.control_)
@@ -209,7 +236,9 @@ public:
     }
   }
 
-  // Converting move constructor (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  /// Converting move constructor (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
+  /// Enabled only when `U*` is implicitly convertible to `T*`.
+  AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr(ipc_shared_ptr<U> && r)  // NOLINT(google-explicit-constructor)
   : ptr_(r.ptr_), control_(r.control_)
@@ -218,7 +247,10 @@ public:
     r.control_ = nullptr;
   }
 
-  // Converting copy assignment (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  /// Converting copy assignment (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
+  /// Enabled only when `U*` is implicitly convertible to `T*`.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr & operator=(const ipc_shared_ptr<U> & r)
   {
@@ -231,7 +263,10 @@ public:
     return *this;
   }
 
-  // Converting move assignment (e.g., ipc_shared_ptr<T> -> ipc_shared_ptr<const T>)
+  /// Converting move assignment (e.g., `ipc_shared_ptr<T>` to `ipc_shared_ptr<const T>`).
+  /// Enabled only when `U*` is implicitly convertible to `T*`.
+  /// @return Reference to `*this`.
+  AGNOCAST_PUBLIC
   template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
   ipc_shared_ptr & operator=(ipc_shared_ptr<U> && r)
   {
@@ -243,6 +278,10 @@ public:
     return *this;
   }
 
+  /// Dereference the managed message. Calls std::terminate() if the pointer has been invalidated
+  /// by publish().
+  /// @return Reference to the managed message.
+  AGNOCAST_PUBLIC
   T & operator*() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
@@ -256,6 +295,10 @@ public:
     return *ptr_;
   }
 
+  /// Access a member of the managed message. Calls std::terminate() if the pointer has been
+  /// invalidated by publish().
+  /// @return Pointer to the managed message.
+  AGNOCAST_PUBLIC
   T * operator->() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
@@ -269,11 +312,22 @@ public:
     return ptr_;
   }
 
+  /// Return `true` if the pointer is non-null and has not been invalidated.
+  /// @return True if non-null and not invalidated.
+  AGNOCAST_PUBLIC
   operator bool() const noexcept { return ptr_ != nullptr && !is_invalidated_(); }
 
+  /// Return the raw pointer, or `nullptr` if empty or invalidated.
+  /// @return Raw pointer, or nullptr if empty or invalidated.
+  AGNOCAST_PUBLIC
   T * get() const noexcept { return is_invalidated_() ? nullptr : ptr_; }
 
-  // Thread-safe: atomically decrements ref count and performs cleanup if last reference.
+  /**
+   * @brief Release ownership of the managed message. If this is the last reference: on the
+   * subscriber side, notifies the kernel module that the message can be reclaimed; on the
+   * publisher side (if unpublished), frees the allocated memory.
+   */
+  AGNOCAST_PUBLIC
   void reset()
   {
     if (control_ == nullptr) return;

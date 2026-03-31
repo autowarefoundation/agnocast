@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/node/agnocast_arguments.hpp"
 
 #include <mutex>
@@ -34,6 +35,16 @@ private:
 extern Context g_context;
 extern std::mutex g_context_mtx;
 
+/// @brief Initialize Agnocast. Must be called once before creating any agnocast::Node.
+/// This is the counterpart of rclcpp::init() for agnocast::Node.
+/// @param argc Number of command-line arguments.
+/// @param argv Command-line argument array.
+AGNOCAST_PUBLIC
 void init(int argc, char const * const * argv);
+
+/// @brief Shut down Agnocast. Should be called before process exit in agnocast::Node processes.
+/// This is the counterpart of rclcpp::shutdown() for agnocast::Node.
+AGNOCAST_PUBLIC
+void shutdown();
 
 }  // namespace agnocast
