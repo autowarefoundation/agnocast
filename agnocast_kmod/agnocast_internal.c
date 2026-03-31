@@ -4,35 +4,17 @@ int major;
 struct class * agnocast_class;
 struct device * agnocast_device;
 
-// Locking convention:
-//   Only ioctl_ prefixed functions acquire locks. All other internal/static functions are
-//   lock-free and rely on callers to hold the appropriate locks. Exceptions are
-//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and increment_message_entry_rc, which
-//   manage locks directly.
-//
-// Lock ordering (to prevent deadlocks, always acquire in this order):
-//   1. global_htables_rwsem   (this file)
-//   2. topic_rwsem            (per-topic, in struct topic_wrapper)
-//   3. mempool_lock           (agnocast_memory_allocator.c)
-//
-// Global rwsem for hashtables (topic_hashtable, proc_info_htable, bridge_htable)
-// - Read lock (down_read): when searching hashtables and operating within a topic
-// - Write lock (down_write): when adding/removing entries from hashtables
 DECLARE_RWSEM(global_htables_rwsem);
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
-// Ring buffer to hold exited pids.
-// EXIT_QUEUE_SIZE (65536) far exceeds mempool_num (default 4096), and only Agnocast PIDs are
-// enqueued (via is_agnocast_pid()), each exiting at most once, so the ring buffer cannot overflow.
 DEFINE_SPINLOCK(pid_queue_lock);
 pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 uint32_t queue_head;
 uint32_t queue_tail;
 
-// For controling the kernel thread
 struct task_struct * worker_task;
 DECLARE_WAIT_QUEUE_HEAD(worker_wait);
 int has_new_pid = false;
