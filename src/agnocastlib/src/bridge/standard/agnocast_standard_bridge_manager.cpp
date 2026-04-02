@@ -316,25 +316,25 @@ void StandardBridgeManager::check_active_bridges()
       ros2_count_ok = update_ros2_subscriber_num(this->container_node_.get(), topic_name_str);
     }
 
-    bool remove = false;
-    bool keep_managed = false;
+    bool remove_active = false;
+    bool remove_managed = false;
     if (!ros2_count_ok) {
-      remove = true;
-      keep_managed = false;
+      remove_active = true;
+      remove_managed = true;
     } else if (count <= 0) {
       if (count < 0) {
         RCLCPP_ERROR(
           this->logger_, "Failed to get connection count for %s. Removing bridge.",
           topic_name_str.c_str());
       }
-      remove = true;
-      keep_managed = false;
+      remove_active = true;
+      remove_managed = true;
     } else if (!is_demanded_by_ros2) {
-      remove = true;
-      keep_managed = true;
+      remove_active = true;
+      remove_managed = false;
     }
 
-    return {remove, keep_managed};
+    return {remove_active, remove_managed};
   };
 
   for (auto it = active_bridges_.begin(); it != active_bridges_.end();) {
@@ -352,9 +352,9 @@ void StandardBridgeManager::check_active_bridges()
     bool is_r2a = (suffix == SUFFIX_R2A);
     std::string topic_name_str(topic_name_view);
 
-    auto [remove, keep_managed] = should_remove(topic_name_str, is_r2a);
+    auto [remove_active, remove_managed] = should_remove(topic_name_str, is_r2a);
 
-    if (!remove) {
+    if (!remove_active) {
       ++it;
       continue;
     }
@@ -381,7 +381,7 @@ void StandardBridgeManager::check_active_bridges()
     it = active_bridges_.erase(it);
 
     // Update managed bridge table.
-    if (!keep_managed) {
+    if (remove_managed) {
       auto mit = managed_bridges_.find(topic_name_str);
       if (mit != managed_bridges_.end()) {
         if (is_r2a) {
