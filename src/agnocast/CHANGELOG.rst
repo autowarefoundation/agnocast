@@ -2,6 +2,9 @@
 Changelog for package agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.2 (2026-03-24)
 ------------------
 * add meta package (`#1197 <https://github.com/autowarefoundation/agnocast/issues/1197>`_)

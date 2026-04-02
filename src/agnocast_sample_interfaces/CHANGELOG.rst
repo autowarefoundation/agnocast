@@ -2,6 +2,9 @@
 Changelog for package agnocast_sample_interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.2 (2026-03-24)
 ------------------
 

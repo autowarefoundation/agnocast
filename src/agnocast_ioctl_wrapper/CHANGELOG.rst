@@ -2,6 +2,10 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* fix: topic list_agnocast warning (`#1208 <https://github.com/autowarefoundation/agnocast/issues/1208>`_)
+
 2.3.2 (2026-03-24)
 ------------------
 
