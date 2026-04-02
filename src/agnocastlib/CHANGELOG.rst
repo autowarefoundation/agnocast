@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.3 (2026-04-02)
+------------------
 * feat(agnocastlib): enable file logging for `agnocast::Node` (`#1204 <https://github.com/autowarefoundation/agnocast/issues/1204>`_)
 * fix(bridge): fix bridge removal by stopping child executor before destruction (`#1200 <https://github.com/autowarefoundation/agnocast/issues/1200>`_)
 * fix(test): filter bridge node messages in agnocast-only CIE test (`#1201 <https://github.com/autowarefoundation/agnocast/issues/1201>`_)
