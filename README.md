@@ -49,7 +49,7 @@ This reflects the current status, and support is expected to expand in the futur
 
 ## For Users
 
-Please refer to the [Agnocast Documentation](https://tier4.github.io/agnocast_doc/environment-setup/).
+For installation, setup, and usage instructions, please refer to the [Getting Started Guide](https://tier4.github.io/agnocast_doc/environment-setup/).
 
 ---
 
