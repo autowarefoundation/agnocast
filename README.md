@@ -166,17 +166,6 @@ Refer to the [Linux kernel documentation](https://www.kernel.org/doc/Documentati
 
 ## Troubleshooting
 
-### Migrating from old PPA setup
-
-If you previously installed Agnocast using the old `add-apt-repository` method, remove the old configuration before running `scripts/setup.bash`:
-
-```bash
-# Remove old repository configuration
-sudo add-apt-repository --remove ppa:t4-system-software/agnocast
-sudo rm -f /etc/apt/sources.list.d/*agnocast*.list
-sudo rm -f /etc/apt/trusted.gpg.d/*agnocast*.gpg
-```
-
 ### Shared memory and message queue cleanup
 
 Agnocast spawns a background daemon process (forked from the first Agnocast process) that automatically cleans up shared memory and message queues when processes exit. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes. If the daemon dies, cleanup stops and resources will leak. To avoid this, stop application processes individually (e.g., with `Ctrl+C` or by targeting specific PIDs).
@@ -192,7 +181,7 @@ rm /dev/mqueue/agnocast@*
 rm /dev/mqueue/agnocast_bridge_manager@*
 ```
 
-If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide limit. See the [System Configuration](#system-configuration) section for how to increase `queues_max`.
+If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide `queues_max` limit (e.g., `sudo sysctl -w fs.mqueue.queues_max=1024`). See [System Configuration](https://tier4.github.io/agnocast_doc/environment-setup/configuration/) for details.
 
 ## Documents
 
