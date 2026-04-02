@@ -53,6 +53,7 @@ struct topic_info_ret * get_agnocast_sub_nodes(const char * topic_name, int * to
   }
 
   *topic_info_ret_count = static_cast<int>(topic_info_args.ret_topic_info_ret_num);
+  close(fd);
   return agnocast_topic_info_ret_buffer;
 }
 
@@ -98,6 +99,7 @@ struct topic_info_ret * get_agnocast_pub_nodes(const char * topic_name, int * to
   }
 
   *topic_info_ret_count = static_cast<int>(topic_info_args.ret_topic_info_ret_num);
+  close(fd);
   return agnocast_topic_info_ret_buffer;
 }
 
