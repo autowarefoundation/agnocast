@@ -286,6 +286,43 @@ void StandardBridgeManager::process_managed_bridge(
   }
 }
 
+std::pair<bool, bool> StandardBridgeManager::should_remove_bridge(
+  const std::string & topic_name, bool is_r2a)
+{
+  int count = 0;
+  bool is_demanded_by_ros2 = false;
+  bool ros2_count_ok = false;
+  if (is_r2a) {
+    count = get_agnocast_subscriber_count(topic_name).count;
+    is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
+    ros2_count_ok = update_ros2_publisher_num(container_node_.get(), topic_name);
+  } else {
+    count = get_agnocast_publisher_count(topic_name).count;
+    is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
+    ros2_count_ok = update_ros2_subscriber_num(container_node_.get(), topic_name);
+  }
+
+  bool remove_active = false;
+  bool remove_managed = false;
+  if (!ros2_count_ok) {
+    remove_active = true;
+    remove_managed = true;
+  } else if (count <= 0) {
+    if (count < 0) {
+      RCLCPP_ERROR(
+        logger_, "Failed to get connection count for %s. Removing %s bridge.", topic_name.c_str(),
+        is_r2a ? "R2A" : "A2R");
+    }
+    remove_active = true;
+    remove_managed = true;
+  } else if (!is_demanded_by_ros2) {
+    remove_active = true;
+    remove_managed = false;
+  }
+
+  return {remove_active, remove_managed};
+}
+
 void StandardBridgeManager::check_parent_alive()
 {
   if (!is_parent_alive_) {
@@ -299,44 +336,6 @@ void StandardBridgeManager::check_parent_alive()
 
 void StandardBridgeManager::check_active_bridges()
 {
-  auto should_remove = [this](
-                         const std::string & topic_name_str, bool is_r2a) -> std::pair<bool, bool> {
-    int count = 0;
-    bool is_demanded_by_ros2 = false;
-    bool ros2_count_ok = false;
-    if (is_r2a) {
-      count = get_agnocast_subscriber_count(topic_name_str).count;
-      is_demanded_by_ros2 =
-        has_external_ros2_publisher(this->container_node_.get(), topic_name_str);
-      ros2_count_ok = update_ros2_publisher_num(this->container_node_.get(), topic_name_str);
-    } else {
-      count = get_agnocast_publisher_count(topic_name_str).count;
-      is_demanded_by_ros2 =
-        has_external_ros2_subscriber(this->container_node_.get(), topic_name_str);
-      ros2_count_ok = update_ros2_subscriber_num(this->container_node_.get(), topic_name_str);
-    }
-
-    bool remove_active = false;
-    bool remove_managed = false;
-    if (!ros2_count_ok) {
-      remove_active = true;
-      remove_managed = true;
-    } else if (count <= 0) {
-      if (count < 0) {
-        RCLCPP_ERROR(
-          this->logger_, "Failed to get connection count for %s. Removing %s bridge.",
-          topic_name_str.c_str(), is_r2a ? "R2A" : "A2R");
-      }
-      remove_active = true;
-      remove_managed = true;
-    } else if (!is_demanded_by_ros2) {
-      remove_active = true;
-      remove_managed = false;
-    }
-
-    return {remove_active, remove_managed};
-  };
-
   for (auto it = active_bridges_.begin(); it != active_bridges_.end();) {
     const std::string & key = it->first;
     const std::shared_ptr<BridgeBase> & bridge = it->second;
@@ -352,7 +351,7 @@ void StandardBridgeManager::check_active_bridges()
     bool is_r2a = (suffix == SUFFIX_R2A);
     std::string topic_name_str(topic_name_view);
 
-    auto [remove_active, remove_managed] = should_remove(topic_name_str, is_r2a);
+    auto [remove_active, remove_managed] = should_remove_bridge(topic_name_str, is_r2a);
 
     if (!remove_active) {
       ++it;
