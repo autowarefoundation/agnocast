@@ -324,8 +324,8 @@ void StandardBridgeManager::check_active_bridges()
     } else if (count <= 0) {
       if (count < 0) {
         RCLCPP_ERROR(
-          this->logger_, "Failed to get connection count for %s. Removing bridge.",
-          topic_name_str.c_str());
+          this->logger_, "Failed to get connection count for %s. Removing %s bridge.",
+          topic_name_str.c_str(), is_r2a ? "R2A" : "A2R");
       }
       remove_active = true;
       remove_managed = true;
