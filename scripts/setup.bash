@@ -2,6 +2,13 @@
 
 set -e
 
+# Validate ROS_DISTRO
+if [ -z "$ROS_DISTRO" ]; then
+  echo "Error: ROS_DISTRO is not set. Please source your ROS 2 environment first:"
+  echo "  source /opt/ros/<distro>/setup.bash"
+  exit 1
+fi
+
 # Check if apt-installed agnocast packages exist (conflict with source build)
 conflicting_pkgs=()
 for pkg in $(dpkg -l 'agnocast-heaphook-v*' 'agnocast-kmod-v*' 2>/dev/null | grep '^ii' | awk '{print $2}'); do
@@ -34,7 +41,7 @@ if [ ${#conflicting_pkgs[@]} -gt 0 ]; then
     echo "  - $pkg"
   done
   echo "These conflict with a source build. Please remove them first:"
-  echo "  sudo apt-get remove ${conflicting_pkgs[*]}"
+  echo "  sudo apt-get remove -- ${conflicting_pkgs[*]}"
   exit 1
 fi
 
