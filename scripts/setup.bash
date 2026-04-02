@@ -8,21 +8,3 @@ rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO
 rustup toolchain install 1.75.0
 rustup default 1.75.0
 rustup component add clippy rustfmt
-
-# agnocast-heaphook and agnocast-kmod
-# Setup PPA with recommended method (key in /etc/apt/keyrings with explicit binding)
-sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xCFDB1950382092423DF37D3E075CD8B5C91E5ACA' \
-  | gpg --dearmor | sudo tee /etc/apt/keyrings/agnocast-ppa.gpg >/dev/null
-sudo chmod 0644 /etc/apt/keyrings/agnocast-ppa.gpg
-
-cat <<EOF | sudo tee /etc/apt/sources.list.d/agnocast.sources
-Types: deb
-URIs: http://ppa.launchpad.net/t4-system-software/agnocast/ubuntu
-Suites: $(. /etc/os-release && echo $VERSION_CODENAME)
-Components: main
-Signed-By: /etc/apt/keyrings/agnocast-ppa.gpg
-EOF
-
-sudo apt update
-sudo apt install agnocast-heaphook-v2.2.0 agnocast-kmod-v2.2.0
