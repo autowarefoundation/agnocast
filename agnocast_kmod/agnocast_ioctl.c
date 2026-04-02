@@ -2207,45 +2207,35 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   return 0;
 }
 
-static long get_version_cmd(unsigned long arg)
+static long get_version_cmd(struct ioctl_get_version_args __user * arg)
 {
   int ret = 0;
   struct ioctl_get_version_args get_version_args;
   memset(&get_version_args, 0, sizeof(get_version_args));
   ret = agnocast_ioctl_get_version(&get_version_args);
-  if (copy_to_user(
-        (struct ioctl_get_version_args __user *)arg, &get_version_args, sizeof(get_version_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_version_args, sizeof(get_version_args))) return -EFAULT;
   return ret;
 }
 
-static long add_process_cmd(unsigned long arg)
+static long add_process_cmd(union ioctl_add_process_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_add_process_args add_process_args;
-  if (copy_from_user(
-        &add_process_args, (union ioctl_add_process_args __user *)arg, sizeof(add_process_args)))
-    return -EFAULT;
+  if (copy_from_user(&add_process_args, arg, sizeof(add_process_args))) return -EFAULT;
   bool is_performance_bridge_manager = add_process_args.is_performance_bridge_manager;
-  ret = agnocast_ioctl_add_process(pid, ipc_ns, is_performance_bridge_manager, &add_process_args);
+  ret = agnocast_ioctl_add_process(
+    current->tgid, current->nsproxy->ipc_ns, is_performance_bridge_manager, &add_process_args);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_add_process_args __user *)arg, &add_process_args, sizeof(add_process_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &add_process_args, sizeof(add_process_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long add_subscriber_cmd(unsigned long arg)
+static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_add_subscriber_args sub_args;
-  if (copy_from_user(&sub_args, (union ioctl_add_subscriber_args __user *)arg, sizeof(sub_args)))
-    return -EFAULT;
+  if (copy_from_user(&sub_args, arg, sizeof(sub_args))) return -EFAULT;
   if (
     sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE ||
     sub_args.node_name.len >= NODE_NAME_BUFFER_SIZE)
@@ -2267,25 +2257,21 @@ static long add_subscriber_cmd(unsigned long arg)
   }
   node_name_buf[sub_args.node_name.len] = '\0';
   ret = agnocast_ioctl_add_subscriber(
-    topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
-    sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, &sub_args);
+    topic_name_buf, current->nsproxy->ipc_ns, node_name_buf, current->tgid, sub_args.qos_depth,
+    sub_args.qos_is_transient_local, sub_args.qos_is_reliable, sub_args.is_take_sub,
+    sub_args.ignore_local_publications, sub_args.is_bridge, &sub_args);
   kfree(combined_buf);
   if (ret == 0) {
-    if (copy_to_user((union ioctl_add_subscriber_args __user *)arg, &sub_args, sizeof(sub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long add_publisher_cmd(unsigned long arg)
+static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_add_publisher_args pub_args;
-  if (copy_from_user(&pub_args, (union ioctl_add_publisher_args __user *)arg, sizeof(pub_args)))
-    return -EFAULT;
+  if (copy_from_user(&pub_args, arg, sizeof(pub_args))) return -EFAULT;
   if (
     pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE ||
     pub_args.node_name.len >= NODE_NAME_BUFFER_SIZE)
@@ -2307,23 +2293,20 @@ static long add_publisher_cmd(unsigned long arg)
   }
   node_name_buf[pub_args.node_name.len] = '\0';
   ret = agnocast_ioctl_add_publisher(
-    topic_name_buf, ipc_ns, node_name_buf, pid, pub_args.qos_depth, pub_args.qos_is_transient_local,
-    pub_args.is_bridge, &pub_args);
+    topic_name_buf, current->nsproxy->ipc_ns, node_name_buf, current->tgid, pub_args.qos_depth,
+    pub_args.qos_is_transient_local, pub_args.is_bridge, &pub_args);
   kfree(combined_buf);
   if (ret == 0) {
-    if (copy_to_user((union ioctl_add_publisher_args __user *)arg, &pub_args, sizeof(pub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &pub_args, sizeof(pub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long release_sub_ref_cmd(unsigned long arg)
+static long release_sub_ref_cmd(struct ioctl_update_entry_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_update_entry_args entry_args;
-  if (copy_from_user(&entry_args, (struct ioctl_update_entry_args __user *)arg, sizeof(entry_args)))
-    return -EFAULT;
+  if (copy_from_user(&entry_args, arg, sizeof(entry_args))) return -EFAULT;
   if (entry_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(entry_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2334,19 +2317,16 @@ static long release_sub_ref_cmd(unsigned long arg)
   }
   topic_name_buf[entry_args.topic_name.len] = '\0';
   ret = agnocast_ioctl_release_message_entry_reference(
-    topic_name_buf, ipc_ns, entry_args.pubsub_id, entry_args.entry_id);
+    topic_name_buf, current->nsproxy->ipc_ns, entry_args.pubsub_id, entry_args.entry_id);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long receive_msg_cmd(unsigned long arg)
+static long receive_msg_cmd(union ioctl_receive_msg_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_receive_msg_args receive_msg_args;
-  if (copy_from_user(
-        &receive_msg_args, (union ioctl_receive_msg_args __user *)arg, sizeof(receive_msg_args)))
-    return -EFAULT;
+  if (copy_from_user(&receive_msg_args, arg, sizeof(receive_msg_args))) return -EFAULT;
   if (receive_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(receive_msg_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2373,8 +2353,8 @@ static long receive_msg_cmd(unsigned long arg)
   }
 
   ret = agnocast_ioctl_receive_msg(
-    topic_name_buf, ipc_ns, receive_msg_args.subscriber_id, pub_shm_infos, pub_shm_info_size,
-    &receive_msg_args);
+    topic_name_buf, current->nsproxy->ipc_ns, receive_msg_args.subscriber_id, pub_shm_infos,
+    pub_shm_info_size, &receive_msg_args);
   kfree(topic_name_buf);
 
   if (ret == 0 && receive_msg_args.ret_pub_shm_num > 0) {
@@ -2388,21 +2368,16 @@ static long receive_msg_cmd(unsigned long arg)
   kfree(pub_shm_infos);
 
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_receive_msg_args __user *)arg, &receive_msg_args, sizeof(receive_msg_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &receive_msg_args, sizeof(receive_msg_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long publish_msg_cmd(unsigned long arg)
+static long publish_msg_cmd(union ioctl_publish_msg_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_publish_msg_args publish_msg_args;
-  if (copy_from_user(
-        &publish_msg_args, (union ioctl_publish_msg_args __user *)arg, sizeof(publish_msg_args)))
-    return -EFAULT;
+  if (copy_from_user(&publish_msg_args, arg, sizeof(publish_msg_args))) return -EFAULT;
   if (publish_msg_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(publish_msg_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2430,8 +2405,8 @@ static long publish_msg_cmd(unsigned long arg)
   uint64_t subscriber_ids_buffer_addr = publish_msg_args.subscriber_ids_buffer_addr;
 
   ret = agnocast_ioctl_publish_msg(
-    topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
-    subscriber_ids_buf, buffer_size, &publish_msg_args);
+    topic_name_buf, current->nsproxy->ipc_ns, publish_msg_args.publisher_id,
+    publish_msg_args.msg_virtual_address, subscriber_ids_buf, buffer_size, &publish_msg_args);
   kfree(topic_name_buf);
 
   if (ret == 0) {
@@ -2449,20 +2424,16 @@ static long publish_msg_cmd(unsigned long arg)
   kfree(subscriber_ids_buf);
 
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_publish_msg_args __user *)arg, &publish_msg_args, sizeof(publish_msg_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &publish_msg_args, sizeof(publish_msg_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long take_msg_cmd(unsigned long arg)
+static long take_msg_cmd(union ioctl_take_msg_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_take_msg_args take_args;
-  if (copy_from_user(&take_args, (union ioctl_take_msg_args __user *)arg, sizeof(take_args)))
-    return -EFAULT;
+  if (copy_from_user(&take_args, arg, sizeof(take_args))) return -EFAULT;
   if (take_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(take_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2488,8 +2459,8 @@ static long take_msg_cmd(unsigned long arg)
   }
 
   ret = agnocast_ioctl_take_msg(
-    topic_name_buf, ipc_ns, take_args.subscriber_id, take_args.allow_same_message, pub_shm_infos,
-    pub_shm_info_size, &take_args);
+    topic_name_buf, current->nsproxy->ipc_ns, take_args.subscriber_id, take_args.allow_same_message,
+    pub_shm_infos, pub_shm_info_size, &take_args);
   kfree(topic_name_buf);
 
   if (ret == 0 && take_args.ret_pub_shm_num > 0) {
@@ -2503,21 +2474,16 @@ static long take_msg_cmd(unsigned long arg)
   kfree(pub_shm_infos);
 
   if (ret == 0) {
-    if (copy_to_user((union ioctl_take_msg_args __user *)arg, &take_args, sizeof(take_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &take_args, sizeof(take_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_subscriber_num_cmd(unsigned long arg)
+static long get_subscriber_num_cmd(union ioctl_get_subscriber_num_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_get_subscriber_num_args get_subscriber_num_args;
-  if (copy_from_user(
-        &get_subscriber_num_args, (union ioctl_get_subscriber_num_args __user *)arg,
-        sizeof(get_subscriber_num_args)))
+  if (copy_from_user(&get_subscriber_num_args, arg, sizeof(get_subscriber_num_args)))
     return -EFAULT;
   if (get_subscriber_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(get_subscriber_num_args.topic_name.len + 1, GFP_KERNEL);
@@ -2529,24 +2495,18 @@ static long get_subscriber_num_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[get_subscriber_num_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_get_subscriber_num(topic_name_buf, ipc_ns, pid, &get_subscriber_num_args);
+  ret = agnocast_ioctl_get_subscriber_num(
+    topic_name_buf, current->nsproxy->ipc_ns, current->tgid, &get_subscriber_num_args);
   kfree(topic_name_buf);
-  if (copy_to_user(
-        (union ioctl_get_subscriber_num_args __user *)arg, &get_subscriber_num_args,
-        sizeof(get_subscriber_num_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_subscriber_num_args, sizeof(get_subscriber_num_args))) return -EFAULT;
   return ret;
 }
 
-static long get_publisher_num_cmd(unsigned long arg)
+static long get_publisher_num_cmd(union ioctl_get_publisher_num_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_get_publisher_num_args get_publisher_num_args;
-  if (copy_from_user(
-        &get_publisher_num_args, (union ioctl_get_publisher_num_args __user *)arg,
-        sizeof(get_publisher_num_args)))
-    return -EFAULT;
+  if (copy_from_user(&get_publisher_num_args, arg, sizeof(get_publisher_num_args))) return -EFAULT;
   if (get_publisher_num_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(get_publisher_num_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2557,24 +2517,18 @@ static long get_publisher_num_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[get_publisher_num_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_get_publisher_num(topic_name_buf, ipc_ns, &get_publisher_num_args);
+  ret = agnocast_ioctl_get_publisher_num(
+    topic_name_buf, current->nsproxy->ipc_ns, &get_publisher_num_args);
   kfree(topic_name_buf);
-  if (copy_to_user(
-        (union ioctl_get_publisher_num_args __user *)arg, &get_publisher_num_args,
-        sizeof(get_publisher_num_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_publisher_num_args, sizeof(get_publisher_num_args))) return -EFAULT;
   return ret;
 }
 
-static long get_exit_process_cmd(unsigned long arg)
+static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_get_exit_process_args get_exit_process_args;
-  if (copy_from_user(
-        &get_exit_process_args, (struct ioctl_get_exit_process_args __user *)arg,
-        sizeof(get_exit_process_args)))
-    return -EFAULT;
+  if (copy_from_user(&get_exit_process_args, arg, sizeof(get_exit_process_args))) return -EFAULT;
 
   uint32_t mq_buf_size = get_exit_process_args.subscription_mq_info_buffer_size;
   if (mq_buf_size > MAX_SUBSCRIPTION_NUM_PER_PROCESS) return -EINVAL;
@@ -2590,7 +2544,7 @@ static long get_exit_process_cmd(unsigned long arg)
 
   pid_t global_pid = -1;
   agnocast_ioctl_get_exit_process(
-    ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
+    current->nsproxy->ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
 
   // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
   // for the next poll (agnocast_commit_exit_process is not called).
@@ -2607,51 +2561,39 @@ static long get_exit_process_cmd(unsigned long arg)
 
   // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.
-  if (copy_to_user(
-        (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
-        sizeof(get_exit_process_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_exit_process_args, sizeof(get_exit_process_args))) return -EFAULT;
 
   // Commit: delete copied entries and free proc_info. Safe because user-space already
   // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
   bool daemon_should_exit = false;
   agnocast_commit_exit_process(
-    ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+    current->nsproxy->ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num,
+    &daemon_should_exit);
 
   // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
   // alive one extra poll cycle — no resource leak.
-  if (copy_to_user(
-        &((struct ioctl_get_exit_process_args __user *)arg)->ret_daemon_should_exit,
-        &daemon_should_exit, sizeof(daemon_should_exit)))
+  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit)))
     return -EFAULT;
   return ret;
 }
 
-static long get_topic_list_cmd(unsigned long arg)
+static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_topic_list_args topic_list_args;
-  if (copy_from_user(
-        &topic_list_args, (union ioctl_topic_list_args __user *)arg, sizeof(topic_list_args)))
-    return -EFAULT;
-  ret = agnocast_ioctl_get_topic_list(ipc_ns, &topic_list_args);
+  if (copy_from_user(&topic_list_args, arg, sizeof(topic_list_args))) return -EFAULT;
+  ret = agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, &topic_list_args);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_topic_list_args __user *)arg, &topic_list_args, sizeof(topic_list_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &topic_list_args, sizeof(topic_list_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_node_subscriber_topics_cmd(unsigned long arg)
+static long get_node_subscriber_topics_cmd(union ioctl_node_info_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_node_info_args node_info_sub_args;
-  if (copy_from_user(
-        &node_info_sub_args, (union ioctl_node_info_args __user *)arg, sizeof(node_info_sub_args)))
-    return -EFAULT;
+  if (copy_from_user(&node_info_sub_args, arg, sizeof(node_info_sub_args))) return -EFAULT;
   if (node_info_sub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) return -EINVAL;
   char * node_name_buf = kmalloc(node_info_sub_args.node_name.len + 1, GFP_KERNEL);
   if (!node_name_buf) return -ENOMEM;
@@ -2662,25 +2604,20 @@ static long get_node_subscriber_topics_cmd(unsigned long arg)
     return -EFAULT;
   }
   node_name_buf[node_info_sub_args.node_name.len] = '\0';
-  ret = agnocast_ioctl_get_node_subscriber_topics(ipc_ns, node_name_buf, &node_info_sub_args);
+  ret = agnocast_ioctl_get_node_subscriber_topics(
+    current->nsproxy->ipc_ns, node_name_buf, &node_info_sub_args);
   kfree(node_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_node_info_args __user *)arg, &node_info_sub_args,
-          sizeof(node_info_sub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &node_info_sub_args, sizeof(node_info_sub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_node_publisher_topics_cmd(unsigned long arg)
+static long get_node_publisher_topics_cmd(union ioctl_node_info_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_node_info_args node_info_pub_args;
-  if (copy_from_user(
-        &node_info_pub_args, (union ioctl_node_info_args __user *)arg, sizeof(node_info_pub_args)))
-    return -EFAULT;
+  if (copy_from_user(&node_info_pub_args, arg, sizeof(node_info_pub_args))) return -EFAULT;
   if (node_info_pub_args.node_name.len >= NODE_NAME_BUFFER_SIZE) return -EINVAL;
   char * node_name_buf = kmalloc(node_info_pub_args.node_name.len + 1, GFP_KERNEL);
   if (!node_name_buf) return -ENOMEM;
@@ -2691,26 +2628,20 @@ static long get_node_publisher_topics_cmd(unsigned long arg)
     return -EFAULT;
   }
   node_name_buf[node_info_pub_args.node_name.len] = '\0';
-  ret = agnocast_ioctl_get_node_publisher_topics(ipc_ns, node_name_buf, &node_info_pub_args);
+  ret = agnocast_ioctl_get_node_publisher_topics(
+    current->nsproxy->ipc_ns, node_name_buf, &node_info_pub_args);
   kfree(node_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_node_info_args __user *)arg, &node_info_pub_args,
-          sizeof(node_info_pub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &node_info_pub_args, sizeof(node_info_pub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_topic_subscriber_info_cmd(unsigned long arg)
+static long get_topic_subscriber_info_cmd(union ioctl_topic_info_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_topic_info_args topic_info_sub_args;
-  if (copy_from_user(
-        &topic_info_sub_args, (union ioctl_topic_info_args __user *)arg,
-        sizeof(topic_info_sub_args)))
-    return -EFAULT;
+  if (copy_from_user(&topic_info_sub_args, arg, sizeof(topic_info_sub_args))) return -EFAULT;
   if (topic_info_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(topic_info_sub_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2721,26 +2652,20 @@ static long get_topic_subscriber_info_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[topic_info_sub_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_get_topic_subscriber_info(topic_name_buf, ipc_ns, &topic_info_sub_args);
+  ret = agnocast_ioctl_get_topic_subscriber_info(
+    topic_name_buf, current->nsproxy->ipc_ns, &topic_info_sub_args);
   kfree(topic_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_topic_info_args __user *)arg, &topic_info_sub_args,
-          sizeof(topic_info_sub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &topic_info_sub_args, sizeof(topic_info_sub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_topic_publisher_info_cmd(unsigned long arg)
+static long get_topic_publisher_info_cmd(union ioctl_topic_info_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   union ioctl_topic_info_args topic_info_pub_args;
-  if (copy_from_user(
-        &topic_info_pub_args, (union ioctl_topic_info_args __user *)arg,
-        sizeof(topic_info_pub_args)))
-    return -EFAULT;
+  if (copy_from_user(&topic_info_pub_args, arg, sizeof(topic_info_pub_args))) return -EFAULT;
   if (topic_info_pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(topic_info_pub_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2751,26 +2676,20 @@ static long get_topic_publisher_info_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[topic_info_pub_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_get_topic_publisher_info(topic_name_buf, ipc_ns, &topic_info_pub_args);
+  ret = agnocast_ioctl_get_topic_publisher_info(
+    topic_name_buf, current->nsproxy->ipc_ns, &topic_info_pub_args);
   kfree(topic_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (union ioctl_topic_info_args __user *)arg, &topic_info_pub_args,
-          sizeof(topic_info_pub_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &topic_info_pub_args, sizeof(topic_info_pub_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_subscriber_qos_cmd(unsigned long arg)
+static long get_subscriber_qos_cmd(struct ioctl_get_subscriber_qos_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_get_subscriber_qos_args get_sub_qos_args;
-  if (copy_from_user(
-        &get_sub_qos_args, (struct ioctl_get_subscriber_qos_args __user *)arg,
-        sizeof(get_sub_qos_args)))
-    return -EFAULT;
+  if (copy_from_user(&get_sub_qos_args, arg, sizeof(get_sub_qos_args))) return -EFAULT;
   if (get_sub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(get_sub_qos_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2782,26 +2701,19 @@ static long get_subscriber_qos_cmd(unsigned long arg)
   }
   topic_name_buf[get_sub_qos_args.topic_name.len] = '\0';
   ret = agnocast_ioctl_get_subscriber_qos(
-    topic_name_buf, ipc_ns, get_sub_qos_args.subscriber_id, &get_sub_qos_args);
+    topic_name_buf, current->nsproxy->ipc_ns, get_sub_qos_args.subscriber_id, &get_sub_qos_args);
   kfree(topic_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (struct ioctl_get_subscriber_qos_args __user *)arg, &get_sub_qos_args,
-          sizeof(get_sub_qos_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &get_sub_qos_args, sizeof(get_sub_qos_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long get_publisher_qos_cmd(unsigned long arg)
+static long get_publisher_qos_cmd(struct ioctl_get_publisher_qos_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_get_publisher_qos_args get_pub_qos_args;
-  if (copy_from_user(
-        &get_pub_qos_args, (struct ioctl_get_publisher_qos_args __user *)arg,
-        sizeof(get_pub_qos_args)))
-    return -EFAULT;
+  if (copy_from_user(&get_pub_qos_args, arg, sizeof(get_pub_qos_args))) return -EFAULT;
   if (get_pub_qos_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(get_pub_qos_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2813,23 +2725,19 @@ static long get_publisher_qos_cmd(unsigned long arg)
   }
   topic_name_buf[get_pub_qos_args.topic_name.len] = '\0';
   ret = agnocast_ioctl_get_publisher_qos(
-    topic_name_buf, ipc_ns, get_pub_qos_args.publisher_id, &get_pub_qos_args);
+    topic_name_buf, current->nsproxy->ipc_ns, get_pub_qos_args.publisher_id, &get_pub_qos_args);
   kfree(topic_name_buf);
   if (ret == 0) {
-    if (copy_to_user(
-          (struct ioctl_get_publisher_qos_args __user *)arg, &get_pub_qos_args,
-          sizeof(get_pub_qos_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &get_pub_qos_args, sizeof(get_pub_qos_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long remove_subscriber_cmd(unsigned long arg)
+static long remove_subscriber_cmd(struct ioctl_remove_subscriber_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_remove_subscriber_args remove_subscriber_args;
-  if (copy_from_user(&remove_subscriber_args, (void __user *)arg, sizeof(remove_subscriber_args))) {
+  if (copy_from_user(&remove_subscriber_args, arg, sizeof(remove_subscriber_args))) {
     return -EFAULT;
   }
   if (remove_subscriber_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
@@ -2842,18 +2750,17 @@ static long remove_subscriber_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[remove_subscriber_args.topic_name.len] = '\0';
-  ret =
-    agnocast_ioctl_remove_subscriber(topic_name_buf, ipc_ns, remove_subscriber_args.subscriber_id);
+  ret = agnocast_ioctl_remove_subscriber(
+    topic_name_buf, current->nsproxy->ipc_ns, remove_subscriber_args.subscriber_id);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long remove_publisher_cmd(unsigned long arg)
+static long remove_publisher_cmd(struct ioctl_remove_publisher_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_remove_publisher_args remove_publisher_args;
-  if (copy_from_user(&remove_publisher_args, (void __user *)arg, sizeof(remove_publisher_args))) {
+  if (copy_from_user(&remove_publisher_args, arg, sizeof(remove_publisher_args))) {
     return -EFAULT;
   }
   if (remove_publisher_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
@@ -2866,18 +2773,17 @@ static long remove_publisher_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[remove_publisher_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_remove_publisher(topic_name_buf, ipc_ns, remove_publisher_args.publisher_id);
+  ret = agnocast_ioctl_remove_publisher(
+    topic_name_buf, current->nsproxy->ipc_ns, remove_publisher_args.publisher_id);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long add_bridge_cmd(unsigned long arg)
+static long add_bridge_cmd(struct ioctl_add_bridge_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_add_bridge_args bridge_args;
-  if (copy_from_user(&bridge_args, (void __user *)arg, sizeof(bridge_args))) return -EFAULT;
+  if (copy_from_user(&bridge_args, arg, sizeof(bridge_args))) return -EFAULT;
   if (bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(bridge_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2887,23 +2793,20 @@ static long add_bridge_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[bridge_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_add_bridge(topic_name_buf, pid, bridge_args.is_r2a, ipc_ns, &bridge_args);
+  ret = agnocast_ioctl_add_bridge(
+    topic_name_buf, current->tgid, bridge_args.is_r2a, current->nsproxy->ipc_ns, &bridge_args);
   kfree(topic_name_buf);
   if (ret == 0 || ret == -EEXIST) {
-    if (copy_to_user((struct ioctl_add_bridge_args __user *)arg, &bridge_args, sizeof(bridge_args)))
-      return -EFAULT;
+    if (copy_to_user(arg, &bridge_args, sizeof(bridge_args))) return -EFAULT;
   }
   return ret;
 }
 
-static long remove_bridge_cmd(unsigned long arg)
+static long remove_bridge_cmd(struct ioctl_remove_bridge_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_remove_bridge_args remove_bridge_args;
-  if (copy_from_user(&remove_bridge_args, (void __user *)arg, sizeof(remove_bridge_args)))
-    return -EFAULT;
+  if (copy_from_user(&remove_bridge_args, arg, sizeof(remove_bridge_args))) return -EFAULT;
   if (remove_bridge_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(remove_bridge_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2914,33 +2817,29 @@ static long remove_bridge_cmd(unsigned long arg)
     return -EFAULT;
   }
   topic_name_buf[remove_bridge_args.topic_name.len] = '\0';
-  ret = agnocast_ioctl_remove_bridge(topic_name_buf, pid, remove_bridge_args.is_r2a, ipc_ns);
+  ret = agnocast_ioctl_remove_bridge(
+    topic_name_buf, current->tgid, remove_bridge_args.is_r2a, current->nsproxy->ipc_ns);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long check_and_request_bridge_shutdown_cmd(unsigned long arg)
+static long check_and_request_bridge_shutdown_cmd(
+  struct ioctl_check_and_request_bridge_shutdown_args __user * arg)
 {
   int ret = 0;
-  const pid_t pid = current->tgid;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_check_and_request_bridge_shutdown_args shutdown_args;
   memset(&shutdown_args, 0, sizeof(shutdown_args));
-  ret = agnocast_ioctl_check_and_request_bridge_shutdown(pid, ipc_ns, &shutdown_args);
-  if (copy_to_user(
-        (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg, &shutdown_args,
-        sizeof(shutdown_args)))
-    return -EFAULT;
+  ret = agnocast_ioctl_check_and_request_bridge_shutdown(
+    current->tgid, current->nsproxy->ipc_ns, &shutdown_args);
+  if (copy_to_user(arg, &shutdown_args, sizeof(shutdown_args))) return -EFAULT;
   return ret;
 }
 
-static long set_ros2_subscriber_num_cmd(unsigned long arg)
+static long set_ros2_subscriber_num_cmd(struct ioctl_set_ros2_subscriber_num_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_set_ros2_subscriber_num_args set_ros2_sub_args;
-  if (copy_from_user(&set_ros2_sub_args, (void __user *)arg, sizeof(set_ros2_sub_args)))
-    return -EFAULT;
+  if (copy_from_user(&set_ros2_sub_args, arg, sizeof(set_ros2_sub_args))) return -EFAULT;
   if (set_ros2_sub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(set_ros2_sub_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2952,18 +2851,16 @@ static long set_ros2_subscriber_num_cmd(unsigned long arg)
   }
   topic_name_buf[set_ros2_sub_args.topic_name.len] = '\0';
   ret = agnocast_ioctl_set_ros2_subscriber_num(
-    topic_name_buf, ipc_ns, set_ros2_sub_args.ros2_subscriber_num);
+    topic_name_buf, current->nsproxy->ipc_ns, set_ros2_sub_args.ros2_subscriber_num);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long set_ros2_publisher_num_cmd(unsigned long arg)
+static long set_ros2_publisher_num_cmd(struct ioctl_set_ros2_publisher_num_args __user * arg)
 {
   int ret = 0;
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
   struct ioctl_set_ros2_publisher_num_args set_ros2_pub_args;
-  if (copy_from_user(&set_ros2_pub_args, (void __user *)arg, sizeof(set_ros2_pub_args)))
-    return -EFAULT;
+  if (copy_from_user(&set_ros2_pub_args, arg, sizeof(set_ros2_pub_args))) return -EFAULT;
   if (set_ros2_pub_args.topic_name.len >= TOPIC_NAME_BUFFER_SIZE) return -EINVAL;
   char * topic_name_buf = kmalloc(set_ros2_pub_args.topic_name.len + 1, GFP_KERNEL);
   if (!topic_name_buf) return -ENOMEM;
@@ -2975,75 +2872,72 @@ static long set_ros2_publisher_num_cmd(unsigned long arg)
   }
   topic_name_buf[set_ros2_pub_args.topic_name.len] = '\0';
   ret = agnocast_ioctl_set_ros2_publisher_num(
-    topic_name_buf, ipc_ns, set_ros2_pub_args.ros2_publisher_num);
+    topic_name_buf, current->nsproxy->ipc_ns, set_ros2_pub_args.ros2_publisher_num);
   kfree(topic_name_buf);
   return ret;
 }
 
-static long notify_bridge_shutdown_cmd(unsigned long arg)
+static long notify_bridge_shutdown_cmd(void)
 {
-  int ret = 0;
-  const pid_t pid = current->tgid;
-  (void)arg;
-  ret = agnocast_ioctl_notify_bridge_shutdown(pid);
-  return ret;
+  return agnocast_ioctl_notify_bridge_shutdown(current->tgid);
 }
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 {
   switch (cmd) {
     case AGNOCAST_GET_VERSION_CMD:
-      return get_version_cmd(arg);
+      return get_version_cmd((struct ioctl_get_version_args __user *)arg);
     case AGNOCAST_ADD_PROCESS_CMD:
-      return add_process_cmd(arg);
+      return add_process_cmd((union ioctl_add_process_args __user *)arg);
     case AGNOCAST_ADD_SUBSCRIBER_CMD:
-      return add_subscriber_cmd(arg);
+      return add_subscriber_cmd((union ioctl_add_subscriber_args __user *)arg);
     case AGNOCAST_ADD_PUBLISHER_CMD:
-      return add_publisher_cmd(arg);
+      return add_publisher_cmd((union ioctl_add_publisher_args __user *)arg);
     case AGNOCAST_RELEASE_SUB_REF_CMD:
-      return release_sub_ref_cmd(arg);
+      return release_sub_ref_cmd((struct ioctl_update_entry_args __user *)arg);
     case AGNOCAST_RECEIVE_MSG_CMD:
-      return receive_msg_cmd(arg);
+      return receive_msg_cmd((union ioctl_receive_msg_args __user *)arg);
     case AGNOCAST_PUBLISH_MSG_CMD:
-      return publish_msg_cmd(arg);
+      return publish_msg_cmd((union ioctl_publish_msg_args __user *)arg);
     case AGNOCAST_TAKE_MSG_CMD:
-      return take_msg_cmd(arg);
+      return take_msg_cmd((union ioctl_take_msg_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_NUM_CMD:
-      return get_subscriber_num_cmd(arg);
+      return get_subscriber_num_cmd((union ioctl_get_subscriber_num_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_NUM_CMD:
-      return get_publisher_num_cmd(arg);
+      return get_publisher_num_cmd((union ioctl_get_publisher_num_args __user *)arg);
     case AGNOCAST_GET_EXIT_PROCESS_CMD:
-      return get_exit_process_cmd(arg);
+      return get_exit_process_cmd((struct ioctl_get_exit_process_args __user *)arg);
     case AGNOCAST_GET_TOPIC_LIST_CMD:
-      return get_topic_list_cmd(arg);
+      return get_topic_list_cmd((union ioctl_topic_list_args __user *)arg);
     case AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD:
-      return get_node_subscriber_topics_cmd(arg);
+      return get_node_subscriber_topics_cmd((union ioctl_node_info_args __user *)arg);
     case AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD:
-      return get_node_publisher_topics_cmd(arg);
+      return get_node_publisher_topics_cmd((union ioctl_node_info_args __user *)arg);
     case AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD:
-      return get_topic_subscriber_info_cmd(arg);
+      return get_topic_subscriber_info_cmd((union ioctl_topic_info_args __user *)arg);
     case AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD:
-      return get_topic_publisher_info_cmd(arg);
+      return get_topic_publisher_info_cmd((union ioctl_topic_info_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_QOS_CMD:
-      return get_subscriber_qos_cmd(arg);
+      return get_subscriber_qos_cmd((struct ioctl_get_subscriber_qos_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_QOS_CMD:
-      return get_publisher_qos_cmd(arg);
+      return get_publisher_qos_cmd((struct ioctl_get_publisher_qos_args __user *)arg);
     case AGNOCAST_REMOVE_SUBSCRIBER_CMD:
-      return remove_subscriber_cmd(arg);
+      return remove_subscriber_cmd((struct ioctl_remove_subscriber_args __user *)arg);
     case AGNOCAST_REMOVE_PUBLISHER_CMD:
-      return remove_publisher_cmd(arg);
+      return remove_publisher_cmd((struct ioctl_remove_publisher_args __user *)arg);
     case AGNOCAST_ADD_BRIDGE_CMD:
-      return add_bridge_cmd(arg);
+      return add_bridge_cmd((struct ioctl_add_bridge_args __user *)arg);
     case AGNOCAST_REMOVE_BRIDGE_CMD:
-      return remove_bridge_cmd(arg);
+      return remove_bridge_cmd((struct ioctl_remove_bridge_args __user *)arg);
     case AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD:
-      return check_and_request_bridge_shutdown_cmd(arg);
+      return check_and_request_bridge_shutdown_cmd(
+        (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg);
     case AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD:
-      return set_ros2_subscriber_num_cmd(arg);
+      return set_ros2_subscriber_num_cmd((struct ioctl_set_ros2_subscriber_num_args __user *)arg);
     case AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD:
-      return set_ros2_publisher_num_cmd(arg);
+      return set_ros2_publisher_num_cmd((struct ioctl_set_ros2_publisher_num_args __user *)arg);
     case AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD:
-      return notify_bridge_shutdown_cmd(arg);
+      return notify_bridge_shutdown_cmd();
     default:
       return -EINVAL;
   }
