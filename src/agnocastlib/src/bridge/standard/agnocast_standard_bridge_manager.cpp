@@ -362,7 +362,7 @@ void StandardBridgeManager::check_active_bridges()
     ioctl_remove_bridge_args args{};
     args.topic_name = {topic_name_view.data(), topic_name_view.size()};
     args.is_r2a = is_r2a;
-    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &args)) {
+    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_BRIDGE_CMD, &args) != 0) {
       RCLCPP_ERROR(
         logger_, "AGNOCAST_REMOVE_BRIDGE_CMD failed for key '%s': %s", key.c_str(),
         strerror(errno));
