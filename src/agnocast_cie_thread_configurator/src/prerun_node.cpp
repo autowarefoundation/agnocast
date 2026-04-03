@@ -15,9 +15,7 @@ PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node"
 {
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
-  auto cbg_qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000))
-                   .reliable()
-                   .transient_local();
+  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
   auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
