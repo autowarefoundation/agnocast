@@ -110,7 +110,7 @@ create_agnocast_client_publisher()
     // Note: agnocast Publisher does not support keep_all(), so KeepLast is used here
     // (unlike the rclcpp variant which uses keep_all()).
     "/agnocast_cie_thread_configurator/callback_group_info",
-    rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).transient_local());
+    rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).reliable().transient_local());
   return publisher;
 }
 
