@@ -1,3 +1,10 @@
+agnocast-kmod-v2.3.3 (2.3.3-1) noble; urgency=medium
+
+  * fix: postinst to avoid package to be destroyed (#1206 <https://github.com/tier4/agnocast/issues/1206>)
+  * fix(kmod): add missing linux/module.h include for older kernels (#1202 <https://github.com/tier4/agnocast/issues/1202>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Thu, 02 Apr 2026 13:45:00 +0900
+
 agnocast-kmod-v2.3.2 (2.3.2-2) noble; urgency=medium
 
   * fix(kmod): prerm script to run dkms remove on package removal/upgrade (#1193 <https://github.com/tier4/agnocast/issues/1193>)
