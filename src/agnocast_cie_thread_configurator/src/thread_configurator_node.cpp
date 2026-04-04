@@ -103,13 +103,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
-  auto qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000))
-               .reliable()
-               .transient_local();
+  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
+  // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
+  // so transient_local is ineffective.
+  auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
   non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-    "/agnocast_cie_thread_configurator/non_ros_thread_info", qos,
+    "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
     [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
     });
@@ -117,7 +118,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this,
        default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
@@ -133,7 +134,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     nodes_for_each_domain_.push_back(node);
 
     auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(domain_id, msg);
       });
