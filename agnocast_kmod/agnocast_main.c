@@ -14,6 +14,7 @@
 #include <linux/version.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION(VERSION);
 
 static int major;
 static struct class * agnocast_class;
