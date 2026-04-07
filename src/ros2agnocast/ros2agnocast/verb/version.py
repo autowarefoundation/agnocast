@@ -1,4 +1,5 @@
 import ctypes
+import ctypes.util
 import os
 
 from ament_index_python.packages import get_package_prefix
@@ -94,12 +95,22 @@ class VersionVerb(VerbExtension):
         lib_path = None
         not_in_ld_preload = False
         ld_preload = os.environ.get('LD_PRELOAD', '')
-        for path in ld_preload.split(':'):
-            if 'libagnocast_heaphook.so' in path:
-                lib_path = path
+        for entry in ld_preload.split(':'):
+            if 'libagnocast_heaphook.so' in entry:
+                if os.path.isabs(entry) and os.path.exists(entry):
+                    lib_path = entry
+                else:
+                    # Bare soname (e.g., "libagnocast_heaphook.so") — resolve via
+                    # the dynamic linker search path.
+                    resolved = ctypes.util.find_library('agnocast_heaphook')
+                    if resolved:
+                        lib_path = resolved
+                    else:
+                        # find_library returns the soname; try loading directly
+                        lib_path = entry
                 break
 
-        if lib_path is None or not os.path.exists(lib_path):
+        if lib_path is None:
             not_in_ld_preload = True
             # LD_PRELOAD not set; fall back to the default install path.
             ros_distro = os.environ.get('ROS_DISTRO', '')
