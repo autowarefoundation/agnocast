@@ -69,6 +69,8 @@ class VersionVerb(VerbExtension):
             return '(not available - module not loaded?)'
         except OSError:
             return '(not available - ioctl wrapper not found)'
+        except AttributeError:
+            return '(not available - ioctl wrapper is incompatible version)'
 
     def _get_agnocastlib_version(self):
         lib_path = _get_lib_path('agnocastlib', 'libagnocast.so')
@@ -84,6 +86,8 @@ class VersionVerb(VerbExtension):
             return '(not available)'
         except OSError:
             return '(not available - library not found)'
+        except AttributeError:
+            return '(not available - agnocastlib is incompatible version)'
 
     def _get_heaphook_version(self):
         # Find heaphook from LD_PRELOAD, which is how it's loaded at runtime.
@@ -125,6 +129,8 @@ class VersionVerb(VerbExtension):
             return '(not available)'
         except OSError:
             return '(not available - library not found)'
+        except AttributeError:
+            return '(not available - heaphook is incompatible version)'
 
     def _get_ros2agnocast_version(self):
         try:
