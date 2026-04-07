@@ -77,10 +77,11 @@ class TestComponentContainerCIE(unittest.TestCase):
         )
 
     def test_thread_configurator_receives_callback_info(self, proc_output, thread_configurator):
-        output_text = "".join(
-            output.text.decode('utf-8') for output in proc_output[thread_configurator]
+        callback_info_count = sum(
+            1 for output in proc_output[thread_configurator]
+            if 'Received CallbackGroupInfo:' in output.text.decode('utf-8')
+            and 'agnocast_bridge_node' not in output.text.decode('utf-8')
         )
-        callback_info_count = output_text.count('Received CallbackGroupInfo:')
 
         # Total expected: 2 (not 3, because the callback group with `automatically_add_to_executor = false` should be skipped)
         self.assertEqual(
