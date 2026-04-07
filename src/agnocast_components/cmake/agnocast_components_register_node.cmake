@@ -76,9 +76,13 @@ macro(agnocast_components_register_node target)
   set(_path "lib")
   set(library_name "$<TARGET_FILE_NAME:${target}>")
 
-  # Register with ament resource index via rclcpp_components properties.
-  # This allows agnocast_components_register_node and rclcpp_components_register_node
-  # to coexist in the same package without conflicting file(GENERATE) calls.
+  # Write node entries into the same directory properties that rclcpp_components uses.
+  # rclcpp_components_package_hook reads these properties via get_property(DIRECTORY ...)
+  # and calls ament_index_register_resource() once for all registered nodes.
+  # By sharing these properties instead of maintaining our own, we avoid duplicate
+  # file(GENERATE) calls on the same ament index file when both
+  # agnocast_components_register_node and rclcpp_components_register_node are used
+  # in the same package.
   set_property(
     DIRECTORY "${PROJECT_SOURCE_DIR}"
     APPEND_STRING PROPERTY _RCLCPP_COMPONENTS_${resource_index}__NODES
