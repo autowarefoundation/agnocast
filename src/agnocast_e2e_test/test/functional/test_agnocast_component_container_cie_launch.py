@@ -26,13 +26,13 @@ def generate_test_description():
         executable='agnocast_component_container_cie',
         composable_node_descriptions=[
             ComposableNode(
-                package='agnocastlib',
-                plugin='agnocastlib_test::TestPublisherComponent',
+                package='agnocast_e2e_test',
+                plugin='agnocast_e2e_test::TestPublisherComponent',
                 name='test_publisher_node',
             ),
             ComposableNode(
-                package='agnocastlib',
-                plugin='agnocastlib_test::TestSubscriptionComponent',
+                package='agnocast_e2e_test',
+                plugin='agnocast_e2e_test::TestSubscriptionComponent',
                 name='test_subscription_node',
             )
         ],
