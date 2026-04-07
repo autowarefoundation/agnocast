@@ -2,7 +2,6 @@ import os
 import unittest
 
 import launch_testing
-import launch_testing.asserts
 import launch_testing.markers
 import yaml
 from launch import LaunchDescription
@@ -151,25 +150,26 @@ class Test2To2(unittest.TestCase):
         if not nodes:
             return
 
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=container_proc) as cm:
-            proc_output = "".join(cm._output)
+        output_text = "".join(
+            output.text.decode('utf-8') for output in proc_output[container_proc]
+        )
 
-            # The display order is not guaranteed, so the message order is not checked.
-            for node in nodes:
-                if node == 'p':
-                    prefix = f"[test_talker_node_{self.pub_i_}]: "
-                    for i in range(PUB_NUM):
-                        self.assertEqual(proc_output.count(f"{prefix}Publishing {i}."), 1)
-                    self.assertEqual(proc_output.count(
-                        f"{prefix}All messages published. Shutting down."), 1)
-                    self.pub_i_ += 1
-                else:  # s
-                    prefix = f"[test_listener_node_{self.sub_i_}]: "
-                    for i in range(PUB_NUM):
-                        self.assertEqual(proc_output.count(f"{prefix}Receiving {i}."), 2)
-                    self.assertEqual(proc_output.count(
-                        f"{prefix}All messages received. Shutting down."), 1)
-                    self.sub_i_ += 1
+        # The display order is not guaranteed, so the message order is not checked.
+        for node in nodes:
+            if node == 'p':
+                prefix = f"[test_talker_node_{self.pub_i_}]: "
+                for i in range(PUB_NUM):
+                    self.assertEqual(output_text.count(f"{prefix}Publishing {i}."), 1)
+                self.assertEqual(output_text.count(
+                    f"{prefix}All messages published. Shutting down."), 1)
+                self.pub_i_ += 1
+            else:  # s
+                prefix = f"[test_listener_node_{self.sub_i_}]: "
+                for i in range(PUB_NUM):
+                    self.assertEqual(output_text.count(f"{prefix}Receiving {i}."), 2)
+                self.assertEqual(output_text.count(
+                    f"{prefix}All messages received. Shutting down."), 1)
+                self.sub_i_ += 1
 
     def test_all_container(self, proc_output, container0, container1, container2, container3):
         nodes = CONFIG['container0']

@@ -77,15 +77,16 @@ class TestComponentContainerCIE(unittest.TestCase):
         )
 
     def test_thread_configurator_receives_callback_info(self, proc_output, thread_configurator):
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=thread_configurator) as cm:
-            output_text = "".join(cm._output)
-            callback_info_count = output_text.count('Received CallbackGroupInfo:')
+        output_text = "".join(
+            output.text.decode('utf-8') for output in proc_output[thread_configurator]
+        )
+        callback_info_count = output_text.count('Received CallbackGroupInfo:')
 
-            # Total expected: 2 (not 3, because the callback group with `automatically_add_to_executor = false` should be skipped)
-            self.assertEqual(
-                callback_info_count, 2,
-                f"Expected exactly 2 'Received CallbackGroupInfo:' messages, but got {callback_info_count}"
-            )
+        # Total expected: 2 (not 3, because the callback group with `automatically_add_to_executor = false` should be skipped)
+        self.assertEqual(
+            callback_info_count, 2,
+            f"Expected exactly 2 'Received CallbackGroupInfo:' messages, but got {callback_info_count}"
+        )
 
     def test_thread_configurator_receives_non_ros_thread_info(self, proc_output, thread_configurator):
         # spawn_non_ros2_thread creates a fresh rclcpp context with its own DDS participant,
@@ -96,15 +97,16 @@ class TestComponentContainerCIE(unittest.TestCase):
             process=thread_configurator
         )
 
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=thread_configurator) as cm:
-            output_text = "".join(cm._output)
-            non_ros_thread_info_count = output_text.count('Received NonRosThreadInfo:')
+        output_text = "".join(
+            output.text.decode('utf-8') for output in proc_output[thread_configurator]
+        )
+        non_ros_thread_info_count = output_text.count('Received NonRosThreadInfo:')
 
-            # Expected: 1 (for test_non_ros_worker)
-            self.assertEqual(
-                non_ros_thread_info_count, 1,
-                f"Expected exactly 1 'Received NonRosThreadInfo:' message, but got {non_ros_thread_info_count}"
-            )
+        # Expected: 1 (for test_non_ros_worker)
+        self.assertEqual(
+            non_ros_thread_info_count, 1,
+            f"Expected exactly 1 'Received NonRosThreadInfo:' message, but got {non_ros_thread_info_count}"
+        )
 
 
 @launch_testing.post_shutdown_test()
