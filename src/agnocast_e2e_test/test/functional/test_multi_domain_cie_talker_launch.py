@@ -12,10 +12,10 @@ import launch_testing.asserts
 def generate_test_description():
     prerun_node = launch_ros.actions.Node(
         package='agnocast_cie_thread_configurator',
-        executable='prerun_node',
+        executable='thread_configurator_node',
         name='prerun_node',
         output='screen',
-        parameters=[{'domains': [0, 1]}],
+        arguments=['--prerun', '--domains', '0,1'],
         additional_env={'ROS_DOMAIN_ID': '0'}
     )
 
