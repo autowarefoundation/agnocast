@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(agnocastlib REQUIRED)
+find_package(agnocast_components REQUIRED)
 find_package(agnocast_cie_thread_configurator REQUIRED)
 
 add_library(test_talker_component SHARED src/test_publisher.cpp)
@@ -65,16 +66,18 @@ rclcpp_components_register_node(
 add_library(test_cie_publisher_component SHARED src/test_publisher_component.cpp)
 ament_target_dependencies(test_cie_publisher_component rclcpp rclcpp_components std_msgs agnocastlib agnocast_cie_thread_configurator)
 
-rclcpp_components_register_node(test_cie_publisher_component
+agnocast_components_register_node(test_cie_publisher_component
   PLUGIN "agnocast_e2e_test::TestPublisherComponent"
-  EXECUTABLE test_cie_publisher)
+  EXECUTABLE test_cie_publisher
+  EXECUTOR CallbackIsolatedAgnocastExecutor)
 
 add_library(test_cie_subscription_component SHARED src/test_subscription_component.cpp)
 ament_target_dependencies(test_cie_subscription_component rclcpp rclcpp_components std_msgs)
 
-rclcpp_components_register_node(test_cie_subscription_component
+agnocast_components_register_node(test_cie_subscription_component
   PLUGIN "agnocast_e2e_test::TestSubscriptionComponent"
-  EXECUTABLE test_cie_subscriber)
+  EXECUTABLE test_cie_subscriber
+  EXECUTOR CallbackIsolatedAgnocastExecutor)
 
 ament_export_targets(export_test_talker_component)
 install(TARGETS test_talker_component
