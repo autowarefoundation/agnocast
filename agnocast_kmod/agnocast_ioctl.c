@@ -1297,18 +1297,6 @@ int agnocast_ioctl_get_publisher_num(
   return 0;
 }
 
-void agnocast_free_exit_subscription_list(struct process_info * proc_info)
-{
-  struct exit_subscription_entry * entry;
-  struct exit_subscription_entry * tmp_entry;
-  list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
-  {
-    list_del(&entry->list);
-    kfree(entry);
-  }
-  proc_info->exit_subscription_count = 0;
-}
-
 // Two-phase ioctl for exit process cleanup:
 //   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
 //   buffer.
