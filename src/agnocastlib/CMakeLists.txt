@@ -163,7 +163,7 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_message_filters_${PROJECT_NAME} std_msgs message_filters)
   set_tests_properties(test_integration_message_filters_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
-    LABELS "requires_kernel_module"
+    LABELS "requires_kernel_module;requires_heaphook"
   )
 
   # Integration tests (with ioctl mock, no kernel module required)
@@ -192,7 +192,7 @@ if(BUILD_TESTING)
   set_tests_properties(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
-    LABELS "requires_kernel_module"
+    LABELS "requires_kernel_module;requires_heaphook"
   )
 
   # Integration tests for agnocast_heaphook
@@ -209,7 +209,8 @@ if(BUILD_TESTING)
     test/integration/test_agnocast_heaphook.cpp)
   target_link_libraries(test_integration_agnocast_heaphook agnocast)
   set_tests_properties(test_integration_agnocast_heaphook PROPERTIES
-    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:")
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:"
+    LABELS "requires_heaphook")
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
