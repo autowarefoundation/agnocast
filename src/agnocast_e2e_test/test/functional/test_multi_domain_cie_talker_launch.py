@@ -7,8 +7,6 @@ import launch_ros.actions
 import launch_testing
 import launch_testing.actions
 import launch_testing.asserts
-from launch_ros.actions import ComposableNodeContainer
-from launch_ros.descriptions import ComposableNode
 
 
 def generate_test_description():
@@ -21,34 +19,18 @@ def generate_test_description():
         additional_env={'ROS_DOMAIN_ID': '0'}
     )
 
-    container_domain_0 = ComposableNodeContainer(
-        name='test_container_domain_0',
-        namespace='',
-        package='agnocast_components',
-        executable='agnocast_component_container_cie',
-        composable_node_descriptions=[
-            ComposableNode(
-                package='agnocast_e2e_test',
-                plugin='agnocast_e2e_test::TestPublisherComponent',
-                name='test_publisher_domain_0',
-            ),
-        ],
+    node_domain_0 = launch_ros.actions.Node(
+        package='agnocast_e2e_test',
+        executable='test_cie_publisher',
+        name='test_publisher_domain_0',
         output='screen',
         additional_env={'ROS_DOMAIN_ID': '0'}
     )
 
-    container_domain_1 = ComposableNodeContainer(
-        name='test_container_domain_1',
-        namespace='',
-        package='agnocast_components',
-        executable='agnocast_component_container_cie',
-        composable_node_descriptions=[
-            ComposableNode(
-                package='agnocast_e2e_test',
-                plugin='agnocast_e2e_test::TestPublisherComponent',
-                name='test_publisher_domain_1',
-            ),
-        ],
+    node_domain_1 = launch_ros.actions.Node(
+        package='agnocast_e2e_test',
+        executable='test_cie_publisher',
+        name='test_publisher_domain_1',
         output='screen',
         additional_env={'ROS_DOMAIN_ID': '1'}
     )
@@ -59,7 +41,7 @@ def generate_test_description():
             prerun_node,
             launch.actions.TimerAction(
                 period=3.0,
-                actions=[container_domain_0, container_domain_1]
+                actions=[node_domain_0, node_domain_1]
             ),
             launch.actions.TimerAction(
                 period=6.0,
@@ -68,26 +50,26 @@ def generate_test_description():
         ]),
         {
             'prerun_node': prerun_node,
-            'container_domain_0': container_domain_0,
-            'container_domain_1': container_domain_1,
+            'node_domain_0': node_domain_0,
+            'node_domain_1': node_domain_1,
         }
     )
 
 
 class TestMultiDomainCieTalker(unittest.TestCase):
 
-    def test_domain_0_publishes(self, proc_output, container_domain_0):
+    def test_domain_0_publishes(self, proc_output, node_domain_0):
         proc_output.assertWaitFor(
             'Publishing:',
             timeout=10.0,
-            process=container_domain_0
+            process=node_domain_0
         )
 
-    def test_domain_1_publishes(self, proc_output, container_domain_1):
+    def test_domain_1_publishes(self, proc_output, node_domain_1):
         proc_output.assertWaitFor(
             'Publishing:',
             timeout=10.0,
-            process=container_domain_1
+            process=node_domain_1
         )
 
     def test_prerun_receives_callback_info_from_both_domains(self, proc_output, prerun_node):
