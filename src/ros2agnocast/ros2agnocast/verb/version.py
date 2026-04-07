@@ -88,13 +88,25 @@ class VersionVerb(VerbExtension):
     def _get_heaphook_version(self):
         # Find heaphook from LD_PRELOAD, which is how it's loaded at runtime.
         lib_path = None
+        not_in_ld_preload = False
         ld_preload = os.environ.get('LD_PRELOAD', '')
         for path in ld_preload.split(':'):
             if 'libagnocast_heaphook.so' in path:
                 lib_path = path
                 break
+
         if lib_path is None or not os.path.exists(lib_path):
-            return '(not available - libagnocast_heaphook.so not found in LD_PRELOAD)'
+            not_in_ld_preload = True
+            # LD_PRELOAD not set; fall back to the default install path.
+            ros_distro = os.environ.get('ROS_DISTRO', '')
+            if ros_distro:
+                candidate = f'/opt/ros/{ros_distro}/lib/libagnocast_heaphook.so'
+                if os.path.exists(candidate):
+                    lib_path = candidate
+
+        if lib_path is None:
+            return '(not available - library not found)'
+
         # Load with RTLD_LOCAL | RTLD_LAZY to prevent the heaphook's malloc/free
         # symbols from replacing the process-wide allocator.
         try:
@@ -106,7 +118,10 @@ class VersionVerb(VerbExtension):
             lib.agnocast_heaphook_get_version.restype = ctypes.c_char_p
             version = lib.agnocast_heaphook_get_version()
             if version:
-                return version.decode('utf-8')
+                ver = version.decode('utf-8')
+                if not_in_ld_preload:
+                    return f'{ver} (WARN: not in LD_PRELOAD, found at {lib_path})'
+                return ver
             return '(not available)'
         except OSError:
             return '(not available - library not found)'
