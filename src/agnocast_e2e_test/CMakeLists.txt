@@ -132,6 +132,10 @@ install(DIRECTORY test
 if(BUILD_TESTING)
   find_package(launch_testing_ament_cmake REQUIRED)
   add_launch_test(test/functional/test_agnocast_component_container_cie_launch.py TIMEOUT 120)
+  add_launch_test(test/functional/test_multi_domain_cie_talker_launch.py TIMEOUT 120)
+  set_tests_properties(test_functional_test_multi_domain_cie_talker_launch.py PROPERTIES
+    LABELS "requires_kernel_module"
+  )
 endif()
 
 ament_package()
