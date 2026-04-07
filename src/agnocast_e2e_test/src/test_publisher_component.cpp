@@ -8,7 +8,7 @@
 #include <memory>
 #include <thread>
 
-namespace agnocastlib_test
+namespace agnocast_e2e_test
 {
 
 class TestPublisherComponent : public rclcpp::Node
@@ -62,6 +62,6 @@ private:
   std::thread non_ros_thread_;
 };
 
-}  // namespace agnocastlib_test
+}  // namespace agnocast_e2e_test
 
-RCLCPP_COMPONENTS_REGISTER_NODE(agnocastlib_test::TestPublisherComponent)
+RCLCPP_COMPONENTS_REGISTER_NODE(agnocast_e2e_test::TestPublisherComponent)
