@@ -293,20 +293,23 @@ bool StandardBridgeManager::should_remove_bridge(const std::string & topic_name,
 {
   int count = 0;
   bool is_demanded_by_ros2 = false;
-  bool ros2_count_ok = false;
   if (is_r2a) {
     count = get_agnocast_subscriber_count(topic_name).count;
     is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
-    ros2_count_ok = update_ros2_publisher_num(container_node_.get(), topic_name);
+    if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+      RCLCPP_ERROR(
+        logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+    }
   } else {
     count = get_agnocast_publisher_count(topic_name).count;
     is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
-    ros2_count_ok = update_ros2_subscriber_num(container_node_.get(), topic_name);
+    if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+      RCLCPP_ERROR(
+        logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+    }
   }
 
-  if (!ros2_count_ok) {
-    return true;
-  } else if (count <= 0) {
+  if (count <= 0) {
     if (count < 0) {
       RCLCPP_ERROR(
         logger_, "Failed to get connection count for %s. Removing %s bridge.", topic_name.c_str(),
