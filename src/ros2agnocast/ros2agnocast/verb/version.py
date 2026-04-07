@@ -1,9 +1,18 @@
 import ctypes
 import ctypes.util
 import os
+import re
 
 from ament_index_python.packages import get_package_prefix
 from ros2cli.verb import VerbExtension
+
+
+def _parse_semver(version_str):
+    """Parse a version string into (major, minor, patch) tuple, or None on failure."""
+    m = re.match(r'^(\d+)\.(\d+)\.(\d+)$', version_str)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
 
 
 def _get_lib_path(package_name, lib_filename):
@@ -16,6 +25,42 @@ def _get_lib_path(package_name, lib_filename):
     except Exception:
         pass
     return None
+
+
+def _check_version_compatibility(kmod_version, agnocastlib_version, heaphook_version):
+    """Check version compatibility using the same rules as agnocastlib's is_version_consistent.
+
+    Rules:
+      - heaphook and agnocastlib must match exactly (major.minor.patch)
+      - kmod and agnocastlib must share the same major.minor
+    """
+    warnings = []
+
+    # Extract the leading version string (strip trailing warnings like "(WARN: ...)")
+    def extract_version(v):
+        return v.split()[0] if v else v
+
+    lib_ver = _parse_semver(extract_version(agnocastlib_version))
+    heaphook_ver = _parse_semver(extract_version(heaphook_version))
+    kmod_ver = _parse_semver(extract_version(kmod_version))
+
+    if lib_ver and heaphook_ver:
+        if lib_ver != heaphook_ver:
+            warnings.append(
+                'Agnocast Heaphook and Agnocastlib versions must match exactly '
+                '(major.minor.patch). '
+                f'heaphook={extract_version(heaphook_version)}, '
+                f'agnocastlib={extract_version(agnocastlib_version)}')
+
+    if lib_ver and kmod_ver:
+        if lib_ver[:2] != kmod_ver[:2]:
+            warnings.append(
+                'Agnocast Kernel Module and Agnocastlib must share the same '
+                'major.minor version. '
+                f'kmod={extract_version(kmod_version)}, '
+                f'agnocastlib={extract_version(agnocastlib_version)}')
+
+    return warnings
 
 
 class VersionVerb(VerbExtension):
@@ -34,6 +79,13 @@ class VersionVerb(VerbExtension):
         print(f'agnocastlib:       {agnocastlib_version}')
         print(f'agnocast_heaphook: {heaphook_version}')
         print(f'ros2agnocast:      {ros2agnocast_version}')
+
+        # Version compatibility checks (same rules as agnocastlib's is_version_consistent)
+        warnings = _check_version_compatibility(
+            kmod_version, agnocastlib_version, heaphook_version)
+        for w in warnings:
+            print(f'\nWARN: {w}')
+
         return 0
 
     def _get_kmod_version(self):
@@ -66,7 +118,7 @@ class VersionVerb(VerbExtension):
         except OSError:
             return '(not available - ioctl wrapper not found)'
         except AttributeError:
-            return '(not available - ioctl wrapper is incompatible version)'
+            return '(not available - ioctl wrapper is outdated or not installed)'
 
     def _get_agnocastlib_version(self):
         lib_path = _get_lib_path('agnocastlib', 'libagnocast.so')
@@ -83,7 +135,7 @@ class VersionVerb(VerbExtension):
         except OSError:
             return '(not available - library not found)'
         except AttributeError:
-            return '(not available - agnocastlib is incompatible version)'
+            return '(not available - agnocastlib is outdated or not installed)'
 
     def _get_heaphook_version(self):
         # Find heaphook from LD_PRELOAD, which is how it's loaded at runtime.
@@ -136,7 +188,7 @@ class VersionVerb(VerbExtension):
         except OSError:
             return '(not available - library not found)'
         except AttributeError:
-            return '(not available - heaphook is incompatible version)'
+            return '(not available - heaphook is outdated or not installed)'
 
     def _get_ros2agnocast_version(self):
         try:
