@@ -1,12 +1,25 @@
 import ctypes
 import os
 
+from ament_index_python.packages import get_package_prefix
 from ros2cli.verb import VerbExtension
 
 # Use c_void_p for malloc'd pointers to preserve the raw address.
 # c_char_p auto-converts to Python bytes, losing the original pointer and causing
 # crashes on free().
 _c_void_p = ctypes.c_void_p
+
+
+def _get_lib_path(package_name, lib_filename):
+    """Resolve absolute path to a shared library from its ROS2 package prefix."""
+    try:
+        prefix = get_package_prefix(package_name)
+        path = os.path.join(prefix, 'lib', lib_filename)
+        if os.path.exists(path):
+            return path
+    except Exception:
+        pass
+    return None
 
 
 class VersionVerb(VerbExtension):
@@ -38,8 +51,11 @@ class VersionVerb(VerbExtension):
                 pass
 
         # Fall back to ioctl via wrapper library
+        lib_path = _get_lib_path('agnocast_ioctl_wrapper', 'libagnocast_ioctl_wrapper.so')
+        if lib_path is None:
+            return '(not available - ioctl wrapper not found)'
         try:
-            lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
+            lib = ctypes.CDLL(lib_path)
             lib.get_agnocast_kmod_version.argtypes = []
             lib.get_agnocast_kmod_version.restype = _c_void_p
             lib.free_agnocast_kmod_version.argtypes = [_c_void_p]
@@ -55,8 +71,11 @@ class VersionVerb(VerbExtension):
             return '(not available - ioctl wrapper not found)'
 
     def _get_agnocastlib_version(self):
+        lib_path = _get_lib_path('agnocastlib', 'libagnocast.so')
+        if lib_path is None:
+            return '(not available - library not found)'
         try:
-            lib = ctypes.CDLL('libagnocast.so')
+            lib = ctypes.CDLL(lib_path)
             lib.agnocast_get_version.argtypes = []
             lib.agnocast_get_version.restype = ctypes.c_char_p
             version = lib.agnocast_get_version()
@@ -67,11 +86,20 @@ class VersionVerb(VerbExtension):
             return '(not available - library not found)'
 
     def _get_heaphook_version(self):
+        # Find heaphook from LD_PRELOAD, which is how it's loaded at runtime.
+        lib_path = None
+        ld_preload = os.environ.get('LD_PRELOAD', '')
+        for path in ld_preload.split(':'):
+            if 'libagnocast_heaphook.so' in path:
+                lib_path = path
+                break
+        if lib_path is None or not os.path.exists(lib_path):
+            return '(not available - libagnocast_heaphook.so not found in LD_PRELOAD)'
         # Load with RTLD_LOCAL | RTLD_LAZY to prevent the heaphook's malloc/free
         # symbols from replacing the process-wide allocator.
         try:
             lib = ctypes.CDLL(
-                'libagnocast_heaphook.so',
+                lib_path,
                 mode=os.RTLD_LAZY | ctypes.RTLD_LOCAL,
             )
             lib.agnocast_heaphook_get_version.argtypes = []
