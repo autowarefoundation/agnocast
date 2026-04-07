@@ -130,7 +130,7 @@ struct RosToAgnocastServiceRequestPolicy;
 
 /**
  * @brief The user-facing Agnocast service server.
- * Alias for `BasicService<ServiceT`. Use this type (not BasicService directly) when declaring
+ * Alias for `BasicService<ServiceT>`. Use this type (not BasicService directly) when declaring
  * service server variables.
  * The service/client API is experimental and may change in future versions.
  * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
