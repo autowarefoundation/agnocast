@@ -276,7 +276,7 @@ public:
       topic_ = topic;
       qos_ = qos;
       options_ = options;
-      sub_ = std::make_shared<BasicSubscription<M, RosToAgnocastRequestPolicy>>(
+      sub_ = std::make_shared<BasicSubscription<M, RosToAgnocastPubsubRequestPolicy>>(
         node, topic, detail::to_rclcpp_qos(qos),
         [this](ipc_shared_ptr<M> msg) { this->cb(std::move(msg)); }, options);
       node_raw_ = node;
