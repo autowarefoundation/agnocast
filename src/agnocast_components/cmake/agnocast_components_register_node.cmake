@@ -74,7 +74,6 @@ macro(agnocast_components_register_node target)
   set(node ${ARGS_EXECUTABLE})
 
   set(_path "lib")
-  set(library_name "$<TARGET_FILE_NAME:${target}>")
 
   # Write node entries into the same directory properties that rclcpp_components uses.
   # rclcpp_components_package_hook reads these properties via get_property(DIRECTORY ...)
