@@ -29,7 +29,7 @@ namespace agnocast
 static constexpr size_t DEFAULT_QOS_DEPTH = 10;
 
 template <typename MessageT>
-void send_bridge_request(
+void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename MessageT>
 void send_performance_pubsub_bridge_request(
@@ -39,12 +39,12 @@ void send_performance_service_bridge_request(
   const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction);
 
 template <typename MessageT>
-void request_bridge_core(
+void request_pubsub_bridge_core(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
-    send_bridge_request<MessageT>(topic_name, id, direction);
+    send_standard_pubsub_bridge_request<MessageT>(topic_name, id, direction);
   } else if (bridge_mode == BridgeMode::Performance) {
     send_performance_pubsub_bridge_request<MessageT>(topic_name, id, direction);
   }
@@ -69,7 +69,7 @@ struct RosToAgnocastPubsubRequestPolicy
   template <typename MessageT>
   static void request_bridge(const std::string & topic_name, topic_local_id_t id)
   {
-    request_bridge_core<MessageT>(topic_name, id, BridgeDirection::ROS2_TO_AGNOCAST);
+    request_pubsub_bridge_core<MessageT>(topic_name, id, BridgeDirection::ROS2_TO_AGNOCAST);
   }
 };
 
@@ -80,7 +80,7 @@ struct AgnocastToRosPubsubRequestPolicy
   template <typename MessageT>
   static void request_bridge(const std::string & topic_name, topic_local_id_t id)
   {
-    request_bridge_core<MessageT>(topic_name, id, BridgeDirection::AGNOCAST_TO_ROS2);
+    request_pubsub_bridge_core<MessageT>(topic_name, id, BridgeDirection::AGNOCAST_TO_ROS2);
   }
 };
 
@@ -270,7 +270,7 @@ void send_mq_message(
 }
 
 template <typename MessageT>
-void send_bridge_request(
+void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_bridge_requester");
