@@ -18,7 +18,6 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -56,10 +55,12 @@ void request_service_bridge_core(
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
-    throw std::runtime_error("Service bridges are not yet implemented for standard mode");
-  } else {
-    send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
+    // Service bridge requests are intentionally ignored in standard mode for now.
+    // Standard-mode service bridges are not implemented yet.
+    return;
   }
+
+  send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
 }
 
 // Policy for agnocast::Subscription.
