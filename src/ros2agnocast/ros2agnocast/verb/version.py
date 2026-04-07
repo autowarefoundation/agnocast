@@ -5,11 +5,6 @@ import os
 from ament_index_python.packages import get_package_prefix
 from ros2cli.verb import VerbExtension
 
-# Use c_void_p for malloc'd pointers to preserve the raw address.
-# c_char_p auto-converts to Python bytes, losing the original pointer and causing
-# crashes on free().
-_c_void_p = ctypes.c_void_p
-
 
 def _get_lib_path(package_name, lib_filename):
     """Resolve absolute path to a shared library from its ROS2 package prefix."""
@@ -58,8 +53,8 @@ class VersionVerb(VerbExtension):
         try:
             lib = ctypes.CDLL(lib_path)
             lib.get_agnocast_kmod_version.argtypes = []
-            lib.get_agnocast_kmod_version.restype = _c_void_p
-            lib.free_agnocast_kmod_version.argtypes = [_c_void_p]
+            lib.get_agnocast_kmod_version.restype = ctypes.c_void_p
+            lib.free_agnocast_kmod_version.argtypes = [ctypes.c_void_p]
             lib.free_agnocast_kmod_version.restype = None
 
             version_ptr = lib.get_agnocast_kmod_version()
