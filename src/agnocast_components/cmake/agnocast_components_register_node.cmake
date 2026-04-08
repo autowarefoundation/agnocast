@@ -73,16 +73,24 @@ macro(agnocast_components_register_node target)
   set(component ${ARGS_PLUGIN})
   set(node ${ARGS_EXECUTABLE})
 
-  # Register package hook for resource index
-  _agnocast_components_register_package_hook()
-
   set(_path "lib")
   set(library_name "$<TARGET_FILE_NAME:${target}>")
 
-  # Register with ament resource index (using same format as rclcpp_components)
-  set(_AGNOCAST_COMPONENTS_${resource_index}__NODES
-    "${_AGNOCAST_COMPONENTS_${resource_index}__NODES}${component};${_path}/$<TARGET_FILE_NAME:${target}>\n")
-  list(APPEND _AGNOCAST_COMPONENTS_PACKAGE_RESOURCE_INDICES ${resource_index})
+  # Write node entries into the same directory properties that rclcpp_components uses.
+  # rclcpp_components_package_hook reads these properties via get_property(DIRECTORY ...)
+  # and calls ament_index_register_resource() once for all registered nodes.
+  # By sharing these properties instead of maintaining our own, we avoid duplicate
+  # file(GENERATE) calls on the same ament index file when both
+  # agnocast_components_register_node and rclcpp_components_register_node are used
+  # in the same package.
+  set_property(
+    DIRECTORY "${PROJECT_SOURCE_DIR}"
+    APPEND_STRING PROPERTY _RCLCPP_COMPONENTS_${resource_index}__NODES
+    "${component};${_path}/$<TARGET_FILE_NAME:${target}>\n")
+  set_property(
+    DIRECTORY "${PROJECT_SOURCE_DIR}"
+    APPEND PROPERTY _RCLCPP_COMPONENTS_PACKAGE_RESOURCE_INDICES
+    ${resource_index})
 
   # Select template based on executor type
   if(_use_agnocast_only_template)

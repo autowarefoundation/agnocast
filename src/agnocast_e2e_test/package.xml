@@ -28,7 +28,7 @@
   <depend>agnocastlib</depend>
   <depend>agnocast_cie_thread_configurator</depend>
 
-  <test_depend>agnocast_components</test_depend>
+  <build_depend>agnocast_components</build_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
 
   <export>
