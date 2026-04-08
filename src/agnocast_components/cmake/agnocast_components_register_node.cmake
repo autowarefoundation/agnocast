@@ -81,12 +81,8 @@ macro(agnocast_components_register_node target)
   # This avoids duplicate file(GENERATE) calls on the same ament index file when both
   # agnocast_components_register_node and rclcpp_components_register_node are used
   # in the same package.
-  if("${resource_index}" STREQUAL "rclcpp_components")
-    rclcpp_components_register_nodes(${target} ${component})
-  else()
-    rclcpp_components_register_nodes(${target} ${component}
-      RESOURCE_INDEX ${resource_index})
-  endif()
+  rclcpp_components_register_nodes(${target} ${component}
+    RESOURCE_INDEX ${resource_index})
 
   # Select template based on executor type
   if(_use_agnocast_only_template)
