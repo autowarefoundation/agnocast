@@ -82,6 +82,10 @@ class TestCallbackIsolatedExecutor(unittest.TestCase):
             process=thread_configurator
         )
 
+        # assertWaitFor returns on first match; give time for the second message to arrive
+        import time
+        time.sleep(2)
+
         filtered_output_text = "".join(
             line
             for output in proc_output[thread_configurator]
@@ -124,7 +128,8 @@ class TestCallbackIsolatedExecutorShutdown(unittest.TestCase):
     def test_exit_code(self, proc_info):
         launch_testing.asserts.assertExitCodes(proc_info)
 
-    def test_cleanup(self):
+    @classmethod
+    def tearDownClass(cls):
         import os
         template_yaml = os.path.join(os.path.expanduser("~"), "agnocast", "template.yaml")
         if os.path.exists(template_yaml):

@@ -118,7 +118,8 @@ class TestComponentContainerCIEShutdown(unittest.TestCase):
     def test_exit_code(self, proc_info):
         launch_testing.asserts.assertExitCodes(proc_info)
 
-    def test_cleanup(self):
+    @classmethod
+    def tearDownClass(cls):
         import os
         template_yaml = os.path.join(os.path.expanduser("~"), "agnocast", "template.yaml")
         if os.path.exists(template_yaml):
