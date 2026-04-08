@@ -6,8 +6,6 @@ import launch_ros.actions
 import launch_testing
 import launch_testing.actions
 import launch_testing.asserts
-from launch_ros.actions import ComposableNodeContainer
-from launch_ros.descriptions import ComposableNode
 
 
 def generate_test_description():
@@ -19,25 +17,20 @@ def generate_test_description():
         arguments=['--prerun']
     )
 
-    component_container = ComposableNodeContainer(
-        name='test_component_container',
-        namespace='',
-        package='agnocast_components',
-        executable='agnocast_component_container_cie',
-        composable_node_descriptions=[
-            ComposableNode(
-                package='agnocast_e2e_test',
-                plugin='agnocast_e2e_test::TestPublisherComponent',
-                name='test_publisher_node',
-            ),
-            ComposableNode(
-                package='agnocast_e2e_test',
-                plugin='agnocast_e2e_test::TestSubscriptionComponent',
-                name='test_subscription_node',
-            )
-        ],
+    # Standalone executable with CallbackIsolatedAgnocastExecutor
+    test_cie_publisher = launch_ros.actions.Node(
+        package='agnocast_e2e_test',
+        executable='test_cie_publisher',
+        name='test_cie_publisher',
         output='screen',
-        parameters=[{'get_next_timeout_ms': 50}]
+    )
+
+    # Standalone executable with CallbackIsolatedAgnocastExecutor
+    test_cie_subscriber = launch_ros.actions.Node(
+        package='agnocast_e2e_test',
+        executable='test_cie_subscriber',
+        name='test_cie_subscriber',
+        output='screen',
     )
 
     return (
@@ -46,37 +39,53 @@ def generate_test_description():
             thread_configurator_node,
             launch.actions.TimerAction(
                 period=3.0,
-                actions=[component_container]
+                actions=[test_cie_publisher]
             ),
             launch.actions.TimerAction(
-                period=6.0,
+                period=4.0,
+                actions=[test_cie_subscriber]
+            ),
+            launch.actions.TimerAction(
+                period=8.0,
                 actions=[launch_testing.actions.ReadyToTest()]
             )
         ]),
         {
             'thread_configurator': thread_configurator_node,
-            'component_container': component_container
+            'test_cie_publisher': test_cie_publisher,
+            'test_cie_subscriber': test_cie_subscriber,
         }
     )
 
 
-class TestComponentContainerCIE(unittest.TestCase):
+class TestCallbackIsolatedExecutor(unittest.TestCase):
 
-    def test_component_publishes(self, proc_output, component_container):
+    def test_publisher_outputs(self, proc_output, test_cie_publisher):
         proc_output.assertWaitFor(
             'Publishing:',
             timeout=10.0,
-            process=component_container
+            process=test_cie_publisher
         )
 
-    def test_component_receives(self, proc_output, component_container):
+    def test_subscriber_outputs(self, proc_output, test_cie_subscriber):
         proc_output.assertWaitFor(
             'Received:',
             timeout=10.0,
-            process=component_container
+            process=test_cie_subscriber
         )
 
     def test_thread_configurator_receives_callback_info(self, proc_output, thread_configurator):
+        # Wait for at least one CallbackGroupInfo to ensure output is available
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo:',
+            timeout=10.0,
+            process=thread_configurator
+        )
+
+        # assertWaitFor returns on first match; give time for the second message to arrive
+        import time
+        time.sleep(2)
+
         filtered_output_text = "".join(
             line
             for output in proc_output[thread_configurator]
@@ -85,7 +94,8 @@ class TestComponentContainerCIE(unittest.TestCase):
         )
         callback_info_count = filtered_output_text.count('Received CallbackGroupInfo:')
 
-        # Total expected: 2 (not 3, because the callback group with `automatically_add_to_executor = false` should be skipped)
+        # Expected: 2 (1 default group from publisher + 1 default group from subscriber;
+        # the publisher's callback group with automatically_add_to_executor=false is skipped)
         self.assertEqual(
             callback_info_count, 2,
             f"Expected exactly 2 'Received CallbackGroupInfo:' messages, but got {callback_info_count}"
@@ -105,7 +115,7 @@ class TestComponentContainerCIE(unittest.TestCase):
         )
         non_ros_thread_info_count = output_text.count('Received NonRosThreadInfo:')
 
-        # Expected: 1 (for test_non_ros_worker)
+        # Expected: 1 (for test_non_ros_worker from the publisher)
         self.assertEqual(
             non_ros_thread_info_count, 1,
             f"Expected exactly 1 'Received NonRosThreadInfo:' message, but got {non_ros_thread_info_count}"
@@ -113,7 +123,7 @@ class TestComponentContainerCIE(unittest.TestCase):
 
 
 @launch_testing.post_shutdown_test()
-class TestComponentContainerCIEShutdown(unittest.TestCase):
+class TestCallbackIsolatedExecutorShutdown(unittest.TestCase):
 
     def test_exit_code(self, proc_info):
         launch_testing.asserts.assertExitCodes(proc_info)
