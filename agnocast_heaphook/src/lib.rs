@@ -159,12 +159,18 @@ static ORIGINAL_POSIX_MEMALIGN: OnceLock<PosixMemalignType> = OnceLock::new();
 
 #[cfg(glibc_pre_2_35)]
 fn init_original_posix_memalign() -> PosixMemalignType {
-    unsafe extern "C" fn posix_memalign_via_memalign(memptr: &mut *mut c_void, alignment: usize, size: usize) -> i32 {
+    unsafe extern "C" fn posix_memalign_via_memalign(
+        memptr: &mut *mut c_void,
+        alignment: usize,
+        size: usize,
+    ) -> i32 {
         if !alignment.is_power_of_two() || alignment % size_of::<*mut c_void>() != 0 {
             return libc::EINVAL;
         }
         let ptr = __libc_memalign(alignment, size);
-        if ptr.is_null() { return libc::ENOMEM; }
+        if ptr.is_null() {
+            return libc::ENOMEM;
+        }
         *memptr = ptr;
         0
     }
