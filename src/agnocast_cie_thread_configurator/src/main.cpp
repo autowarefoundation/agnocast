@@ -3,7 +3,9 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <filesystem>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 static std::vector<int64_t> parse_domain_ids(const std::string & domains_str)
@@ -14,7 +16,7 @@ static std::vector<int64_t> parse_domain_ids(const std::string & domains_str)
   while (std::getline(ss, token, ',')) {
     if (!token.empty()) {
       try {
-        domain_ids.push_back(static_cast<int64_t>(std::stoul(token)));
+        domain_ids.push_back(static_cast<int64_t>(std::stol(token)));
       } catch (const std::exception & e) {
         std::cerr << "[WARN] Invalid domain ID value: " << token << ". Skipping." << std::endl;
       }

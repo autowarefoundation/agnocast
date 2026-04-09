@@ -248,7 +248,7 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   }
 
   const YAML::Node & yaml_hw_info = yaml["hardware_info"];
-  auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
 
   std::vector<std::string> mismatches;
 
