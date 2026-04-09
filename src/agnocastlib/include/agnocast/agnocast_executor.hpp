@@ -41,6 +41,8 @@ protected:
   bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   static void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
 
+  EpollUpdateTracker epoll_update_tracker_;
+
 public:
   /// Construct the executor.
   /// @param options Executor options.

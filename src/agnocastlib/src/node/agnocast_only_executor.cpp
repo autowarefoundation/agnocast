@@ -19,7 +19,8 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
 : spinning_(false),
   epoll_fd_(epoll_create1(0)),
   shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
-  my_pid_(getpid())
+  my_pid_(getpid()),
+  epoll_update_tracker_(EpollUpdateDispatcher::get_instance().create_tracker())
 {
   if (epoll_fd_ == -1) {
     RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
