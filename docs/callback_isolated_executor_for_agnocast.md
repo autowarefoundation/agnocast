@@ -34,9 +34,13 @@ agnocast_components_register_node(
 
 #### Multiple ROS domain support
 
-`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use launch arguments to specify domain IDs:
+`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use ROS parameters to specify domain IDs:
 
 ```bash
+# Option 1: Run prerun_node directly with ROS parameters
+ros2 run agnocast_cie_thread_configurator prerun_node --ros-args -p domains:=[0,1]
+
+# Option 2: Use the launch file
 ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=true domains:=[0,1]
 ```
 

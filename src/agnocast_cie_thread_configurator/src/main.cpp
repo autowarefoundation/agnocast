@@ -48,10 +48,11 @@ int main(int argc, char * argv[])
 
   if (prerun_mode || !domain_ids.empty() || !config_filename.empty()) {
     std::cerr << "[DEPRECATED] CLI arguments (--prerun, --domains, --config-file) are deprecated. "
-              << "Use the launch file (thread_configurator.launch.xml) with ROS parameters instead."
-              << std::endl;
+              << "Run prerun_node directly with ROS parameters or use the launch file "
+              << "(thread_configurator.launch.xml) instead." << std::endl;
   }
 
+  // Backward-compatible CLI path: translates deprecated CLI args into ROS parameter overrides.
   try {
     if (prerun_mode) {
       std::cout << "prerun mode" << std::endl;
