@@ -73,16 +73,16 @@ macro(agnocast_components_register_node target)
   set(component ${ARGS_PLUGIN})
   set(node ${ARGS_EXECUTABLE})
 
-  # Register package hook for resource index
-  _agnocast_components_register_package_hook()
-
-  set(_path "lib")
   set(library_name "$<TARGET_FILE_NAME:${target}>")
 
-  # Register with ament resource index (using same format as rclcpp_components)
-  set(_AGNOCAST_COMPONENTS_${resource_index}__NODES
-    "${_AGNOCAST_COMPONENTS_${resource_index}__NODES}${component};${_path}/$<TARGET_FILE_NAME:${target}>\n")
-  list(APPEND _AGNOCAST_COMPONENTS_PACKAGE_RESOURCE_INDICES ${resource_index})
+  # Register with rclcpp_components for component container support (resource index only).
+  # Unlike rclcpp_components_register_node (singular), the plural form only populates
+  # the ament resource index without generating a standalone executable.
+  # This avoids duplicate file(GENERATE) calls on the same ament index file when both
+  # agnocast_components_register_node and rclcpp_components_register_node are used
+  # in the same package.
+  rclcpp_components_register_nodes(${target} ${component}
+    RESOURCE_INDEX ${resource_index})
 
   # Select template based on executor type
   if(_use_agnocast_only_template)

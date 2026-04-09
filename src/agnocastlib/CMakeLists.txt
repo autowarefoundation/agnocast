@@ -163,14 +163,13 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_message_filters_${PROJECT_NAME} std_msgs message_filters)
   set_tests_properties(test_integration_message_filters_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
-    LABELS "requires_kernel_module"
+    LABELS "requires_kernel_module;requires_heaphook"
   )
 
   # Integration tests (with ioctl mock, no kernel module required)
   ament_add_gmock(test_integration_${PROJECT_NAME}
     test/integration/test_agnocast_single_threaded_executor.cpp
     test/integration/test_agnocast_multi_threaded_executor.cpp
-    test/integration/test_agnocast_callback_isolated_executor.cpp
     test/integration/src/ioctl_mock.cpp
     test/integration/src/node_for_executor_test.cpp)
   target_include_directories(test_integration_${PROJECT_NAME} PRIVATE test/integration/include)
@@ -192,34 +191,8 @@ if(BUILD_TESTING)
   set_tests_properties(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
-    LABELS "requires_kernel_module"
+    LABELS "requires_kernel_module;requires_heaphook"
   )
-
-  # Test component for ComponentManagerCallbackIsolated integration tests
-  add_library(test_publisher_component SHARED
-    test/integration/src/test_publisher_component.cpp)
-  target_link_libraries(test_publisher_component agnocast)
-  ament_target_dependencies(test_publisher_component rclcpp rclcpp_components std_msgs agnocast_cie_thread_configurator)
-  rclcpp_components_register_node(test_publisher_component
-    PLUGIN "agnocastlib_test::TestPublisherComponent"
-    EXECUTABLE test_publisher_component_node)
-  install(TARGETS test_publisher_component
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin)
-
-  add_library(test_subscription_component SHARED
-    test/integration/src/test_subscription_component.cpp)
-  target_link_libraries(test_subscription_component agnocast)
-  ament_target_dependencies(test_subscription_component rclcpp rclcpp_components std_msgs)
-  rclcpp_components_register_node(test_subscription_component
-    PLUGIN "agnocastlib_test::TestSubscriptionComponent"
-    EXECUTABLE test_subscription_component_node)
-  install(TARGETS test_subscription_component
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin)
-
 
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)
@@ -235,7 +208,8 @@ if(BUILD_TESTING)
     test/integration/test_agnocast_heaphook.cpp)
   target_link_libraries(test_integration_agnocast_heaphook agnocast)
   set_tests_properties(test_integration_agnocast_heaphook PROPERTIES
-    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:")
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libinitialize_shutdown_mock.so:${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:"
+    LABELS "requires_heaphook")
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)

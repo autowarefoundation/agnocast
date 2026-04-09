@@ -7,6 +7,12 @@ class AgnocastCommand(CommandExtension):
 
     def add_arguments(self, parser, cli_name):
         self._subparser = parser
+        parser.add_argument(
+            '--version', '-v',
+            action='store_true',
+            default=False,
+            help='Show version information for Agnocast components',
+        )
         add_subparsers_on_demand(
             parser,
             cli_name,
@@ -16,6 +22,10 @@ class AgnocastCommand(CommandExtension):
         )
 
     def main(self, *, parser, args):
+        if args.version:
+            from ros2agnocast.verb.version import VersionVerb
+            return VersionVerb().main(args=args)
+
         if not hasattr(args, '_verb'):
             self._subparser.print_help()
             return 0

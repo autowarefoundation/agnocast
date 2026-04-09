@@ -11,6 +11,8 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(agnocastlib REQUIRED)
+find_package(agnocast_components REQUIRED)
+find_package(agnocast_cie_thread_configurator REQUIRED)
 
 add_library(test_talker_component SHARED src/test_publisher.cpp)
 ament_target_dependencies(test_talker_component rclcpp rclcpp_components std_msgs agnocastlib)
@@ -61,6 +63,22 @@ rclcpp_components_register_node(
   EXECUTABLE test_ros2_talker
 )
 
+add_library(test_cie_publisher_component SHARED src/test_publisher_component.cpp)
+ament_target_dependencies(test_cie_publisher_component rclcpp rclcpp_components std_msgs agnocastlib agnocast_cie_thread_configurator)
+
+agnocast_components_register_node(test_cie_publisher_component
+  PLUGIN "agnocast_e2e_test::TestPublisherComponent"
+  EXECUTABLE test_cie_publisher
+  EXECUTOR CallbackIsolatedAgnocastExecutor)
+
+add_library(test_cie_subscription_component SHARED src/test_subscription_component.cpp)
+ament_target_dependencies(test_cie_subscription_component rclcpp rclcpp_components std_msgs)
+
+agnocast_components_register_node(test_cie_subscription_component
+  PLUGIN "agnocast_e2e_test::TestSubscriptionComponent"
+  EXECUTABLE test_cie_subscriber
+  EXECUTOR CallbackIsolatedAgnocastExecutor)
+
 ament_export_targets(export_test_talker_component)
 install(TARGETS test_talker_component
         EXPORT export_test_talker_component
@@ -101,8 +119,21 @@ install(TARGETS test_ros2_talker_component
         RUNTIME DESTINATION bin
 )
 
+install(TARGETS test_cie_publisher_component test_cie_subscription_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
+
 install(DIRECTORY test
   DESTINATION share/${PROJECT_NAME}/
 )
+
+if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/functional/test_agnocast_component_container_cie_launch.py TIMEOUT 120)
+  add_launch_test(test/functional/test_agnocast_callback_isolated_executor_launch.py TIMEOUT 120)
+  add_launch_test(test/functional/test_multi_domain_cie_talker_launch.py TIMEOUT 120)
+endif()
 
 ament_package()

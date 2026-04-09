@@ -45,4 +45,10 @@ install(TARGETS thread_configurator_node DESTINATION lib/${PROJECT_NAME})
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_${PROJECT_NAME} test/test_sanitize_node_name.cpp)
+  target_link_libraries(test_${PROJECT_NAME} thread_configurator)
+endif()
+
 ament_package()
