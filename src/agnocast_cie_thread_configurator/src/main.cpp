@@ -52,44 +52,50 @@ int main(int argc, char * argv[])
               << std::endl;
   }
 
-  if (prerun_mode) {
-    std::cout << "prerun mode" << std::endl;
+  try {
+    if (prerun_mode) {
+      std::cout << "prerun mode" << std::endl;
 
-    rclcpp::NodeOptions options;
-    if (!domain_ids.empty()) {
-      options.append_parameter_override("domains", domain_ids);
+      rclcpp::NodeOptions options;
+      if (!domain_ids.empty()) {
+        options.append_parameter_override("domains", domain_ids);
+      }
+
+      auto node = std::make_shared<PrerunNode>(options);
+      auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+
+      executor->add_node(node);
+      for (const auto & sub_node : node->get_domain_nodes()) {
+        executor->add_node(sub_node);
+      }
+
+      executor->spin();
+
+      node->dump_yaml_config(std::filesystem::current_path());
+    } else {
+      rclcpp::NodeOptions options;
+      if (!config_filename.empty()) {
+        options.append_parameter_override("config_file", config_filename);
+      }
+
+      auto node = std::make_shared<ThreadConfiguratorNode>(options);
+      auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+
+      executor->add_node(node);
+      for (const auto & domain_node : node->get_domain_nodes()) {
+        executor->add_node(domain_node);
+      }
+
+      executor->spin();
+
+      if (!node->has_configured_once()) {
+        node->print_all_unapplied();
+      }
     }
-
-    auto node = std::make_shared<PrerunNode>(options);
-    auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-
-    executor->add_node(node);
-    for (const auto & sub_node : node->get_domain_nodes()) {
-      executor->add_node(sub_node);
-    }
-
-    executor->spin();
-
-    node->dump_yaml_config(std::filesystem::current_path());
-  } else {
-    rclcpp::NodeOptions options;
-    if (!config_filename.empty()) {
-      options.append_parameter_override("config_file", config_filename);
-    }
-
-    auto node = std::make_shared<ThreadConfiguratorNode>(options);
-    auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-
-    executor->add_node(node);
-    for (const auto & domain_node : node->get_domain_nodes()) {
-      executor->add_node(domain_node);
-    }
-
-    executor->spin();
-
-    if (!node->has_configured_once()) {
-      node->print_all_unapplied();
-    }
+  } catch (const std::exception & e) {
+    std::cerr << "[ERROR] " << e.what() << std::endl;
+    rclcpp::shutdown();
+    return 1;
   }
 
   rclcpp::shutdown();

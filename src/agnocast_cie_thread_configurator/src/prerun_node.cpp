@@ -23,7 +23,8 @@ PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node"
   for (const auto raw_domain_id : domains) {
     if (raw_domain_id < 0) {
       RCLCPP_WARN(
-        this->get_logger(), "Negative domain ID %ld is invalid. Skipping.", raw_domain_id);
+        this->get_logger(), "Negative domain ID %lld is invalid. Skipping.",
+        static_cast<long long>(raw_domain_id));
       continue;
     }
 
