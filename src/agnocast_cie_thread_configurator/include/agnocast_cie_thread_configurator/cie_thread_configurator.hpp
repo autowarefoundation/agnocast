@@ -7,6 +7,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <memory>
@@ -25,6 +26,16 @@ size_t get_default_domain_id();
 
 // Create a node for a different domain
 rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id);
+
+inline std::string sanitize_node_name(const std::string & name)
+{
+  std::string result;
+  result.reserve(name.size());
+  for (char c : name) {
+    result += (std::isalnum(static_cast<unsigned char>(c)) || c == '_') ? c : '_';
+  }
+  return result;
+}
 
 /// Spawn a thread whose scheduling policy can be managed through
 /// cie_thread_configurator.
@@ -45,7 +56,8 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
     rclcpp::NodeOptions options;
     options.context(context);
     auto node = std::make_shared<rclcpp::Node>(
-      "cie_thread_client", "/agnocast_cie_thread_configurator", options);
+      "cie_thread_client_" + sanitize_node_name(thread_name), "/agnocast_cie_thread_configurator",
+      options);
 
     auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
       "/agnocast_cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(5000).reliable());
