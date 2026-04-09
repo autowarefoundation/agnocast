@@ -27,6 +27,8 @@ size_t get_default_domain_id();
 // Create a node for a different domain
 rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id);
 
+// Replace characters that are not alphanumeric or '_' with '_',
+// producing a valid ROS 2 node name token.
 inline std::string sanitize_node_name(const std::string & name)
 {
   std::string result;
