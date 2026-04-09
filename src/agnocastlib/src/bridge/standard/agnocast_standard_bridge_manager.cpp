@@ -22,15 +22,6 @@ StandardBridgeManager::StandardBridgeManager(pid_t target_pid)
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }
-  if (is_r2a) {
-    count = get_agnocast_subscriber_count(topic_name).count;
-    is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
-    ros2_count_ok = update_ros2_publisher_num(container_node_.get(), topic_name);
-  } else {
-    count = get_agnocast_publisher_count(topic_name).count;
-    is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
-    ros2_count_ok = update_ros2_subscriber_num(container_node_.get(), topic_name);
-  }
 
   rclcpp::InitOptions init_options{};
   init_options.shutdown_on_signal = false;
