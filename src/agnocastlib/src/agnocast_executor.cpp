@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_executor.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
@@ -12,7 +13,10 @@ namespace agnocast
 {
 
 AgnocastExecutor::AgnocastExecutor(const rclcpp::ExecutorOptions & options)
-: rclcpp::Executor(options), epoll_fd_(epoll_create1(0)), my_pid_(getpid())
+: rclcpp::Executor(options),
+  epoll_fd_(epoll_create1(0)),
+  my_pid_(getpid()),
+  epoll_update_tracker_(EpollUpdateDispatcher::get_instance().register_tracker())
 {
   if (epoll_fd_ == -1) {
     RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
