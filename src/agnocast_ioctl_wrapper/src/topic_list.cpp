@@ -54,6 +54,8 @@ char ** get_agnocast_topics(int * topic_count)
   char ** topic_array = static_cast<char **>(malloc(*topic_count * sizeof(char *)));
   if (topic_array == nullptr) {
     *topic_count = 0;
+    free(agnocast_topic_buffer);
+    close(fd);
     return nullptr;
   }
 
@@ -66,6 +68,7 @@ char ** get_agnocast_topics(int * topic_count)
       }
       free(topic_array);
       topic_array = nullptr;
+      *topic_count = 0;
       break;
     }
     std::strcpy(topic_array[i], agnocast_topic_buffer + i * TOPIC_NAME_BUFFER_SIZE);

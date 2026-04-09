@@ -10,6 +10,13 @@ struct PerformanceBridgeResult
   rclcpp::CallbackGroup::SharedPtr callback_group;
 };
 
+struct PerformanceServiceBridgeResult
+{
+  std::shared_ptr<void> entity_handle;
+  rclcpp::CallbackGroup::SharedPtr ros_srv_cb_group;
+  rclcpp::CallbackGroup::SharedPtr agno_client_cb_group;
+};
+
 extern "C" PerformanceBridgeResult create_r2a_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 

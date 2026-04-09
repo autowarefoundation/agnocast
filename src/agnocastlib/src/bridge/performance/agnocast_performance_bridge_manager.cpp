@@ -76,6 +76,9 @@ void PerformanceBridgeManager::start_ros_execution()
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
+  // We must not use single-threaded executors because of how service bridges work. Service bridges
+  // require two callback groups to execute concurrently. If a single-threaded executor is used, it
+  // can deadlock. See the service bridge implementation for details.
   executor_ = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>();
   executor_->add_node(container_node_);
 

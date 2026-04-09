@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocast_e2e_test</name>
-  <version>2.3.2</version>
+  <version>2.3.3</version>
   <description>
     E2E test for Agnocast.
   </description>
@@ -26,7 +26,10 @@
   <depend>std_msgs</depend>
 
   <depend>agnocastlib</depend>
-  <exec_depend>agnocast_components</exec_depend>
+  <depend>agnocast_components</depend>
+  <depend>agnocast_cie_thread_configurator</depend>
+
+  <test_depend>launch_testing_ament_cmake</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

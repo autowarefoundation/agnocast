@@ -15,6 +15,14 @@ use crate::tlsf::TLSFAllocator;
 
 mod tlsf;
 
+/// Version string exported as a C-compatible symbol for external querying.
+/// Can be read via `dlsym` or `nm -D` on the shared library.
+#[no_mangle]
+pub extern "C" fn agnocast_heaphook_get_version() -> *const std::os::raw::c_char {
+    // CARGO_PKG_VERSION + null terminator, known at compile time
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const std::os::raw::c_char
+}
+
 ///  An alignment equal to `alignof(max_align_t)`.
 ///
 /// According to [C23](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf), when allocation succeeds,
