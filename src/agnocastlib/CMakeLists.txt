@@ -32,7 +32,7 @@ find_package(glog REQUIRED)
 
 add_library(agnocast SHARED
   src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
-  src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
+  src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_event.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp

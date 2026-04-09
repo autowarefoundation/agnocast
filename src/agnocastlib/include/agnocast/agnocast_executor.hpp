@@ -1,8 +1,12 @@
 #pragma once
 
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_event.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
+
+#include <memory>
 
 namespace agnocast
 {
@@ -33,7 +37,7 @@ class AgnocastExecutor : public rclcpp::Executor
   virtual bool validate_callback_group(const rclcpp::CallbackGroup::SharedPtr & group) const = 0;
 
 protected:
-  int epoll_fd_;
+  std::unique_ptr<EpollManager> epoll_manager_;
   pid_t my_pid_;
   std::mutex wait_mutex_;
 

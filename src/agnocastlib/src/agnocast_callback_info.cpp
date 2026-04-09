@@ -18,7 +18,7 @@ std::atomic<uint32_t> next_callback_info_id;
 uint32_t allocate_callback_info_id()
 {
   const uint32_t callback_info_id = next_callback_info_id.fetch_add(1);
-  if ((callback_info_id & EPOLL_EVENT_ID_RESERVED_MASK) != 0U) {
+  if (callback_info_id >= MAX_CALLBACK_INFO_ID) {
     throw std::runtime_error("Callback info ID overflow: too many callbacks registered");
   }
   return callback_info_id;
@@ -137,6 +137,80 @@ std::vector<std::string> get_agnocast_topics_by_group(
   std::sort(topic_names.begin(), topic_names.end());
 
   return topic_names;
+}
+
+void SubscriptionEventSource::prepare_epoll(
+  Epoll & epoll, const CallbackGroupValidator & validate_callback_group)
+{
+  std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+
+  for (auto & it : id2_callback_info) {
+    const uint32_t callback_info_id = it.first;
+    CallbackInfo & callback_info = it.second;
+
+    if (!callback_info.need_epoll_update) {
+      continue;
+    }
+
+    if (!validate_callback_group(callback_info.callback_group)) {
+      continue;
+    }
+
+    if (
+      epoll.add_source(callback_info.mqdes, EpollEventType::Subscription, callback_info_id) == -1) {
+      RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    if (callback_info.is_transient_local) {
+      agnocast::enqueue_receive_and_execute(
+        callback_info_id, my_pid_, callback_info, *ready_agnocast_executables_mutex_,
+        *ready_agnocast_executables_);
+    }
+
+    callback_info.need_epoll_update = false;
+  }
+}
+
+bool SubscriptionEventSource::handle(EpollEventLocalID event_local_id)
+{
+  // Subscription callback event
+  const uint32_t callback_info_id = event_local_id;
+  CallbackInfo callback_info;
+
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+
+    const auto it = id2_callback_info.find(callback_info_id);
+    if (it == id2_callback_info.end()) {
+      // Callback was unregistered (subscription destroyed) - this is normal
+      return false;
+    }
+
+    callback_info = it->second;
+  }
+
+  MqMsgAgnocast mq_msg = {};
+
+  // non-blocking
+  auto ret =
+    mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
+  if (ret < 0) {
+    if (errno != EAGAIN) {
+      RCLCPP_ERROR(logger, "mq_receive failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    return false;
+  }
+
+  agnocast::enqueue_receive_and_execute(
+    callback_info_id, my_pid_, callback_info, *ready_agnocast_executables_mutex_,
+    *ready_agnocast_executables_);
+
+  return false;
 }
 
 }  // namespace agnocast

@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_timer_info.hpp"
 
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_executor.hpp"
 #include "agnocast/agnocast_utils.hpp"
 
 #include <sys/eventfd.h>
@@ -191,7 +192,7 @@ int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period, rcl_cloc
 uint32_t allocate_timer_id()
 {
   const uint32_t timer_id = next_timer_id.fetch_add(1);
-  if ((timer_id & EPOLL_EVENT_ID_RESERVED_MASK) != 0U) {
+  if (timer_id >= MAX_TIMER_ID) {
     throw std::runtime_error("Timer ID overflow: too many timers created");
   }
   return timer_id;
@@ -282,6 +283,67 @@ void unregister_timer_info(uint32_t timer_id)
 {
   std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
   id2_timer_info.erase(timer_id);
+}
+
+void TimerEventSource::prepare_epoll(
+  Epoll & epoll, const CallbackGroupValidator & validate_callback_group)
+{
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+
+  for (auto & it : id2_timer_info) {
+    const uint32_t timer_id = it.first;
+    TimerInfo & timer_info = *it.second;
+
+    if (!timer_info.need_epoll_update) {
+      continue;
+    }
+
+    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
+      continue;
+    }
+
+    if (epoll.add_source(timer_info.timer_fd, EpollEventType::Timer, timer_id) == -1) {
+      RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    timer_info.need_epoll_update = false;
+  }
+}
+
+bool TimerEventSource::handle(EpollEventLocalID event_local_id)
+{
+  // Timer event
+  const uint32_t timer_id = event_local_id;
+  rclcpp::CallbackGroup::SharedPtr callback_group;
+
+  std::shared_ptr<TimerInfo> timer_info;
+  {
+    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+    const auto it = id2_timer_info.find(timer_id);
+    if (it == id2_timer_info.end()) {
+      RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+    timer_info = it->second;
+    if (!timer_info->timer.lock()) {
+      return false;  // Timer object has been destroyed
+    }
+    callback_group = timer_info->callback_group;
+  }
+
+  // Create a callable that handles the timer event
+  const std::shared_ptr<std::function<void()>> callable =
+    std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
+
+  {
+    std::lock_guard<std::mutex> ready_lock{*ready_agnocast_executables_mutex_};
+    ready_agnocast_executables_->emplace_back(AgnocastExecutable{callable, callback_group});
+  }
+
+  return false;
 }
 
 }  // namespace agnocast

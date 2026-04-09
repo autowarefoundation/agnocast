@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_timer.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -15,6 +16,9 @@ namespace agnocast
 {
 
 constexpr int64_t NANOSECONDS_PER_SECOND = 1000000000;
+constexpr uint32_t MAX_TIMER_ID = 0x10000000;
+
+struct AgnocastExecutable;
 
 struct TimerInfo
 {
@@ -58,5 +62,29 @@ void register_timer_info(
   const rclcpp::CallbackGroup::SharedPtr & callback_group, const rclcpp::Clock::SharedPtr & clock);
 
 void unregister_timer_info(uint32_t timer_id);
+
+class TimerEventSource : public EpollEventSource
+{
+  pid_t my_pid_;
+  std::mutex * ready_agnocast_executables_mutex_;
+  std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+
+public:
+  TimerEventSource(
+    const pid_t my_pid, std::mutex * ready_agnocast_executables_mutex,
+    std::vector<AgnocastExecutable> * ready_agnocast_executables)
+  : my_pid_(my_pid),
+    ready_agnocast_executables_mutex_(ready_agnocast_executables_mutex),
+    ready_agnocast_executables_(ready_agnocast_executables)
+  {
+  }
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Timer; }
+
+  void prepare_epoll(
+    Epoll & epoll, const CallbackGroupValidator & validate_callback_group) override;
+
+  bool handle(EpollEventLocalID event_local_id) override;
+};
 
 }  // namespace agnocast

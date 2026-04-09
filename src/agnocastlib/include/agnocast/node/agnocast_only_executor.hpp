@@ -1,5 +1,7 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/callback_group.hpp"
@@ -30,7 +32,7 @@ class AgnocastOnlyExecutor
 {
 protected:
   std::atomic_bool spinning_;
-  int epoll_fd_;
+  std::unique_ptr<EpollManager> epoll_manager_;
   int shutdown_event_fd_;
   pid_t my_pid_;
 
