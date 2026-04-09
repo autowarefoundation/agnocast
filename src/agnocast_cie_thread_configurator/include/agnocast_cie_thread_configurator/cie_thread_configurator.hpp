@@ -7,7 +7,6 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include <cctype>
 #include <chrono>
 #include <map>
 #include <memory>
@@ -34,7 +33,9 @@ inline std::string sanitize_node_name(const std::string & name)
   std::string result;
   result.reserve(name.size());
   for (char c : name) {
-    result += (std::isalnum(static_cast<unsigned char>(c)) || c == '_') ? c : '_';
+    const bool is_alnum =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    result += (is_alnum || c == '_') ? c : '_';
   }
   return result;
 }
