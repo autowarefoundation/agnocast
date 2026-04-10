@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if ! grep -q "^agnocast " /proc/modules; then
+    echo "ERROR: agnocast kernel module is not loaded." >&2
+    echo "Load it first: sudo insmod agnocast_kmod/agnocast.ko" >&2
+    exit 1
+fi
+
 AGNOCAST_PROCESS_NUM=100
 OTHER_PROCESS_NUM=100
 WAIT_TIME=5
