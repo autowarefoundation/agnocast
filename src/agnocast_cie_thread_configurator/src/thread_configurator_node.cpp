@@ -31,8 +31,6 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
   try {
     yaml = YAML::LoadFile(config_file);
   } catch (const std::exception & e) {
-    RCLCPP_ERROR(
-      this->get_logger(), "Error reading the YAML file '%s': %s", config_file.c_str(), e.what());
     throw std::runtime_error("Error reading the YAML file '" + config_file + "': " + e.what());
   }
 
