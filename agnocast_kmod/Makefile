@@ -1,43 +1,18 @@
 VERSION := $(shell cat $(src)/version.txt 2>/dev/null || echo "unknown")
 ccflags-y += -Wall -Werror -DVERSION='"$(VERSION)"'
 
-ifneq ($(KUNIT_BUILD),y)
-  obj-m := agnocast.o
-  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o
-else
+ifeq ($(KUNIT_BUILD),y)
   ifeq ($(CONFIG_KUNIT)$(CONFIG_GCOV_KERNEL),yy)
     obj-m := agnocast_kunit.o
-	agnocast_kunit-objs := agnocast_kunit_main.o agnocast_main.o agnocast_memory_allocator.o\
-	  agnocast_kunit/agnocast_kunit_add_process.o \
-	  agnocast_kunit/agnocast_kunit_add_subscriber.o \
-	  agnocast_kunit/agnocast_kunit_add_publisher.o \
-	  agnocast_kunit/agnocast_kunit_remove_subscriber.o \
-	  agnocast_kunit/agnocast_kunit_remove_publisher.o \
-	  agnocast_kunit/agnocast_kunit_release_sub_ref.o \
-	  agnocast_kunit/agnocast_kunit_publish_msg.o \
-	  agnocast_kunit/agnocast_kunit_receive_msg.o \
-	  agnocast_kunit/agnocast_kunit_take_msg.o \
-	  agnocast_kunit/agnocast_kunit_get_publisher_num.o \
-	  agnocast_kunit/agnocast_kunit_get_publisher_qos.o \
-	  agnocast_kunit/agnocast_kunit_get_subscriber_num.o \
-	  agnocast_kunit/agnocast_kunit_get_subscriber_qos.o \
-	  agnocast_kunit/agnocast_kunit_add_bridge.o \
-	  agnocast_kunit/agnocast_kunit_remove_bridge.o \
-	  agnocast_kunit/agnocast_kunit_set_ros2_subscriber_num.o \
-	  agnocast_kunit/agnocast_kunit_set_ros2_publisher_num.o \
-	  agnocast_kunit/agnocast_kunit_do_exit.o \
-	  agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.o \
-	  agnocast_kunit/agnocast_kunit_get_node_publisher_topics.o \
-	  agnocast_kunit/agnocast_kunit_get_version.o \
-	  agnocast_kunit/agnocast_kunit_bridge_shutdown.o \
-	  agnocast_kunit/agnocast_kunit_check_and_request_bridge_shutdown.o \
-	  agnocast_kunit/agnocast_kunit_get_topic_subscriber_info.o \
-	  agnocast_kunit/agnocast_kunit_get_topic_publisher_info.o \
-	  agnocast_kunit/agnocast_kunit_init_memory_allocator.o
-	ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
+    agnocast_kunit-objs := agnocast_kunit_main.o agnocast_main.o agnocast_memory_allocator.o
+    include $(src)/agnocast_kunit/Makefile.inc
+    ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
   else
     $(warning "CONFIG_KUNIT or CONFIG_GCOV_KERNEL is not set")
   endif
+else
+  obj-m := agnocast.o
+  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o
 endif
 
 KERNEL_VERSION ?= $(shell uname -r)
