@@ -27,6 +27,8 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
       my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
   sources[static_cast<uint32_t>(EpollEventType::Timer)] = std::make_unique<TimerEventSource>(
     my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Clock)] = std::make_unique<ClockEventSource>(
+    my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
   sources[static_cast<uint32_t>(EpollEventType::Shutdown)] =
     std::make_unique<ShutdownEventSource>();
 

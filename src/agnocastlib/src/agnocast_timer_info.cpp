@@ -1,5 +1,6 @@
 #include "agnocast/agnocast_timer_info.hpp"
 
+#include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_executor.hpp"
@@ -237,6 +238,14 @@ void register_timer_info(
 
   setup_time_jump_callback(timer_info, clock);
 
+  if (timer_info->timer_fd >= 0) {
+    timer_info->timer_fd_need_update = true;
+  }
+
+  if (timer_info->clock_eventfd >= 0) {
+    timer_info->clock_eventfd_need_update = true;
+  }
+
   {
     std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
     id2_timer_info[timer_id] = std::move(timer_info);
@@ -303,21 +312,29 @@ void TimerEventSource::prepare_epoll(
       continue;
     }
 
-    if (epoll.add_source(timer_info.timer_fd, EpollEventType::Timer, timer_id) == -1) {
-      RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
+    std::shared_lock fd_lock(timer_info.fd_mutex);
+
+    // Register timerfd (wall clock based firing)
+    if (timer_info.timer_fd >= 0 && timer_info.timer_fd_need_update) {
+      if (epoll.add_source(timer_info.timer_fd, EpollEventType::Timer, timer_id) == -1) {
+        RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+      timer_info.timer_fd_need_update = false;
     }
 
-    timer_info.need_epoll_update = false;
+    timer_info.need_epoll_update =
+      timer_info.timer_fd_need_update || timer_info.clock_eventfd_need_update;
   }
 }
 
 bool TimerEventSource::handle(EpollEventLocalID event_local_id)
 {
-  // Timer event
+  // Timer event (timerfd fired)
   const uint32_t timer_id = event_local_id;
   rclcpp::CallbackGroup::SharedPtr callback_group;
+  std::shared_ptr<agnocast::TimerBase> timer_ptr;
 
   std::shared_ptr<TimerInfo> timer_info;
   {
@@ -329,21 +346,137 @@ bool TimerEventSource::handle(EpollEventLocalID event_local_id)
       exit(EXIT_FAILURE);
     }
     timer_info = it->second;
-    if (!timer_info->timer.lock()) {
+    timer_ptr = timer_info->timer.lock();
+    if (!timer_ptr) {
       return false;  // Timer object has been destroyed
     }
     callback_group = timer_info->callback_group;
   }
 
+  // Read the number of expirations to clear the event
+  uint64_t expirations = 0;
+  {
+    std::shared_lock fd_lock(timer_info->fd_mutex);
+    if (timer_info->timer_fd < 0) {
+      return false;  // Timer fd was closed (ROS time activated)
+    }
+    const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
+    if (ret == -1 || expirations == 0) {
+      return false;
+    }
+  }
+
+  auto callable = std::make_shared<std::function<void()>>();
+  // For tracepoints.
+  const void * callable_ptr = callable.get();
   // Create a callable that handles the timer event
-  const std::shared_ptr<std::function<void()>> callable =
-    std::make_shared<std::function<void()>>([timer_info]() { handle_timer_event(*timer_info); });
+  *callable = [timer_info, callable_ptr]() {
+    TRACEPOINT(agnocast_callable_start, callable_ptr);
+    handle_timer_event(*timer_info);
+    TRACEPOINT(agnocast_callable_end, callable_ptr);
+  };
+
+  TRACEPOINT(
+    agnocast_create_timer_callable, static_cast<const void *>(callable_ptr),
+    static_cast<const void *>(timer_ptr.get()));
 
   {
     std::lock_guard<std::mutex> ready_lock{*ready_agnocast_executables_mutex_};
     ready_agnocast_executables_->emplace_back(AgnocastExecutable{callable, callback_group});
   }
 
+  return false;
+}
+
+void ClockEventSource::prepare_epoll(
+  Epoll & epoll, const CallbackGroupValidator & validate_callback_group)
+{
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+
+  for (auto & it : id2_timer_info) {
+    const uint32_t timer_id = it.first;
+    TimerInfo & timer_info = *it.second;
+
+    if (!timer_info.need_epoll_update) {
+      continue;
+    }
+
+    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
+      continue;
+    }
+
+    std::shared_lock fd_lock(timer_info.fd_mutex);
+
+    // Register clock_eventfd for ROS_TIME timers (simulation time support)
+    if (timer_info.clock_eventfd >= 0 && timer_info.clock_eventfd_need_update) {
+      if (epoll.add_source(timer_info.clock_eventfd, EpollEventType::Clock, timer_id) == -1) {
+        RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+      timer_info.clock_eventfd_need_update = false;
+    }
+
+    timer_info.need_epoll_update =
+      timer_info.timer_fd_need_update || timer_info.clock_eventfd_need_update;
+  }
+}
+
+bool ClockEventSource::handle(EpollEventLocalID event_local_id)
+{
+  // Clock event (ROS_TIME clock updated via time jump callback)
+  const uint32_t timer_id = event_local_id;
+  rclcpp::CallbackGroup::SharedPtr callback_group;
+  std::shared_ptr<agnocast::TimerBase> timer_ptr;
+
+  std::shared_ptr<TimerInfo> timer_info;
+  {
+    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+    const auto it = id2_timer_info.find(timer_id);
+    if (it == id2_timer_info.end()) {
+      RCLCPP_ERROR(logger, "Agnocast internal implementation error: timer info cannot be found");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+    timer_info = it->second;
+    timer_ptr = timer_info->timer.lock();
+    if (!timer_ptr) {
+      return false;  // Timer object has been destroyed
+    }
+    callback_group = timer_info->callback_group;
+  }
+
+  uint64_t val = 0;
+  const ssize_t ret = read(timer_info->clock_eventfd, &val, sizeof(val));
+  if (ret == -1 || val == 0) {
+    return false;
+  }
+
+  // Check if timer is ready (corresponds to rcl_timer_is_ready)
+  const int64_t now_ns = timer_info->clock->now().nanoseconds();
+  const int64_t next_call_ns = timer_info->next_call_time_ns.load(std::memory_order_relaxed);
+  if (now_ns < next_call_ns) {
+    return false;
+  }
+
+  // Create a callable that handles the clock event
+  auto callable = std::make_shared<std::function<void()>>();
+  const void * callable_ptr = callable.get();
+
+  *callable = [timer_info, callable_ptr]() {
+    TRACEPOINT(agnocast_callable_start, callable_ptr);
+    handle_timer_event(*timer_info);
+    TRACEPOINT(agnocast_callable_end, callable_ptr);
+  };
+
+  TRACEPOINT(
+    agnocast_create_timer_callable, static_cast<const void *>(callable_ptr),
+    static_cast<const void *>(timer_ptr.get()));
+
+  {
+    std::lock_guard<std::mutex> ready_lock{*ready_agnocast_executables_mutex_};
+    ready_agnocast_executables_->emplace_back(AgnocastExecutable{callable, callback_group});
+  }
   return false;
 }
 

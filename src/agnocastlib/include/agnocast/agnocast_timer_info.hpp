@@ -31,7 +31,9 @@ struct TimerInfo
 
   uint32_t timer_id = 0;
   int timer_fd = -1;
+  bool timer_fd_need_update = false;
   int clock_eventfd = -1;  // eventfd to wake epoll on clock updates (ROS_TIME only)
+  bool clock_eventfd_need_update = false;
   std::weak_ptr<TimerBase> timer;
   rclcpp::CallbackGroup::SharedPtr callback_group;
   std::atomic<int64_t> last_call_time_ns;
@@ -80,6 +82,30 @@ public:
   }
 
   [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Timer; }
+
+  void prepare_epoll(
+    Epoll & epoll, const CallbackGroupValidator & validate_callback_group) override;
+
+  bool handle(EpollEventLocalID event_local_id) override;
+};
+
+class ClockEventSource : public EpollEventSource
+{
+  pid_t my_pid_;
+  std::mutex * ready_agnocast_executables_mutex_;
+  std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+
+public:
+  ClockEventSource(
+    const pid_t my_pid, std::mutex * ready_agnocast_executables_mutex,
+    std::vector<AgnocastExecutable> * ready_agnocast_executables)
+  : my_pid_(my_pid),
+    ready_agnocast_executables_mutex_(ready_agnocast_executables_mutex),
+    ready_agnocast_executables_(ready_agnocast_executables)
+  {
+  }
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Clock; }
 
   void prepare_epoll(
     Epoll & epoll, const CallbackGroupValidator & validate_callback_group) override;
