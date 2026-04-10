@@ -3,6 +3,12 @@
 #include "agnocast/agnocast_utils.hpp"
 
 #include <sys/epoll.h>
+#include <unistd.h>
+
+#include <array>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 
 namespace agnocast
 {

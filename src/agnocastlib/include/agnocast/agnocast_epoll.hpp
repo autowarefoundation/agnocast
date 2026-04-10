@@ -4,7 +4,10 @@
 
 #include <rclcpp/callback_group.hpp>
 
+#include <array>
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <vector>

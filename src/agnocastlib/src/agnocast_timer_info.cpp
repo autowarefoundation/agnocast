@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_timer_info.hpp"
 
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_executor.hpp"
 #include "agnocast/agnocast_utils.hpp"
 

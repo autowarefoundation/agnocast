@@ -1,7 +1,5 @@
 #pragma once
 
-#include "sys/epoll.h"
-
 #include <atomic>
 #include <memory>
 #include <mutex>
