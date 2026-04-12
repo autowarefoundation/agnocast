@@ -4,7 +4,7 @@ package_name = 'ros2agnocast'
 
 setup(
     name=package_name,
-    version='2.3.2',
+    version='2.3.3',
     packages=find_packages(),
     data_files=[
         ('share/' + package_name, ['package.xml']),
@@ -22,6 +22,7 @@ setup(
         ],
         'ros2agnocast.verb': [
             'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
+            'version = ros2agnocast.verb.version:VersionVerb',
         ],
         'ros2topic.verb': [
             'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',

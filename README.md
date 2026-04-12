@@ -25,7 +25,6 @@ The paper has been accepted to [IEEE ISORC 2025](https://ieeexplore.ieee.org/doc
 
 ## Table of Contents
 
-- [Table of Contents](#table-of-contents)
 - [Supported Environments](#supported-environments)
 - [For Users](#for-users)
 - [For Developers](#for-developers)
@@ -50,228 +49,7 @@ This reflects the current status, and support is expected to expand in the futur
 
 ## For Users
 
-### Clone the repository
-
-Since ROS packages under `src/` such as `agnocastlib` are not yet distributed from the ROS build farm, a source build is currently required.
-Therefore, to perform the source build, first check out the specific version as follows:
-
-```bash
-git clone --branch 2.3.1 https://github.com/autowarefoundation/agnocast.git
-cd agnocast
-```
-
-### System Configuration
-
-Agnocast uses POSIX message queues for inter-process notification. The following system parameters may need adjustment.
-
-#### `msg_max`: Maximum number of messages per queue (Required)
-
-Agnocast requires increasing the system limit for the maximum number of messages in a queue.
-
-**Temporary setting (Current session only):**
-
-```bash
-sudo sysctl -w fs.mqueue.msg_max=256
-```
-
-**Permanent setting:**
-
-```bash
-echo "fs.mqueue.msg_max=256" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
-#### `queues_max`: Maximum number of message queues system-wide (Optional)
-
-Agnocast creates a message queue for each subscriber, so the total number of message queues grows with the number of topics and subscribers. The system default for `queues_max` is typically 256, which may not be sufficient for large-scale deployments.
-
-You can check the current limit with:
-
-```bash
-cat /proc/sys/fs/mqueue/queues_max
-```
-
-If you encounter `mq_open failed: No space left on device`, you may need to increase this limit.
-
-**Temporary setting (Current session only):**
-
-```bash
-sudo sysctl -w fs.mqueue.queues_max=1024
-```
-
-**Permanent setting:**
-
-```bash
-echo "fs.mqueue.queues_max=1024" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
-#### `msgqueue`: Per-user POSIX message queue memory limit (Optional)
-
-Each bridge manager message queue consumes memory proportional to the maximum message size and queue depth.
-When running many Agnocast processes simultaneously, the per-user POSIX message queue memory limit
-(`RLIMIT_MSGQUEUE`) may be exceeded, causing `mq_open` to fail.
-
-To increase the limit, either add the following line to `/etc/security/limits.conf`:
-
-```text
-* - msgqueue unlimited
-```
-
-Or use `prlimit` to change the limit for the current shell:
-
-```bash
-sudo prlimit --pid=$$ --msgqueue=unlimited
-```
-
-You can verify the current limit with:
-
-```bash
-ulimit -q
-```
-
-### Setup
-
-Run the setup script to install dependencies:
-
-```bash
-bash scripts/setup.bash
-```
-
-<details>
-<summary>Manual installation of agnocast-heaphook and agnocast-kmod</summary>
-
-If you prefer to install the packages manually instead of using the setup script:
-
-```bash
-# Create keyrings directory
-sudo install -d -m 0755 /etc/apt/keyrings
-
-# Download and install GPG key
-curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xCFDB1950382092423DF37D3E075CD8B5C91E5ACA' \
-  | gpg --dearmor | sudo tee /etc/apt/keyrings/agnocast-ppa.gpg >/dev/null
-sudo chmod 0644 /etc/apt/keyrings/agnocast-ppa.gpg
-
-# Create repository configuration (deb822 format)
-cat <<EOF | sudo tee /etc/apt/sources.list.d/agnocast.sources
-Types: deb
-URIs: http://ppa.launchpad.net/t4-system-software/agnocast/ubuntu
-Suites: jammy noble
-Components: main
-Signed-By: /etc/apt/keyrings/agnocast-ppa.gpg
-EOF
-
-# Install packages
-sudo apt update
-sudo apt install agnocast-heaphook-v2.3.1 agnocast-kmod-v2.3.1
-```
-
-</details>
-
-### Build
-
-Build the project:
-
-```bash
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
-
-### Run
-
-Insert kernel module.
-
-```bash
-sudo modprobe agnocast
-```
-
-You can optionally specify the mempool size per process (default: 8GB).
-Note that this parameter is experimental and may be removed or changed in future versions:
-
-```bash
-sudo modprobe agnocast mempool_size_gb=16
-```
-
-See [shared_memory.md](docs/shared_memory.md) for details on mempool configuration.
-
-Run sample app (different window for each script).
-The order does not matter.
-
-```bash
-bash scripts/sample_application/run_listener.bash
-bash scripts/sample_application/run_talker.bash
-```
-
-Stop applications and unload kernel module.
-
-```bash
-sudo modprobe -r agnocast
-```
-
-### Bridge Feature
-
-The Agnocast Bridge enables communication between Agnocast nodes and standard ROS 2 nodes by automatically forwarding messages between shared memory (Agnocast) and DDS (ROS 2).
-
-#### Bridge Modes
-
-Configuration for the Agnocast bridge manager. The mode can be specified using strings (case-insensitive) or integers.
-
-| Mode | Accepted Values | Description |
-| :--- | :--- | :--- |
-| **Standard** (Default) | `standard`, `1` | One bridge manager per process. Used if the variable is unset or invalid. |
-| **Performance** | `performance`, `2` | Single global bridge manager. |
-| **Off** | `off`, `0` | Bridge disabled. |
-
-**Note:**
-
-- Values are **case-insensitive** (e.g., `Standard`, `OFF`, `Performance` are valid).
-- If an unknown value is provided, it falls back to **Standard** mode with a warning.
-
-#### Usage
-
-```bash
-# Standard mode (Default)
-export AGNOCAST_BRIDGE_MODE=standard
-# OR
-export AGNOCAST_BRIDGE_MODE=1
-
-# Performance mode
-export AGNOCAST_BRIDGE_MODE=performance
-# OR
-export AGNOCAST_BRIDGE_MODE=2
-
-# Disable bridge
-export AGNOCAST_BRIDGE_MODE=off
-```
-
-### Performance Mode Setup
-
-Performance mode requires pre-compiled bridge plugins for each message type used. Generate and build them using the following steps:
-
-**1. Generate the plugin package:**
-
-```bash
-# For specific message types
-ros2 agnocast generate-bridge-plugins --message-types std_msgs/msg/String geometry_msgs/msg/Pose
-
-# Or for all available message types
-ros2 agnocast generate-bridge-plugins --all
-```
-
-**2. Build the generated package:**
-
-```bash
-colcon build --packages-select agnocast_bridge_plugins
-```
-
-**3. Source and run:**
-
-```bash
-source install/setup.bash
-export AGNOCAST_BRIDGE_MODE=performance
-# Run your application
-```
-
-For detailed information, see [Bridge Documentation](./docs/agnocast_ros2_bridge.md).
+For installation, setup, and usage instructions, please refer to the [Getting Started Guide](https://tier4.github.io/agnocast_doc/environment-setup/).
 
 ---
 
@@ -284,6 +62,14 @@ Clone the latest main branch for development:
 ```bash
 git clone https://github.com/autowarefoundation/agnocast.git
 cd agnocast
+```
+
+### Setup
+
+Run the setup script to install dependencies:
+
+```bash
+bash scripts/setup.bash
 ```
 
 ### Setup pre-commit
@@ -299,9 +85,6 @@ pre-commit install
 If you want to disable pre-commit, please run `pre-commit uninstall`.
 
 ### Build and insert kmod
-
-> [!NOTE]
-> If you have already installed `agnocast-heaphook` or `agnocast-kmod` via apt (i.e., `bash scripts/setup.bash`), please remove them first.
 
 Build.
 
@@ -383,17 +166,6 @@ Refer to the [Linux kernel documentation](https://www.kernel.org/doc/Documentati
 
 ## Troubleshooting
 
-### Migrating from old PPA setup
-
-If you previously installed Agnocast using the old `add-apt-repository` method, remove the old configuration before running `scripts/setup.bash`:
-
-```bash
-# Remove old repository configuration
-sudo add-apt-repository --remove ppa:t4-system-software/agnocast
-sudo rm -f /etc/apt/sources.list.d/*agnocast*.list
-sudo rm -f /etc/apt/trusted.gpg.d/*agnocast*.gpg
-```
-
 ### Shared memory and message queue cleanup
 
 Agnocast spawns a background daemon process (forked from the first Agnocast process) that automatically cleans up shared memory and message queues when processes exit. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes. If the daemon dies, cleanup stops and resources will leak. To avoid this, stop application processes individually (e.g., with `Ctrl+C` or by targeting specific PIDs).
@@ -409,7 +181,7 @@ rm /dev/mqueue/agnocast@*
 rm /dev/mqueue/agnocast_bridge_manager@*
 ```
 
-If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide limit. See the [System Configuration](#system-configuration) section for how to increase `queues_max`.
+If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide `queues_max` limit (e.g., `sudo sysctl -w fs.mqueue.queues_max=1024`). See [System Configuration](https://tier4.github.io/agnocast_doc/environment-setup/configuration/) for details.
 
 ## Documents
 

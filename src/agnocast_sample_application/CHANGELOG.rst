@@ -2,6 +2,10 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.3 (2026-04-02)
+------------------
+* feat(agnocastlib): enable file logging for `agnocast::Node` (`#1204 <https://github.com/autowarefoundation/agnocast/issues/1204>`_)
+
 2.3.2 (2026-03-24)
 ------------------
 * feat(sample_application): add sample app for doc tutorial (`#1192 <https://github.com/autowarefoundation/agnocast/issues/1192>`_)
