@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Set up the agnocast CIE thread configurator.
+# Reference: https://tier4.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator
+#
+# This script automates:
+#   1. Granting CAP_SYS_NICE to the thread_configurator_node binary.
+#   2. Registering required library paths in /etc/ld.so.conf.d/agnocast-cie.conf.
+
+set -euo pipefail
+
+# --- Prerequisites ---------------------------------------------------------
+
+if [ -z "${ROS_DISTRO:-}" ]; then
+	echo "Error: ROS_DISTRO is not set. Please source your ROS 2 environment first:"
+	echo "  source /opt/ros/<distro>/setup.bash"
+	exit 1
+fi
+
+if ! command -v ros2 >/dev/null 2>&1; then
+	echo "Error: 'ros2' command not found. Please source your ROS 2 environment first:"
+	echo "  source /opt/ros/\$ROS_DISTRO/setup.bash"
+	exit 1
+fi
+
+script_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+workspace_dir=$(dirname "$script_dir")
+workspace_setup="${workspace_dir}/install/setup.bash"
+if [ ! -f "$workspace_setup" ]; then
+	echo "Error: $workspace_setup not found. Build the workspace first."
+	exit 1
+fi
+
+# ROS setup scripts reference unset variables; relax nounset while sourcing.
+set +u
+# shellcheck source=/dev/null
+source "$workspace_setup"
+set -u
+
+if ! command -v dpkg-architecture >/dev/null 2>&1; then
+	echo "Error: 'dpkg-architecture' not found. Install it with: sudo apt-get install dpkg-dev"
+	exit 1
+fi
+
+if ! thread_configurator_prefix=$(ros2 pkg prefix agnocast_cie_thread_configurator 2>/dev/null); then
+	echo "Error: Package 'agnocast_cie_thread_configurator' not found."
+	echo "       Build the workspace and source install/setup.bash first."
+	exit 1
+fi
+
+if ! config_msgs_prefix=$(ros2 pkg prefix agnocast_cie_config_msgs 2>/dev/null); then
+	echo "Error: Package 'agnocast_cie_config_msgs' not found."
+	echo "       Build the workspace and source install/setup.bash first."
+	exit 1
+fi
+
+# --- Step 1: Grant capabilities --------------------------------------------
+
+echo "[1/2] Grant CAP_SYS_NICE to thread_configurator_node"
+
+bin_path=$(readlink -f "${thread_configurator_prefix}/lib/agnocast_cie_thread_configurator/thread_configurator_node")
+
+if [ ! -f "$bin_path" ]; then
+	echo "  Error: binary not found at: $bin_path"
+	exit 1
+fi
+
+current_caps=$(getcap "$bin_path" 2>/dev/null || true)
+if echo "$current_caps" | grep -q "cap_sys_nice=eip"; then
+	echo "  Already set ($current_caps). Skipping."
+else
+	echo "  Target: $bin_path"
+	sudo setcap cap_sys_nice=eip "$bin_path"
+	echo "  Done: $(getcap "$bin_path")"
+fi
+
+# --- Step 2: Configure library paths ---------------------------------------
+
+echo "[2/2] Configure library paths (/etc/ld.so.conf.d/agnocast-cie.conf)"
+
+conf_file=/etc/ld.so.conf.d/agnocast-cie.conf
+expected_content="/opt/ros/${ROS_DISTRO}/lib /opt/ros/${ROS_DISTRO}/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH) ${config_msgs_prefix}/lib"
+
+if [ -f "$conf_file" ] && [ "$(cat "$conf_file")" = "$expected_content" ]; then
+	echo "  Already configured ($conf_file). Skipping."
+else
+	echo "  Writing: $conf_file"
+	echo "  Content: $expected_content"
+	echo "$expected_content" | sudo tee "$conf_file" >/dev/null
+	sudo ldconfig
+	echo "  Done."
+fi
+
+echo "All steps completed."
