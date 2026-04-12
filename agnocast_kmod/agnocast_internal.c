@@ -63,8 +63,8 @@ static void pre_handler_subscriber_exit(
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
-        agnocast_device, "subscriber_id %d out of range [0, %d). (%s)\n",
-        subscriber_id, MAX_TOPIC_LOCAL_ID, __func__);
+        agnocast_device, "subscriber_id %d out of range [0, %d). (%s)\n", subscriber_id,
+        MAX_TOPIC_LOCAL_ID, __func__);
       continue;
     }
 

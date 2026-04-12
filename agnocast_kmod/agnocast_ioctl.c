@@ -10,8 +10,7 @@ static pid_t convert_pid_to_local(pid_t global_pid)
   struct pid * pid_struct = find_pid_ns(global_pid, &init_pid_ns);
   if (!pid_struct) {
     dev_warn(
-      agnocast_device, "Cannot convert global pid=%d to local pid (%s)\n",
-      global_pid, __func__);
+      agnocast_device, "Cannot convert global pid=%d to local pid (%s)\n", global_pid, __func__);
     rcu_read_unlock();
     return -1;
   }
@@ -60,8 +59,8 @@ static int add_topic(
   *wrapper = kmalloc(sizeof(struct topic_wrapper), GFP_KERNEL);
   if (!*wrapper) {
     dev_warn(
-      agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n",
-      topic_name, __func__);
+      agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n", topic_name,
+      __func__);
     return -ENOMEM;
   }
 
@@ -69,8 +68,8 @@ static int add_topic(
   (*wrapper)->key = kstrdup(topic_name, GFP_KERNEL);
   if (!(*wrapper)->key) {
     dev_warn(
-      agnocast_device, "Failed to add a new topic (topic_name=%s) by kstrdup. (%s)\n",
-      topic_name, __func__);
+      agnocast_device, "Failed to add a new topic (topic_name=%s) by kstrdup. (%s)\n", topic_name,
+      __func__);
     kfree(*wrapper);
     return -ENOMEM;
   }
@@ -292,9 +291,7 @@ static int insert_publisher_info(
 static int add_subscriber_reference(struct entry_node * en, const topic_local_id_t id)
 {
   if (id < 0 || id >= MAX_TOPIC_LOCAL_ID) {
-    pr_err(
-      "subscriber id %d out of range [0, %d). (%s)\n", id,
-      MAX_TOPIC_LOCAL_ID, __func__);
+    pr_err("subscriber id %d out of range [0, %d). (%s)\n", id, MAX_TOPIC_LOCAL_ID, __func__);
     return -EINVAL;
   }
 
@@ -343,9 +340,7 @@ int agnocast_increment_message_entry_rc(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n",
-      topic_name, __func__);
+    dev_warn(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -366,8 +361,7 @@ int agnocast_increment_message_entry_rc(
   // Adding reference is allowed only for subscribers
   if (!find_subscriber_info(wrapper, pubsub_id)) {
     dev_warn(
-      agnocast_device,
-      "Subscriber (id=%d) not found in the topic (topic_name=%s). (%s)\n",
+      agnocast_device, "Subscriber (id=%d) not found in the topic (topic_name=%s). (%s)\n",
       pubsub_id, wrapper->key, __func__);
     ret = -EINVAL;
     goto unlock_all;
@@ -400,9 +394,7 @@ int agnocast_ioctl_release_message_entry_reference(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n",
-      topic_name, __func__);
+    dev_warn(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -422,9 +414,8 @@ int agnocast_ioctl_release_message_entry_reference(
 
   if (pubsub_id < 0 || pubsub_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
-      agnocast_device,
-      "pubsub_id %d out of range [0, %d). (%s)\n", pubsub_id,
-      MAX_TOPIC_LOCAL_ID, __func__);
+      agnocast_device, "pubsub_id %d out of range [0, %d). (%s)\n", pubsub_id, MAX_TOPIC_LOCAL_ID,
+      __func__);
     ret = -EINVAL;
     goto unlock_all;
   }
@@ -600,8 +591,7 @@ int agnocast_ioctl_add_process(
   down_write(&global_htables_rwsem);
 
   if (agnocast_find_process_info(pid)) {
-    dev_warn(
-      agnocast_device, "Process (pid=%d) already exists. (%s)\n", pid, __func__);
+    dev_warn(agnocast_device, "Process (pid=%d) already exists. (%s)\n", pid, __func__);
     ret = -EINVAL;
     goto unlock;
   }
@@ -631,8 +621,7 @@ int agnocast_ioctl_add_process(
 #endif
   new_proc_info->mempool_entry = assign_memory(pid);
   if (!new_proc_info->mempool_entry) {
-    dev_warn(
-      agnocast_device, "Process (pid=%d) failed to allocate memory. (%s)\n", pid, __func__);
+    dev_warn(agnocast_device, "Process (pid=%d) failed to allocate memory. (%s)\n", pid, __func__);
     kfree(new_proc_info);
     ret = -ENOMEM;
     goto unlock;
@@ -773,7 +762,8 @@ static int release_msgs_to_meet_depth(
       dev_warn(
         agnocast_device,
         "Unreachable: entries_num is inconsistent with actual message entry num. "
-        "(%s)\n", __func__);
+        "(%s)\n",
+        __func__);
       return -ENODATA;
     }
 
@@ -832,8 +822,7 @@ int agnocast_ioctl_publish_msg(
   struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
   if (!pub_info) {
     dev_warn(
-      agnocast_device,
-      "Publisher (id=%d) not found in the topic (topic_name=%s). (%s)\n",
+      agnocast_device, "Publisher (id=%d) not found in the topic (topic_name=%s). (%s)\n",
       publisher_id, topic_name, __func__);
     ret = -EINVAL;
     goto unlock_all;
@@ -841,8 +830,7 @@ int agnocast_ioctl_publish_msg(
 
   struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
   if (!proc_info) {
-    dev_warn(
-      agnocast_device, "Process (pid=%d) does not exist. (%s)\n", pub_info->pid, __func__);
+    dev_warn(agnocast_device, "Process (pid=%d) does not exist. (%s)\n", pub_info->pid, __func__);
     ret = -EINVAL;
     goto unlock_all;
   }
@@ -983,9 +971,7 @@ int agnocast_ioctl_receive_msg(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n",
-      topic_name, __func__);
+    dev_warn(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -1042,8 +1028,7 @@ int agnocast_ioctl_take_msg(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    dev_warn(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -1054,8 +1039,7 @@ int agnocast_ioctl_take_msg(
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
     dev_warn(
-      agnocast_device,
-      "Subscriber (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      agnocast_device, "Subscriber (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
       subscriber_id, topic_name, __func__);
     ret = -EINVAL;
     goto unlock_all;
@@ -1361,7 +1345,8 @@ int agnocast_ioctl_get_exit_process(
           dev_warn(
             agnocast_device,
             "mq_info_buf is full, remaining entries kept for next poll. "
-            "(%s)\n", __func__);
+            "(%s)\n",
+            __func__);
           break;
         }
         strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
@@ -1762,9 +1747,7 @@ int agnocast_ioctl_get_subscriber_qos(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_dbg(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n",
-      topic_name, __func__);
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -1803,9 +1786,7 @@ int agnocast_ioctl_get_publisher_qos(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_dbg(
-      agnocast_device, "Topic (topic_name=%s) not found. (%s)\n",
-      topic_name, __func__);
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
@@ -1861,8 +1842,7 @@ int agnocast_ioctl_remove_subscriber(
 
   if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
-      agnocast_device,
-      "subscriber_id %d out of range [0, %d). (%s)\n", subscriber_id,
+      agnocast_device, "subscriber_id %d out of range [0, %d). (%s)\n", subscriber_id,
       MAX_TOPIC_LOCAL_ID, __func__);
     ret = -EINVAL;
     goto unlock;
@@ -2107,8 +2087,7 @@ int agnocast_ioctl_remove_bridge(
   struct bridge_info * br_info = find_bridge_info(topic_name, ipc_ns);
 
   if (!br_info) {
-    dev_warn(
-      agnocast_device, "Bridge (topic=%s) not found. (%s)\n", topic_name, __func__);
+    dev_warn(agnocast_device, "Bridge (topic=%s) not found. (%s)\n", topic_name, __func__);
     ret = -ENOENT;
     goto unlock;
   }
