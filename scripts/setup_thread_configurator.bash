@@ -3,6 +3,11 @@
 # Set up the agnocast CIE thread configurator.
 # Reference: https://tier4.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator
 #
+# Usage:
+#   source /opt/ros/<distro>/setup.bash
+#   source <workspace>/install/setup.bash
+#   ./scripts/setup_thread_configurator.bash
+#
 # This script automates:
 #   1. Granting CAP_SYS_NICE to the thread_configurator_node binary.
 #   2. Registering required library paths in /etc/ld.so.conf.d/agnocast-cie.conf.
@@ -22,20 +27,6 @@ if ! command -v ros2 >/dev/null 2>&1; then
 	echo "  source /opt/ros/\$ROS_DISTRO/setup.bash"
 	exit 1
 fi
-
-script_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-workspace_dir=$(dirname "$script_dir")
-workspace_setup="${workspace_dir}/install/setup.bash"
-if [ ! -f "$workspace_setup" ]; then
-	echo "Error: $workspace_setup not found. Build the workspace first."
-	exit 1
-fi
-
-# ROS setup scripts reference unset variables; relax nounset while sourcing.
-set +u
-# shellcheck source=/dev/null
-source "$workspace_setup"
-set -u
 
 if ! command -v dpkg-architecture >/dev/null 2>&1; then
 	echo "Error: 'dpkg-architecture' not found. Install it with: sudo apt-get install dpkg-dev"
