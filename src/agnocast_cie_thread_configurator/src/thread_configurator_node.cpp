@@ -385,7 +385,11 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
-    attr.sched_flags = 0;
+    // SCHED_FLAG_RESET_ON_FORK lets the target thread still call fork(2)/clone(2)
+    // after being placed under SCHED_DEADLINE; without it, clone(2) returns EAGAIN.
+    // Children reset to SCHED_OTHER; each callback-group thread that needs its own
+    // SCHED_DEADLINE gets it via its own CallbackGroupInfo message.
+    attr.sched_flags = SCHED_FLAG_RESET_ON_FORK;
     attr.sched_nice = 0;
     attr.sched_priority = 0;
 
@@ -475,22 +479,13 @@ void ThreadConfiguratorNode::callback_group_callback(
     msg->thread_id, msg->callback_group_id.c_str());
   config->thread_id = msg->thread_id;
 
-  if (config->policy == "SCHED_DEADLINE") {
-    // delayed applying (deduplicate if already queued)
-    if (
-      std::find(deadline_configs_.begin(), deadline_configs_.end(), config) ==
-      deadline_configs_.end()) {
-      deadline_configs_.push_back(config);
-    }
-  } else {
-    if (!issue_syscalls(*config)) {
-      RCLCPP_WARN(
-        this->get_logger(),
-        "Skipping configuration for callback group (domain=%zu, id=%s, tid=%ld) due to syscall "
-        "failure.",
-        domain_id, msg->callback_group_id.c_str(), msg->thread_id);
-      return;
-    }
+  if (!issue_syscalls(*config)) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Skipping configuration for callback group (domain=%zu, id=%s, tid=%ld) due to syscall "
+      "failure.",
+      domain_id, msg->callback_group_id.c_str(), msg->thread_id);
+    return;
   }
 
   if (!config->applied) {
@@ -499,7 +494,7 @@ void ThreadConfiguratorNode::callback_group_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0) {
-    apply_deadline_configs();
+    on_all_configured();
   }
 }
 
@@ -536,21 +531,12 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     msg->thread_name.c_str());
   config->thread_id = msg->thread_id;
 
-  if (config->policy == "SCHED_DEADLINE") {
-    // delayed applying (deduplicate if already queued)
-    if (
-      std::find(deadline_configs_.begin(), deadline_configs_.end(), config) ==
-      deadline_configs_.end()) {
-      deadline_configs_.push_back(config);
-    }
-  } else {
-    if (!issue_syscalls(*config)) {
-      RCLCPP_WARN(
-        this->get_logger(),
-        "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall failure.",
-        msg->thread_name.c_str(), msg->thread_id);
-      return;
-    }
+  if (!issue_syscalls(*config)) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall failure.",
+      msg->thread_name.c_str(), msg->thread_id);
+    return;
   }
 
   if (!config->applied) {
@@ -559,20 +545,12 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0) {
-    apply_deadline_configs();
+    on_all_configured();
   }
 }
 
-void ThreadConfiguratorNode::apply_deadline_configs()
+void ThreadConfiguratorNode::on_all_configured()
 {
-  for (auto config : deadline_configs_) {
-    if (!issue_syscalls(*config)) {
-      RCLCPP_WARN(
-        this->get_logger(), "Failed to apply SCHED_DEADLINE for tid=%ld", config->thread_id);
-    }
-  }
-  deadline_configs_.clear();
-
   RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
 
   configured_at_least_once_ = true;
