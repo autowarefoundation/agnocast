@@ -20,9 +20,9 @@ extern struct class * agnocast_class;
 extern struct device * agnocast_device;
 
 // Locking convention:
-//   Only ioctl_ prefixed functions acquire locks. All other internal/static functions are
+//   Only agnocast_ioctl_ prefixed functions acquire locks. All other internal/static functions are
 //   lock-free and rely on callers to hold the appropriate locks. Exceptions are
-//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and increment_message_entry_rc, which
+//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and agnocast_increment_message_entry_rc, which
 //   manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
@@ -170,7 +170,7 @@ extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
 extern uint32_t queue_tail;
 
-// For controling the kernel thread
+// For controlling the kernel thread
 extern struct task_struct * worker_task;
 extern struct wait_queue_head worker_wait;
 extern int has_new_pid;

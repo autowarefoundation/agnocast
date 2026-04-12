@@ -54,52 +54,6 @@ static int exit_worker_thread(void * data)
   return 0;
 }
 
-void agnocast_enqueue_exit_pid(const pid_t pid)
-{
-  unsigned long flags;
-  uint32_t next;
-
-  bool need_wakeup = false;
-
-  spin_lock_irqsave(&pid_queue_lock, flags);
-
-  next = (queue_tail + 1) & EXIT_QUEUE_MASK;
-
-  if (next != queue_head) {  // queue is not full
-    exit_pid_queue[queue_tail] = pid;
-    queue_tail = next;
-    smp_store_release(&has_new_pid, 1);
-    need_wakeup = true;
-  }
-
-  spin_unlock_irqrestore(&pid_queue_lock, flags);
-
-  if (need_wakeup) {
-    wake_up_interruptible(&worker_wait);
-  } else {
-    dev_warn(
-      agnocast_device,
-      "exit_pid_queue is full! consider expanding the queue size. (enqueue_exit_pid)\n");
-  }
-}
-
-// RCU-protected check: returns true if pid is registered in agnocast.
-bool is_agnocast_pid(const pid_t pid)
-{
-  struct process_info * proc_info;
-  bool found = false;
-  rcu_read_lock();
-  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
-  {
-    if (proc_info->global_pid == pid) {
-      found = true;
-      break;
-    }
-  }
-  rcu_read_unlock();
-  return found;
-}
-
 static void find_sched_process_exit_tp(struct tracepoint * tp, void * priv)
 {
   if (strcmp(tp->name, "sched_process_exit") == 0) {
