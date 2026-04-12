@@ -42,6 +42,21 @@ if ! command -v dpkg-architecture >/dev/null 2>&1; then
 	exit 1
 fi
 
+if ! command -v getcap >/dev/null 2>&1; then
+	echo "Error: 'getcap' not found. Install it with: sudo apt-get install libcap2-bin"
+	exit 1
+fi
+
+if ! command -v setcap >/dev/null 2>&1; then
+	echo "Error: 'setcap' not found. Install it with: sudo apt-get install libcap2-bin"
+	exit 1
+fi
+
+if ! command -v ldconfig >/dev/null 2>&1; then
+	echo "Error: 'ldconfig' not found. Install it with: sudo apt-get install libc-bin"
+	exit 1
+fi
+
 if ! thread_configurator_prefix=$(ros2 pkg prefix agnocast_cie_thread_configurator 2>/dev/null); then
 	echo "Error: Package 'agnocast_cie_thread_configurator' not found."
 	echo "       Build the workspace and source install/setup.bash first."
@@ -79,14 +94,18 @@ fi
 echo "[2/2] Configure library paths (/etc/ld.so.conf.d/agnocast-cie.conf)"
 
 conf_file=/etc/ld.so.conf.d/agnocast-cie.conf
-expected_content="/opt/ros/${ROS_DISTRO}/lib /opt/ros/${ROS_DISTRO}/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH) ${config_msgs_prefix}/lib"
+ros_lib_dir="/opt/ros/${ROS_DISTRO}/lib"
+ros_multiarch_lib_dir="/opt/ros/${ROS_DISTRO}/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+config_msgs_lib_dir="${config_msgs_prefix}/lib"
+expected_content=$(printf '%s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir")
 
 if [ -f "$conf_file" ] && [ "$(cat "$conf_file")" = "$expected_content" ]; then
 	echo "  Already configured ($conf_file). Skipping."
 else
 	echo "  Writing: $conf_file"
-	echo "  Content: $expected_content"
-	echo "$expected_content" | sudo tee "$conf_file" >/dev/null
+	echo "  Content:"
+	printf '    %s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir"
+	printf '%s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir" | sudo tee "$conf_file" >/dev/null
 	sudo ldconfig
 	echo "  Done."
 fi
