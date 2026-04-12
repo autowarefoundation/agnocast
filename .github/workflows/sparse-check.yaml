@@ -1,0 +1,24 @@
+name: sparse-check
+
+on:
+  pull_request:
+    paths:
+      - 'agnocast_kmod/**'
+
+jobs:
+  sparse-check:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install sparse
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sparse
+
+      - name: Run sparse
+        run: |
+          cd agnocast_kmod
+          make sparse
