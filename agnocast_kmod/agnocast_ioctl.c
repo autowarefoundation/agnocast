@@ -1601,7 +1601,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
   int bkt_sub_info;
 
   struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
+    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
   // Count actual subscribers first
   uint32_t subscriber_num = 0;
@@ -1687,7 +1687,7 @@ int agnocast_ioctl_get_topic_publisher_info(
   int bkt_pub_info;
 
   struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret *)topic_info_args->topic_info_ret_buffer_addr;
+    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
   // Count actual publishers first
   uint32_t publisher_num = 0;
