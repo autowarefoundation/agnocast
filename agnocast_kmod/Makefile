@@ -4,7 +4,11 @@ ccflags-y += -Wall -Werror -DVERSION='"$(VERSION)"'
 ifeq ($(KUNIT_BUILD),y)
   ifeq ($(CONFIG_KUNIT)$(CONFIG_GCOV_KERNEL),yy)
     obj-m := agnocast_kunit.o
-    agnocast_kunit-objs := agnocast_kunit_main.o agnocast_main.o agnocast_memory_allocator.o
+    agnocast_kunit-objs := agnocast_kunit_main.o agnocast_main.o agnocast_memory_allocator.o\
+	  agnocast_init.o \
+	  agnocast_exit.o \
+	  agnocast_ioctl.o \
+	  agnocast_internal.o
     include $(src)/agnocast_kunit/Makefile.inc
     ccflags-y += -DKUNIT_BUILD -fprofile-arcs -ftest-coverage
   else
@@ -12,7 +16,11 @@ ifeq ($(KUNIT_BUILD),y)
   endif
 else
   obj-m := agnocast.o
-  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o
+  agnocast-objs := agnocast_main.o agnocast_memory_allocator.o\
+	agnocast_init.o \
+	agnocast_exit.o \
+	agnocast_ioctl.o \
+	agnocast_internal.o
 endif
 
 KERNEL_VERSION ?= $(shell uname -r)
