@@ -9,13 +9,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Set PR fetch depth
-        run: echo "PR_FETCH_DEPTH=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "${GITHUB_ENV}"
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: ${{ env.PR_FETCH_DEPTH }}
+          fetch-depth: 0
 
       - name: Check for agnocast_kmod changes
         id: check_changes
