@@ -1282,7 +1282,7 @@ int agnocast_ioctl_get_publisher_num(
 }
 
 // Two-phase ioctl for exit process cleanup:
-//   Phase 1 (%s): read-only copy of subscription entries to kernel
+//   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
 //   buffer.
 //   Phase 2 (agnocast_commit_exit_process): delete entries and free proc_info.
 //
