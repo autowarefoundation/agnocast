@@ -331,60 +331,6 @@ static struct entry_node * find_message_entry(
   return NULL;
 }
 
-// Add subscriber reference to message entry (set boolean flag to true).
-// Called when subscriber first receives/takes the message.
-int agnocast_increment_message_entry_rc(
-  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
-  const int64_t entry_id)
-{
-  int ret = 0;
-
-  down_read(&global_htables_rwsem);
-
-  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
-  if (!wrapper) {
-    dev_warn(
-      agnocast_device, "Topic (topic_name=%s) not found. (increment_message_entry_rc)\n",
-      topic_name);
-    ret = -EINVAL;
-    goto unlock_only_global;
-  }
-
-  down_read(&wrapper->topic_rwsem);
-
-  struct entry_node * en = find_message_entry(wrapper, entry_id);
-  if (!en) {
-    dev_warn(
-      agnocast_device,
-      "Message entry (topic_name=%s entry_id=%lld) not found. "
-      "(increment_message_entry_rc)\n",
-      topic_name, entry_id);
-    ret = -EINVAL;
-    goto unlock_all;
-  }
-
-  // Adding reference is allowed only for subscribers
-  if (!find_subscriber_info(wrapper, pubsub_id)) {
-    dev_warn(
-      agnocast_device,
-      "Subscriber (id=%d) not found in the topic (topic_name=%s). (increment_message_entry_rc)\n",
-      pubsub_id, wrapper->key);
-    ret = -EINVAL;
-    goto unlock_all;
-  }
-
-  ret = add_subscriber_reference(en, pubsub_id);
-  if (ret < 0) {
-    goto unlock_all;
-  }
-
-unlock_all:
-  up_read(&wrapper->topic_rwsem);
-unlock_only_global:
-  up_read(&global_htables_rwsem);
-  return ret;
-}
-
 // Forward declaration
 static int get_process_num(const struct ipc_namespace * ipc_ns);
 
@@ -2840,6 +2786,60 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 // helper functions for KUnit test
 
 #ifdef KUNIT_BUILD
+
+// Add subscriber reference to message entry (set boolean flag to true).
+// Called when subscriber first receives/takes the message.
+int agnocast_increment_message_entry_rc(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
+  const int64_t entry_id)
+{
+  int ret = 0;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_warn(
+      agnocast_device, "Topic (topic_name=%s) not found. (increment_message_entry_rc)\n",
+      topic_name);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_read(&wrapper->topic_rwsem);
+
+  struct entry_node * en = find_message_entry(wrapper, entry_id);
+  if (!en) {
+    dev_warn(
+      agnocast_device,
+      "Message entry (topic_name=%s entry_id=%lld) not found. "
+      "(increment_message_entry_rc)\n",
+      topic_name, entry_id);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // Adding reference is allowed only for subscribers
+  if (!find_subscriber_info(wrapper, pubsub_id)) {
+    dev_warn(
+      agnocast_device,
+      "Subscriber (id=%d) not found in the topic (topic_name=%s). (increment_message_entry_rc)\n",
+      pubsub_id, wrapper->key);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  ret = add_subscriber_reference(en, pubsub_id);
+  if (ret < 0) {
+    goto unlock_all;
+  }
+
+unlock_all:
+  up_read(&wrapper->topic_rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
 
 // No locking needed for the following KUnit helper functions.
 // These are only called from single-threaded KUnit context.
