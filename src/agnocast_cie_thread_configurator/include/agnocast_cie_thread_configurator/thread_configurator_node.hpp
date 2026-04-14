@@ -29,7 +29,7 @@ class ThreadConfiguratorNode : public rclcpp::Node
   };
 
 public:
-  explicit ThreadConfiguratorNode(const YAML::Node & yaml);
+  explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
   ~ThreadConfiguratorNode();
   void print_all_unapplied();
   bool has_configured_once() const;
@@ -37,6 +37,7 @@ public:
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
 private:
+  void validate_hardware_info(const YAML::Node & yaml);
   void validate_rt_throttling(const YAML::Node & yaml);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
   bool issue_syscalls(const ThreadConfig & config);

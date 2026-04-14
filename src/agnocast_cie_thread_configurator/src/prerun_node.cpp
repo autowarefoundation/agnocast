@@ -9,10 +9,36 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 
-PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node")
+PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node", options)
 {
+  // https://docs.ros.org/en/rolling/Concepts/Intermediate/About-Domain-ID.html#choosing-a-domain-id-short-version
+  constexpr size_t max_domain_id = 101;
+
+  const auto domains =
+    this->declare_parameter<std::vector<int64_t>>("domains", std::vector<int64_t>{});
+  std::set<size_t> domain_ids;
+  for (const auto raw_domain_id : domains) {
+    if (raw_domain_id < 0) {
+      RCLCPP_WARN(
+        this->get_logger(), "Negative domain ID %lld is invalid. Skipping.",
+        static_cast<long long>(raw_domain_id));
+      continue;
+    }
+
+    const size_t domain_id = static_cast<size_t>(raw_domain_id);
+    if (domain_id > max_domain_id) {
+      RCLCPP_WARN(
+        this->get_logger(), "Domain ID %zu exceeds maximum valid value (%zu). Skipping.", domain_id,
+        max_domain_id);
+      continue;
+    }
+
+    domain_ids.insert(domain_id);
+  }
+
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();

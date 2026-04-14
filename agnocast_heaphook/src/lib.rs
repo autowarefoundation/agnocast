@@ -13,6 +13,32 @@ use std::{
 
 use crate::tlsf::TLSFAllocator;
 
+// On glibc < 2.35 (e.g. Ubuntu 20.04), dlsym(RTLD_NEXT, ...) deadlocks when called
+// from malloc hooks during LD_PRELOAD initialization because the dynamic linker lock
+// is held. We use glibc's internal __libc_* symbols instead, which are resolved at
+// load time without dlsym.
+#[cfg(glibc_pre_2_35)]
+extern "C" {
+    fn __libc_malloc(size: usize) -> *mut c_void;
+    fn __libc_free(ptr: *mut c_void);
+    fn __libc_calloc(num: usize, size: usize) -> *mut c_void;
+    fn __libc_realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+    fn __libc_memalign(alignment: usize, size: usize) -> *mut c_void;
+}
+
+// Resolve __libc_start_main via dlsym in .init_array (runs after libraries are loaded,
+// safe even on glibc < 2.35). On glibc >= 2.35 this is not needed — the original
+// get_or_init in __libc_start_main works fine.
+#[cfg(all(glibc_pre_2_35, not(test)))]
+#[used]
+#[link_section = ".init_array"]
+static RESOLVE_START_MAIN: extern "C" fn() = {
+    extern "C" fn init() {
+        ORIGINAL_LIBC_START_MAIN.get_or_init(init_original_libc_start_main);
+    }
+    init
+};
+
 mod tlsf;
 
 /// Version string exported as a C-compatible symbol for external querying.
@@ -67,6 +93,11 @@ fn init_original_libc_start_main() -> LibcStartMainType {
 type MallocType = unsafe extern "C" fn(usize) -> *mut c_void;
 static ORIGINAL_MALLOC: OnceLock<MallocType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_malloc() -> MallocType {
+    __libc_malloc
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_malloc() -> MallocType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"malloc\0").unwrap();
     unsafe {
@@ -78,6 +109,11 @@ fn init_original_malloc() -> MallocType {
 type FreeType = unsafe extern "C" fn(*mut c_void) -> ();
 static ORIGINAL_FREE: OnceLock<FreeType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_free() -> FreeType {
+    __libc_free
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_free() -> FreeType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"free\0").unwrap();
     unsafe {
@@ -89,6 +125,11 @@ fn init_original_free() -> FreeType {
 type CallocType = unsafe extern "C" fn(usize, usize) -> *mut c_void;
 static ORIGINAL_CALLOC: OnceLock<CallocType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_calloc() -> CallocType {
+    __libc_calloc
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_calloc() -> CallocType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"calloc\0").unwrap();
     unsafe {
@@ -100,6 +141,11 @@ fn init_original_calloc() -> CallocType {
 type ReallocType = unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void;
 static ORIGINAL_REALLOC: OnceLock<ReallocType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_realloc() -> ReallocType {
+    __libc_realloc
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_realloc() -> ReallocType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"realloc\0").unwrap();
     unsafe {
@@ -111,6 +157,26 @@ fn init_original_realloc() -> ReallocType {
 type PosixMemalignType = unsafe extern "C" fn(&mut *mut c_void, usize, usize) -> i32;
 static ORIGINAL_POSIX_MEMALIGN: OnceLock<PosixMemalignType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_posix_memalign() -> PosixMemalignType {
+    unsafe extern "C" fn posix_memalign_via_memalign(
+        memptr: &mut *mut c_void,
+        alignment: usize,
+        size: usize,
+    ) -> i32 {
+        if !alignment.is_power_of_two() || alignment % size_of::<*mut c_void>() != 0 {
+            return libc::EINVAL;
+        }
+        let ptr = __libc_memalign(alignment, size);
+        if ptr.is_null() {
+            return libc::ENOMEM;
+        }
+        *memptr = ptr;
+        0
+    }
+    posix_memalign_via_memalign
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_posix_memalign() -> PosixMemalignType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"posix_memalign\0").unwrap();
     unsafe {
@@ -122,6 +188,17 @@ fn init_original_posix_memalign() -> PosixMemalignType {
 type AlignedAllocType = unsafe extern "C" fn(usize, usize) -> *mut c_void;
 static ORIGINAL_ALIGNED_ALLOC: OnceLock<AlignedAllocType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_aligned_alloc() -> AlignedAllocType {
+    unsafe extern "C" fn aligned_alloc_via_memalign(alignment: usize, size: usize) -> *mut c_void {
+        if !alignment.is_power_of_two() || (size != 0 && size % alignment != 0) {
+            return ptr::null_mut();
+        }
+        __libc_memalign(alignment, size)
+    }
+    aligned_alloc_via_memalign
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_aligned_alloc() -> AlignedAllocType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"aligned_alloc\0").unwrap();
     unsafe {
@@ -133,6 +210,11 @@ fn init_original_aligned_alloc() -> AlignedAllocType {
 type MemalignType = unsafe extern "C" fn(usize, usize) -> *mut c_void;
 static ORIGINAL_MEMALIGN: OnceLock<MemalignType> = OnceLock::new();
 
+#[cfg(glibc_pre_2_35)]
+fn init_original_memalign() -> MemalignType {
+    __libc_memalign
+}
+#[cfg(not(glibc_pre_2_35))]
 fn init_original_memalign() -> MemalignType {
     let symbol: &CStr = CStr::from_bytes_with_nul(b"memalign\0").unwrap();
     unsafe {
@@ -430,9 +512,19 @@ pub unsafe extern "C" fn __libc_start_main(
         panic!("[ERROR] [Agnocast] The memory allocator has already been initialized.");
     }
 
-    (*ORIGINAL_LIBC_START_MAIN.get_or_init(init_original_libc_start_main))(
-        main, argc, argv, init, fini, rtld_fini, stack_end,
-    )
+    #[cfg(glibc_pre_2_35)]
+    {
+        // Resolved in .init_array before this hook runs
+        (*ORIGINAL_LIBC_START_MAIN.get().unwrap())(
+            main, argc, argv, init, fini, rtld_fini, stack_end,
+        )
+    }
+    #[cfg(not(glibc_pre_2_35))]
+    {
+        (*ORIGINAL_LIBC_START_MAIN.get_or_init(init_original_libc_start_main))(
+            main, argc, argv, init, fini, rtld_fini, stack_end,
+        )
+    }
 }
 
 #[no_mangle]
