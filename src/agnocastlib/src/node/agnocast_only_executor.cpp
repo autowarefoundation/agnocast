@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast_signal_handler.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -19,7 +20,8 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
 : spinning_(false),
   shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
   my_pid_(getpid()),
-  epoll_update_tracker_(EpollUpdateDispatcher::get_instance().create_tracker())
+  epoll_update_tracker_(EpollUpdateDispatcher::get_instance().create_tracker()),
+  epoll_update_tracker_id_(epoll_update_tracker_.id())
 {
   EventSourceArray sources;
   sources[static_cast<uint32_t>(EpollEventType::Subscription)] =
@@ -179,6 +181,8 @@ void AgnocastOnlyExecutor::add_callback_group(
     agnocast_add_callback_group, static_cast<const void *>(this),
     static_cast<const void *>(node_ptr.get()), static_cast<const void *>(group_ptr.get()),
     group_type_str);
+
+  EpollUpdateDispatcher::get_instance().notify(epoll_update_tracker_id_);
 }
 
 void AgnocastOnlyExecutor::remove_callback_group(
@@ -201,6 +205,8 @@ void AgnocastOnlyExecutor::remove_callback_group(
   }
   weak_groups_associated_with_executor_to_nodes_.erase(it);
   group_ptr->get_associated_with_executor_atomic().store(false);
+
+  EpollUpdateDispatcher::get_instance().notify(epoll_update_tracker_id_);
 }
 
 std::vector<rclcpp::CallbackGroup::WeakPtr> AgnocastOnlyExecutor::get_all_callback_groups()
@@ -319,6 +325,8 @@ void AgnocastOnlyExecutor::add_node(
       }
     });
   weak_nodes_.push_back(node_ptr);
+
+  EpollUpdateDispatcher::get_instance().notify(epoll_update_tracker_id_);
 }
 
 void AgnocastOnlyExecutor::add_node(const std::shared_ptr<agnocast::Node> & node, bool notify)
@@ -369,6 +377,8 @@ void AgnocastOnlyExecutor::remove_node(
   }
 
   node_ptr->get_associated_with_executor_atomic().store(false);
+
+  EpollUpdateDispatcher::get_instance().notify(epoll_update_tracker_id_);
 }
 
 void AgnocastOnlyExecutor::remove_node(const std::shared_ptr<agnocast::Node> & node, bool notify)

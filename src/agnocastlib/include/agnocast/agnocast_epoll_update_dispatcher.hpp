@@ -26,6 +26,8 @@ public:
 
   void notify_all();
 
+  void notify(int tracker_id);
+
   EpollUpdateTracker create_tracker();
 
 private:
@@ -52,6 +54,8 @@ public:
   ~EpollUpdateTracker();
 
   [[nodiscard]] bool need_update() const;
+
+  [[nodiscard]] int id() const { return id_; }
 
 private:
   friend class EpollUpdateDispatcher;

@@ -27,6 +27,15 @@ void EpollUpdateDispatcher::notify_all()
   }
 }
 
+void EpollUpdateDispatcher::notify(int tracker_id)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = trackers_.find(tracker_id);
+  if (it != trackers_.end()) {
+    it->second->need_update.store(true, std::memory_order_release);
+  }
+}
+
 void EpollUpdateDispatcher::unregister(int tracker_id)
 {
   std::lock_guard<std::mutex> lock(mutex_);

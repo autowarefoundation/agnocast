@@ -37,6 +37,7 @@ protected:
   pid_t my_pid_;
 
   EpollUpdateTracker epoll_update_tracker_;
+  int epoll_update_tracker_id_;
 
   // Lock ordering: When both mutexes are needed, always acquire
   // ready_agnocast_executables_mutex_ before mutex_ to prevent deadlocks.
