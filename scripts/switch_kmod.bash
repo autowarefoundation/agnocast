@@ -67,9 +67,9 @@ fi
 
 # --- Step 2: Purge existing agnocast-kmod packages -------------------------
 
-echo "[2/5] Purge existing agnocast-kmod-v* packages"
+echo "[2/5] Purge existing agnocast-kmod* packages"
 
-installed_pkgs=$(dpkg-query -W -f='${Package} ${Status}\n' 'agnocast-kmod-v*' 2>/dev/null \
+installed_pkgs=$(dpkg-query -W -f='${Package} ${Status}\n' 'agnocast-kmod*' 2>/dev/null \
 	| awk '$NF == "installed" {print $1}' || true)
 
 if [ -n "$installed_pkgs" ]; then
@@ -80,22 +80,36 @@ else
 	echo "  None installed. Skipping."
 fi
 
-# --- Step 3: Remove leftover DKMS entries ----------------------------------
+# --- Step 3: Remove leftover DKMS entries and orphan modules ---------------
 
-echo "[3/5] Remove leftover DKMS entries for agnocast"
+echo "[3/5] Remove leftover DKMS entries and orphan modules"
 
-dkms_versions=$(dkms status agnocast 2>/dev/null \
-	| awk -F'[/,:]' '/^agnocast/ {gsub(/ /,"",$2); print $2}' \
-	| sort -u || true)
-
-if [ -n "$dkms_versions" ]; then
-	while IFS= read -r ver; do
-		[ -z "$ver" ] && continue
+# DKMS may have been left with broken entries (missing source dir) by old
+# packages, in which case `dkms remove` fails. Fall back to deleting the
+# state directory directly.
+if [ -d /var/lib/dkms/agnocast ]; then
+	for ver_dir in /var/lib/dkms/agnocast/*/; do
+		[ -d "$ver_dir" ] || continue
+		ver=$(basename "$ver_dir")
 		echo "  Removing agnocast/${ver}"
-		sudo dkms remove "agnocast/${ver}" --all || true
-	done <<<"$dkms_versions"
+		if ! sudo dkms remove "agnocast/${ver}" --all 2>/dev/null; then
+			sudo rm -rf "$ver_dir"
+		fi
+	done
+	sudo rmdir /var/lib/dkms/agnocast 2>/dev/null || true
 else
-	echo "  No DKMS entries. Skipping."
+	echo "  No DKMS entries."
+fi
+
+# Old unversioned installs may leave /lib/modules/<kver>/updates/dkms/agnocast.ko*
+# behind, which blocks the new DKMS install with "already installed
+# (unversioned module)".
+kver=$(uname -r)
+orphan_dir="/lib/modules/${kver}/updates/dkms"
+if sudo test -e "${orphan_dir}/agnocast.ko" || sudo test -e "${orphan_dir}/agnocast.ko.zst"; then
+	echo "  Removing orphan unversioned module in ${orphan_dir}"
+	sudo rm -f "${orphan_dir}/agnocast.ko" "${orphan_dir}/agnocast.ko.zst"
+	sudo depmod -a
 fi
 
 # --- Step 4: Install target version ----------------------------------------
