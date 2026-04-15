@@ -17,7 +17,7 @@ EpollManager::EpollManager(EventSourceArray sources) : sources_(std::move(source
 {
   for (uint32_t type = 0; type < static_cast<size_t>(EpollEventType::NrEventType); type++) {
     if (!sources_[type]) {
-      RCLCPP_ERROR(logger, "invalid epoll event source array: sources_[%d] is nullptr", type);
+      RCLCPP_ERROR(logger, "invalid epoll event source array: sources_[%u] is nullptr", type);
       exit(EXIT_FAILURE);
     }
   }
@@ -54,7 +54,7 @@ bool EpollManager::wait_and_handle_epoll_event(const int timeout_ms)
   for (auto [event_type, event_local_id] : results) {
     if (EpollEventType::NrEventType <= event_type) {
       RCLCPP_ERROR(
-        logger, "Agnocast internal implementation error: invalid epoll event type %d",
+        logger, "Agnocast internal implementation error: invalid epoll event type %u",
         static_cast<uint32_t>(event_type));
       close(agnocast_fd);
       exit(EXIT_FAILURE);
