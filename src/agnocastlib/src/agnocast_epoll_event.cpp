@@ -63,10 +63,6 @@ int Epoll::wait(std::vector<EpollResult> & results, int timeout_ms) const
     return -1;
   }
 
-  if (!results.empty()) {
-    return -1;
-  }
-
   results.clear();
   for (int i = 0; i < nfds; ++i) {
     auto [type, id] = unpack_epoll_data(events[i].data.u64);
