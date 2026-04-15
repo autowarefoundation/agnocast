@@ -22,6 +22,7 @@ setup(
         ],
         'ros2agnocast.verb': [
             'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
+            'version = ros2agnocast.verb.version:VersionVerb',
         ],
         'ros2topic.verb': [
             'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',

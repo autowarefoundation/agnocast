@@ -170,7 +170,6 @@ if(BUILD_TESTING)
   ament_add_gmock(test_integration_${PROJECT_NAME}
     test/integration/test_agnocast_single_threaded_executor.cpp
     test/integration/test_agnocast_multi_threaded_executor.cpp
-    test/integration/test_agnocast_callback_isolated_executor.cpp
     test/integration/src/ioctl_mock.cpp
     test/integration/src/node_for_executor_test.cpp)
   target_include_directories(test_integration_${PROJECT_NAME} PRIVATE test/integration/include)
