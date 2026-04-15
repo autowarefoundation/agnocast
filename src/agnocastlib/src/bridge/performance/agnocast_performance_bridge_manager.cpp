@@ -115,7 +115,8 @@ void PerformanceBridgeManager::on_mq_request(int fd)
   if (msg->is_service) {
     RCLCPP_INFO(
       logger_, "Received service bridge request for '%s' with type '%s'",
-      msg->srv_target.service_name, msg->srv_target.service_type);
+      static_cast<const char *>(msg->srv_target.service_name),
+      static_cast<const char *>(msg->srv_target.service_type));
     return;
   }
 
