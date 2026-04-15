@@ -10,6 +10,8 @@
 namespace agnocast
 {
 
+// Capped slightly below UINT32_MAX to provide a safe margin against
+// atomic wrap-around (overflow back to 0) during concurrent fetch_add calls.
 constexpr uint32_t MAX_CALLBACK_INFO_ID = 0x10000000;
 
 struct AgnocastExecutable;

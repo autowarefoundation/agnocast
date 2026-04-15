@@ -16,6 +16,8 @@ namespace agnocast
 {
 
 constexpr int64_t NANOSECONDS_PER_SECOND = 1000000000;
+// Capped slightly below UINT32_MAX to provide a safe margin against
+// atomic wrap-around (overflow back to 0) during concurrent fetch_add calls.
 constexpr uint32_t MAX_TIMER_ID = 0x10000000;
 
 struct AgnocastExecutable;
