@@ -58,9 +58,9 @@ void request_service_bridge_core(
     // Service bridge requests are intentionally ignored in standard mode for now.
     // Standard-mode service bridges are not implemented yet.
     return;
+  } else if (bridge_mode == BridgeMode::Performance) {
+    send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
   }
-
-  send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
 }
 
 // Policy for agnocast::Subscription.
