@@ -18,6 +18,13 @@
 #include <span>
 #include <vector>
 
+extern "C" {
+const char * agnocast_get_version()
+{
+  return agnocastlib::VERSION;
+}
+}
+
 namespace agnocast
 {
 

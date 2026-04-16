@@ -6,11 +6,11 @@
 
 ### Package, Class, and Executable Names
 
-| | Original | Agnocast Version |
-|--|----------|------------------|
-| Package | `callback_isolated_executor` | `agnocast_components` (recommended) or `agnocastlib` (deprecated) |
-| Executor Class | `CallbackIsolatedExecutor` | `agnocast::CallbackIsolatedAgnocastExecutor` |
-| Container Executable | `component_container_callback_isolated` | `agnocast_component_container_cie` |
+|                      | Original                                | Agnocast Version                                                  |
+| -------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| Package              | `callback_isolated_executor`            | `agnocast_components` (recommended) or `agnocastlib` (deprecated) |
+| Executor Class       | `CallbackIsolatedExecutor`              | `agnocast::CallbackIsolatedAgnocastExecutor`                      |
+| Container Executable | `component_container_callback_isolated` | `agnocast_component_container_cie`                                |
 
 ### Features
 
@@ -34,10 +34,14 @@ agnocast_components_register_node(
 
 #### Multiple ROS domain support
 
-`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use the `--domains` option to specify domain IDs you use:
+`agnocast_cie_thread_configurator` can handle callback groups from multiple ROS domains. Use ROS parameters to specify domain IDs:
 
 ```bash
-ros2 run agnocast_cie_thread_configurator thread_configurator_node --prerun --domains 0,1
+# Option 1: Run prerun_node directly with ROS parameters
+ros2 run agnocast_cie_thread_configurator prerun_node --ros-args -p domains:=[0,1]
+
+# Option 2: Use the launch file
+ros2 launch agnocast_cie_thread_configurator thread_configurator.launch.xml prerun:=true domains:=[0,1]
 ```
 
 #### RT Throttling

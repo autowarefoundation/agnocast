@@ -1,0 +1,37 @@
+name: sparse-check
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  sparse-check:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for agnocast_kmod changes
+        id: check_changes
+        run: |
+          set -e
+          if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '^agnocast_kmod/'; then
+            echo "kmod_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "kmod_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install sparse
+        if: steps.check_changes.outputs.kmod_changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sparse
+
+      - name: Run sparse
+        if: steps.check_changes.outputs.kmod_changed == 'true'
+        run: |
+          cd agnocast_kmod
+          make sparse
