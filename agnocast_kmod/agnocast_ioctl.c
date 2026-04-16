@@ -1696,9 +1696,7 @@ int agnocast_ioctl_get_subscriber_qos(
 
   struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns);
   if (!wrapper) {
-    dev_dbg(
-      agnocast_device, "Topic (topic_name=%s) not found. (agnocast_ioctl_get_subscriber_qos)\n",
-      topic_name);
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
     ret = -EINVAL;
     goto unlock_only_global;
   }
