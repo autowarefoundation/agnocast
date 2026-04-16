@@ -25,7 +25,7 @@ public:
   using WeakPtr = std::weak_ptr<ParameterService>;
   using UniquePtr = std::unique_ptr<ParameterService>;
 
-  /// @brief Construct a ParameterService, registering register all parameter management services.
+  /// @brief Construct a ParameterService, registering all parameter management services.
   /// @param node The node's pointer
   /// @param node_params The node's parameters interface
   /// @param qos_profile The QoS profile for all parameter services. Defaults to `rclcpp::QoS()`.
