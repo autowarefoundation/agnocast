@@ -115,7 +115,7 @@ private:
 public:
   template <typename NodeT>
   Client(
-    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos,
+    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
     logger_(node->get_logger()),
@@ -132,6 +132,9 @@ public:
       "Agnocast service/client is not officially supported yet and the API may change in the "
       "future: %s",
       service_name_.c_str());
+
+    // TransientLocal durability is not allowed for services.
+    const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
 
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(

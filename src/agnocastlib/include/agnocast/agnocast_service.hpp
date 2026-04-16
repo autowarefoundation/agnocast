@@ -65,7 +65,8 @@ public:
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
     service_name_(node->get_node_services_interface()->resolve_service_name(service_name)),
-    qos_(qos)
+    // TransientLocal durability is not allowed for services.
+    qos_(rclcpp::QoS(qos).durability_volatile())
   {
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
@@ -128,7 +129,7 @@ public:
     SubscriptionOptions options{group};
     std::string topic_name = create_service_request_topic_name(service_name_);
     subscriber_ = std::make_shared<BasicSubscription<RequestT, NoBridgeRequestPolicy>>(
-      node, topic_name, qos, std::move(subscriber_callback), options);
+      node, topic_name, qos_, std::move(subscriber_callback), options);
   }
 };
 
