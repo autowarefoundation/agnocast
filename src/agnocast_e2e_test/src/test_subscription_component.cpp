@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace agnocastlib_test
+namespace agnocast_e2e_test
 {
 
 class TestSubscriptionComponent : public rclcpp::Node
@@ -29,6 +29,6 @@ private:
   int received_count_;
 };
 
-}  // namespace agnocastlib_test
+}  // namespace agnocast_e2e_test
 
-RCLCPP_COMPONENTS_REGISTER_NODE(agnocastlib_test::TestSubscriptionComponent)
+RCLCPP_COMPONENTS_REGISTER_NODE(agnocast_e2e_test::TestSubscriptionComponent)
