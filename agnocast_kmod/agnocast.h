@@ -377,10 +377,6 @@ int agnocast_ioctl_add_publisher(
   const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
 
-int agnocast_increment_message_entry_rc(
-  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
-  const int64_t entry_id);
-
 int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
@@ -485,6 +481,9 @@ bool is_agnocast_pid(const pid_t pid);
 // helper functions for KUnit test
 
 #ifdef KUNIT_BUILD
+int agnocast_increment_message_entry_rc(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
+  const int64_t entry_id);
 int agnocast_get_alive_proc_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);

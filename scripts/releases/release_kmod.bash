@@ -19,7 +19,7 @@ if ! command -v backportpackage &> /dev/null; then
   exit 1
 fi
 
-VERSION="2.3.2"
+VERSION="2.3.3"
 RELEASE=$(dpkg-parsechangelog -l agnocast_kmod/debian/changelog -S Version | cut -d'-' -f2)
 
 CHANGES_FILE="agnocast-kmod-v${VERSION}_${VERSION}-${RELEASE}_source.changes"

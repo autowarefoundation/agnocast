@@ -20,10 +20,10 @@ extern struct class * agnocast_class;
 extern struct device * agnocast_device;
 
 // Locking convention:
-//   Only ioctl_ prefixed functions acquire locks. All other internal/static functions are
+//   Only agnocast_ioctl_ prefixed functions acquire locks. All other internal/static functions are
 //   lock-free and rely on callers to hold the appropriate locks. Exceptions are
-//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and increment_message_entry_rc, which
-//   manage locks directly.
+//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and
+//   agnocast_increment_message_entry_rc, which manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
 //   1. global_htables_rwsem   (this file)
@@ -101,6 +101,16 @@ struct subscriber_info
   struct hlist_node node;
 };
 
+// Helper to copy a name_info string from userspace to a kernel stack buffer.
+// Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
+static inline long copy_name_from_user(char * dst, size_t dst_size, const struct name_info * src)
+{
+  if (src->len >= dst_size) return -EINVAL;
+  if (copy_from_user(dst, (const char __user *)src->ptr, src->len)) return -EFAULT;
+  dst[src->len] = '\0';
+  return 0;
+}
+
 struct topic_struct
 {
   struct rb_root entries;
@@ -170,7 +180,7 @@ extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
 extern uint32_t queue_tail;
 
-// For controling the kernel thread
+// For controlling the kernel thread
 extern struct task_struct * worker_task;
 extern struct wait_queue_head worker_wait;
 extern int has_new_pid;

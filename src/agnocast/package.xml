@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocast</name>
-  <version>2.3.2</version>
+  <version>2.3.3</version>
   <description>
     Metapackage for Agnocast: true zero-copy IPC middleware for ROS 2.
   </description>
@@ -14,14 +14,14 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <exec_depend version_eq="2.3.2">agnocastlib</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_cie_config_msgs</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_cie_thread_configurator</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_components</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_ioctl_wrapper</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_sample_application</exec_depend>
-  <exec_depend version_eq="2.3.2">agnocast_sample_interfaces</exec_depend>
-  <exec_depend version_eq="2.3.2">ros2agnocast</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocastlib</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_cie_config_msgs</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_cie_thread_configurator</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_components</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_ioctl_wrapper</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_sample_application</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">agnocast_sample_interfaces</exec_depend>
+  <exec_depend version_gte="2.3.3" version_lt="2.3.4">ros2agnocast</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -11,7 +11,7 @@ if ! dpkg -s dh-dkms &> /dev/null; then
   exit 1
 fi
 
-VERSION="2.3.2"
+VERSION="2.3.3"
 RELEASE=$(dpkg-parsechangelog -l agnocast_kmod/debian/changelog -S Version | cut -d'-' -f2)
 PKG_NAME="agnocast-kmod-v${VERSION}-${VERSION}"
 

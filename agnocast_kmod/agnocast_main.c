@@ -1,10 +1,11 @@
 #include "agnocast_internal.h"
 
-MODULE_LICENSE("Dual BSD/GPL");
-
 #ifndef VERSION
 #define VERSION "unknown"
 #endif
+
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION(VERSION);
 
 #ifndef KUNIT_BUILD
 static int agnocast_init(void)

@@ -18,10 +18,26 @@
 #include <string>
 #include <unordered_map>
 
-ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
-: Node("thread_configurator_node"), unapplied_num_(0), cgroup_num_(0)
+ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
+: Node("thread_configurator_node", options), unapplied_num_(0), cgroup_num_(0)
 {
+  const auto config_file = this->declare_parameter<std::string>("config_file", "");
+  if (config_file.empty()) {
+    throw std::runtime_error(
+      "'config_file' parameter must be provided with a valid YAML file path.");
+  }
+
+  YAML::Node yaml;
+  try {
+    yaml = YAML::LoadFile(config_file);
+  } catch (const std::exception & e) {
+    throw std::runtime_error("Error reading the YAML file '" + config_file + "': " + e.what());
+  }
+
+  validate_hardware_info(yaml);
   validate_rt_throttling(yaml);
+
+  RCLCPP_INFO(this->get_logger(), "Loaded config from: %s", config_file.c_str());
 
   YAML::Node callback_groups = yaml["callback_groups"];
   YAML::Node non_ros_threads = yaml["non_ros_threads"];
@@ -103,13 +119,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
-  auto qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 5000))
-               .reliable()
-               .transient_local();
+  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
+  // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
+  // so transient_local is ineffective.
+  auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
   non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-    "/agnocast_cie_thread_configurator/non_ros_thread_info", qos,
+    "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
     [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
     });
@@ -117,7 +134,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
   // Create subscription for default domain on this node
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this,
        default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
@@ -133,7 +150,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const YAML::Node & yaml)
     nodes_for_each_domain_.push_back(node);
 
     auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", qos,
+      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(domain_id, msg);
       });
@@ -217,6 +234,43 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     }
 
     RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
+  }
+}
+
+void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
+{
+  if (!yaml["hardware_info"]) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No hardware_info section found in configuration file. Skipping hardware validation.");
+    return;
+  }
+
+  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
+  const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+
+  std::vector<std::string> mismatches;
+
+  for (const auto & [key, current_value] : current_hw_info) {
+    if (!yaml_hw_info[key]) {
+      continue;
+    }
+
+    std::string yaml_value = yaml_hw_info[key].as<std::string>();
+    if (yaml_value != current_value) {
+      mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
+    }
+  }
+
+  if (!mismatches.empty()) {
+    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
+    for (const auto & mismatch : mismatches) {
+      error_msg += "  - " + mismatch + "\n";
+    }
+    throw std::runtime_error(error_msg);
+  } else {
+    RCLCPP_INFO(
+      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
   }
 }
 
