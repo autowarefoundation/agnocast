@@ -38,8 +38,8 @@ static void pre_handler_subscriber_exit(
       dev_warn(
         agnocast_device,
         "exit_subscription_list is full for pid=%d, subscription MQ may leak. "
-        "(pre_handler_subscriber_exit)\n",
-        pid);
+        "(%s)\n",
+        pid, __func__);
     } else {
       struct exit_subscription_entry * exit_entry =
         kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
@@ -52,7 +52,8 @@ static void pre_handler_subscriber_exit(
         dev_warn(
           agnocast_device,
           "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
-          "(pre_handler_subscriber_exit)\n");
+          "(%s)\n",
+          __func__);
       }
     }
 
@@ -62,8 +63,8 @@ static void pre_handler_subscriber_exit(
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
-        agnocast_device, "subscriber_id %d out of range [0, %d). (pre_handler_subscriber_exit)\n",
-        subscriber_id, MAX_TOPIC_LOCAL_ID);
+        agnocast_device, "subscriber_id %d out of range [0, %d). (%s)\n", subscriber_id,
+        MAX_TOPIC_LOCAL_ID, __func__);
       continue;
     }
 
@@ -323,6 +324,6 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   up_write(&global_htables_rwsem);
 
 #ifndef KUNIT_BUILD
-  dev_info(agnocast_device, "Process (pid=%d) has exited. (agnocast_process_exit_cleanup)\n", pid);
+  dev_info(agnocast_device, "Process (pid=%d) has exited. (%s)\n", pid, __func__);
 #endif
 }
