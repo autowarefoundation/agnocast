@@ -2,8 +2,6 @@
 
 #include "agnocast/agnocast_ioctl.hpp"
 
-#include <rmw/types.h>
-
 #include <cstddef>
 #include <cstdint>
 
@@ -64,7 +62,6 @@ struct ServiceBridgeTargetInfo
 {
   char service_type[SERVICE_TYPE_BUFFER_SIZE];
   char service_name[SERVICE_NAME_BUFFER_SIZE];
-  rmw_qos_profile_t qos;
 };
 
 struct MqMsgPerformanceBridge

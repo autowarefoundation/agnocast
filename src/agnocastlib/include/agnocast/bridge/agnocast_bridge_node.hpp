@@ -35,7 +35,7 @@ void send_performance_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename ServiceT>
 void send_performance_service_bridge_request(
-  const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction);
+  const std::string & service_name, BridgeDirection direction);
 
 template <typename MessageT>
 void request_pubsub_bridge_core(
@@ -50,8 +50,7 @@ void request_pubsub_bridge_core(
 }
 
 template <typename ServiceT>
-void request_service_bridge_core(
-  const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction)
+void request_service_bridge_core(const std::string & service_name, BridgeDirection direction)
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
@@ -59,7 +58,7 @@ void request_service_bridge_core(
     // Standard-mode service bridges are not implemented yet.
     return;
   } else if (bridge_mode == BridgeMode::Performance) {
-    send_performance_service_bridge_request<ServiceT>(service_name, qos, direction);
+    send_performance_service_bridge_request<ServiceT>(service_name, direction);
   }
 }
 
@@ -90,9 +89,9 @@ struct AgnocastToRosPubsubRequestPolicy
 struct RosToAgnocastServiceRequestPolicy
 {
   template <typename ServiceT>
-  static void request_bridge(const std::string & service_name, const rclcpp::QoS & qos)
+  static void request_bridge(const std::string & service_name)
   {
-    request_service_bridge_core<ServiceT>(service_name, qos, BridgeDirection::ROS2_TO_AGNOCAST);
+    request_service_bridge_core<ServiceT>(service_name, BridgeDirection::ROS2_TO_AGNOCAST);
   }
 };
 
@@ -109,7 +108,7 @@ struct NoBridgeRequestPolicy
 
 private:
   static void request_bridge_impl(const std::string &, topic_local_id_t) {}
-  static void request_bridge_impl(const std::string &, const rclcpp::QoS &) {}
+  static void request_bridge_impl(const std::string &) {}
 };
 
 template <typename MessageT>
@@ -351,7 +350,7 @@ void send_performance_pubsub_bridge_request(
 
 template <typename ServiceT>
 void send_performance_service_bridge_request(
-  const std::string & service_name, const rclcpp::QoS & qos, BridgeDirection direction)
+  const std::string & service_name, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_requester");
 
@@ -360,7 +359,6 @@ void send_performance_service_bridge_request(
   MqMsgPerformanceBridge msg = {};
   snprintf(msg.srv_target.service_type, SERVICE_TYPE_BUFFER_SIZE, "%s", service_type_name.c_str());
   snprintf(msg.srv_target.service_name, SERVICE_NAME_BUFFER_SIZE, "%s", service_name.c_str());
-  msg.srv_target.qos = qos.get_rmw_qos_profile();
   msg.direction = direction;
   msg.is_service = true;
 
