@@ -101,6 +101,16 @@ struct subscriber_info
   struct hlist_node node;
 };
 
+// Helper to copy a name_info string from userspace to a kernel stack buffer.
+// Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
+static inline long copy_name_from_user(char * dst, size_t dst_size, const struct name_info * src)
+{
+  if (src->len >= dst_size) return -EINVAL;
+  if (copy_from_user(dst, (const char __user *)src->ptr, src->len)) return -EFAULT;
+  dst[src->len] = '\0';
+  return 0;
+}
+
 struct topic_struct
 {
   struct rb_root entries;
