@@ -13,10 +13,9 @@ from launch_ros.descriptions import ComposableNode
 def generate_test_description():
     thread_configurator_node = launch_ros.actions.Node(
         package='agnocast_cie_thread_configurator',
-        executable='thread_configurator_node',
-        name='thread_configurator_node',
-        output='screen',
-        arguments=['--prerun']
+        executable='prerun_node',
+        name='prerun_node',
+        output='screen'
     )
 
     component_container = ComposableNodeContainer(
@@ -118,7 +117,8 @@ class TestComponentContainerCIEShutdown(unittest.TestCase):
     def test_exit_code(self, proc_info):
         launch_testing.asserts.assertExitCodes(proc_info)
 
-    def test_cleanup(self):
+    @classmethod
+    def tearDownClass(cls):
         import os
         template_yaml = os.path.join(os.path.expanduser("~"), "agnocast", "template.yaml")
         if os.path.exists(template_yaml):

@@ -66,6 +66,14 @@ union ioctl_topic_info_args {
 };
 #pragma GCC diagnostic pop
 
+#define VERSION_BUFFER_LEN 32
+
+struct ioctl_get_version_args
+{
+  char ret_version[VERSION_BUFFER_LEN];
+};
+
+#define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_GET_TOPIC_LIST_CMD _IOWR(0xA6, 20, union ioctl_topic_list_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD _IOWR(0xA6, 22, union ioctl_topic_info_args)
