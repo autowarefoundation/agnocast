@@ -69,7 +69,7 @@ private:
   void send_delegation(const MqMsgBridge & req, pid_t owner_pid);
   void process_managed_bridge(
     const std::string & topic_name, const std::optional<MqMsgBridge> & req);
-  std::pair<bool, bool> should_remove_bridge(const std::string & topic_name, bool is_r2a);
+  bool should_remove_bridge(const std::string & topic_name, bool is_r2a);
 
   void check_parent_alive();
   void check_active_bridges();
