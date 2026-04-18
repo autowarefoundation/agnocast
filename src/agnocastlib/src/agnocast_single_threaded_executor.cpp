@@ -73,7 +73,6 @@ void SingleThreadedAgnocastExecutor::spin()
 
 void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 {
-  // Single pass: collect group → topics, skipping already-warned groups
   std::unordered_map<rclcpp::CallbackGroup::SharedPtr, std::vector<std::string>> group_topics;
 
   {
@@ -96,7 +95,6 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 
     if (has_ros_callback) {
       warned_mixed_groups_.insert(group.get());
-      std::sort(topics.begin(), topics.end());
       std::string agnocast_entities_str = "Agnocast callbacks";
       if (!topics.empty()) {
         std::string topics_str;
