@@ -158,13 +158,6 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
     RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
   }
-
-  // Handle the empty-config case: if no threads are configured in the YAML,
-  // mark as configured immediately so the shutdown path does not misleadingly
-  // call print_all_unapplied().
-  if (unapplied_num_ == 0) {
-    on_all_configured();
-  }
 }
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
@@ -292,6 +285,10 @@ ThreadConfiguratorNode::~ThreadConfiguratorNode()
 
 void ThreadConfiguratorNode::print_all_unapplied()
 {
+  if (unapplied_num_ == 0) {
+    return;
+  }
+
   RCLCPP_WARN(this->get_logger(), "Following callback groups are not yet configured");
 
   for (auto & config : callback_group_configs_) {
@@ -441,11 +438,6 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
   return true;
 }
 
-bool ThreadConfiguratorNode::has_configured_once() const
-{
-  return configured_at_least_once_;
-}
-
 const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_nodes() const
 {
   return nodes_for_each_domain_;
@@ -496,7 +488,8 @@ void ThreadConfiguratorNode::callback_group_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    on_all_configured();
+    RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
+    configured_at_least_once_ = true;
   }
 }
 
@@ -542,13 +535,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    on_all_configured();
+    RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
+    configured_at_least_once_ = true;
   }
-}
-
-void ThreadConfiguratorNode::on_all_configured()
-{
-  RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
-
-  configured_at_least_once_ = true;
 }
