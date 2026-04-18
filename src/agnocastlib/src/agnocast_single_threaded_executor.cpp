@@ -98,7 +98,7 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 
   // Filter out already-warned groups after releasing locks
   for (auto it = agnocast_groups.begin(); it != agnocast_groups.end();) {
-    if (warned_mixed_groups_.count(*it)) {
+    if (warned_mixed_groups_.count(it->get())) {
       it = agnocast_groups.erase(it);
     } else {
       ++it;
@@ -115,20 +115,24 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
       [&has_ros_callback](const rclcpp::Waitable::SharedPtr &) { has_ros_callback = true; });
 
     if (has_ros_callback) {
-      warned_mixed_groups_.insert(group);
+      warned_mixed_groups_.insert(group.get());
       auto agnocast_topics = get_agnocast_topics_by_group(group);
-      std::string topics_str;
-      for (const auto & t : agnocast_topics) {
-        if (!topics_str.empty()) topics_str += ", ";
-        topics_str += t;
+      std::string agnocast_entities_str = "Agnocast callbacks";
+      if (!agnocast_topics.empty()) {
+        std::string topics_str;
+        for (const auto & t : agnocast_topics) {
+          if (!topics_str.empty()) topics_str += ", ";
+          topics_str += t;
+        }
+        agnocast_entities_str += " (topics: [" + topics_str + "])";
       }
       RCLCPP_WARN(
         logger,
-        "A callback group (Agnocast topics: [%s]) contains both ROS 2 and Agnocast callbacks. "
+        "A callback group (%s) contains both ROS 2 and Agnocast callbacks. "
         "In SingleThreadedAgnocastExecutor, the Agnocast timed wait may block "
         "ROS 2 callbacks in the same callback group every spin iteration. "
         "Consider separating them into different callback groups.",
-        topics_str.c_str());
+        agnocast_entities_str.c_str());
     }
   }
 }

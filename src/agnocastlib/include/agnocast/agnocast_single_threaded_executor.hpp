@@ -25,7 +25,7 @@ class SingleThreadedAgnocastExecutor : public agnocast::AgnocastExecutor
   bool is_dedicated_to_one_callback_group_ = false;
   rclcpp::CallbackGroup::SharedPtr dedicated_callback_group_ = nullptr;
 
-  std::set<rclcpp::CallbackGroup::SharedPtr> warned_mixed_groups_;
+  std::set<const rclcpp::CallbackGroup *> warned_mixed_groups_;
   void warn_if_mixed_callback_groups();
 
 public:
