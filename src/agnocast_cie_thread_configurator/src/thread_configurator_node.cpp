@@ -460,18 +460,11 @@ void ThreadConfiguratorNode::callback_group_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
-    if (config->thread_id == msg->thread_id) {
-      RCLCPP_INFO(
-        this->get_logger(),
-        "This callback group is already configured. skip (domain=%zu, id=%s, tid=%ld)", domain_id,
-        msg->callback_group_id.c_str(), msg->thread_id);
-      return;
-    }
     RCLCPP_INFO(
       this->get_logger(),
-      "This callback group is already configured, but thread_id changed. "
-      "Re-applying configuration (domain=%zu, id=%s, old_tid=%ld, new_tid=%ld)",
-      domain_id, msg->callback_group_id.c_str(), config->thread_id, msg->thread_id);
+      "Re-applying configuration for already configured callback group "
+      "(domain=%zu, id=%s, tid=%ld)",
+      domain_id, msg->callback_group_id.c_str(), msg->thread_id);
   }
 
   RCLCPP_INFO(
@@ -513,17 +506,10 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
-    if (config->thread_id == msg->thread_id) {
-      RCLCPP_INFO(
-        this->get_logger(), "This non-ROS thread is already configured. skip (name=%s, tid=%ld)",
-        msg->thread_name.c_str(), msg->thread_id);
-      return;
-    }
     RCLCPP_INFO(
       this->get_logger(),
-      "This non-ROS thread is already configured, but thread_id changed. "
-      "Re-applying configuration (name=%s, old_tid=%ld, new_tid=%ld)",
-      msg->thread_name.c_str(), config->thread_id, msg->thread_id);
+      "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
+      msg->thread_name.c_str(), msg->thread_id);
   }
 
   RCLCPP_INFO(
