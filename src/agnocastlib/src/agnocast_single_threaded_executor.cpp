@@ -4,6 +4,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sys/epoll.h"
 
+#include <unordered_map>
+
 namespace agnocast
 {
 
@@ -71,28 +73,19 @@ void SingleThreadedAgnocastExecutor::spin()
 
 void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 {
-  // Collect callback groups used by agnocast callbacks
-  std::set<rclcpp::CallbackGroup::SharedPtr> agnocast_groups;
+  // Single pass: collect group → topics, skipping already-warned groups
+  std::unordered_map<rclcpp::CallbackGroup::SharedPtr, std::vector<std::string>> group_topics;
 
   {
     std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
     for (const auto & [id, info] : id2_callback_info) {
-      if (info.callback_group) {
-        agnocast_groups.insert(info.callback_group);
+      if (info.callback_group && !warned_mixed_groups_.count(info.callback_group.get())) {
+        group_topics[info.callback_group].push_back(info.topic_name);
       }
     }
   }
 
-  // Filter out already-warned groups after releasing locks
-  for (auto it = agnocast_groups.begin(); it != agnocast_groups.end();) {
-    if (warned_mixed_groups_.count(it->get())) {
-      it = agnocast_groups.erase(it);
-    } else {
-      ++it;
-    }
-  }
-
-  for (const auto & group : agnocast_groups) {
+  for (auto & [group, topics] : group_topics) {
     bool has_ros_callback = false;
     group->collect_all_ptrs(
       [&has_ros_callback](const rclcpp::SubscriptionBase::SharedPtr &) { has_ros_callback = true; },
@@ -103,11 +96,11 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 
     if (has_ros_callback) {
       warned_mixed_groups_.insert(group.get());
-      auto agnocast_topics = get_agnocast_topics_by_group(group);
+      std::sort(topics.begin(), topics.end());
       std::string agnocast_entities_str = "Agnocast callbacks";
-      if (!agnocast_topics.empty()) {
+      if (!topics.empty()) {
         std::string topics_str;
-        for (const auto & t : agnocast_topics) {
+        for (const auto & t : topics) {
           if (!topics_str.empty()) topics_str += ", ";
           topics_str += t;
         }
