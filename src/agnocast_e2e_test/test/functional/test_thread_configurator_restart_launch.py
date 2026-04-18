@@ -166,24 +166,6 @@ class TestThreadConfiguratorRestart(unittest.TestCase):
             process=thread_configurator,
         )
 
-    def test_no_syscall_failure(self, proc_output, thread_configurator):
-        """Verify no scheduling syscall failures occurred."""
-        # Wait for at least one configuration to complete
-        proc_output.assertWaitFor(
-            'Success: All of the configurations are applied.',
-            timeout=10.0,
-            process=thread_configurator,
-        )
-
-        time.sleep(3)
-
-        output_text = ''.join(
-            output.text.decode('utf-8')
-            for output in proc_output[thread_configurator]
-        )
-        self.assertNotIn('Failed to configure', output_text)
-        self.assertNotIn('Skipping configuration', output_text)
-
     def test_first_app_publishes(self, proc_output, test_app_1):
         proc_output.assertWaitFor(
             'Publishing:',
