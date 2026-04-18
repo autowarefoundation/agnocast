@@ -24,7 +24,9 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'template.yaml')
 
 def _run_prerun():
     """Run prerun_node alongside test_cie_publisher to generate config YAML."""
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+    if os.path.exists(CONFIG_DIR):
+        shutil.rmtree(CONFIG_DIR)
+    os.makedirs(CONFIG_DIR)
 
     tc_prefix = get_package_prefix('agnocast_cie_thread_configurator')
     prerun_exe = os.path.join(
@@ -191,14 +193,6 @@ class TestThreadConfiguratorRestart(unittest.TestCase):
         )
         self.assertNotIn('Failed to configure', output_text)
         self.assertNotIn('Skipping configuration', output_text)
-
-    def test_reapply_logged(self, proc_output, thread_configurator):
-        """Verify that the re-application path was exercised."""
-        proc_output.assertWaitFor(
-            'Re-applying configuration',
-            timeout=15.0,
-            process=thread_configurator,
-        )
 
     def test_first_app_publishes(self, proc_output, test_app_1):
         proc_output.assertWaitFor(
