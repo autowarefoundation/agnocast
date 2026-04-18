@@ -158,6 +158,13 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
     RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
   }
+
+  // Handle the empty-config case: if no threads are configured in the YAML,
+  // mark as configured immediately so the shutdown path does not misleadingly
+  // call print_all_unapplied().
+  if (unapplied_num_ == 0) {
+    on_all_configured();
+  }
 }
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
