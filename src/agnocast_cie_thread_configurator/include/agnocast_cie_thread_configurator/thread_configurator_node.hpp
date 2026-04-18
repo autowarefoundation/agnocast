@@ -44,6 +44,7 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(
     const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
+  void on_all_configured();
 
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
   std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>

@@ -488,8 +488,7 @@ void ThreadConfiguratorNode::callback_group_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
-    configured_at_least_once_ = true;
+    on_all_configured();
   }
 }
 
@@ -535,7 +534,12 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   config->applied = true;
 
   if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
-    configured_at_least_once_ = true;
+    on_all_configured();
   }
+}
+
+void ThreadConfiguratorNode::on_all_configured()
+{
+  RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
+  configured_at_least_once_ = true;
 }
