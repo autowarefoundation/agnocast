@@ -5,6 +5,8 @@
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <set>
+
 namespace agnocast
 {
 
@@ -22,6 +24,9 @@ class SingleThreadedAgnocastExecutor : public agnocast::AgnocastExecutor
   // CallbackIsolatedAgnocastExecutor.
   bool is_dedicated_to_one_callback_group_ = false;
   rclcpp::CallbackGroup::SharedPtr dedicated_callback_group_ = nullptr;
+
+  std::set<rclcpp::CallbackGroup::SharedPtr> warned_mixed_groups_;
+  void warn_if_mixed_callback_groups();
 
 public:
   /// Construct the executor.
