@@ -544,13 +544,4 @@ void ThreadConfiguratorNode::on_all_configured()
   RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
 
   configured_at_least_once_ = true;
-
-  // Reset for re-application when target applications restart
-  unapplied_num_ = callback_group_configs_.size() + non_ros_thread_configs_.size();
-  for (auto & config : callback_group_configs_) {
-    config.applied = false;
-  }
-  for (auto & config : non_ros_thread_configs_) {
-    config.applied = false;
-  }
 }

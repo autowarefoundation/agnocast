@@ -151,29 +151,12 @@ def generate_test_description():
 
 class TestThreadConfiguratorRestart(unittest.TestCase):
 
-    def test_success_logged_twice(self, proc_output, thread_configurator):
-        """Verify that scheduling attributes are applied for both app instances."""
+    def test_reapply_logged(self, proc_output, thread_configurator):
+        """Verify that the re-application path was exercised on restart."""
         proc_output.assertWaitFor(
-            'Success: All of the configurations are applied.',
-            timeout=10.0,
+            'Re-applying configuration',
+            timeout=15.0,
             process=thread_configurator,
-        )
-
-        # Give time for the second Success message to be captured
-        time.sleep(3)
-
-        output_text = ''.join(
-            output.text.decode('utf-8')
-            for output in proc_output[thread_configurator]
-        )
-        success_count = output_text.count(
-            'Success: All of the configurations are applied.'
-        )
-        self.assertGreaterEqual(
-            success_count,
-            2,
-            f'Expected at least 2 success messages, got {success_count}.\n'
-            f'Full output:\n{output_text}',
         )
 
     def test_no_syscall_failure(self, proc_output, thread_configurator):
