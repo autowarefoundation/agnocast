@@ -38,17 +38,20 @@ def _run_prerun():
         e2e_prefix, 'lib', 'agnocast_e2e_test', 'test_cie_publisher'
     )
 
+    prerun_log = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.log', delete=False
+    )
     prerun_proc = subprocess.Popen(
         [prerun_exe],
         cwd=CONFIG_DIR,
-        stdout=subprocess.PIPE,
+        stdout=prerun_log,
         stderr=subprocess.STDOUT,
     )
 
     publisher_proc = subprocess.Popen(
         [publisher_exe],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     # Wait for DDS discovery and data collection
@@ -66,12 +69,16 @@ def _run_prerun():
                 proc.kill()
                 proc.wait()
 
+    prerun_log.close()
     if not os.path.exists(CONFIG_FILE):
-        prerun_output = prerun_proc.stdout.read().decode()
+        with open(prerun_log.name) as f:
+            prerun_output = f.read()
+        os.unlink(prerun_log.name)
         raise RuntimeError(
             f'prerun_node failed to generate {CONFIG_FILE}.\n'
             f'Output:\n{prerun_output}'
         )
+    os.unlink(prerun_log.name)
 
 
 def generate_test_description():
@@ -204,11 +211,3 @@ class TestThreadConfiguratorRestartShutdown(unittest.TestCase):
     def tearDownClass(cls):
         if os.path.isdir(CONFIG_DIR):
             shutil.rmtree(CONFIG_DIR)
-
-        # prerun_node also writes template.yaml to ~/agnocast/ by default;
-        # clean up to prevent stale config from affecting other tests.
-        template_yaml = os.path.join(
-            os.path.expanduser('~'), 'agnocast', 'template.yaml'
-        )
-        if os.path.exists(template_yaml):
-            os.remove(template_yaml)
