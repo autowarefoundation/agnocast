@@ -106,11 +106,11 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
       }
       RCLCPP_WARN(
         logger,
-        "A callback group (%s) contains both ROS 2 and Agnocast callbacks. "
+        "Callback group %p contains both ROS 2 callbacks and %s. "
         "In SingleThreadedAgnocastExecutor, the Agnocast timed wait may block "
         "ROS 2 callbacks in the same callback group every spin iteration. "
         "Consider separating them into different callback groups.",
-        agnocast_entities_str.c_str());
+        static_cast<const void *>(group.get()), agnocast_entities_str.c_str());
     }
   }
 }
