@@ -71,10 +71,6 @@ void SingleThreadedAgnocastExecutor::spin()
 
 void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
 {
-  if (is_dedicated_to_one_callback_group_) {
-    return;
-  }
-
   // Collect callback groups used by agnocast callbacks
   std::set<rclcpp::CallbackGroup::SharedPtr> agnocast_groups;
 
@@ -83,15 +79,6 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
     for (const auto & [id, info] : id2_callback_info) {
       if (info.callback_group) {
         agnocast_groups.insert(info.callback_group);
-      }
-    }
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-    for (const auto & [id, info] : id2_timer_info) {
-      if (info->callback_group) {
-        agnocast_groups.insert(info->callback_group);
       }
     }
   }
