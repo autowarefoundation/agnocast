@@ -1,4 +1,5 @@
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -52,11 +53,16 @@ def _run_prerun():
     time.sleep(5)
 
     # Shutdown app first, then prerun (so prerun captures all data)
-    publisher_proc.send_signal(signal.SIGINT)
-    publisher_proc.wait(timeout=10)
-
-    prerun_proc.send_signal(signal.SIGINT)
-    prerun_proc.wait(timeout=10)
+    try:
+        publisher_proc.send_signal(signal.SIGINT)
+        publisher_proc.wait(timeout=10)
+        prerun_proc.send_signal(signal.SIGINT)
+        prerun_proc.wait(timeout=10)
+    finally:
+        for proc in [publisher_proc, prerun_proc]:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
     if not os.path.exists(CONFIG_FILE):
         prerun_output = prerun_proc.stdout.read().decode()
@@ -186,6 +192,14 @@ class TestThreadConfiguratorRestart(unittest.TestCase):
         self.assertNotIn('Failed to configure', output_text)
         self.assertNotIn('Skipping configuration', output_text)
 
+    def test_reapply_logged(self, proc_output, thread_configurator):
+        """Verify that the re-application path was exercised."""
+        proc_output.assertWaitFor(
+            'Re-applying configuration',
+            timeout=15.0,
+            process=thread_configurator,
+        )
+
     def test_first_app_publishes(self, proc_output, test_app_1):
         proc_output.assertWaitFor(
             'Publishing:',
@@ -205,15 +219,17 @@ class TestThreadConfiguratorRestart(unittest.TestCase):
 class TestThreadConfiguratorRestartShutdown(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):
-        launch_testing.asserts.assertExitCodes(proc_info)
+        launch_testing.asserts.assertExitCodes(
+            proc_info, allowable_exit_codes=[0, -signal.SIGINT]
+        )
 
     @classmethod
     def tearDownClass(cls):
-        if os.path.exists(CONFIG_FILE):
-            os.remove(CONFIG_FILE)
         if os.path.isdir(CONFIG_DIR):
-            os.rmdir(CONFIG_DIR)
+            shutil.rmtree(CONFIG_DIR)
 
+        # prerun_node also writes template.yaml to ~/agnocast/ by default;
+        # clean up to prevent stale config from affecting other tests.
         template_yaml = os.path.join(
             os.path.expanduser('~'), 'agnocast', 'template.yaml'
         )

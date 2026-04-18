@@ -460,6 +460,8 @@ void ThreadConfiguratorNode::callback_group_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
+    // Always re-apply: the OS may reuse the same thread IDs after an application
+    // restarts, so we cannot use thread_id equality to skip reconfiguration.
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already configured callback group "
@@ -506,6 +508,8 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
+    // Always re-apply: the OS may reuse the same thread IDs after an application
+    // restarts, so we cannot use thread_id equality to skip reconfiguration.
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
