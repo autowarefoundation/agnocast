@@ -39,9 +39,20 @@ setup_file() {
 	fi
 }
 
+setup() {
+	if ! _is_canonical; then
+		echo "ERROR: host is not in canonical state before test '${BATS_TEST_NAME}' (agnocast-kmod-v${CANONICAL_VER} installed and loaded)." >&2
+		echo "       Run: sudo bash $(dirname "${BATS_TEST_FILENAME}")/switch_kmod_canonical_setup.bash" >&2
+		return 1
+	fi
+}
+
 teardown() {
 	_is_canonical && return 0
-	_restore_canonical || echo "WARNING: failed to restore canonical state after test '${BATS_TEST_NAME}'" >&2
+	if ! _restore_canonical; then
+		echo "WARNING: failed to restore canonical state after test '${BATS_TEST_NAME}'" >&2
+		return 1
+	fi
 }
 
 _is_canonical() {
