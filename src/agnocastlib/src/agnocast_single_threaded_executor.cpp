@@ -78,7 +78,7 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
   {
     std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
     for (const auto & [id, info] : id2_callback_info) {
-      if (info.callback_group && !warned_mixed_groups_.count(info.callback_group.get())) {
+      if (info.callback_group && warned_mixed_groups_.count(info.callback_group.get()) == 0) {
         group_topics[info.callback_group].push_back(info.topic_name);
       }
     }
@@ -99,7 +99,9 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
       if (!topics.empty()) {
         std::string topics_str;
         for (const auto & t : topics) {
-          if (!topics_str.empty()) topics_str += ", ";
+          if (!topics_str.empty()) {
+            topics_str += ", ";
+          }
           topics_str += t;
         }
         agnocast_entities_str += " (topics: [" + topics_str + "])";
