@@ -29,6 +29,13 @@ if [ $# -ne 1 ]; then
 fi
 
 target_version="$1"
+
+if ! [[ "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	echo "Error: version must be in full X.Y.Z form (e.g., 2.3.3); got '${target_version}'." >&2
+	echo "       Short forms like '2.3' or 'v2.3.3' are not accepted." >&2
+	exit 1
+fi
+
 target_package="agnocast-kmod-v${target_version}"
 
 # --- Prerequisites ---------------------------------------------------------
