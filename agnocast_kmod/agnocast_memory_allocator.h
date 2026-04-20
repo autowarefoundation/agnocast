@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
 #pragma once
 
 #include <linux/list.h>
