@@ -57,6 +57,12 @@ echo "[1/5] Unload agnocast kernel module"
 if lsmod | awk '{print $1}' | grep -qx agnocast; then
 	if ! sudo modprobe -r agnocast; then
 		echo "  Error: failed to unload agnocast. A process may still be holding /dev/agnocast."
+		if command -v fuser >/dev/null 2>&1 && [ -e /dev/agnocast ]; then
+			echo "  Processes currently using /dev/agnocast:"
+			sudo fuser -v /dev/agnocast || echo "  (fuser reported no users; module refcount may be held by another path)"
+		else
+			echo "  (fuser not available; install 'psmisc' to see which PIDs hold /dev/agnocast)"
+		fi
 		echo "         Stop all agnocast users (containers, ROS nodes) and retry."
 		exit 1
 	fi
