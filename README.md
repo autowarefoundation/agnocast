@@ -69,7 +69,7 @@ cd agnocast
 Run the setup script to install dependencies:
 
 ```bash
-bash scripts/setup.bash
+bash scripts/dev/setup.bash
 ```
 
 ### Setup pre-commit
@@ -89,7 +89,7 @@ If you want to disable pre-commit, please run `pre-commit uninstall`.
 Build.
 
 ```bash
-bash scripts/build_all.bash
+bash scripts/dev/build_all.bash
 ```
 
 Check if there is a `libagnocast_heaphook.so` in `install/agnocastlib/lib`.
