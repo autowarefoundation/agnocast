@@ -14,6 +14,7 @@ All scripts are intended to be invoked from the repository root unless noted oth
 |---|---|
 | `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast over CycloneDDS. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
 | `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
+| `switch_kmod.bash` | Swap the installed `agnocast-kmod-v<ver>` on the host. Intended for container-based setups where the heaphook is switched by swapping containers and only the host-side kmod needs to be replaced independently. Unloads the module, purges existing `agnocast-kmod-v*` packages, cleans DKMS residue (including orphan `.ko` and dangling `kernel-*` symlinks), installs the target version from apt, and verifies the load via dmesg. The kmod and the heaphook inside the container must share the same ioctl ABI version. |
 
 ### sample_application/
 
@@ -64,6 +65,8 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |
 | `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM / mqueue loads. |
 | `test/test_rmmod_refcount.bash` | Verify `rmmod agnocast` is refused while `/dev/agnocast` is open and succeeds once the fd is closed. |
+| `test/switch_kmod.bats` | [bats](https://github.com/bats-core/bats-core) test suite for `switch_kmod.bash` (9 cases: argument validation, pre-flight availability check, prompt decline, missing prerequisite, early-exit on same version, happy-path swap, `fuser` reporting on unload failure, orphan `.ko` cleanup, orphan `kernel-*` symlink cleanup). **Destructive** — touches `/var/lib/dkms/agnocast`, purges/installs `agnocast-kmod-v*` packages, and load/unloads the module. Requires `apt install bats` and a prior run of `test/switch_kmod_canonical_setup.bash`. Run: `sudo bats scripts/test/switch_kmod.bats`. |
+| `test/switch_kmod_canonical_setup.bash` | One-time setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.3.3}`, loads the module, and caches the corresponding `.deb` under `test/switch_kmod_fixtures/` as a recovery fallback for the bats teardown. Idempotent on re-run. |
 
 ### releases/ — maintainer-only
 
