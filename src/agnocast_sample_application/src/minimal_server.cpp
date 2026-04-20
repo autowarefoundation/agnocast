@@ -7,11 +7,13 @@ class MinimalService : public rclcpp::Node
   using Request = agnocast_sample_interfaces::srv::SumIntArray::Request;
   using Response = agnocast_sample_interfaces::srv::SumIntArray::Response;
 
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
   typename agnocast::Service<agnocast_sample_interfaces::srv::SumIntArray>::SharedPtr service_;
 
 public:
   explicit MinimalService() : Node("minimal_server")
   {
+    callback_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     service_ = agnocast::create_service<agnocast_sample_interfaces::srv::SumIntArray>(
       this, "sum_int_array",
       [this](
@@ -22,7 +24,8 @@ public:
           response->sum += value;
         }
         RCLCPP_INFO(this->get_logger(), "Sending back response: [%ld]", response->sum);
-      });
+      },
+      rclcpp::ServicesQoS(), callback_group_);
   }
 };
 
