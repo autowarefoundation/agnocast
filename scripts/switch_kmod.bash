@@ -189,3 +189,12 @@ fi
 
 echo ""
 echo "Done. Installed and loaded: ${target_package} (v${loaded_version})"
+echo ""
+echo "Next: verify version compatibility across kmod / heaphook / agnocastlib by running"
+echo ""
+echo "    source <your-workspace>/install/setup.bash   # must include the ros2agnocast package"
+echo "    ros2 agnocast -v"
+echo ""
+echo "in the environment where your ROS 2 / Agnocast application will actually run:"
+echo "  - If you run your application inside a container, run it inside that container."
+echo "  - If you run your application directly on this host, run it here."
