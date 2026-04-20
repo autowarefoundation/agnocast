@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_get_topic_subscriber_info.h"
 
 #include "../agnocast.h"

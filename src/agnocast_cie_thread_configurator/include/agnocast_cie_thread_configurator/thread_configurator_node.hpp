@@ -32,7 +32,6 @@ public:
   explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
   ~ThreadConfiguratorNode();
   void print_all_unapplied();
-  bool has_configured_once() const;
 
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
@@ -45,7 +44,7 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(
     const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
-  void apply_deadline_configs();
+  void on_all_configured();
 
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
   std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
@@ -64,6 +63,4 @@ private:
   int unapplied_num_;
   int cgroup_num_;
   bool configured_at_least_once_ = false;
-
-  std::vector<ThreadConfig *> deadline_configs_;
 };

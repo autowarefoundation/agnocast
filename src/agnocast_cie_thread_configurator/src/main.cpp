@@ -89,9 +89,7 @@ int main(int argc, char * argv[])
 
       executor->spin();
 
-      if (!node->has_configured_once()) {
-        node->print_all_unapplied();
-      }
+      node->print_all_unapplied();
     }
   } catch (const std::exception & e) {
     std::cerr << "[ERROR] " << e.what() << std::endl;
