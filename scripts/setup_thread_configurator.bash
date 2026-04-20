@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set up the agnocast CIE thread configurator.
-# Reference: https://tier4.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator
+# Reference: https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator
 #
 # Usage:
 #   source /opt/ros/<distro>/setup.bash

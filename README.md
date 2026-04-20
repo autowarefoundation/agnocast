@@ -49,7 +49,7 @@ This reflects the current status, and support is expected to expand in the futur
 
 ## For Users
 
-For installation, setup, and usage instructions, please refer to the [Getting Started Guide](https://tier4.github.io/agnocast_doc/environment-setup/).
+For installation, setup, and usage instructions, please refer to the [Getting Started Guide](https://autowarefoundation.github.io/agnocast_doc/environment-setup/).
 
 ---
 
@@ -181,7 +181,7 @@ rm /dev/mqueue/agnocast@*
 rm /dev/mqueue/agnocast_bridge_manager@*
 ```
 
-If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide `queues_max` limit (e.g., `sudo sysctl -w fs.mqueue.queues_max=1024`). See [System Configuration](https://tier4.github.io/agnocast_doc/environment-setup/configuration/) for details.
+If you encounter `mq_open failed: No space left on device`, the system has reached the maximum number of message queues. Run the cleanup commands above, and if the error persists, increase the system-wide `queues_max` limit (e.g., `sudo sysctl -w fs.mqueue.queues_max=1024`). See [System Configuration](https://autowarefoundation.github.io/agnocast_doc/environment-setup/configuration/) for details.
 
 ## Documents
 
