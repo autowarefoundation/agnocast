@@ -41,6 +41,15 @@ for cmd in apt-get dpkg dkms modprobe lsmod; do
 done
 
 echo "Target: ${target_package}"
+
+# Early-exit if the target package is already installed and the module is
+# currently loaded — in that case there is nothing to switch.
+if dpkg-query -W -f='${Status}' "${target_package}" 2>/dev/null | grep -q "install ok installed" \
+	&& lsmod | awk '{print $1}' | grep -qx agnocast; then
+	echo "${target_package} is already installed and agnocast is loaded. Nothing to do."
+	exit 0
+fi
+
 echo ""
 echo "WARNING: Make sure every container using agnocast is stopped before continuing."
 echo "         The heaphook inside your container must match version v${target_version}."
@@ -115,11 +124,17 @@ if [ -d /var/lib/dkms/agnocast ]; then
 	for ver_dir in /var/lib/dkms/agnocast/*/; do
 		[ -d "$ver_dir" ] || continue
 		ver=$(basename "$ver_dir")
+		# Skip per-kernel build directories (e.g. kernel-6.8.0-XX-generic-x86_64);
+		# `dkms remove agnocast/<ver> --all` cleans those up as a side effect.
+		[[ "$ver" == kernel-* ]] && continue
 		echo "  Removing agnocast/${ver}"
 		if ! sudo dkms remove "agnocast/${ver}" --all 2>/dev/null; then
 			sudo rm -rf "$ver_dir"
 		fi
 	done
+	# Remove any kernel-* build dirs still left over (e.g. if `dkms remove`
+	# failed above and we fell back to rm -rf of the version dir only).
+	sudo rm -rf /var/lib/dkms/agnocast/kernel-*
 	sudo rmdir /var/lib/dkms/agnocast 2>/dev/null || true
 else
 	echo "  No DKMS entries."
