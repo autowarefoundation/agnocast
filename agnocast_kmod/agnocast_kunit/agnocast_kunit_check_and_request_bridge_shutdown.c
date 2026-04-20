@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_check_and_request_bridge_shutdown.h"
 
 #include "../agnocast.h"
