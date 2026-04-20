@@ -285,6 +285,10 @@ ThreadConfiguratorNode::~ThreadConfiguratorNode()
 
 void ThreadConfiguratorNode::print_all_unapplied()
 {
+  if (unapplied_num_ == 0) {
+    return;
+  }
+
   RCLCPP_WARN(this->get_logger(), "Following callback groups are not yet configured");
 
   for (auto & config : callback_group_configs_) {
@@ -434,11 +438,6 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
   return true;
 }
 
-bool ThreadConfiguratorNode::has_configured_once() const
-{
-  return configured_at_least_once_;
-}
-
 const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_nodes() const
 {
   return nodes_for_each_domain_;
@@ -460,18 +459,13 @@ void ThreadConfiguratorNode::callback_group_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
-    if (config->thread_id == msg->thread_id) {
-      RCLCPP_INFO(
-        this->get_logger(),
-        "This callback group is already configured. skip (domain=%zu, id=%s, tid=%ld)", domain_id,
-        msg->callback_group_id.c_str(), msg->thread_id);
-      return;
-    }
+    // Always re-apply: the OS may reuse the same thread IDs after an application
+    // restarts, so we cannot use thread_id equality to skip reconfiguration.
     RCLCPP_INFO(
       this->get_logger(),
-      "This callback group is already configured, but thread_id changed. "
-      "Re-applying configuration (domain=%zu, id=%s, old_tid=%ld, new_tid=%ld)",
-      domain_id, msg->callback_group_id.c_str(), config->thread_id, msg->thread_id);
+      "Re-applying configuration for already configured callback group "
+      "(domain=%zu, id=%s, tid=%ld)",
+      domain_id, msg->callback_group_id.c_str(), msg->thread_id);
   }
 
   RCLCPP_INFO(
@@ -493,7 +487,7 @@ void ThreadConfiguratorNode::callback_group_callback(
   }
   config->applied = true;
 
-  if (unapplied_num_ == 0) {
+  if (unapplied_num_ == 0 && !configured_at_least_once_) {
     on_all_configured();
   }
 }
@@ -513,17 +507,12 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
 
   ThreadConfig * config = it->second;
   if (config->applied) {
-    if (config->thread_id == msg->thread_id) {
-      RCLCPP_INFO(
-        this->get_logger(), "This non-ROS thread is already configured. skip (name=%s, tid=%ld)",
-        msg->thread_name.c_str(), msg->thread_id);
-      return;
-    }
+    // Always re-apply: the OS may reuse the same thread IDs after an application
+    // restarts, so we cannot use thread_id equality to skip reconfiguration.
     RCLCPP_INFO(
       this->get_logger(),
-      "This non-ROS thread is already configured, but thread_id changed. "
-      "Re-applying configuration (name=%s, old_tid=%ld, new_tid=%ld)",
-      msg->thread_name.c_str(), config->thread_id, msg->thread_id);
+      "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
+      msg->thread_name.c_str(), msg->thread_id);
   }
 
   RCLCPP_INFO(
@@ -544,7 +533,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   }
   config->applied = true;
 
-  if (unapplied_num_ == 0) {
+  if (unapplied_num_ == 0 && !configured_at_least_once_) {
     on_all_configured();
   }
 }
@@ -552,15 +541,5 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
 void ThreadConfiguratorNode::on_all_configured()
 {
   RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
-
   configured_at_least_once_ = true;
-
-  // Reset for re-application when target applications restart
-  unapplied_num_ = callback_group_configs_.size() + non_ros_thread_configs_.size();
-  for (auto & config : callback_group_configs_) {
-    config.applied = false;
-  }
-  for (auto & config : non_ros_thread_configs_) {
-    config.applied = false;
-  }
 }

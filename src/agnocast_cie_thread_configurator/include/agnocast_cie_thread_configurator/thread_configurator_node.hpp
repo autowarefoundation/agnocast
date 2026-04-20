@@ -32,7 +32,6 @@ public:
   explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
   ~ThreadConfiguratorNode();
   void print_all_unapplied();
-  bool has_configured_once() const;
 
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
