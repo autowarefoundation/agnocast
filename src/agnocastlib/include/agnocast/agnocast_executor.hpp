@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
 

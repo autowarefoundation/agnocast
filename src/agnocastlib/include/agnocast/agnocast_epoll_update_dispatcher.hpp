@@ -1,8 +1,7 @@
 #pragma once
 
-#include "sys/epoll.h"
-
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <unordered_map>

@@ -15,7 +15,9 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <string>
 #include <thread>
 
 using namespace std::chrono_literals;
