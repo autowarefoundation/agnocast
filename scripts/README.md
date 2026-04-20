@@ -19,6 +19,8 @@ All scripts are intended to be invoked from the repository root unless noted oth
 
 Each script is a thin wrapper that runs `source install/setup.bash` followed by the matching `ros2 launch agnocast_sample_application <name>.launch.xml`.
 
+**Samples inheriting from `rclcpp::Node`:**
+
 | Script | Launch file |
 |---|---|
 | `run_talker.bash` | `talker.launch.xml` |
@@ -27,6 +29,11 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `run_cie_listener.bash` | `cie_listener.launch.xml` (Callback Isolated Executor) |
 | `run_client.bash` | `client.launch.xml` (service client) |
 | `run_server.bash` | `server.launch.xml` (service server) |
+
+**Samples inheriting from `agnocast::Node` (instead of `rclcpp::Node`):**
+
+| Script | Launch file |
+|---|---|
 | `run_no_rclcpp_talker.bash` | `no_rclcpp_talker.launch.xml` |
 | `run_no_rclcpp_listener.bash` | `no_rclcpp_listener.launch.xml` |
 | `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (polling-style subscription) |
