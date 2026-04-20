@@ -111,7 +111,6 @@ _restore_canonical() {
 	for cmd in apt-get dpkg modprobe lsmod; do
 		ln -s "$(command -v "${cmd}")" "${fake_bin}/${cmd}"
 	done
-	# Absolute path to bash so env doesn't try to find it via the shadowed PATH.
 	run env PATH="${fake_bin}" "${bash_path}" "${SCRIPT}" "${UPGRADE_VER}"
 	rm -rf "${fake_bin}"
 	[ "${status}" -eq 1 ]
