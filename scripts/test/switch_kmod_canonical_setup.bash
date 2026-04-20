@@ -6,16 +6,16 @@
 # local fallback if apt cannot fetch it later.
 #
 # Run once before the first `sudo bats switch_kmod.bats`:
-#     sudo bash scripts/test/switch_kmod_canonical_setup.bash
+#     bash scripts/test/switch_kmod_canonical_setup.bash
+#
+# This helper itself does not need root — `apt-get download` does not
+# acquire the dpkg lock, and `switch_kmod.bash` handles its own privilege
+# escalation via sudo. You will be prompted for your sudo password once
+# by the inner script.
 
 set -euo pipefail
 
 CANONICAL_VER="${CANONICAL_VER:-2.3.3}"
-
-if [ "$(id -u)" -ne 0 ]; then
-	echo "ERROR: run as root (sudo bash $0)" >&2
-	exit 1
-fi
 
 here="$(cd "$(dirname "$0")" && pwd)"
 switch_script="$(cd "${here}/.." && pwd)/switch_kmod.bash"
