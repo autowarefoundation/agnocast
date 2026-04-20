@@ -12,7 +12,7 @@ All scripts are intended to be invoked from the repository root unless noted oth
 
 | Script | Purpose |
 |---|---|
-| `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
+| `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast over CycloneDDS. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
 | `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
 
 ### sample_application/
@@ -25,8 +25,8 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 |---|---|
 | `run_talker.bash` | `talker.launch.xml` |
 | `run_listener.bash` | `listener.launch.xml` |
-| `run_cie_talker.bash` | `cie_talker.launch.xml` (Callback Isolated Executor) |
-| `run_cie_listener.bash` | `cie_listener.launch.xml` (Callback Isolated Executor) |
+| `run_cie_talker.bash` | `cie_talker.launch.xml` (`CallbackIsolatedAgnocastExecutor`) |
+| `run_cie_listener.bash` | `cie_listener.launch.xml` (`CallbackIsolatedAgnocastExecutor`) |
 | `run_client.bash` | `client.launch.xml` (service client) |
 | `run_server.bash` | `server.launch.xml` (service server) |
 
@@ -59,7 +59,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/test_and_create_report.bash` | Build with coverage flags, run `colcon test`, and generate the HTML coverage report for `agnocastlib`. Temporarily removes apt-installed `agnocast-heaphook` if present and restores it at the end. |
 | `test/run_kunit.bash` | Build and insert `agnocast_kunit.ko`, parse pass/fail from dmesg, and generate the HTML coverage report for the kernel module. Requires a kernel with `CONFIG_KUNIT=y` and `CONFIG_GCOV_KERNEL=y`. |
 | `test/run_requires_kernel_module_tests.bash` | Build `agnocast_e2e_test` and run `colcon test` filtered to the `requires_kernel_module` label. Kernel module must already be loaded. |
-| `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers. |
+| `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping publisher type (agnocast/ros2), QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers. |
 | `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s`, `-c`. |
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |
 | `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM / mqueue loads. |
