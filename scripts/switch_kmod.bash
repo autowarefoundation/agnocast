@@ -50,6 +50,24 @@ if ! [[ ${answer:0:1} =~ y|Y ]]; then
 	exit 1
 fi
 
+# Prime sudo credentials up-front so the 5 steps below don't stall on a
+# password prompt mid-flow.
+sudo -v
+
+# --- Pre-flight: verify the target package is reachable --------------------
+#
+# Done BEFORE any destructive action so that a typo in the version or a
+# missing apt source does not leave the host with no kmod installed.
+
+echo "Pre-flight: verify ${target_package} is available in apt"
+sudo apt-get update
+if ! apt-cache show "${target_package}" >/dev/null 2>&1; then
+	echo "Error: ${target_package} is not available in any configured apt source."
+	echo "       Check the version string and your /etc/apt/sources.list*."
+	exit 1
+fi
+echo "  OK."
+
 # --- Step 1: Unload current module -----------------------------------------
 
 echo "[1/5] Unload agnocast kernel module"
@@ -71,11 +89,11 @@ else
 	echo "  Not loaded. Skipping."
 fi
 
-# --- Step 2: Purge existing agnocast-kmod packages -------------------------
+# --- Step 2: Purge existing agnocast-kmod-v* packages ----------------------
 
-echo "[2/5] Purge existing agnocast-kmod* packages"
+echo "[2/5] Purge existing agnocast-kmod-v* packages"
 
-installed_pkgs=$(dpkg-query -W -f='${Package} ${Status}\n' 'agnocast-kmod*' 2>/dev/null \
+installed_pkgs=$(dpkg-query -W -f='${Package} ${Status}\n' 'agnocast-kmod-v*' 2>/dev/null \
 	| awk '$NF == "installed" {print $1}' || true)
 
 if [ -n "$installed_pkgs" ]; then
@@ -122,18 +140,37 @@ fi
 
 echo "[4/5] Install ${target_package}"
 
-sudo apt-get update
 sudo apt-get install -y "${target_package}"
 
 # --- Step 5: Load and verify -----------------------------------------------
 
 echo "[5/5] Load agnocast and verify"
 
+# Snapshot dmesg line count so we can isolate messages emitted by THIS
+# modprobe (avoids mistaking a stale 'Agnocast installed!' line from an
+# earlier load for the current one).
+dmesg_before=$(sudo dmesg | wc -l)
+
 sudo modprobe agnocast
 echo "  Loaded."
-echo ""
-echo "  Recent dmesg lines mentioning agnocast:"
-sudo dmesg | grep -i agnocast | tail -n 5 || true
+
+new_dmesg=$(sudo dmesg | tail -n +$((dmesg_before + 1)))
+install_line=$(echo "$new_dmesg" | grep -E "Agnocast installed! v" | tail -n 1 || true)
+
+if [ -z "$install_line" ]; then
+	echo "  Error: did not see 'Agnocast installed! v...' in dmesg after modprobe."
+	echo "  Recent agnocast-related kernel messages:"
+	echo "$new_dmesg" | grep -i agnocast || true
+	exit 1
+fi
+
+loaded_version=$(echo "$install_line" | sed -n 's/.*Agnocast installed! v\([^[:space:]]*\).*/\1/p')
+echo "  ${install_line}"
+
+if [ "$loaded_version" != "$target_version" ]; then
+	echo "  Error: loaded version (${loaded_version}) does not match target (${target_version})."
+	exit 1
+fi
 
 echo ""
-echo "Done. Installed: ${target_package}"
+echo "Done. Installed and loaded: ${target_package} (v${loaded_version})"
