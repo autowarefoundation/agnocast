@@ -53,8 +53,12 @@ echo "Target: ${target_package}"
 # currently loaded — in that case there is nothing to switch.
 if dpkg-query -W -f='${Status}' "${target_package}" 2>/dev/null | grep -q "install ok installed" \
 	&& lsmod | awk '{print $1}' | grep -qx agnocast; then
-	echo "${target_package} is already installed and agnocast is loaded. Nothing to do."
-	exit 0
+	loaded_ver=$(sudo dmesg | grep -E "Agnocast installed! v" | tail -n 1 \
+		| sed -n 's/.*Agnocast installed! v\([^[:space:]]*\).*/\1/p' || true)
+	if [ "${loaded_ver}" = "${target_version}" ]; then
+		echo "${target_package} is already installed and loaded. Nothing to do."
+		exit 0
+	fi
 fi
 
 echo ""
