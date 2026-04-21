@@ -258,7 +258,7 @@ public:
   const char * get_topic_name() const { return topic_name_.c_str(); }
 };
 
-struct AgnocastToRosRequestPolicy;
+struct AgnocastToRosPubsubRequestPolicy;
 
 /**
  * @brief The user-facing Agnocast publisher type.
@@ -268,6 +268,6 @@ struct AgnocastToRosRequestPolicy;
  */
 AGNOCAST_PUBLIC
 template <typename MessageT>
-using Publisher = agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosRequestPolicy>;
+using Publisher = agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosPubsubRequestPolicy>;
 
 }  // namespace agnocast
