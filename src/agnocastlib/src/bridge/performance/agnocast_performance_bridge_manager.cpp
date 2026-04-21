@@ -63,8 +63,8 @@ void PerformanceBridgeManager::run()
       break;
     }
 
-    check_and_create_bridges();
-    check_and_remove_bridges();
+    check_and_create_pubsub_bridges();
+    check_and_remove_pubsub_bridges();
     check_and_remove_service_bridges();
     check_and_remove_request_cache();
     check_and_request_shutdown();
@@ -118,7 +118,8 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
     request_cache_[topic_name][target_id] = msg;
 
-    create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg.direction);
+    create_pubsub_bridge_if_needed(
+      topic_name, request_cache_[topic_name], message_type, msg.direction);
   }
 }
 
@@ -133,7 +134,7 @@ void PerformanceBridgeManager::on_signal()
   }
 }
 
-void PerformanceBridgeManager::check_and_create_bridges()
+void PerformanceBridgeManager::check_and_create_pubsub_bridges()
 {
   for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
     const auto & topic_name = cache_it->first;
@@ -147,8 +148,10 @@ void PerformanceBridgeManager::check_and_create_bridges()
     const std::string message_type =
       static_cast<const char *>(requests.begin()->second.pubsub_target.message_type);
 
-    create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
-    create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
+    create_pubsub_bridge_if_needed(
+      topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
+    create_pubsub_bridge_if_needed(
+      topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
 
     if (requests.empty()) {
       cache_it = request_cache_.erase(cache_it);
@@ -158,10 +161,10 @@ void PerformanceBridgeManager::check_and_create_bridges()
   }
 }
 
-void PerformanceBridgeManager::check_and_remove_bridges()
+void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
 {
-  auto r2a_it = active_r2a_bridges_.begin();
-  while (r2a_it != active_r2a_bridges_.end()) {
+  auto r2a_it = active_pubsub_r2a_bridges_.begin();
+  while (r2a_it != active_pubsub_r2a_bridges_.end()) {
     const std::string & topic_name = r2a_it->first;
     auto result = get_agnocast_subscriber_count(topic_name);
     bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
@@ -180,7 +183,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       if (r2a_it->second.callback_group) {
         executor_->stop_callback_group(r2a_it->second.callback_group);
       }
-      r2a_it = active_r2a_bridges_.erase(r2a_it);
+      r2a_it = active_pubsub_r2a_bridges_.erase(r2a_it);
     } else {
       if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
         RCLCPP_ERROR(
@@ -190,8 +193,8 @@ void PerformanceBridgeManager::check_and_remove_bridges()
     }
   }
 
-  auto a2r_it = active_a2r_bridges_.begin();
-  while (a2r_it != active_a2r_bridges_.end()) {
+  auto a2r_it = active_pubsub_a2r_bridges_.begin();
+  while (a2r_it != active_pubsub_a2r_bridges_.end()) {
     const std::string & topic_name = a2r_it->first;
     auto result = get_agnocast_publisher_count(topic_name);
     bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
@@ -210,7 +213,7 @@ void PerformanceBridgeManager::check_and_remove_bridges()
       if (a2r_it->second.callback_group) {
         executor_->stop_callback_group(a2r_it->second.callback_group);
       }
-      a2r_it = active_a2r_bridges_.erase(a2r_it);
+      a2r_it = active_pubsub_a2r_bridges_.erase(a2r_it);
     } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
         RCLCPP_ERROR(
@@ -272,11 +275,11 @@ void PerformanceBridgeManager::check_and_request_shutdown()
   }
 }
 
-bool PerformanceBridgeManager::should_create_bridge(
+bool PerformanceBridgeManager::should_create_pubsub_bridge(
   const std::string & topic_name, BridgeDirection direction) const
 {
   if (direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-    if (active_r2a_bridges_.count(topic_name) > 0) {
+    if (active_pubsub_r2a_bridges_.count(topic_name) > 0) {
       return false;
     }
 
@@ -287,7 +290,7 @@ bool PerformanceBridgeManager::should_create_bridge(
 
     return has_external_ros2_publisher(container_node_.get(), topic_name);
   }
-  if (active_a2r_bridges_.count(topic_name) > 0) {
+  if (active_pubsub_a2r_bridges_.count(topic_name) > 0) {
     return false;
   }
 
@@ -299,11 +302,11 @@ bool PerformanceBridgeManager::should_create_bridge(
   return has_external_ros2_subscriber(container_node_.get(), topic_name);
 }
 
-void PerformanceBridgeManager::create_bridge_if_needed(
+void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
   const std::string & topic_name, RequestMap & requests, const std::string & message_type,
   BridgeDirection direction)
 {
-  if (!should_create_bridge(topic_name, direction)) {
+  if (!should_create_pubsub_bridge(topic_name, direction)) {
     return;
   }
 
@@ -321,7 +324,7 @@ void PerformanceBridgeManager::create_bridge_if_needed(
   try {
     const bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
 
-    PerformanceBridgeResult result;
+    PerformancePubsubBridgeResult result;
     if (is_r2a) {
       auto qos = get_subscriber_qos(topic_name, qos_source_id);
       result = loader_.create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos);
@@ -336,13 +339,13 @@ void PerformanceBridgeManager::create_bridge_if_needed(
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
         }
-        active_r2a_bridges_[topic_name] = result;
+        active_pubsub_r2a_bridges_[topic_name] = result;
       } else {
         if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
         }
-        active_a2r_bridges_[topic_name] = result;
+        active_pubsub_a2r_bridges_[topic_name] = result;
       }
     }
 

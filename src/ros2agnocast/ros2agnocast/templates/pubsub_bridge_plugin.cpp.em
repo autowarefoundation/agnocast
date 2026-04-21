@@ -9,7 +9,7 @@
 
 #include "@(header_path)"
 
-extern "C" PerformanceBridgeResult create_r2a_pubsub_bridge(
+extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
@@ -42,7 +42,7 @@ extern "C" PerformanceBridgeResult create_r2a_pubsub_bridge(
   return {ros_sub, ros_cb_group};
 }
 
-extern "C" PerformanceBridgeResult create_a2r_pubsub_bridge(
+extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)

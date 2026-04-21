@@ -19,11 +19,11 @@ public:
   explicit PerformanceBridgeLoader(const rclcpp::Logger & logger);
   ~PerformanceBridgeLoader();
 
-  PerformanceBridgeResult create_r2a_pubsub_bridge(
+  PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
-  PerformanceBridgeResult create_a2r_pubsub_bridge(
+  PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 

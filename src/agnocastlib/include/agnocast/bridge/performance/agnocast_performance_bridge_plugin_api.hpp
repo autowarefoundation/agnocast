@@ -4,7 +4,7 @@
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-struct PerformanceBridgeResult
+struct PerformancePubsubBridgeResult
 {
   std::shared_ptr<void> entity_handle;
   rclcpp::CallbackGroup::SharedPtr callback_group;
@@ -17,10 +17,10 @@ struct PerformanceServiceBridgeResult
   rclcpp::CallbackGroup::SharedPtr agno_client_cb_group;
 };
 
-extern "C" PerformanceBridgeResult create_r2a_pubsub_bridge(
+extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
-extern "C" PerformanceBridgeResult create_a2r_pubsub_bridge(
+extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
 extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
