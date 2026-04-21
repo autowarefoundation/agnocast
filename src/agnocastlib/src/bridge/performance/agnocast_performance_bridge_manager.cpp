@@ -396,11 +396,6 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
     PerformanceServiceBridgeResult result =
       loader_.create_r2a_service_bridge(container_node_, service_name, service_type, service_qos);
     if (result.entity_handle) {
-      executor_->add_callback_group(
-        result.ros_srv_cb_group, container_node_->get_node_base_interface(), true);
-      executor_->add_callback_group(
-        result.agno_client_cb_group, container_node_->get_node_base_interface(), true);
-
       active_r2a_service_bridges_[service_name] = std::move(result);
     }
   } catch (const std::exception & e) {
