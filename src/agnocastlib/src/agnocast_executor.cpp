@@ -1,6 +1,8 @@
 #include "agnocast/agnocast_executor.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "rclcpp/rclcpp.hpp"
@@ -8,34 +10,36 @@
 #include "sys/epoll.h"
 
 #include <algorithm>
+#include <memory>
 
 namespace agnocast
 {
 
 AgnocastExecutor::AgnocastExecutor(const rclcpp::ExecutorOptions & options)
 : rclcpp::Executor(options),
-  epoll_fd_(epoll_create1(0)),
   my_pid_(getpid()),
   epoll_update_tracker_(EpollUpdateDispatcher::get_instance().register_tracker())
 {
-  if (epoll_fd_ == -1) {
-    RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
-    exit(EXIT_FAILURE);
-  }
+  EventHandlerArray sources;
+  sources[static_cast<uint32_t>(EpollEventType::Subscription)] =
+    std::make_unique<SubscriptionEventHandler>(
+      my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Timer)] = std::make_unique<TimerEventHandler>(
+    my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Clock)] = std::make_unique<ClockEventHandler>(
+    my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Shutdown)] = std::make_unique<DummyEventHandler>();
+
+  epoll_manager_ = std::make_unique<EpollManager>(std::move(sources));
 }
 
-AgnocastExecutor::~AgnocastExecutor()
-{
-  close(epoll_fd_);
-}
+AgnocastExecutor::~AgnocastExecutor() = default;
 
 void AgnocastExecutor::prepare_epoll()
 {
-  agnocast::prepare_epoll_impl(
-    epoll_fd_, my_pid_, ready_agnocast_executables_mutex_, ready_agnocast_executables_,
-    [this](const rclcpp::CallbackGroup::SharedPtr & group) {
-      return validate_callback_group(group);
-    });
+  epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
+    return validate_callback_group(group);
+  });
 }
 
 bool AgnocastExecutor::get_next_agnocast_executable(
@@ -45,8 +49,7 @@ bool AgnocastExecutor::get_next_agnocast_executable(
     return true;
   }
 
-  agnocast::wait_and_handle_epoll_event(
-    epoll_fd_, my_pid_, timeout_ms, ready_agnocast_executables_mutex_, ready_agnocast_executables_);
+  epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
 
   // Try again
   return get_next_ready_agnocast_executable(agnocast_executable);
