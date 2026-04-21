@@ -35,11 +35,7 @@ protected:
     executor_ = std::make_shared<ExecutorType>();
   }
 
-  void TearDown() override
-  {
-    stop_spinning();
-    rclcpp::shutdown();
-  }
+  void TearDown() override { rclcpp::shutdown(); }
 
   void start_spinning()
   {
@@ -148,6 +144,8 @@ TYPED_TEST(EpollUpdateTest, CbgTimerAddSpin)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 // Spin -> Add.
@@ -164,6 +162,8 @@ TYPED_TEST(EpollUpdateTest, CbgTimerSpinAdd)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, CbgSpinAddTimer)
@@ -180,6 +180,8 @@ TYPED_TEST(EpollUpdateTest, CbgSpinAddTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, SpinAddCbgTimer)
@@ -197,6 +199,8 @@ TYPED_TEST(EpollUpdateTest, SpinAddCbgTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 // Spin -> Timer.
@@ -213,6 +217,8 @@ TYPED_TEST(EpollUpdateTest, CbgAddSpinTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, CbgSpinTimerAdd)
@@ -229,6 +235,8 @@ TYPED_TEST(EpollUpdateTest, CbgSpinTimerAdd)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 // Spin -> Cbg.
@@ -245,6 +253,8 @@ TYPED_TEST(EpollUpdateTest, AddSpinCbgTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, SpinCbgAddTimer)
@@ -261,6 +271,8 @@ TYPED_TEST(EpollUpdateTest, SpinCbgAddTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, SpinCbgTimerAdd)
@@ -277,6 +289,8 @@ TYPED_TEST(EpollUpdateTest, SpinCbgTimerAdd)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 // Tests using add_callback_group instead of add_node.
@@ -296,6 +310,8 @@ TYPED_TEST(EpollUpdateTest, CbgTimerAddcbgSpin)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, SpinCbgTimerAddcbg)
@@ -312,6 +328,8 @@ TYPED_TEST(EpollUpdateTest, SpinCbgTimerAddcbg)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
 
 TYPED_TEST(EpollUpdateTest, SpinCbgAddcbgTimer)
@@ -328,4 +346,6 @@ TYPED_TEST(EpollUpdateTest, SpinCbgAddcbgTimer)
 
   bool success = this->wait_for_condition([&]() { return callback_started.load(); });
   EXPECT_TRUE(success) << "Timer callback was not called, epoll update might have failed";
+
+  this->stop_spinning();
 }
