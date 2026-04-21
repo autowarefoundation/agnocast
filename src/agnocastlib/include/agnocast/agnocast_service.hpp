@@ -17,21 +17,14 @@
 namespace agnocast
 {
 
-/**
- * @brief Agnocast service server. The callback signature is
- * void(const ipc_shared_ptr<RequestT>&, ipc_shared_ptr<ResponseT>&). The service/client API is
- * experimental and may change in future versions.
- * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
- */
-// AGNOCAST_PUBLIC
-template <typename ServiceT>
-class Service
+// Internal implementation - users should use agnocast::Service<ServiceT> instead.
+template <typename ServiceT, typename BridgeRequestPolicy>
+class BasicService
 {
 private:
   // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
   /// Request type extending `ServiceT::Request` with internal metadata. Received in the service
   /// callback's first argument.
-  // AGNOCAST_PUBLIC
   struct RequestT : public ServiceT::Request
   {
     std::string _node_name;
@@ -39,14 +32,13 @@ private:
   };
   /// Response type extending `ServiceT::Response` with internal metadata. Populated in the service
   /// callback's second argument.
-  // AGNOCAST_PUBLIC
   struct ResponseT : public ServiceT::Response
   {
     int64_t _sequence_number;
   };
 
 private:
-  using ServiceResponsePublisher = BasicPublisher<ResponseT, agnocast::NoBridgeRequestPolicy>;
+  using ServiceResponsePublisher = BasicPublisher<ResponseT, NoBridgeRequestPolicy>;
   using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRequestPolicy>;
 
   std::variant<rclcpp::Node *, agnocast::Node *> node_;
@@ -57,10 +49,10 @@ private:
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
 public:
-  using SharedPtr = std::shared_ptr<Service<ServiceT>>;
+  using SharedPtr = std::shared_ptr<BasicService<ServiceT, BridgeRequestPolicy>>;
 
   template <typename Func, typename NodeT>
-  Service(
+  BasicService(
     NodeT * node, const std::string & service_name, Func && callback, const rclcpp::QoS & qos,
     rclcpp::CallbackGroup::SharedPtr group)
   : node_(node),
@@ -130,7 +122,22 @@ public:
     std::string topic_name = create_service_request_topic_name(service_name_);
     subscriber_ = std::make_shared<BasicSubscription<RequestT, NoBridgeRequestPolicy>>(
       node, topic_name, qos_, std::move(subscriber_callback), options);
+
+    BridgeRequestPolicy::template request_bridge<ServiceT>(service_name_);
   }
 };
+
+struct RosToAgnocastServiceRequestPolicy;
+
+/**
+ * @brief The user-facing Agnocast service server.
+ * Alias for `BasicService<ServiceT>`. Use this type (not BasicService directly) when declaring
+ * service server variables.
+ * The service/client API is experimental and may change in future versions.
+ * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
+ */
+// AGNOCAST_PUBLIC
+template <typename ServiceT>
+using Service = BasicService<ServiceT, RosToAgnocastServiceRequestPolicy>;
 
 }  // namespace agnocast

@@ -402,14 +402,15 @@ public:
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
 };
 
-struct RosToAgnocastRequestPolicy;
+struct RosToAgnocastPubsubRequestPolicy;
 
 /// @brief The user-facing event-driven subscription type.
 /// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when
 /// declaring subscription variables.
 AGNOCAST_PUBLIC
 template <typename MessageT>
-using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+using Subscription =
+  agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 /// @brief The user-facing polling take-subscription type.
 /// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly)
@@ -417,7 +418,7 @@ using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnoca
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using TakeSubscription =
-  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 /// @brief The user-facing polling subscriber type.
 /// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber
@@ -425,6 +426,6 @@ using TakeSubscription =
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using PollingSubscriber =
-  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 }  // namespace agnocast
