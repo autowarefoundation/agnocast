@@ -4,6 +4,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sys/epoll.h"
 
+#include <unordered_map>
+
 namespace agnocast
 {
 
@@ -53,6 +55,7 @@ void SingleThreadedAgnocastExecutor::spin()
   while (rclcpp::ok(this->context_) && spinning.load()) {
     if (need_epoll_updates.load()) {
       prepare_epoll();
+      warn_if_mixed_callback_groups();
     }
 
     agnocast::AgnocastExecutable agnocast_executable;
@@ -64,6 +67,52 @@ void SingleThreadedAgnocastExecutor::spin()
     rclcpp::AnyExecutable any_executable;
     if (get_next_executable(any_executable, std::chrono::nanoseconds(0) /*non-blocking*/)) {
       execute_any_executable(any_executable);
+    }
+  }
+}
+
+void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
+{
+  std::unordered_map<rclcpp::CallbackGroup::SharedPtr, std::vector<std::string>> group_topics;
+
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    for (const auto & [id, info] : id2_callback_info) {
+      if (info.callback_group && warned_mixed_groups_.count(info.callback_group.get()) == 0) {
+        group_topics[info.callback_group].push_back(info.topic_name);
+      }
+    }
+  }
+
+  for (auto & [group, topics] : group_topics) {
+    bool has_ros_callback = false;
+    group->collect_all_ptrs(
+      [&has_ros_callback](const rclcpp::SubscriptionBase::SharedPtr &) { has_ros_callback = true; },
+      [&has_ros_callback](const rclcpp::ServiceBase::SharedPtr &) { has_ros_callback = true; },
+      [&has_ros_callback](const rclcpp::ClientBase::SharedPtr &) { has_ros_callback = true; },
+      [&has_ros_callback](const rclcpp::TimerBase::SharedPtr &) { has_ros_callback = true; },
+      [&has_ros_callback](const rclcpp::Waitable::SharedPtr &) { has_ros_callback = true; });
+
+    if (has_ros_callback) {
+      warned_mixed_groups_.insert(group.get());
+      std::string agnocast_entities_str = "Agnocast callbacks";
+      if (!topics.empty()) {
+        std::string topics_str;
+        for (const auto & t : topics) {
+          if (!topics_str.empty()) {
+            topics_str += ", ";
+          }
+          topics_str += t;
+        }
+        agnocast_entities_str += " (topics: [" + topics_str + "])";
+      }
+      RCLCPP_WARN(
+        logger,
+        "Callback group %p contains both ROS 2 callbacks and %s. "
+        "In SingleThreadedAgnocastExecutor, the Agnocast timed wait may block "
+        "ROS 2 callbacks in the same callback group every spin iteration. "
+        "Consider separating them into different callback groups.",
+        static_cast<const void *>(group.get()), agnocast_entities_str.c_str());
     }
   }
 }

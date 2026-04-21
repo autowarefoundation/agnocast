@@ -12,7 +12,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <vector>
 
 namespace agnocast
 {
@@ -97,9 +96,9 @@ void PerformanceBridgeManager::start_ros_execution()
 
 void PerformanceBridgeManager::on_mq_request(int fd)
 {
-  std::vector<char> buffer(PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE);
+  MqMsgPerformanceBridge msg{};
 
-  ssize_t bytes_read = mq_receive(fd, buffer.data(), buffer.size(), nullptr);
+  ssize_t bytes_read = mq_receive(fd, reinterpret_cast<char *>(&msg), sizeof(msg), nullptr);
   if (bytes_read < 0) {
     if (errno != EAGAIN) {
       RCLCPP_WARN_STREAM(
@@ -109,15 +108,22 @@ void PerformanceBridgeManager::on_mq_request(int fd)
     return;
   }
 
-  auto * msg = reinterpret_cast<MqMsgPerformanceBridge *>(buffer.data());
+  // TODO(bdm-k): For debugging purposes. Remove this later.
+  if (msg.is_service) {
+    RCLCPP_INFO(
+      logger_, "Received service bridge request for '%s' with type '%s'",
+      static_cast<const char *>(msg.srv_target.service_name),
+      static_cast<const char *>(msg.srv_target.service_type));
+    return;
+  }
 
-  std::string topic_name = static_cast<const char *>(msg->target.topic_name);
-  topic_local_id_t target_id = msg->target.target_id;
-  std::string message_type = static_cast<const char *>(msg->message_type);
+  std::string topic_name = static_cast<const char *>(msg.pubsub_target.topic_name);
+  topic_local_id_t target_id = msg.pubsub_target.target_id;
+  std::string message_type = static_cast<const char *>(msg.pubsub_target.message_type);
 
-  request_cache_[topic_name][target_id] = *msg;
+  request_cache_[topic_name][target_id] = msg;
 
-  create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg->direction);
+  create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg.direction);
 }
 
 void PerformanceBridgeManager::on_signal()
@@ -143,7 +149,7 @@ void PerformanceBridgeManager::check_and_create_bridges()
     }
 
     const std::string message_type =
-      static_cast<const char *>(requests.begin()->second.message_type);
+      static_cast<const char *>(requests.begin()->second.pubsub_target.message_type);
 
     create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
     create_bridge_if_needed(topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
