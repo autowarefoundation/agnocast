@@ -203,7 +203,7 @@ rclcpp::QoS get_service_qos(const std::string & service_name)
   const topic_info_ret & info = (*topic_info_buffer)[0];
 
   // We know the durability policy is set to Volatile because this is a service.
-  relcpp::QoS qos = rclcpp::QoS(info.qos_depth)
+  rclcpp::QoS qos = rclcpp::QoS(info.qos_depth)
                       .durability(rclcpp::DurabilityPolicy::Volatile)
                       .reliability(
                         info.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
