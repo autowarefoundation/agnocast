@@ -90,8 +90,8 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
   } else if (jump.clock_change == RCL_ROS_TIME_DEACTIVATED) {
     // TODO(Koichi98): Support dynamic ROS time deactivation (use_sim_time changed from true to
     // false at runtime). This requires recreating timerfd and re-registering it with epoll, which
-    // involves writing need_epoll_update under unique_lock and needs careful synchronization with
-    // the shared_lock reader in prepare_epoll_impl.
+    // involves request epoll update under unique_lock and needs careful synchronization with
+    // the shared_lock reader in prepare_epoll.
     RCLCPP_WARN(
       rclcpp::get_logger("Agnocast"),
       "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
