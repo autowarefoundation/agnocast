@@ -83,6 +83,15 @@ bool AgnocastExecutor::get_next_ready_agnocast_executable(AgnocastExecutable & a
       continue;
     }
 #else
+    // We need to call add_callback_groups_from_nodes_associated_to_executor() to handle the
+    // case where a CallbackGroup is created with automatically_add_to_executor_with_node==true
+    // after the Node has been associated with the Executor.
+    // In Jazzy, this process is handled internally within get_all_callback_groups(), so it
+    // works fine, but in Humble, it must be called explicitly.
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      add_callback_groups_from_nodes_associated_to_executor();
+    }
     if (
       rclcpp::Executor::get_node_by_group(
         rclcpp::Executor::weak_groups_to_nodes_, it->callback_group) == nullptr) {
