@@ -5,6 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <string>
+#include <utility>
 
 namespace agnocast
 {
@@ -43,5 +44,6 @@ bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & t
 bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name);
+rclcpp::QoS get_service_qos(const std::string & service_name);
 
 }  // namespace agnocast

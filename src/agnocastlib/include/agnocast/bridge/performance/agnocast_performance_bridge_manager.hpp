@@ -36,6 +36,7 @@ private:
 
   std::unordered_map<std::string, PerformanceBridgeResult> active_r2a_bridges_;
   std::unordered_map<std::string, PerformanceBridgeResult> active_a2r_bridges_;
+  std::unordered_map<std::string, PerformanceServiceBridgeResult> active_r2a_service_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   void start_ros_execution();
@@ -45,6 +46,7 @@ private:
 
   void check_and_create_bridges();
   void check_and_remove_bridges();
+  void check_and_remove_service_bridges();
   void check_and_remove_request_cache();
   void check_and_request_shutdown();
 
@@ -52,6 +54,8 @@ private:
   void create_bridge_if_needed(
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
+  void create_service_bridge_if_needed(
+    const ServiceBridgeTargetInfo & target, BridgeDirection direction);
   static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 

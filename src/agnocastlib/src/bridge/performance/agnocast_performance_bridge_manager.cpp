@@ -65,6 +65,7 @@ void PerformanceBridgeManager::run()
 
     check_and_create_bridges();
     check_and_remove_bridges();
+    check_and_remove_service_bridges();
     check_and_remove_request_cache();
     check_and_request_shutdown();
   }
@@ -108,22 +109,17 @@ void PerformanceBridgeManager::on_mq_request(int fd)
     return;
   }
 
-  // TODO(bdm-k): For debugging purposes. Remove this later.
   if (msg.is_service) {
-    RCLCPP_INFO(
-      logger_, "Received service bridge request for '%s' with type '%s'",
-      static_cast<const char *>(msg.srv_target.service_name),
-      static_cast<const char *>(msg.srv_target.service_type));
-    return;
+    create_service_bridge_if_needed(msg.srv_target, msg.direction);
+  } else {
+    std::string topic_name = static_cast<const char *>(msg.pubsub_target.topic_name);
+    topic_local_id_t target_id = msg.pubsub_target.target_id;
+    std::string message_type = static_cast<const char *>(msg.pubsub_target.message_type);
+
+    request_cache_[topic_name][target_id] = msg;
+
+    create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg.direction);
   }
-
-  std::string topic_name = static_cast<const char *>(msg.pubsub_target.topic_name);
-  topic_local_id_t target_id = msg.pubsub_target.target_id;
-  std::string message_type = static_cast<const char *>(msg.pubsub_target.message_type);
-
-  request_cache_[topic_name][target_id] = msg;
-
-  create_bridge_if_needed(topic_name, request_cache_[topic_name], message_type, msg.direction);
 }
 
 void PerformanceBridgeManager::on_signal()
@@ -221,6 +217,28 @@ void PerformanceBridgeManager::check_and_remove_bridges()
           logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
       }
       ++a2r_it;
+    }
+  }
+}
+
+void PerformanceBridgeManager::check_and_remove_service_bridges()
+{
+  auto r2a_srv_it = active_r2a_service_bridges_.begin();
+  while (r2a_srv_it != active_r2a_service_bridges_.end()) {
+    const std::string & service_name = r2a_srv_it->first;
+
+    // Verify liveness by attempting to retrieve QoS.
+    try {
+      get_service_qos(service_name);
+      ++r2a_srv_it;
+    } catch (...) {
+      if (r2a_srv_it->second.ros_srv_cb_group) {
+        executor_->stop_callback_group(r2a_srv_it->second.ros_srv_cb_group);
+      }
+      if (r2a_srv_it->second.agno_client_cb_group) {
+        executor_->stop_callback_group(r2a_srv_it->second.agno_client_cb_group);
+      }
+      r2a_srv_it = active_r2a_service_bridges_.erase(r2a_srv_it);
     }
   }
 }
@@ -338,6 +356,55 @@ void PerformanceBridgeManager::create_bridge_if_needed(
       logger_, "Unknown error creating bridge for '%s'. Removing invalid request ID %d.",
       topic_name.c_str(), qos_source_id);
     requests.erase(qos_source_id);
+  }
+}
+
+void PerformanceBridgeManager::create_service_bridge_if_needed(
+  const ServiceBridgeTargetInfo & target, BridgeDirection direction)
+{
+  std::string service_name = static_cast<const char *>(target.service_name);
+  std::string service_type = static_cast<const char *>(target.service_type);
+
+  if (direction == BridgeDirection::AGNOCAST_TO_ROS2) {
+    // A2R service bridge is not implemented yet.
+    return;
+  }
+
+  try {
+    // Check that the target bridge does not already exist.
+    if (active_r2a_service_bridges_.count(service_name) > 0) {
+      return;
+    }
+
+    // Check that the target service does not already exist in ROS 2.
+    const auto services = container_node_->get_service_names_and_types();
+    bool exists = std::any_of(services.begin(), services.end(), [&service_name](const auto & s) {
+      return s.first == service_name;
+    });
+    if (exists) {
+      RCLCPP_WARN(
+        logger_, "Service '%s' already exists in ROS 2. Not creating bridge for it.",
+        service_name.c_str());
+      return;
+    }
+
+    auto service_qos = get_service_qos(service_name);
+
+    PerformanceServiceBridgeResult result =
+      loader_.create_r2a_service_bridge(container_node_, service_name, service_type, service_qos);
+    if (result.entity_handle) {
+      executor_->add_callback_group(
+        result.ros_srv_cb_group, container_node_->get_node_base_interface(), true);
+      executor_->add_callback_group(
+        result.agno_client_cb_group, container_node_->get_node_base_interface(), true);
+
+      active_r2a_service_bridges_[service_name] = std::move(result);
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(
+      logger_, "Failed to create service bridge for '%s': %s", service_name.c_str(), e.what());
+  } catch (...) {
+    RCLCPP_WARN(logger_, "Unknown error creating service bridge for '%s'", service_name.c_str());
   }
 }
 
