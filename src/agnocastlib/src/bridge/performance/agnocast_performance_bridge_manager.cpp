@@ -306,10 +306,10 @@ void PerformanceBridgeManager::create_bridge_if_needed(
     PerformanceBridgeResult result;
     if (is_r2a) {
       auto qos = get_subscriber_qos(topic_name, qos_source_id);
-      result = loader_.create_r2a_bridge(container_node_, topic_name, message_type, qos);
+      result = loader_.create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos);
     } else {
       auto qos = get_publisher_qos(topic_name, qos_source_id);
-      result = loader_.create_a2r_bridge(container_node_, topic_name, message_type, qos);
+      result = loader_.create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
     }
 
     if (result.entity_handle) {

@@ -17,11 +17,16 @@ struct PerformanceServiceBridgeResult
   rclcpp::CallbackGroup::SharedPtr agno_client_cb_group;
 };
 
-extern "C" PerformanceBridgeResult create_r2a_bridge(
+extern "C" PerformanceBridgeResult create_r2a_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
-extern "C" PerformanceBridgeResult create_a2r_bridge(
+extern "C" PerformanceBridgeResult create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
-using BridgeEntryR2A = decltype(&create_r2a_bridge);
-using BridgeEntryA2R = decltype(&create_a2r_bridge);
+extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos);
+
+using R2APubsubBridgeFactory = decltype(&create_r2a_pubsub_bridge);
+using A2RPubsubBridgeFactory = decltype(&create_a2r_pubsub_bridge);
+
+using R2AServiceBridgeFactory = decltype(&create_r2a_service_bridge);
