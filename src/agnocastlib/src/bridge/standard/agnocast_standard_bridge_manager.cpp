@@ -133,9 +133,44 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
     return;
   }
 
-  auto & info = managed_bridges_[topic_name];
-  bool is_r2a = (req.direction == BridgeDirection::ROS2_TO_AGNOCAST);
-  (is_r2a ? info.req_r2a : info.req_a2r) = req;
+  auto it = managed_bridges_.find(topic_name);
+  if (it == managed_bridges_.end()) {
+    auto & info = managed_bridges_[topic_name];
+
+    if (
+      std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) ==
+      0) {
+      info.shared_lib_path = std::nullopt;
+    } else {
+      info.shared_lib_path = std::string(static_cast<const char *>(req.factory.shared_lib_path));
+    }
+
+    if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
+      info.fn_offset_r2a = req.factory.fn_offset;
+      info.fn_offset_a2r = req.factory.fn_offset_reverse;
+      info.target_id_r2a = req.target.target_id;
+      info.target_id_a2r = -1;
+      info.is_requested_r2a = true;
+      info.is_requested_a2r = false;
+    } else {
+      info.fn_offset_r2a = req.factory.fn_offset_reverse;
+      info.fn_offset_a2r = req.factory.fn_offset;
+      info.target_id_r2a = -1;
+      info.target_id_a2r = req.target.target_id;
+      info.is_requested_r2a = false;
+      info.is_requested_a2r = true;
+    }
+  } else {
+    auto & info = it->second;
+
+    if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
+      info.target_id_r2a = req.target.target_id;
+      info.is_requested_r2a = true;
+    } else {
+      info.target_id_a2r = req.target.target_id;
+      info.is_requested_a2r = true;
+    }
+  }
 }
 
 StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_to_kernel(
@@ -173,9 +208,10 @@ void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topi
   }
 }
 
-bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::string & topic_name)
+bool StandardBridgeManager::activate_bridge(
+  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction)
 {
-  bool is_r2a = (req.direction == BridgeDirection::ROS2_TO_AGNOCAST);
+  bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
   std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
   std::string topic_name_with_direction = topic_name + std::string(suffix);
 
@@ -184,10 +220,12 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
   }
 
   try {
-    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, req.target.target_id)
-                                    : get_publisher_qos(topic_name, req.target.target_id);
+    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, info.target_id_r2a)
+                                    : get_publisher_qos(topic_name, info.target_id_a2r);
 
-    auto bridge = loader_.create(req, topic_name_with_direction, container_node_, target_qos);
+    auto bridge = loader_.create(
+      topic_name, direction, info.shared_lib_path, info.fn_offset_r2a, info.fn_offset_a2r,
+      container_node_, target_qos);
 
     if (!bridge) {
       RCLCPP_ERROR(logger_, "Failed to create bridge for '%s'", topic_name_with_direction.c_str());
@@ -221,7 +259,9 @@ bool StandardBridgeManager::activate_bridge(const MqMsgBridge & req, const std::
   }
 }
 
-void StandardBridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner_pid)
+void StandardBridgeManager::send_delegation(
+  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction,
+  pid_t owner_pid)
 {
   std::string mq_name = create_mq_name_for_bridge(owner_pid);
 
@@ -232,6 +272,18 @@ void StandardBridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner
       strerror(errno));
     return;
   }
+
+  /* --- Construct message --- */
+  MqMsgBridge req{};
+  req.direction = direction;
+  req.target.target_id =
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? info.target_id_r2a : info.target_id_a2r;
+  snprintf(
+    static_cast<char *>(req.target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
+  // req.factory can be left uninitialized because it is not going to be used.
+
+  // NOTE(bdm-k): What if the owner has removed the target entry in `managed_bridges_`?
+  /* ------------------------- */
 
   if (mq_send(mq, reinterpret_cast<const char *>(&req), sizeof(req), 0) < 0) {
     RCLCPP_WARN(
@@ -245,13 +297,16 @@ void StandardBridgeManager::send_delegation(const MqMsgBridge & req, pid_t owner
 }
 
 void StandardBridgeManager::process_managed_bridge(
-  const std::string & topic_name, const std::optional<MqMsgBridge> & req)
+  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction)
 {
-  if (!req) {
+  bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+  if (is_r2a && !info.is_requested_r2a) {
     return;
   }
-
-  bool is_r2a = (req->direction == BridgeDirection::ROS2_TO_AGNOCAST);
+  if (!is_r2a && !info.is_requested_a2r) {
+    return;
+  }
 
   // Check demand before adding bridge to kernel to avoid unnecessary add+remove cycles
   if (
@@ -271,7 +326,7 @@ void StandardBridgeManager::process_managed_bridge(
 
   switch (status) {
     case AddBridgeResult::SUCCESS:
-      if (!activate_bridge(*req, topic_name)) {
+      if (!activate_bridge(topic_name, info, direction)) {
         // Rollback: remove bridge from kernel if activation failed
         rollback_bridge_from_kernel(topic_name, is_r2a);
       }
@@ -279,7 +334,7 @@ void StandardBridgeManager::process_managed_bridge(
 
     case AddBridgeResult::EXIST:
       if (!is_active_in_owner) {
-        send_delegation(*req, owner_pid);
+        send_delegation(topic_name, info, direction, owner_pid);
       }
       break;
 
@@ -389,20 +444,20 @@ void StandardBridgeManager::check_managed_bridges()
 
     // Clean up requests when Agnocast entity no longer exists (count == 0)
     // Note: count < 0 indicates an error, so we keep the request in that case
-    if (info.req_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
-      info.req_r2a.reset();
+    if (info.is_requested_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
+      info.reset_r2a();
     }
-    if (info.req_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
-      info.req_a2r.reset();
+    if (info.is_requested_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
+      info.reset_a2r();
     }
 
-    if (!info.req_r2a && !info.req_a2r) {
+    if (!info.is_requested_r2a && !info.is_requested_a2r) {
       it = managed_bridges_.erase(it);
       continue;
     }
 
-    process_managed_bridge(topic_name, info.req_r2a);
-    process_managed_bridge(topic_name, info.req_a2r);
+    process_managed_bridge(topic_name, info, BridgeDirection::ROS2_TO_AGNOCAST);
+    process_managed_bridge(topic_name, info, BridgeDirection::AGNOCAST_TO_ROS2);
     ++it;
   }
 }

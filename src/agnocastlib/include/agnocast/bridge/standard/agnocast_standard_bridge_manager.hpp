@@ -36,8 +36,25 @@ private:
 
   struct BridgeInfo
   {
-    std::optional<MqMsgBridge> req_r2a;
-    std::optional<MqMsgBridge> req_a2r;
+    // If set to std::nullopt, the factory functions reside in the main executable.
+    std::optional<std::string> shared_lib_path;
+    uintptr_t fn_offset_r2a;
+    uintptr_t fn_offset_a2r;
+    topic_local_id_t target_id_r2a;
+    topic_local_id_t target_id_a2r;
+    bool is_requested_r2a;
+    bool is_requested_a2r;
+
+    void reset_r2a()
+    {
+      target_id_r2a = 0;
+      is_requested_r2a = false;
+    }
+    void reset_a2r()
+    {
+      target_id_a2r = 0;
+      is_requested_a2r = false;
+    }
   };
 
   const pid_t target_pid_;
@@ -65,10 +82,13 @@ private:
 
   static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
   void rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
-  bool activate_bridge(const MqMsgBridge & req, const std::string & topic_name);
-  void send_delegation(const MqMsgBridge & req, pid_t owner_pid);
+  bool activate_bridge(
+    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction);
+  void send_delegation(
+    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction,
+    pid_t owner_pid);
   void process_managed_bridge(
-    const std::string & topic_name, const std::optional<MqMsgBridge> & req);
+    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction);
   bool should_remove_bridge(const std::string & topic_name, bool is_r2a);
 
   void check_parent_alive();
