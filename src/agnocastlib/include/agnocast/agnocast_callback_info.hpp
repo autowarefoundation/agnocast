@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 
 #include <mutex>
@@ -57,7 +58,6 @@ std::vector<std::string> get_agnocast_topics_by_group(
 extern std::mutex id2_callback_info_mtx;
 extern std::unordered_map<uint32_t, CallbackInfo> id2_callback_info;
 extern std::atomic<uint32_t> next_callback_info_id;
-extern std::atomic<bool> need_epoll_updates;
 
 uint32_t allocate_callback_info_id();
 
@@ -109,7 +109,7 @@ uint32_t register_callback(
                    callback_group, erased_callback, message_creator};
   }
 
-  need_epoll_updates.store(true);
+  EpollUpdateDispatcher::get_instance().request_update_all();
 
   return callback_info_id;
 }
