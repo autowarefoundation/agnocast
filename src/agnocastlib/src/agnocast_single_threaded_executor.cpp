@@ -4,7 +4,10 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sys/epoll.h"
 
+#include <string_view>
 #include <unordered_map>
+
+bool is_builtin_parameter_service(std::string_view service_name);
 
 namespace agnocast
 {
@@ -88,7 +91,11 @@ void SingleThreadedAgnocastExecutor::warn_if_mixed_callback_groups()
     bool has_ros_callback = false;
     group->collect_all_ptrs(
       [&has_ros_callback](const rclcpp::SubscriptionBase::SharedPtr &) { has_ros_callback = true; },
-      [&has_ros_callback](const rclcpp::ServiceBase::SharedPtr &) { has_ros_callback = true; },
+      [&has_ros_callback](const rclcpp::ServiceBase::SharedPtr & service) {
+        if (!is_builtin_parameter_service(service->get_service_name())) {
+          has_ros_callback = true;
+        }
+      },
       [&has_ros_callback](const rclcpp::ClientBase::SharedPtr &) { has_ros_callback = true; },
       [&has_ros_callback](const rclcpp::TimerBase::SharedPtr &) { has_ros_callback = true; },
       [&has_ros_callback](const rclcpp::Waitable::SharedPtr &) { has_ros_callback = true; });
@@ -134,3 +141,22 @@ void SingleThreadedAgnocastExecutor::dedicate_to_callback_group(
 }
 
 }  // namespace agnocast
+
+bool is_builtin_parameter_service(std::string_view service_name)
+{
+  static constexpr std::string_view kParameterServiceSuffixes[] = {
+    "/describe_parameters", "/get_parameter_types", "/get_parameters",
+    "/list_parameters",     "/set_parameters",      "/set_parameters_atomically"};
+
+  for (const auto & suffix : kParameterServiceSuffixes) {
+    size_t name_len = service_name.size();
+    size_t suffix_len = suffix.size();
+    if (
+      name_len > suffix_len &&
+      service_name.substr(name_len - suffix_len, suffix_len).compare(suffix) == 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
