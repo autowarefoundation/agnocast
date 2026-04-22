@@ -20,7 +20,7 @@
 
 namespace
 {
-const std::unordered_map<std::string, int> kPolicyToSchedConst = {
+const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
 };
@@ -92,7 +92,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     }
     config.policy = callback_group["policy"].as<std::string>();
 
-    if (kPolicyToSchedConst.count(config.policy) == 0) {
+    if (policy_to_sched_const.count(config.policy) == 0) {
       throw std::runtime_error(
         "Unknown scheduling policy '" + config.policy + "' for id=" + config.thread_str +
         ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
@@ -123,7 +123,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     }
     config.policy = non_ros_thread["policy"].as<std::string>();
 
-    if (kPolicyToSchedConst.count(config.policy) == 0) {
+    if (policy_to_sched_const.count(config.policy) == 0) {
       throw std::runtime_error(
         "Unknown scheduling policy '" + config.policy + "' for name=" + config.thread_str +
         ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
@@ -373,7 +373,8 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = 0;
 
-    if (sched_setscheduler(config.thread_id, kPolicyToSchedConst.at(config.policy), &param) == -1) {
+    if (
+      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
@@ -392,7 +393,8 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = config.priority;
 
-    if (sched_setscheduler(config.thread_id, kPolicyToSchedConst.at(config.policy), &param) == -1) {
+    if (
+      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
