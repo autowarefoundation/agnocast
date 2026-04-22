@@ -18,7 +18,6 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -29,43 +28,70 @@ namespace agnocast
 static constexpr size_t DEFAULT_QOS_DEPTH = 10;
 
 template <typename MessageT>
-void send_bridge_request(
+void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename MessageT>
-void send_performance_bridge_request(
+void send_performance_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
+template <typename ServiceT>
+void send_performance_service_bridge_request(
+  const std::string & service_name, BridgeDirection direction);
 
 template <typename MessageT>
-void request_bridge_core(
+void request_pubsub_bridge_core(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
-    send_bridge_request<MessageT>(topic_name, id, direction);
+    send_standard_pubsub_bridge_request<MessageT>(topic_name, id, direction);
   } else if (bridge_mode == BridgeMode::Performance) {
-    send_performance_bridge_request<MessageT>(topic_name, id, direction);
+    send_performance_pubsub_bridge_request<MessageT>(topic_name, id, direction);
+  }
+}
+
+template <typename ServiceT>
+void request_service_bridge_core(const std::string & service_name, BridgeDirection direction)
+{
+  auto bridge_mode = get_bridge_mode();
+  if (bridge_mode == BridgeMode::Standard) {
+    // Service bridge requests are intentionally ignored in standard mode for now.
+    // Standard-mode service bridges are not implemented yet.
+    return;
+  } else if (bridge_mode == BridgeMode::Performance) {
+    send_performance_service_bridge_request<ServiceT>(service_name, direction);
   }
 }
 
 // Policy for agnocast::Subscription.
 // Requests a bridge that forwards messages from ROS 2 to Agnocast (R2A).
-struct RosToAgnocastRequestPolicy
+struct RosToAgnocastPubsubRequestPolicy
 {
   template <typename MessageT>
   static void request_bridge(const std::string & topic_name, topic_local_id_t id)
   {
-    request_bridge_core<MessageT>(topic_name, id, BridgeDirection::ROS2_TO_AGNOCAST);
+    request_pubsub_bridge_core<MessageT>(topic_name, id, BridgeDirection::ROS2_TO_AGNOCAST);
   }
 };
 
 // Policy for agnocast::Publisher.
 // Requests a bridge that forwards messages from Agnocast to ROS 2 (A2R).
-struct AgnocastToRosRequestPolicy
+struct AgnocastToRosPubsubRequestPolicy
 {
   template <typename MessageT>
   static void request_bridge(const std::string & topic_name, topic_local_id_t id)
   {
-    request_bridge_core<MessageT>(topic_name, id, BridgeDirection::AGNOCAST_TO_ROS2);
+    request_pubsub_bridge_core<MessageT>(topic_name, id, BridgeDirection::AGNOCAST_TO_ROS2);
+  }
+};
+
+// Policy for agnocast::Service.
+// Requests a bridge that forwards requests from ROS 2 to Agnocast (R2A).
+struct RosToAgnocastServiceRequestPolicy
+{
+  template <typename ServiceT>
+  static void request_bridge(const std::string & service_name)
+  {
+    request_service_bridge_core<ServiceT>(service_name, BridgeDirection::ROS2_TO_AGNOCAST);
   }
 };
 
@@ -74,11 +100,15 @@ struct AgnocastToRosRequestPolicy
 // are not needed and would cause include cycles.
 struct NoBridgeRequestPolicy
 {
-  template <typename MessageT>
-  static void request_bridge(const std::string & /*unused*/, topic_local_id_t /*unused*/)
+  template <typename T, typename... Args>
+  static void request_bridge(Args &&... args)
   {
-    // Do nothing
+    request_bridge_impl(std::forward<Args>(args)...);
   }
+
+private:
+  static void request_bridge_impl(const std::string &, topic_local_id_t) {}
+  static void request_bridge_impl(const std::string &) {}
 };
 
 template <typename MessageT>
@@ -240,7 +270,7 @@ void send_mq_message(
 }
 
 template <typename MessageT>
-void send_bridge_request(
+void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_bridge_requester");
@@ -299,7 +329,7 @@ void send_bridge_request(
 }
 
 template <typename MessageT>
-void send_performance_bridge_request(
+void send_performance_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_performance_bridge_requester");
@@ -307,10 +337,30 @@ void send_performance_bridge_request(
   const std::string message_type_name = rosidl_generator_traits::name<MessageT>();
 
   MqMsgPerformanceBridge msg = {};
-  snprintf(msg.message_type, MESSAGE_TYPE_BUFFER_SIZE, "%s", message_type_name.c_str());
-  snprintf(msg.target.topic_name, TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
-  msg.target.target_id = id;
+  snprintf(
+    msg.pubsub_target.message_type, MESSAGE_TYPE_BUFFER_SIZE, "%s", message_type_name.c_str());
+  snprintf(msg.pubsub_target.topic_name, TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
+  msg.pubsub_target.target_id = id;
   msg.direction = direction;
+  msg.is_service = false;
+
+  std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
+  send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);
+}
+
+template <typename ServiceT>
+void send_performance_service_bridge_request(
+  const std::string & service_name, BridgeDirection direction)
+{
+  static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_requester");
+
+  const std::string service_type_name = rosidl_generator_traits::name<ServiceT>();
+
+  MqMsgPerformanceBridge msg = {};
+  snprintf(msg.srv_target.service_type, SERVICE_TYPE_BUFFER_SIZE, "%s", service_type_name.c_str());
+  snprintf(msg.srv_target.service_name, SERVICE_NAME_BUFFER_SIZE, "%s", service_name.c_str());
+  msg.direction = direction;
+  msg.is_service = true;
 
   std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
   send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);

@@ -13,7 +13,9 @@ inline constexpr pid_t PERFORMANCE_BRIDGE_VIRTUAL_PID = -1;
 
 inline constexpr size_t SHARED_LIB_PATH_BUFFER_SIZE = 4096;  // Linux PATH_MAX is 4096
 inline constexpr size_t SYMBOL_NAME_BUFFER_SIZE = 256;
+inline constexpr size_t SERVICE_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t MESSAGE_TYPE_BUFFER_SIZE = 256;
+inline constexpr size_t SERVICE_TYPE_BUFFER_SIZE = 256;
 
 inline constexpr const char * MAIN_EXECUTABLE_SYMBOL = "__MAIN_EXECUTABLE__";
 
@@ -49,11 +51,27 @@ struct MqMsgBridge
   BridgeDirection direction;
 };
 
-struct MqMsgPerformanceBridge
+struct PubsubBridgeTargetInfo
 {
   char message_type[MESSAGE_TYPE_BUFFER_SIZE];
-  BridgeTargetInfo target;
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  topic_local_id_t target_id;
+};
+
+struct ServiceBridgeTargetInfo
+{
+  char service_type[SERVICE_TYPE_BUFFER_SIZE];
+  char service_name[SERVICE_NAME_BUFFER_SIZE];
+};
+
+struct MqMsgPerformanceBridge
+{
+  union {
+    PubsubBridgeTargetInfo pubsub_target;
+    ServiceBridgeTargetInfo srv_target;
+  };
   BridgeDirection direction;
+  bool is_service;
 };
 
 constexpr int64_t BRIDGE_MQ_MAX_MESSAGES = 2;
