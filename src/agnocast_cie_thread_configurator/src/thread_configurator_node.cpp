@@ -89,7 +89,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     }
     config.policy = callback_group["policy"].as<std::string>();
 
-    if (valid_policies.find(config.policy) == valid_policies.end()) {
+    if (valid_policies.count(config.policy) == 0) {
       throw std::runtime_error(
         "Unknown scheduling policy '" + config.policy + "' for id=" + config.thread_str);
     }
@@ -118,7 +118,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     }
     config.policy = non_ros_thread["policy"].as<std::string>();
 
-    if (valid_policies.find(config.policy) == valid_policies.end()) {
+    if (valid_policies.count(config.policy) == 0) {
       throw std::runtime_error(
         "Unknown scheduling policy '" + config.policy + "' for name=" + config.thread_str);
     }

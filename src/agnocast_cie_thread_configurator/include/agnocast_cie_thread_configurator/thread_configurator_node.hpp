@@ -14,7 +14,7 @@ class ThreadConfiguratorNode : public rclcpp::Node
   struct ThreadConfig
   {
     std::string thread_str;  // callback_group_id or thread_name
-    size_t domain_id;
+    size_t domain_id = 0;
     int64_t thread_id = -1;
     std::vector<int> affinity;
     std::string policy;
