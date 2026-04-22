@@ -16,8 +16,7 @@ namespace agnocast
 StandardBridgeManager::StandardBridgeManager(pid_t target_pid)
 : target_pid_(target_pid),
   logger_(rclcpp::get_logger("agnocast_standard_bridge_manager")),
-  event_loop_(logger_),
-  loader_(logger_)
+  event_loop_(logger_)
 {
   if (rclcpp::ok()) {
     rclcpp::shutdown();
@@ -82,6 +81,7 @@ void StandardBridgeManager::start_ros_execution()
 {
   std::string node_name = "agnocast_bridge_node_" + std::to_string(getpid());
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
+  loader_ = std::make_unique<StandardBridgeLoader>(container_node_, logger_);
 
   // We must not use single-threaded executors because of how service bridges work. Service bridges
   // require two callback groups to execute concurrently. If a single-threaded executor is used, it
@@ -135,40 +135,41 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
 
   auto it = managed_bridges_.find(topic_name);
   if (it == managed_bridges_.end()) {
-    auto & info = managed_bridges_[topic_name];
+    auto & entry = managed_bridges_[topic_name];
 
     if (
       std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) ==
       0) {
-      info.shared_lib_path = std::nullopt;
+      entry.factory_spec.shared_lib_path = std::nullopt;
     } else {
-      info.shared_lib_path = std::string(static_cast<const char *>(req.factory.shared_lib_path));
+      entry.factory_spec.shared_lib_path =
+        std::string(static_cast<const char *>(req.factory.shared_lib_path));
     }
 
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-      info.fn_offset_r2a = req.factory.fn_offset;
-      info.fn_offset_a2r = req.factory.fn_offset_reverse;
-      info.target_id_r2a = req.target.target_id;
-      info.target_id_a2r = -1;
-      info.is_requested_r2a = true;
-      info.is_requested_a2r = false;
+      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset;
+      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
+      entry.target_id_r2a = req.target.target_id;
+      entry.target_id_a2r = -1;
+      entry.is_requested_r2a = true;
+      entry.is_requested_a2r = false;
     } else {
-      info.fn_offset_r2a = req.factory.fn_offset_reverse;
-      info.fn_offset_a2r = req.factory.fn_offset;
-      info.target_id_r2a = -1;
-      info.target_id_a2r = req.target.target_id;
-      info.is_requested_r2a = false;
-      info.is_requested_a2r = true;
+      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_reverse;
+      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset;
+      entry.target_id_r2a = -1;
+      entry.target_id_a2r = req.target.target_id;
+      entry.is_requested_r2a = false;
+      entry.is_requested_a2r = true;
     }
   } else {
-    auto & info = it->second;
+    auto & entry = it->second;
 
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-      info.target_id_r2a = req.target.target_id;
-      info.is_requested_r2a = true;
+      entry.target_id_r2a = req.target.target_id;
+      entry.is_requested_r2a = true;
     } else {
-      info.target_id_a2r = req.target.target_id;
-      info.is_requested_a2r = true;
+      entry.target_id_a2r = req.target.target_id;
+      entry.is_requested_a2r = true;
     }
   }
 }
@@ -208,9 +209,10 @@ void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topi
   }
 }
 
-bool StandardBridgeManager::activate_bridge(
-  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction)
+bool StandardBridgeManager::activate_bridge(const DirectedBridgeRef bridge_ref)
 {
+  const auto & [topic_name, entry, direction] = bridge_ref;
+
   bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
   std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
   std::string topic_name_with_direction = topic_name + std::string(suffix);
@@ -220,12 +222,10 @@ bool StandardBridgeManager::activate_bridge(
   }
 
   try {
-    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, info.target_id_r2a)
-                                    : get_publisher_qos(topic_name, info.target_id_a2r);
+    rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, entry.target_id_r2a)
+                                    : get_publisher_qos(topic_name, entry.target_id_a2r);
 
-    auto bridge = loader_.create(
-      topic_name, direction, info.shared_lib_path, info.fn_offset_r2a, info.fn_offset_a2r,
-      container_node_, target_qos);
+    auto bridge = loader_->create(topic_name, direction, entry.factory_spec, target_qos);
 
     if (!bridge) {
       RCLCPP_ERROR(logger_, "Failed to create bridge for '%s'", topic_name_with_direction.c_str());
@@ -259,10 +259,10 @@ bool StandardBridgeManager::activate_bridge(
   }
 }
 
-void StandardBridgeManager::send_delegation(
-  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction,
-  pid_t owner_pid)
+void StandardBridgeManager::send_delegation(const DirectedBridgeRef bridge_ref, pid_t owner_pid)
 {
+  const auto & [topic_name, entry, direction] = bridge_ref;
+
   std::string mq_name = create_mq_name_for_bridge(owner_pid);
 
   mqd_t mq = mq_open(mq_name.c_str(), O_WRONLY | O_NONBLOCK);
@@ -277,7 +277,7 @@ void StandardBridgeManager::send_delegation(
   MqMsgBridge req{};
   req.direction = direction;
   req.target.target_id =
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? info.target_id_r2a : info.target_id_a2r;
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
   snprintf(
     static_cast<char *>(req.target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
   // req.factory can be left uninitialized because it is not going to be used.
@@ -296,15 +296,16 @@ void StandardBridgeManager::send_delegation(
   mq_close(mq);
 }
 
-void StandardBridgeManager::process_managed_bridge(
-  const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction)
+void StandardBridgeManager::process_managed_bridge(const DirectedBridgeRef bridge_ref)
 {
+  const auto & [topic_name, entry, direction] = bridge_ref;
+
   bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
 
-  if (is_r2a && !info.is_requested_r2a) {
+  if (is_r2a && !entry.is_requested_r2a) {
     return;
   }
-  if (!is_r2a && !info.is_requested_a2r) {
+  if (!is_r2a && !entry.is_requested_a2r) {
     return;
   }
 
@@ -326,7 +327,7 @@ void StandardBridgeManager::process_managed_bridge(
 
   switch (status) {
     case AddBridgeResult::SUCCESS:
-      if (!activate_bridge(topic_name, info, direction)) {
+      if (!activate_bridge(bridge_ref)) {
         // Rollback: remove bridge from kernel if activation failed
         rollback_bridge_from_kernel(topic_name, is_r2a);
       }
@@ -334,7 +335,7 @@ void StandardBridgeManager::process_managed_bridge(
 
     case AddBridgeResult::EXIST:
       if (!is_active_in_owner) {
-        send_delegation(topic_name, info, direction, owner_pid);
+        send_delegation(bridge_ref, owner_pid);
       }
       break;
 
@@ -440,24 +441,24 @@ void StandardBridgeManager::check_managed_bridges()
     }
 
     const auto & topic_name = it->first;
-    auto & info = it->second;
+    auto & entry = it->second;
 
     // Clean up requests when Agnocast entity no longer exists (count == 0)
     // Note: count < 0 indicates an error, so we keep the request in that case
-    if (info.is_requested_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
-      info.reset_r2a();
+    if (entry.is_requested_r2a && get_agnocast_subscriber_count(topic_name).count == 0) {
+      entry.reset_r2a();
     }
-    if (info.is_requested_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
-      info.reset_a2r();
+    if (entry.is_requested_a2r && get_agnocast_publisher_count(topic_name).count == 0) {
+      entry.reset_a2r();
     }
 
-    if (!info.is_requested_r2a && !info.is_requested_a2r) {
+    if (!entry.is_requested_r2a && !entry.is_requested_a2r) {
       it = managed_bridges_.erase(it);
       continue;
     }
 
-    process_managed_bridge(topic_name, info, BridgeDirection::ROS2_TO_AGNOCAST);
-    process_managed_bridge(topic_name, info, BridgeDirection::AGNOCAST_TO_ROS2);
+    process_managed_bridge(DirectedBridgeRef{topic_name, entry, BridgeDirection::ROS2_TO_AGNOCAST});
+    process_managed_bridge(DirectedBridgeRef{topic_name, entry, BridgeDirection::AGNOCAST_TO_ROS2});
     ++it;
   }
 }

@@ -34,12 +34,9 @@ private:
     bool has_a2r;
   };
 
-  struct BridgeInfo
+  struct ManagedBridgeEntry
   {
-    // If set to std::nullopt, the factory functions reside in the main executable.
-    std::optional<std::string> shared_lib_path;
-    uintptr_t fn_offset_r2a;
-    uintptr_t fn_offset_a2r;
+    BridgeFactorySpec factory_spec;
     topic_local_id_t target_id_r2a;
     topic_local_id_t target_id_a2r;
     bool is_requested_r2a;
@@ -57,11 +54,18 @@ private:
     }
   };
 
+  struct DirectedBridgeRef
+  {
+    const std::string & topic_name;
+    const ManagedBridgeEntry & entry;
+    BridgeDirection direction;
+  };
+
   const pid_t target_pid_;
   rclcpp::Logger logger_;
 
   StandardBridgeIpcEventLoop event_loop_;
-  StandardBridgeLoader loader_;
+  std::unique_ptr<StandardBridgeLoader> loader_;
 
   bool is_parent_alive_ = true;
   std::atomic_bool shutdown_requested_ = false;
@@ -71,7 +75,7 @@ private:
   std::thread executor_thread_;
 
   std::map<std::string, std::shared_ptr<BridgeBase>> active_bridges_;
-  std::map<std::string, BridgeInfo> managed_bridges_;
+  std::map<std::string, ManagedBridgeEntry> managed_bridges_;
 
   void start_ros_execution();
 
@@ -82,13 +86,9 @@ private:
 
   static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
   void rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
-  bool activate_bridge(
-    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction);
-  void send_delegation(
-    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction,
-    pid_t owner_pid);
-  void process_managed_bridge(
-    const std::string & topic_name, const BridgeInfo & info, BridgeDirection direction);
+  bool activate_bridge(const DirectedBridgeRef bridge_ref);
+  void send_delegation(const DirectedBridgeRef bridge_ref, pid_t owner_pid);
+  void process_managed_bridge(const DirectedBridgeRef bridge_ref);
   bool should_remove_bridge(const std::string & topic_name, bool is_r2a);
 
   void check_parent_alive();

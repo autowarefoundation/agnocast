@@ -15,7 +15,9 @@
 namespace agnocast
 {
 
-StandardBridgeLoader::StandardBridgeLoader(const rclcpp::Logger & logger) : logger_(logger)
+StandardBridgeLoader::StandardBridgeLoader(
+  const rclcpp::Node::SharedPtr & container_node, const rclcpp::Logger & logger)
+: container_node_(container_node), logger_(logger)
 {
 }
 
@@ -25,12 +27,10 @@ StandardBridgeLoader::~StandardBridgeLoader()
 }
 
 std::shared_ptr<BridgeBase> StandardBridgeLoader::create(
-  const std::string & topic_name, BridgeDirection direction,
-  const std::optional<std::string> & shared_lib_path, uintptr_t fn_offset_r2a,
-  uintptr_t fn_offset_a2r, const rclcpp::Node::SharedPtr & node, const rclcpp::QoS & qos)
+  const std::string & topic_name, BridgeDirection direction, const BridgeFactorySpec & factory_spec,
+  const rclcpp::QoS & qos)
 {
-  auto [entry_func, lib_handle] =
-    resolve_factory_function(topic_name, direction, shared_lib_path, fn_offset_r2a, fn_offset_a2r);
+  auto [entry_func, lib_handle] = resolve_factory_function(topic_name, direction, factory_spec);
 
   if (entry_func == nullptr) {
     const char * err = dlerror();
@@ -41,15 +41,15 @@ std::shared_ptr<BridgeBase> StandardBridgeLoader::create(
     return nullptr;
   }
 
-  return create_bridge_instance(entry_func, lib_handle, node, topic_name, qos);
+  return create_bridge_instance(entry_func, lib_handle, topic_name, qos);
 }
 
 std::shared_ptr<BridgeBase> StandardBridgeLoader::create_bridge_instance(
-  BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
-  const rclcpp::Node::SharedPtr & node, const std::string & topic_name, const rclcpp::QoS & qos)
+  BridgeFn entry_func, const std::shared_ptr<void> & lib_handle, const std::string & topic_name,
+  const rclcpp::QoS & qos)
 {
   try {
-    auto bridge_resource = entry_func(node, topic_name, qos);
+    auto bridge_resource = entry_func(container_node_, topic_name, qos);
     if (!bridge_resource) {
       return nullptr;
     }
@@ -94,9 +94,7 @@ std::pair<void *, uintptr_t> StandardBridgeLoader::load_library(
 }
 
 std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory_function(
-  const std::string & topic_name, BridgeDirection direction,
-  const std::optional<std::string> & shared_lib_path, uintptr_t fn_offset_r2a,
-  uintptr_t fn_offset_a2r)
+  const std::string & topic_name, BridgeDirection direction, const BridgeFactorySpec & factory_spec)
 {
   std::string key_r2a = topic_name;
   key_r2a += SUFFIX_R2A;
@@ -114,7 +112,7 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
   // symbol. This ensures that a subsequent call to dlerror() will report only errors that occurred
   // after this point.
   dlerror();
-  auto [raw_handle, base_addr] = load_library(shared_lib_path);
+  auto [raw_handle, base_addr] = load_library(factory_spec.shared_lib_path);
 
   if ((raw_handle == nullptr) || (base_addr == 0)) {
     if (raw_handle != nullptr) {
@@ -131,7 +129,7 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
   });
 
   // Add R2A function.
-  uintptr_t addr_r2a = base_addr + fn_offset_r2a;
+  uintptr_t addr_r2a = base_addr + factory_spec.fn_offset_r2a;
   BridgeFn func_r2a = nullptr;
   if (is_address_in_library_code_segment(raw_handle, addr_r2a)) {
     func_r2a = reinterpret_cast<BridgeFn>(addr_r2a);
@@ -144,7 +142,7 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
   cached_factories_[key_r2a] = {func_r2a, lib_handle_ptr};
 
   // Add A2R function.
-  uintptr_t addr_a2r = base_addr + fn_offset_a2r;
+  uintptr_t addr_a2r = base_addr + factory_spec.fn_offset_a2r;
   BridgeFn func_a2r = nullptr;
   if (is_address_in_library_code_segment(raw_handle, addr_a2r)) {
     func_a2r = reinterpret_cast<BridgeFn>(addr_a2r);
