@@ -2,18 +2,14 @@
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_epoll_event.hpp"
-#include "agnocast/agnocast_mq.hpp"
 
 #include <sys/epoll.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace agnocast
 {
-
-struct AgnocastExecutable;
 
 bool DummyEventHandler::handle(EpollEventLocalID event_local_id)
 {
