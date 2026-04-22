@@ -37,6 +37,7 @@ private:
   struct ManagedBridgeEntry
   {
     BridgeFactorySpec factory_spec;
+    // Use -1 when not requested. Valid topic_local_id_t values are [0..MAX_TOPIC_LOCAL_ID).
     topic_local_id_t target_id_r2a;
     topic_local_id_t target_id_a2r;
     bool is_requested_r2a;
@@ -44,12 +45,12 @@ private:
 
     void reset_r2a()
     {
-      target_id_r2a = 0;
+      target_id_r2a = -1;
       is_requested_r2a = false;
     }
     void reset_a2r()
     {
-      target_id_a2r = 0;
+      target_id_a2r = -1;
       is_requested_a2r = false;
     }
   };

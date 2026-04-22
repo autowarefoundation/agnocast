@@ -135,6 +135,16 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
 
   auto it = managed_bridges_.find(topic_name);
   if (it == managed_bridges_.end()) {
+    if (*static_cast<const char *>(req.factory.shared_lib_path) == '\0') {
+      RCLCPP_WARN(
+        logger_,
+        "Skipping %s bridge request for new topic '%s' due to missing factory information. "
+        "This occurs when delegating a request to a bridge manager that has already removed "
+        "the topic from its managed bridges.",
+        req.direction == BridgeDirection::ROS2_TO_AGNOCAST ? "R2A" : "A2R", topic_name.c_str());
+      return;
+    }
+
     auto & entry = managed_bridges_[topic_name];
 
     if (
@@ -150,16 +160,14 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
       entry.factory_spec.fn_offset_r2a = req.factory.fn_offset;
       entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
       entry.target_id_r2a = req.target.target_id;
-      entry.target_id_a2r = -1;
       entry.is_requested_r2a = true;
-      entry.is_requested_a2r = false;
+      entry.reset_a2r();
     } else {
       entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_reverse;
       entry.factory_spec.fn_offset_a2r = req.factory.fn_offset;
-      entry.target_id_r2a = -1;
       entry.target_id_a2r = req.target.target_id;
-      entry.is_requested_r2a = false;
       entry.is_requested_a2r = true;
+      entry.reset_r2a();
     }
   } else {
     auto & entry = it->second;
@@ -273,16 +281,14 @@ void StandardBridgeManager::send_delegation(const DirectedBridgeRef bridge_ref, 
     return;
   }
 
-  /* --- Construct message --- */
+  /* --- Construct request --- */
   MqMsgBridge req{};
   req.direction = direction;
   req.target.target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
   snprintf(
     static_cast<char *>(req.target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
-  // req.factory can be left uninitialized because it is not going to be used.
-
-  // NOTE(bdm-k): What if the owner has removed the target entry in `managed_bridges_`?
+  // req.factory can be left zeroed because it is not going to be used.
   /* ------------------------- */
 
   if (mq_send(mq, reinterpret_cast<const char *>(&req), sizeof(req), 0) < 0) {
