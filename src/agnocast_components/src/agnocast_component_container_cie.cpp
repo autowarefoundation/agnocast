@@ -55,10 +55,10 @@ public:
 
     monitor_callback_group_ =
       this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    monitor_timer_ =
-      this->create_wall_timer(  // NOLINT(cppcoreguidelines-prefer-member-initializer)
-        std::chrono::milliseconds(monitor_polling_interval_ms_),
-        [this]() { check_for_new_callback_groups(); }, monitor_callback_group_);
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    monitor_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(monitor_polling_interval_ms_),
+      [this]() { check_for_new_callback_groups(); }, monitor_callback_group_);
   }
 
   ~ComponentManagerCallbackIsolated() override;
