@@ -18,6 +18,14 @@
 #include <string>
 #include <unordered_map>
 
+namespace
+{
+const std::unordered_map<std::string, int> policy_to_sched_const = {
+  {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
+  {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
+};
+}  // namespace
+
 ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
 : Node("thread_configurator_node", options), unapplied_num_(0), cgroup_num_(0)
 {
@@ -84,6 +92,13 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     }
     config.policy = callback_group["policy"].as<std::string>();
 
+    if (policy_to_sched_const.count(config.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + config.policy + "' for id=" + config.thread_str +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
+
     if (config.policy == "SCHED_DEADLINE") {
       config.runtime = callback_group["runtime"].as<unsigned int>();
       config.period = callback_group["period"].as<unsigned int>();
@@ -107,6 +122,13 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
       config.affinity.push_back(cpu.as<int>());
     }
     config.policy = non_ros_thread["policy"].as<std::string>();
+
+    if (policy_to_sched_const.count(config.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + config.policy + "' for name=" + config.thread_str +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
 
     if (config.policy == "SCHED_DEADLINE") {
       config.runtime = non_ros_thread["runtime"].as<unsigned int>();
@@ -316,8 +338,11 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
 
   std::string cpus_path = cgroup_path + "/cpuset.cpus";
   if (std::ofstream cpus_file{cpus_path}) {
-    for (int cpu : cpus) {
-      cpus_file << cpu << ",";
+    for (size_t i = 0; i < cpus.size(); i++) {
+      if (i > 0) {
+        cpus_file << ",";
+      }
+      cpus_file << cpus[i];
     }
   } else {
     return false;
@@ -348,15 +373,10 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = 0;
 
-    static std::unordered_map<std::string, int> m = {
-      {"SCHED_OTHER", SCHED_OTHER},
-      {"SCHED_BATCH", SCHED_BATCH},
-      {"SCHED_IDLE", SCHED_IDLE},
-    };
-
-    if (sched_setscheduler(config.thread_id, m[config.policy], &param) == -1) {
+    if (
+      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
@@ -364,7 +384,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     // Specify nice value
     if (setpriority(PRIO_PROCESS, config.thread_id, config.priority) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure nice value (id=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure nice value (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
@@ -373,14 +393,10 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = config.priority;
 
-    static std::unordered_map<std::string, int> m = {
-      {"SCHED_FIFO", SCHED_FIFO},
-      {"SCHED_RR", SCHED_RR},
-    };
-
-    if (sched_setscheduler(config.thread_id, m[config.policy], &param) == -1) {
+    if (
+      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
@@ -404,17 +420,22 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
 
     if (sched_setattr(config.thread_id, &attr, 0) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (id=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), config.thread_id, strerror(errno));
       return false;
     }
+  } else {
+    RCLCPP_ERROR(
+      this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%ld)",
+      config.policy.c_str(), config.thread_str.c_str(), config.thread_id);
+    return false;
   }
 
   if (config.affinity.size() > 0) {
     if (config.policy == "SCHED_DEADLINE") {
       if (!set_affinity_by_cgroup(config.thread_id, config.affinity)) {
         RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure affinity (id=%s, tid=%ld): %s",
+          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
           config.thread_str.c_str(), config.thread_id,
           "Please disable cgroup v2 if used: "
           "`systemd.unified_cgroup_hierarchy=0`");
@@ -428,7 +449,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
       }
       if (sched_setaffinity(config.thread_id, sizeof(set), &set) == -1) {
         RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure affinity (id=%s, tid=%ld): %s",
+          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
           config.thread_str.c_str(), config.thread_id, strerror(errno));
         return false;
       }
