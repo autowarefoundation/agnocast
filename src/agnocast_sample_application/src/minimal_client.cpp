@@ -19,8 +19,9 @@ int main(int argc, char * argv[])
     executor.spin();
   });
 
+  auto callback_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   auto client = agnocast::create_client<agnocast_sample_interfaces::srv::SumIntArray>(
-    node.get(), "sum_int_array");
+    node.get(), "sum_int_array", rclcpp::ServicesQoS(), callback_group);
 
   while (!client->wait_for_service(1s)) {
     if (!rclcpp::ok()) {
