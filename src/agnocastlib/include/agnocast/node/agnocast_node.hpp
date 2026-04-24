@@ -652,9 +652,9 @@ private:
 
   node_interfaces::NodeBase::SharedPtr node_base_;
   rclcpp::Logger logger_;
+  node_interfaces::NodeTopics::SharedPtr node_topics_;
   node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeParameters::SharedPtr node_parameters_;
-  node_interfaces::NodeTopics::SharedPtr node_topics_;
   node_interfaces::NodeClock::SharedPtr node_clock_;
   node_interfaces::NodeTimeSource::SharedPtr node_time_source_;
   node_interfaces::NodeLogging::SharedPtr node_logging_;
