@@ -128,6 +128,7 @@ if(BUILD_TESTING)
   ament_add_gmock(test_unit_${PROJECT_NAME}
     test/unit/test_agnocast_utils.cpp
     test/unit/test_agnocast_subscription.cpp
+    test/unit/test_agnocast_signal_handler.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
     test/unit/test_agnocast_epoll_update.cpp
