@@ -7,8 +7,6 @@
 namespace agnocast
 {
 
-std::atomic<bool> need_epoll_updates{false};
-
 bool wait_and_handle_epoll_event(
   const int epoll_fd, const pid_t my_pid, const int timeout_ms,
   std::mutex & ready_agnocast_executables_mutex,

@@ -32,7 +32,7 @@ void AgnocastOnlySingleThreadedExecutor::spin()
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
 
   while (spinning_.load()) {
-    if (need_epoll_updates.load()) {
+    if (epoll_update_tracker_.take_update_request()) {
       add_callback_groups_from_nodes_associated_to_executor();
       agnocast::prepare_epoll_impl(
         epoll_fd_, my_pid_, ready_agnocast_executables_mutex_, ready_agnocast_executables_,
