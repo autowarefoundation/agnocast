@@ -34,17 +34,39 @@ private:
     bool has_a2r;
   };
 
-  struct BridgeInfo
+  struct ManagedBridgeEntry
   {
-    std::optional<MqMsgBridge> req_r2a;
-    std::optional<MqMsgBridge> req_a2r;
+    BridgeFactorySpec factory_spec;
+    // Use -1 when not requested. Valid topic_local_id_t values are [0..MAX_TOPIC_LOCAL_ID).
+    topic_local_id_t target_id_r2a;
+    topic_local_id_t target_id_a2r;
+    bool is_requested_r2a;
+    bool is_requested_a2r;
+
+    void reset_r2a()
+    {
+      target_id_r2a = -1;
+      is_requested_r2a = false;
+    }
+    void reset_a2r()
+    {
+      target_id_a2r = -1;
+      is_requested_a2r = false;
+    }
+  };
+
+  struct DirectedBridgeRef
+  {
+    const std::string & topic_name;
+    const ManagedBridgeEntry & entry;
+    BridgeDirection direction;
   };
 
   const pid_t target_pid_;
   rclcpp::Logger logger_;
 
   StandardBridgeIpcEventLoop event_loop_;
-  StandardBridgeLoader loader_;
+  std::unique_ptr<StandardBridgeLoader> loader_;
 
   bool is_parent_alive_ = true;
   std::atomic_bool shutdown_requested_ = false;
@@ -54,7 +76,7 @@ private:
   std::thread executor_thread_;
 
   std::map<std::string, std::shared_ptr<BridgeBase>> active_bridges_;
-  std::map<std::string, BridgeInfo> managed_bridges_;
+  std::map<std::string, ManagedBridgeEntry> managed_bridges_;
 
   void start_ros_execution();
 
@@ -65,10 +87,9 @@ private:
 
   static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
   void rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
-  bool activate_bridge(const MqMsgBridge & req, const std::string & topic_name);
-  void send_delegation(const MqMsgBridge & req, pid_t owner_pid);
-  void process_managed_bridge(
-    const std::string & topic_name, const std::optional<MqMsgBridge> & req);
+  bool activate_bridge(const DirectedBridgeRef bridge_ref);
+  void send_delegation(const DirectedBridgeRef bridge_ref, pid_t owner_pid);
+  void process_managed_bridge(const DirectedBridgeRef bridge_ref);
   bool should_remove_bridge(const std::string & topic_name, bool is_r2a);
 
   void check_parent_alive();
