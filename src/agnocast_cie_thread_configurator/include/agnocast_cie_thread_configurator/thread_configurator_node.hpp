@@ -14,16 +14,16 @@ class ThreadConfiguratorNode : public rclcpp::Node
   struct ThreadConfig
   {
     std::string thread_str;  // callback_group_id or thread_name
-    size_t domain_id;
+    size_t domain_id = 0;
     int64_t thread_id = -1;
     std::vector<int> affinity;
     std::string policy;
-    int priority;
+    int priority = 0;
 
     // For SCHED_DEADLINE
-    unsigned int runtime;
-    unsigned int period;
-    unsigned int deadline;
+    unsigned int runtime = 0;
+    unsigned int period = 0;
+    unsigned int deadline = 0;
 
     bool applied = false;
   };
