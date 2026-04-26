@@ -32,13 +32,13 @@ find_package(glog REQUIRED)
 
 add_library(agnocast SHARED
   src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
-  src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
+  src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
-  src/node/agnocast_only_callback_isolated_executor.cpp
+  src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
   src/cie_client_utils.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
@@ -130,6 +130,7 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_subscription.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
+    test/unit/test_agnocast_epoll_update.cpp
     test/unit/test_node_topics.cpp
     test/unit/test_cie_client_utils.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include)
@@ -189,6 +190,18 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME}
     agnocast_cie_config_msgs)
   set_tests_properties(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 120
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # Epoll update integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_agnocast_epoll_update_${PROJECT_NAME}
+    test/integration/test_agnocast_epoll_update.cpp)
+  target_link_libraries(test_integration_agnocast_epoll_update_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_agnocast_epoll_update_${PROJECT_NAME}
+    agnocast_cie_config_msgs)
+  set_tests_properties(test_integration_agnocast_epoll_update_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
     LABELS "requires_kernel_module;requires_heaphook"
