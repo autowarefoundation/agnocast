@@ -234,7 +234,10 @@ void PerformanceBridgeManager::check_and_remove_service_bridges()
     try {
       get_service_qos(service_name);
       ++r2a_srv_it;
-    } catch (...) {
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(
+        logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), e.what());
+
       if (r2a_srv_it->second.ros_srv_cb_group) {
         executor_->stop_callback_group(r2a_srv_it->second.ros_srv_cb_group);
       }
