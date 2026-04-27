@@ -31,7 +31,7 @@ static_assert(
   std::atomic<bool>::is_always_lock_free,
   "std::atomic<bool> is not lock-free on this target architecture!");
 
-bool SignalHandler::installed_{false};
+SignalHandler::State SignalHandler::state_{SignalHandler::State::NotInstalled};
 std::mutex SignalHandler::mutex_;
 std::array<std::atomic<int>, SignalHandler::MAX_EXECUTORS_NUM> SignalHandler::eventfds_{};
 std::atomic<size_t> SignalHandler::eventfd_count_{0};
@@ -53,7 +53,7 @@ struct sigaction SignalHandler::old_sigterm_action_
 void SignalHandler::install()
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (installed_) {
+  if (state_ != State::NotInstalled) {
     return;
   }
 
@@ -92,80 +92,89 @@ void SignalHandler::install()
     exit(EXIT_FAILURE);
   }
 
-  installed_ = true;
+  state_ = State::Installed;
 }
 
 void SignalHandler::uninstall()
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!installed_) {
-    return;
+  std::thread * signal_thread = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_ != State::Installed) {
+      return;
+    }
+    state_ = State::Uninstalling;
+
+    bool restore_failed = false;
+    if (sigaction(SIGINT, &old_sigint_action_, nullptr) != 0) {
+      RCLCPP_ERROR(logger, "Failed to restore SIGINT handler: %s", strerror(errno));
+      restore_failed = true;
+    }
+    if (sigaction(SIGTERM, &old_sigterm_action_, nullptr) != 0) {
+      RCLCPP_ERROR(logger, "Failed to restore SIGTERM handler: %s", strerror(errno));
+      restore_failed = true;
+    }
+    if (restore_failed) {
+      RCLCPP_ERROR(
+        logger,
+        "Failed to restore previous signal handlers; aborting uninstall to avoid inconsistent "
+        "SIGINT/SIGTERM handling");
+      exit(EXIT_FAILURE);
+    }
+
+    // shutdown signal processing loop
+    stop_requested_.store(true);
+    notify_signal_eventfd();
+
+    signal_thread = signal_thread_;
+    signal_thread_ = nullptr;
   }
 
-  bool restore_failed = false;
-  if (sigaction(SIGINT, &old_sigint_action_, nullptr) != 0) {
-    RCLCPP_ERROR(logger, "Failed to restore SIGINT handler: %s", strerror(errno));
-    restore_failed = true;
-  }
-  if (sigaction(SIGTERM, &old_sigterm_action_, nullptr) != 0) {
-    RCLCPP_ERROR(logger, "Failed to restore SIGTERM handler: %s", strerror(errno));
-    restore_failed = true;
-  }
-  if (restore_failed) {
-    RCLCPP_ERROR(
-      logger,
-      "Failed to restore previous signal handlers; aborting uninstall to avoid inconsistent "
-      "SIGINT/SIGTERM handling");
-    exit(EXIT_FAILURE);
-  }
-
-  // shutdown signal processing loop
-  stop_requested_.store(true);
-  notify_signal_eventfd();
-
-  if (signal_thread_ == nullptr) {
+  // wait for signal_thread_ to finish
+  if (signal_thread == nullptr) {
     RCLCPP_ERROR(logger, "Signal handler thread was not running");
     exit(EXIT_FAILURE);
   }
-
   // join signal_thread_
-  if (signal_thread_->joinable()) {
-    signal_thread_->join();
+  if (signal_thread->joinable()) {
+    signal_thread->join();
   }
-  delete signal_thread_;  // NOLINT
-  signal_thread_ = nullptr;
+  delete signal_thread;  // NOLINT
 
-  // Invalidate signal_eventfd_ atomically before closing it.
-  // The OS may have dispatched a signal to our handler before sigaction was
-  // restored but the handler's first statement (handler_inflight_count_.fetch_add)
-  // had not yet executed ("tiny gap").  Setting signal_eventfd_ to -1 here ensures
-  // any such late-starting handler will load -1 in notify_signal_eventfd() and
-  // skip the write, preventing a write to a closed—and potentially reused—fd.
-  int signal_eventfd = signal_eventfd_.exchange(-1);
-  if (signal_eventfd == -1) {
-    RCLCPP_ERROR(logger, "Signal eventfd was already closed");
-    exit(EXIT_FAILURE);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Invalidate signal_eventfd_ atomically before closing it.
+    // The OS may have dispatched a signal to our handler before sigaction was
+    // restored but the handler's first statement (handler_inflight_count_.fetch_add)
+    // had not yet executed ("tiny gap").  Setting signal_eventfd_ to -1 here ensures
+    // any such late-starting handler will load -1 in notify_signal_eventfd() and
+    // skip the write, preventing a write to a closed—and potentially reused—fd.
+    int signal_eventfd = signal_eventfd_.exchange(-1);
+    if (signal_eventfd == -1) {
+      RCLCPP_ERROR(logger, "Signal eventfd was already closed");
+      exit(EXIT_FAILURE);
+    }
+
+    // Wait for handlers that were already in flight before or during the exchange
+    // above. Those handlers may have already loaded the valid fd before it was
+    // invalidated and must complete their write before we close it.
+    while (handler_inflight_count_.load() > 0) {
+      std::this_thread::yield();
+    }
+
+    if (close(signal_eventfd) != 0) {
+      RCLCPP_ERROR(logger, "Failed to close signal eventfd: %s", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+
+    state_ = State::NotInstalled;
   }
-
-  // Wait for handlers that were already in flight before or during the exchange
-  // above. Those handlers may have already loaded the valid fd before it was
-  // invalidated and must complete their write before we close it.
-  while (handler_inflight_count_.load() > 0) {
-    std::this_thread::yield();
-  }
-
-  if (close(signal_eventfd) != 0) {
-    RCLCPP_ERROR(logger, "Failed to close signal eventfd: %s", strerror(errno));
-    exit(EXIT_FAILURE);
-  }
-
-  installed_ = false;
 }
 
 void SignalHandler::register_shutdown_event(int eventfd)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!installed_) {
+  if (state_ != State::Installed) {
     return;
   }
 
@@ -188,7 +197,7 @@ void SignalHandler::register_shutdown_event(int eventfd)
 void SignalHandler::unregister_shutdown_event(int eventfd)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!installed_) {
+  if (state_ == State::NotInstalled) {
     return;
   }
 

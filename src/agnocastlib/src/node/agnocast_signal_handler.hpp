@@ -18,9 +18,15 @@ public:
   static void unregister_shutdown_event(int eventfd);
 
 private:
+  enum class State {
+    NotInstalled,
+    Installed,
+    Uninstalling,
+  };
+
   static constexpr size_t MAX_EXECUTORS_NUM = 128;
 
-  static bool installed_;
+  static State state_;
   static std::mutex mutex_;
   static std::array<std::atomic<int>, MAX_EXECUTORS_NUM> eventfds_;
   static std::atomic<size_t> eventfd_count_;
