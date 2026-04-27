@@ -33,8 +33,8 @@ static_assert(
 
 SignalHandler::State SignalHandler::state_{SignalHandler::State::NotInstalled};
 std::mutex SignalHandler::mutex_;
-std::array<std::atomic<int>, SignalHandler::MAX_EXECUTORS_NUM> SignalHandler::eventfds_{};
-std::atomic<size_t> SignalHandler::eventfd_count_{0};
+std::array<int, SignalHandler::MAX_EXECUTORS_NUM> SignalHandler::eventfds_{};
+size_t SignalHandler::eventfd_count_{0};
 std::atomic<bool> SignalHandler::stop_requested_{false};
 std::atomic<bool> SignalHandler::signal_received_{false};
 std::atomic<int> SignalHandler::signal_eventfd_{-1};
@@ -59,9 +59,9 @@ void SignalHandler::install()
 
   // Initialize eventfds array with -1 (empty marker)
   for (auto & fd : eventfds_) {
-    fd.store(-1);
+    fd = -1;
   }
-  eventfd_count_.store(0);
+  eventfd_count_ = 0;
 
   const int signal_eventfd = eventfd(0, EFD_CLOEXEC);
   if (signal_eventfd < 0) {
@@ -178,20 +178,19 @@ void SignalHandler::register_shutdown_event(int eventfd)
     return;
   }
 
-  size_t count = eventfd_count_.load();
-  for (size_t i = 0; i < count; ++i) {
-    if (eventfds_[i].load() == -1) {
-      eventfds_[i].store(eventfd);
+  for (size_t i = 0; i < eventfd_count_; ++i) {
+    if (eventfds_[i] == -1) {
+      eventfds_[i] = eventfd;
       return;
     }
   }
 
-  if (count >= MAX_EXECUTORS_NUM) {
+  if (eventfd_count_ >= MAX_EXECUTORS_NUM) {
     RCLCPP_ERROR(logger, "Maximum number of executors (%zu) exceeded", MAX_EXECUTORS_NUM);
     return;
   }
-  eventfds_[count].store(eventfd);
-  eventfd_count_.store(count + 1);
+  eventfds_[eventfd_count_] = eventfd;
+  eventfd_count_++;
 }
 
 void SignalHandler::unregister_shutdown_event(int eventfd)
@@ -201,10 +200,9 @@ void SignalHandler::unregister_shutdown_event(int eventfd)
     return;
   }
 
-  size_t count = eventfd_count_.load();
-  for (size_t i = 0; i < count; ++i) {
-    if (eventfds_[i].load() == eventfd) {
-      eventfds_[i].store(-1);
+  for (size_t i = 0; i < eventfd_count_; ++i) {
+    if (eventfds_[i] == eventfd) {
+      eventfds_[i] = -1;
       return;
     }
   }
@@ -281,11 +279,25 @@ void SignalHandler::signal_handler(int signum)
 
 void SignalHandler::notify_all_executors()
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   uint64_t val = 1;
   for (size_t i = 0; i < MAX_EXECUTORS_NUM; ++i) {
-    int fd = eventfds_[i].load();
+    int fd = eventfds_[i];
     if (fd != -1) {
-      [[maybe_unused]] auto ret = write(fd, &val, sizeof(val));
+      while (true) {
+        const auto ret = write(fd, &val, sizeof(val));
+        if (ret != -1) {
+          break;
+        }
+        if (errno == EINTR) {
+          continue;
+        }
+        RCLCPP_ERROR(logger, "Failed to notify shutdown eventfd %d: %s", fd, std::strerror(errno));
+        if (errno == EBADF || errno == EINVAL) {
+          eventfds_[i] = -1;
+        }
+        break;
+      }
     }
   }
 }

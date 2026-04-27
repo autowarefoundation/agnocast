@@ -28,8 +28,8 @@ private:
 
   static State state_;
   static std::mutex mutex_;
-  static std::array<std::atomic<int>, MAX_EXECUTORS_NUM> eventfds_;
-  static std::atomic<size_t> eventfd_count_;
+  static std::array<int, MAX_EXECUTORS_NUM> eventfds_;
+  static size_t eventfd_count_;
   static std::atomic<bool> stop_requested_;
   static std::atomic<bool> signal_received_;
   static std::atomic<int> signal_eventfd_;
