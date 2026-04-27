@@ -58,9 +58,7 @@ void SignalHandler::install()
   }
 
   // Initialize eventfds array with -1 (empty marker)
-  for (auto & fd : eventfds_) {
-    fd = -1;
-  }
+  eventfds_.fill(-1);
   eventfd_count_ = 0;
 
   const int signal_eventfd = eventfd(0, EFD_CLOEXEC);
