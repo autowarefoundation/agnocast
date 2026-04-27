@@ -114,7 +114,7 @@ class BasicPublisher
             rclcpp::detail::PublisherQosParametersTraits{})
         : qos;
 
-    validate_qos(actual_qos);
+    validate_publisher_qos(actual_qos);
 
     id_ =
       initialize_publisher(topic_name_, node->get_fully_qualified_name(), actual_qos, is_bridge);

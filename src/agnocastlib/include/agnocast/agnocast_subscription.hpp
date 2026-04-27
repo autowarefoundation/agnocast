@@ -133,7 +133,7 @@ class BasicSubscription : public SubscriptionBase
             rclcpp::detail::SubscriptionQosParametersTraits{})
         : qos;
 
-    validate_qos(actual_qos);
+    validate_subscription_qos(actual_qos);
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
       actual_qos, false, options.ignore_local_publications, is_bridge,
@@ -242,7 +242,7 @@ private:
             rclcpp::detail::SubscriptionQosParametersTraits{})
         : qos;
 
-    validate_qos(actual_qos);
+    validate_subscription_qos(actual_qos);
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
       actual_qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
