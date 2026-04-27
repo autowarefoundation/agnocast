@@ -1,4 +1,4 @@
-#include "../../src/node/agnocast_signal_handler.hpp"
+#include "node/agnocast_signal_handler.hpp"
 
 #include <gtest/gtest.h>
 #include <sys/epoll.h>
