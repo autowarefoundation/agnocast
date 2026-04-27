@@ -14,7 +14,7 @@ std::string captured_log;
 int captured_warn_count = 0;
 
 void capture_log_handler(
-  const rcutils_log_location_t * /*location*/, int severity, const char * /*name*/,
+  const rcutils_log_location_t * /*location*/, int severity, const char * name,
   rcutils_time_point_value_t /*timestamp*/, const char * format, va_list * args)
 {
   char buf[1024];
@@ -22,6 +22,10 @@ void capture_log_handler(
   va_copy(args_copy, *args);
   vsnprintf(buf, sizeof(buf), format, args_copy);
   va_end(args_copy);
+  const bool from_agnocast = name != nullptr && std::string(name) == "Agnocast";
+  if (!from_agnocast) {
+    return;
+  }
   captured_log += buf;
   captured_log += "\n";
   if (severity == RCUTILS_LOG_SEVERITY_WARN) {
