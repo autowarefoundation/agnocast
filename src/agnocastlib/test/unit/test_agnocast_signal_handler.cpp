@@ -33,15 +33,55 @@ bool read_event_fd_with_timeout(int fd, int timeout_ms, uint64_t & value)
     return false;
   }
 
-  epoll_event triggered_event{};
-  const int wait_result = epoll_wait(epoll_fd, &triggered_event, 1, timeout_ms);
-  close(epoll_fd);
-  if (wait_result <= 0) {
-    return false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  bool read_succeeded = false;
+  while (true) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      break;
+    }
+
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    epoll_event triggered_event{};
+    const int wait_result =
+      epoll_wait(epoll_fd, &triggered_event, 1, static_cast<int>(remaining.count()));
+    if (wait_result == 0) {
+      break;
+    }
+    if (wait_result == -1) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+
+    bool should_break = false;
+    while (true) {
+      const ssize_t bytes_read = read(fd, &value, sizeof(value));
+      if (bytes_read == static_cast<ssize_t>(sizeof(value))) {
+        read_succeeded = true;
+        break;
+      }
+      if (bytes_read == -1 && errno == EINTR) {
+        continue;
+      }
+      if (bytes_read == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        break;
+      }
+      should_break = true;
+      break;
+    }
+    if (should_break) {
+      break;
+    }
+
+    if (read_succeeded) {
+      break;
+    }
   }
 
-  const ssize_t bytes_read = read(fd, &value, sizeof(value));
-  return bytes_read == static_cast<ssize_t>(sizeof(value));
+  close(epoll_fd);
+  return read_succeeded;
 }
 
 bool event_fd_has_notification(int fd, int timeout_ms = 200)
