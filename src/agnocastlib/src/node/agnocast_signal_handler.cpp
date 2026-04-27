@@ -102,11 +102,21 @@ void SignalHandler::uninstall()
     return;
   }
 
+  bool restore_failed = false;
   if (sigaction(SIGINT, &old_sigint_action_, nullptr) != 0) {
     RCLCPP_ERROR(logger, "Failed to restore SIGINT handler: %s", strerror(errno));
+    restore_failed = true;
   }
   if (sigaction(SIGTERM, &old_sigterm_action_, nullptr) != 0) {
     RCLCPP_ERROR(logger, "Failed to restore SIGTERM handler: %s", strerror(errno));
+    restore_failed = true;
+  }
+  if (restore_failed) {
+    RCLCPP_ERROR(
+      logger,
+      "Failed to restore previous signal handlers; aborting uninstall to avoid inconsistent "
+      "SIGINT/SIGTERM handling");
+    exit(EXIT_FAILURE);
   }
 
   // shutdown signal processing loop
