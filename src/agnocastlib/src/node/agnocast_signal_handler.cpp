@@ -1,6 +1,5 @@
 #include "agnocast_signal_handler.hpp"
 
-#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <sys/eventfd.h>
@@ -138,10 +137,9 @@ void SignalHandler::uninstall()
     exit(EXIT_FAILURE);
   }
 
-  // Wait for handlers that were already in-flight between the first
-  // handler_inflight_count_ wait and the exchange above.  Those handlers may have
-  // already loaded the valid fd (before our exchange) and must complete their write
-  // before we close it.
+  // Wait for handlers that were already in flight before or during the exchange
+  // above. Those handlers may have already loaded the valid fd before it was
+  // invalidated and must complete their write before we close it.
   while (handler_inflight_count_.load() > 0) {
     std::this_thread::yield();
   }
@@ -228,7 +226,23 @@ void SignalHandler::wait_for_signal_eventfd()
   const int fd = signal_eventfd_.load();
   if (fd != -1) {
     uint64_t count = 0;
-    [[maybe_unused]] auto ret = read(fd, &count, sizeof(count));
+    while (true) {
+      const auto ret = read(fd, &count, sizeof(count));
+      if (ret == static_cast<ssize_t>(sizeof(count))) {
+        break;
+      }
+      if (ret == -1 && errno == EINTR) {
+        continue;
+      }
+      if (ret == -1) {
+        RCLCPP_ERROR(logger, "Failed to read signal eventfd: %s", std::strerror(errno));
+      } else {
+        RCLCPP_ERROR(
+          logger, "Short read from signal eventfd: got %zd bytes, expected %zu", ret,
+          sizeof(count));
+      }
+      break;
+    }
   }
 }
 

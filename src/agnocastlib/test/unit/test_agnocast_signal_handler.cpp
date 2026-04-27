@@ -5,7 +5,6 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -67,6 +66,7 @@ class SignalHandlerTest : public ::testing::Test
 protected:
   void TearDown() override
   {
+    agnocast::SignalHandler::uninstall();
     for (int fd : owned_eventfds_) {
       close(fd);
     }
