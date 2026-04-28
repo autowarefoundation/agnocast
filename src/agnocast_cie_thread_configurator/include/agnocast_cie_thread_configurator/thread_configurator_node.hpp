@@ -12,6 +12,9 @@
 
 class ThreadConfiguratorNode : public rclcpp::Node
 {
+  // Each ThreadConfig instance is reachable from exactly one MutuallyExclusive
+  // callback group, so no two callbacks ever touch the same instance. Hence
+  // thread_id and applied stay non-atomic; print_all_unapplied reads post-spin.
   struct ThreadConfig
   {
     std::string thread_str;  // callback_group_id or thread_name

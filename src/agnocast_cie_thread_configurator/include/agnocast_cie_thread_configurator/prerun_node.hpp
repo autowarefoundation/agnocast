@@ -34,9 +34,11 @@ private:
   rclcpp::Subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>::SharedPtr
     non_ros_thread_sub_;
 
-  // (domain_id, callback_group_id) pairs
+  // (domain_id, callback_group_id) pairs. Guarded by domain_and_cbg_ids_mutex_
+  // during callbacks; dump_yaml_config reads it post-spin without the lock.
   std::set<std::pair<size_t, std::string>> domain_and_cbg_ids_;
   std::mutex domain_and_cbg_ids_mutex_;
-  // non-ROS thread names
+  // non-ROS thread names. Single subscription on a MutuallyExclusive group;
+  // dump_yaml_config reads it post-spin. No concurrent access, no mutex needed.
   std::set<std::string> non_ros_thread_names_;
 };
