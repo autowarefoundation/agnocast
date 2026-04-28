@@ -34,7 +34,7 @@ private:
     bool has_a2r;
   };
 
-  struct ManagedBridgeEntry
+  struct ManagedPubsubBridgeEntry
   {
     BridgeFactorySpec factory_spec;
     // Use -1 when not requested. Valid topic_local_id_t values are [0..MAX_TOPIC_LOCAL_ID).
@@ -55,10 +55,10 @@ private:
     }
   };
 
-  struct DirectedBridgeRef
+  struct DirectedPubsubBridgeRef
   {
     const std::string & topic_name;
-    const ManagedBridgeEntry & entry;
+    const ManagedPubsubBridgeEntry & entry;
     BridgeDirection direction;
   };
 
@@ -75,29 +75,33 @@ private:
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
 
-  std::map<std::string, std::shared_ptr<BridgeBase>> active_bridges_;
-  std::map<std::string, ManagedBridgeEntry> managed_bridges_;
+  std::map<std::string, std::shared_ptr<PubsubBridgeBase>> active_pubsub_bridges_;
+  std::map<std::string, ManagedPubsubBridgeEntry> managed_pubsub_bridges_;
+
+  std::map<std::string, std::shared_ptr<ServiceBridgeBase>> active_r2a_service_bridges_;
 
   void start_ros_execution();
 
   void on_mq_request(mqd_t fd);
   void on_signal();
 
-  void register_request(const MqMsgBridge & req);
+  void register_pubsub_request(const MqMsgBridge & req);
 
-  static BridgeKernelResult try_add_bridge_to_kernel(const std::string & topic_name, bool is_r2a);
-  void rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
-  bool activate_bridge(const DirectedBridgeRef bridge_ref);
-  void send_delegation(const DirectedBridgeRef bridge_ref, pid_t owner_pid);
-  void process_managed_bridge(const DirectedBridgeRef bridge_ref);
-  bool should_remove_bridge(const std::string & topic_name, bool is_r2a);
+  static BridgeKernelResult try_add_pubsub_bridge_to_kernel(
+    const std::string & topic_name, bool is_r2a);
+  void rollback_pubsub_bridge_from_kernel(const std::string & topic_name, bool is_r2a);
+  bool activate_pubsub_bridge(const DirectedPubsubBridgeRef bridge_ref);
+  void send_pubsub_delegation(const DirectedPubsubBridgeRef bridge_ref, pid_t owner_pid);
+  void process_managed_pubsub_bridge(const DirectedPubsubBridgeRef bridge_ref);
+  bool should_remove_pubsub_bridge(const std::string & topic_name, bool is_r2a);
+
+  void create_service_bridge_if_needed(const MqMsgBridge & req);
 
   void check_parent_alive();
-  void check_active_bridges();
-  void check_managed_bridges();
+  void check_active_pubsub_bridges();
+  void check_and_remove_service_bridges();
+  void check_managed_pubsub_bridges();
   void check_should_exit();
-
-  static std::pair<std::string, std::string> extract_topic_info(const MqMsgBridge & req);
 };
 
 }  // namespace agnocast

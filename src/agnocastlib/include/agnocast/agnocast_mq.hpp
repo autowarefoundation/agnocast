@@ -38,27 +38,36 @@ struct BridgeFactoryInfo
   uintptr_t fn_offset_reverse;
 };
 
-struct BridgeTargetInfo
+struct PubsubBridgeTargetInfo
 {
   char topic_name[TOPIC_NAME_BUFFER_SIZE];
   topic_local_id_t target_id;
 };
 
+struct ServiceBridgeTargetInfo
+{
+  char service_name[SERVICE_NAME_BUFFER_SIZE];
+};
+
 struct MqMsgBridge
 {
   BridgeFactoryInfo factory;
-  BridgeTargetInfo target;
+  union {
+    PubsubBridgeTargetInfo pubsub_target;
+    ServiceBridgeTargetInfo srv_target;
+  };
   BridgeDirection direction;
+  bool is_service;
 };
 
-struct PubsubBridgeTargetInfo
+struct PubsubBridgeTargetInfoWithType
 {
   char message_type[MESSAGE_TYPE_BUFFER_SIZE];
   char topic_name[TOPIC_NAME_BUFFER_SIZE];
   topic_local_id_t target_id;
 };
 
-struct ServiceBridgeTargetInfo
+struct ServiceBridgeTargetInfoWithType
 {
   char service_type[SERVICE_TYPE_BUFFER_SIZE];
   char service_name[SERVICE_NAME_BUFFER_SIZE];
@@ -67,8 +76,8 @@ struct ServiceBridgeTargetInfo
 struct MqMsgPerformanceBridge
 {
   union {
-    PubsubBridgeTargetInfo pubsub_target;
-    ServiceBridgeTargetInfo srv_target;
+    PubsubBridgeTargetInfoWithType pubsub_target;
+    ServiceBridgeTargetInfoWithType srv_target;
   };
   BridgeDirection direction;
   bool is_service;

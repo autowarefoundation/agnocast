@@ -366,7 +366,7 @@ void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
 }
 
 void PerformanceBridgeManager::create_service_bridge_if_needed(
-  const ServiceBridgeTargetInfo & target, BridgeDirection direction)
+  const ServiceBridgeTargetInfoWithType & target, BridgeDirection direction)
 {
   std::string service_name = static_cast<const char *>(target.service_name);
   std::string service_type = static_cast<const char *>(target.service_type);
