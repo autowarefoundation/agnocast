@@ -103,12 +103,12 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
+| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
 
 **Other differences from rclcpp::NodeParameters**:
 
 | Item | rclcpp::NodeParameters | agnocast::NodeParameters | Planned |
 |------|------------------------|-------------------------|---------|
-| Parameter Service | Creates `ParameterService` (optional) | None | Yes |
 | Parameter Event Publishing | Publishes to `/parameter_events` | None | TBD |
 
 ---

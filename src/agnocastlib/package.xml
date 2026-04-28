@@ -33,6 +33,10 @@
 
   <depend>agnocast_cie_config_msgs</depend>
   <depend>agnocast_cie_thread_configurator</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <!-- Uncomment when agnocast_kmod is released from PPA -->
   <!-- <exec_depend>agnocast_kmod</exec_depend> -->

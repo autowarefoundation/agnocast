@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
@@ -32,6 +33,8 @@ protected:
   int epoll_fd_;
   int shutdown_event_fd_;
   pid_t my_pid_;
+
+  EpollUpdateTracker epoll_update_tracker_;
 
   // Lock ordering: When both mutexes are needed, always acquire
   // ready_agnocast_executables_mutex_ before mutex_ to prevent deadlocks.

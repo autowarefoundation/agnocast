@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -40,6 +41,8 @@ protected:
   void prepare_epoll();
   bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   static void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
+
+  EpollUpdateTracker epoll_update_tracker_;
 
 public:
   /// Construct the executor.

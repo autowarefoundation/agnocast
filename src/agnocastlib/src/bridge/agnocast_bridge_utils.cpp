@@ -5,6 +5,8 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <algorithm>
+#include <array>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -174,6 +176,40 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
     subscribers.begin(), subscribers.end(), [&self_name, &self_ns](const auto & info) {
       return info.node_name() != self_name || info.node_namespace() != self_ns;
     });
+}
+
+rclcpp::QoS get_service_qos(const std::string & service_name)
+{
+  const std::string request_topic_name = create_service_request_topic_name(service_name);
+
+  auto topic_info_buffer = std::make_unique<std::array<topic_info_ret, 1>>();
+  ioctl_topic_info_args topic_info_args = {};
+  topic_info_args.topic_name = {request_topic_name.c_str(), request_topic_name.size()};
+  topic_info_args.topic_info_ret_buffer_addr =
+    reinterpret_cast<uint64_t>(topic_info_buffer->data());
+  topic_info_args.topic_info_ret_buffer_size = 1;
+
+  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
+    if (errno == ENOBUFS) {
+      throw std::runtime_error("Multiple target agnocast services found");
+    }
+    throw std::runtime_error(
+      "Failed to fetch target service information from agnocast kernel module");
+  }
+
+  if (topic_info_args.ret_topic_info_ret_num <= 0) {
+    throw std::runtime_error("No target agnocast service found");
+  }
+
+  const topic_info_ret & info = (*topic_info_buffer)[0];
+
+  // We know the durability policy is set to Volatile because this is a service.
+  rclcpp::QoS qos = rclcpp::QoS(info.qos_depth)
+                      .durability(rclcpp::DurabilityPolicy::Volatile)
+                      .reliability(
+                        info.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
+                                             : rclcpp::ReliabilityPolicy::BestEffort);
+  return qos;
 }
 
 }  // namespace agnocast

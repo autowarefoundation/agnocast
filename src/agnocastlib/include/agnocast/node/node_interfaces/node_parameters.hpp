@@ -18,6 +18,14 @@
 #include <string>
 #include <vector>
 
+namespace agnocast
+{
+
+class Node;
+class ParameterService;
+
+}  // namespace agnocast
+
 namespace agnocast::node_interfaces
 {
 
@@ -33,9 +41,9 @@ public:
     std::list<rclcpp::node_interfaces::OnSetParametersCallbackHandle::WeakPtr>;
 
   explicit NodeParameters(
-    rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
-    const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
-    bool allow_undeclared_parameters = false);
+    agnocast::Node * node, rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
+    const std::vector<rclcpp::Parameter> & parameter_overrides, bool start_parameter_services,
+    const rcl_arguments_t * local_args, bool allow_undeclared_parameters = false);
 
   virtual ~NodeParameters() = default;
 
@@ -126,6 +134,8 @@ private:
   CallbacksContainerType on_parameters_set_callback_container_;
 
   bool allow_undeclared_ = false;
+
+  std::shared_ptr<ParameterService> parameter_service_;
 };
 
 }  // namespace agnocast::node_interfaces

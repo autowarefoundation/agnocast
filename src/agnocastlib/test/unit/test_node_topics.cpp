@@ -15,7 +15,9 @@ protected:
   rclcpp::node_interfaces::NodeTopicsInterface::SharedPtr create_node_topics(
     const std::string & node_name, const std::string & node_namespace)
   {
-    node_ = std::make_shared<agnocast::Node>(node_name, node_namespace);
+    rclcpp::NodeOptions options;
+    options.start_parameter_services(false);
+    node_ = std::make_shared<agnocast::Node>(node_name, node_namespace, options);
     return node_->get_node_topics_interface();
   }
 };

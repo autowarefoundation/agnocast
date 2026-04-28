@@ -78,7 +78,9 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, get_all_callback_groups)
 // guard condition, but it must be available for executor compatibility.
 TEST_F(CallbackIsolatedAgnocastExecutorTest, agnocast_node_add_to_executor)
 {
-  auto node = std::make_shared<agnocast::Node>("test_agnocast_node");
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  auto node = std::make_shared<agnocast::Node>("test_agnocast_node", options);
   auto node_base = node->get_node_base_interface();
 
   EXPECT_NO_THROW(node_base->get_notify_guard_condition());

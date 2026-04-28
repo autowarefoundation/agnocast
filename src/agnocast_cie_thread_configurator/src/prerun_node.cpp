@@ -9,11 +9,39 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 
-PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node")
+PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node", options)
 {
+  // https://docs.ros.org/en/rolling/Concepts/Intermediate/About-Domain-ID.html#choosing-a-domain-id-short-version
+  constexpr size_t max_domain_id = 101;
+
+  const auto domains =
+    this->declare_parameter<std::vector<int64_t>>("domains", std::vector<int64_t>{});
+  std::set<size_t> domain_ids;
+  for (const auto raw_domain_id : domains) {
+    if (raw_domain_id < 0) {
+      RCLCPP_WARN(
+        this->get_logger(), "Negative domain ID %lld is invalid. Skipping.",
+        static_cast<long long>(raw_domain_id));
+      continue;
+    }
+
+    const size_t domain_id = static_cast<size_t>(raw_domain_id);
+    if (domain_id > max_domain_id) {
+      RCLCPP_WARN(
+        this->get_logger(), "Domain ID %zu exceeds maximum valid value (%zu). Skipping.", domain_id,
+        max_domain_id);
+      continue;
+    }
+
+    domain_ids.insert(domain_id);
+  }
+
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
+
+  cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
   // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
@@ -21,13 +49,17 @@ PrerunNode::PrerunNode(const std::set<size_t> & domain_ids) : Node("prerun_node"
   auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
+  rclcpp::SubscriptionOptions non_ros_opts;
+  non_ros_opts.callback_group = cbg_non_ros_thread_;
   non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
     "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
     [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
-    });
+    },
+    non_ros_opts);
 
-  // Create subscription for default domain on this node
+  // Create subscription for default domain on this node. Uses the node's default
+  // callback group, mirroring the per-domain extra nodes below.
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
@@ -60,15 +92,17 @@ void PrerunNode::topic_callback(
   size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
-  if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
-    return;
+  {
+    std::lock_guard<std::mutex> lock(domain_and_cbg_ids_mutex_);
+    if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
+      return;
+    }
+    domain_and_cbg_ids_.insert(key);
   }
 
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
-
-  domain_and_cbg_ids_.insert(key);
 }
 
 void PrerunNode::non_ros_thread_callback(
