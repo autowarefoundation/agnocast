@@ -27,7 +27,7 @@ const std::unordered_map<std::string, int> policy_to_sched_const = {
 }  // namespace
 
 ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
-: Node("thread_configurator_node", options), unapplied_num_(0), cgroup_num_(0)
+: Node("thread_configurator_node", options)
 {
   const auto config_file = this->declare_parameter<std::string>("config_file", "");
   if (config_file.empty()) {
@@ -50,7 +50,7 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
   YAML::Node callback_groups = yaml["callback_groups"];
   YAML::Node non_ros_threads = yaml["non_ros_threads"];
 
-  unapplied_num_ = callback_groups.size() + non_ros_threads.size();
+  unapplied_num_.store(static_cast<int>(callback_groups.size() + non_ros_threads.size()));
   callback_group_configs_.resize(callback_groups.size());
   non_ros_thread_configs_.resize(non_ros_threads.size());
 
@@ -141,19 +141,25 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
+  cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
   // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
   // so transient_local is ineffective.
   auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
+  rclcpp::SubscriptionOptions non_ros_opts;
+  non_ros_opts.callback_group = cbg_non_ros_thread_;
   non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
     "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
     [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
-    });
+    },
+    non_ros_opts);
 
-  // Create subscription for default domain on this node
+  // Create subscription for default domain on this node. Uses the node's default
+  // callback group, mirroring the per-domain extra nodes below.
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
@@ -298,16 +304,15 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
 {
-  if (cgroup_num_ > 0) {
-    for (int i = 0; i < cgroup_num_; i++) {
-      rmdir(("/sys/fs/cgroup/cpuset/" + std::to_string(i)).c_str());
-    }
+  const int cgroup_count = cgroup_num_.load();
+  for (int i = 0; i < cgroup_count; i++) {
+    rmdir(("/sys/fs/cgroup/cpuset/" + std::to_string(i)).c_str());
   }
 }
 
 void ThreadConfiguratorNode::print_all_unapplied()
 {
-  if (unapplied_num_ == 0) {
+  if (unapplied_num_.load() == 0) {
     return;
   }
 
@@ -331,7 +336,8 @@ void ThreadConfiguratorNode::print_all_unapplied()
 bool ThreadConfiguratorNode::set_affinity_by_cgroup(
   int64_t thread_id, const std::vector<int> & cpus)
 {
-  std::string cgroup_path = "/sys/fs/cgroup/cpuset/" + std::to_string(cgroup_num_++);
+  const int my_id = cgroup_num_.fetch_add(1, std::memory_order_relaxed);
+  std::string cgroup_path = "/sys/fs/cgroup/cpuset/" + std::to_string(my_id);
   if (!std::filesystem::create_directory(cgroup_path)) {
     return false;
   }
@@ -504,12 +510,13 @@ void ThreadConfiguratorNode::callback_group_callback(
   }
 
   if (!config->applied) {
-    unapplied_num_--;
-  }
-  config->applied = true;
-
-  if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    on_all_configured();
+    config->applied = true;
+    if (unapplied_num_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      bool expected = false;
+      if (configured_at_least_once_.compare_exchange_strong(expected, true)) {
+        RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
+      }
+    }
   }
 }
 
@@ -550,17 +557,12 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
   }
 
   if (!config->applied) {
-    unapplied_num_--;
+    config->applied = true;
+    if (unapplied_num_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      bool expected = false;
+      if (configured_at_least_once_.compare_exchange_strong(expected, true)) {
+        RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
+      }
+    }
   }
-  config->applied = true;
-
-  if (unapplied_num_ == 0 && !configured_at_least_once_) {
-    on_all_configured();
-  }
-}
-
-void ThreadConfiguratorNode::on_all_configured()
-{
-  RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
-  configured_at_least_once_ = true;
 }
