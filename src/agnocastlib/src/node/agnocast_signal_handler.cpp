@@ -173,6 +173,8 @@ void SignalHandler::register_shutdown_event(int eventfd)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (state_ != State::Installed) {
+    RCLCPP_WARN(
+      logger, "Cannot register shutdown eventfd %d: signal handler is not installed", eventfd);
     return;
   }
 
