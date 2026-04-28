@@ -33,8 +33,7 @@ static_assert(
 
 SignalHandler::State SignalHandler::state_{SignalHandler::State::NotInstalled};
 std::mutex SignalHandler::mutex_;
-std::array<int, SignalHandler::MAX_EXECUTORS_NUM> SignalHandler::eventfds_{};
-size_t SignalHandler::eventfd_count_{0};
+std::set<int> SignalHandler::eventfds_{};
 std::atomic<bool> SignalHandler::stop_requested_{false};
 std::atomic<bool> SignalHandler::signal_received_{false};
 std::atomic<int> SignalHandler::signal_eventfd_{-1};
@@ -57,9 +56,7 @@ void SignalHandler::install()
     return;
   }
 
-  // Initialize eventfds array with -1 (empty marker)
-  eventfds_.fill(-1);
-  eventfd_count_ = 0;
+  eventfds_.clear();
 
   const int signal_eventfd = eventfd(0, EFD_CLOEXEC);
   if (signal_eventfd < 0) {
@@ -178,19 +175,7 @@ void SignalHandler::register_shutdown_event(int eventfd)
     return;
   }
 
-  for (size_t i = 0; i < eventfd_count_; ++i) {
-    if (eventfds_[i] == -1) {
-      eventfds_[i] = eventfd;
-      return;
-    }
-  }
-
-  if (eventfd_count_ >= MAX_EXECUTORS_NUM) {
-    RCLCPP_ERROR(logger, "Maximum number of executors (%zu) exceeded", MAX_EXECUTORS_NUM);
-    return;
-  }
-  eventfds_[eventfd_count_] = eventfd;
-  eventfd_count_++;
+  eventfds_.insert(eventfd);
 }
 
 void SignalHandler::unregister_shutdown_event(int eventfd)
@@ -200,12 +185,7 @@ void SignalHandler::unregister_shutdown_event(int eventfd)
     return;
   }
 
-  for (size_t i = 0; i < eventfd_count_; ++i) {
-    if (eventfds_[i] == eventfd) {
-      eventfds_[i] = -1;
-      return;
-    }
-  }
+  eventfds_.erase(eventfd);
 }
 
 void SignalHandler::signal_processing_loop()
@@ -281,23 +261,28 @@ void SignalHandler::notify_all_executors()
 {
   std::lock_guard<std::mutex> lock(mutex_);
   uint64_t val = 1;
-  for (size_t i = 0; i < MAX_EXECUTORS_NUM; ++i) {
-    int fd = eventfds_[i];
-    if (fd != -1) {
-      while (true) {
-        const auto ret = write(fd, &val, sizeof(val));
-        if (ret != -1) {
-          break;
-        }
-        if (errno == EINTR) {
-          continue;
-        }
-        RCLCPP_ERROR(logger, "Failed to notify shutdown eventfd %d: %s", fd, std::strerror(errno));
-        if (errno == EBADF || errno == EINVAL) {
-          eventfds_[i] = -1;
-        }
+  for (auto it = eventfds_.begin(); it != eventfds_.end();) {
+    const int fd = *it;
+    bool erase_fd = false;
+    while (true) {
+      const auto ret = write(fd, &val, sizeof(val));
+      if (ret != -1) {
         break;
       }
+      if (errno == EINTR) {
+        continue;
+      }
+      RCLCPP_ERROR(logger, "Failed to notify shutdown eventfd %d: %s", fd, std::strerror(errno));
+      if (errno == EBADF || errno == EINVAL) {
+        erase_fd = true;
+      }
+      break;
+    }
+
+    if (erase_fd) {
+      it = eventfds_.erase(it);
+    } else {
+      ++it;
     }
   }
 }

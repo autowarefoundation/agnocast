@@ -1,9 +1,9 @@
 #pragma once
 
-#include <array>
 #include <atomic>
 #include <csignal>
 #include <mutex>
+#include <set>
 #include <thread>
 
 namespace agnocast
@@ -24,12 +24,9 @@ private:
     Uninstalling,
   };
 
-  static constexpr size_t MAX_EXECUTORS_NUM = 128;
-
   static State state_;
   static std::mutex mutex_;
-  static std::array<int, MAX_EXECUTORS_NUM> eventfds_;
-  static size_t eventfd_count_;
+  static std::set<int> eventfds_;
   static std::atomic<bool> stop_requested_;
   static std::atomic<bool> signal_received_;
   static std::atomic<int> signal_eventfd_;

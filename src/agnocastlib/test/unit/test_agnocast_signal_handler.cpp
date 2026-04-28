@@ -246,6 +246,25 @@ TEST_F(SignalHandlerTest, SigintNotifiesAllRegisteredEventfds)
   agnocast::SignalHandler::uninstall();
 }
 
+TEST_F(SignalHandlerTest, DuplicateEventfdRegistrationIsIgnored)
+{
+  agnocast::SignalHandler::install();
+
+  const int fd = create_event_fd();
+  agnocast::SignalHandler::register_shutdown_event(fd);
+  agnocast::SignalHandler::register_shutdown_event(fd);
+
+  send_sigint();
+  EXPECT_TRUE(event_fd_has_notification(fd));
+
+  agnocast::SignalHandler::unregister_shutdown_event(fd);
+
+  send_sigint();
+  EXPECT_FALSE(event_fd_has_notification(fd));
+
+  agnocast::SignalHandler::uninstall();
+}
+
 TEST_F(SignalHandlerTest, UnregisteredEventfdIsNotNotifiedBySigint)
 {
   agnocast::SignalHandler::install();
@@ -321,4 +340,27 @@ TEST_F(SignalHandlerTest, SigintNotifiesEventfdEvenWhenThreadsSpawnedBeforeInsta
   for (auto & t : pre_spawn_threads) {
     t.join();
   }
+}
+
+TEST_F(SignalHandlerTest, ManyEventfdsAreNotifiedBySigint)
+{
+  agnocast::SignalHandler::install();
+
+  constexpr int eventfd_count = 200;
+  std::vector<int> fds;
+  fds.reserve(eventfd_count);
+  for (int i = 0; i < eventfd_count; ++i) {
+    const int fd = create_event_fd();
+    fds.push_back(fd);
+    agnocast::SignalHandler::register_shutdown_event(fd);
+  }
+
+  send_sigint();
+
+  for (int fd : fds) {
+    uint64_t value = 0;
+    ASSERT_TRUE(read_event_fd_with_timeout(fd, TIMEOUT_MS_DEFAULT, value));
+  }
+
+  agnocast::SignalHandler::uninstall();
 }
