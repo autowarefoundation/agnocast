@@ -240,7 +240,7 @@ void register_timer_info(
     id2_timer_info[timer_id] = std::move(timer_info);
   }
 
-  need_epoll_updates.store(true);
+  EpollUpdateDispatcher::get_instance().request_update_all();
 }
 
 void handle_timer_event(TimerInfo & timer_info)

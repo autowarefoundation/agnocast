@@ -73,24 +73,16 @@ macro(agnocast_components_register_node target)
   set(component ${ARGS_PLUGIN})
   set(node ${ARGS_EXECUTABLE})
 
-  set(_path "lib")
   set(library_name "$<TARGET_FILE_NAME:${target}>")
 
-  # Write node entries into the same directory properties that rclcpp_components uses.
-  # rclcpp_components_package_hook reads these properties via get_property(DIRECTORY ...)
-  # and calls ament_index_register_resource() once for all registered nodes.
-  # By sharing these properties instead of maintaining our own, we avoid duplicate
-  # file(GENERATE) calls on the same ament index file when both
+  # Register with rclcpp_components for component container support (resource index only).
+  # Unlike rclcpp_components_register_node (singular), the plural form only populates
+  # the ament resource index without generating a standalone executable.
+  # This avoids duplicate file(GENERATE) calls on the same ament index file when both
   # agnocast_components_register_node and rclcpp_components_register_node are used
   # in the same package.
-  set_property(
-    DIRECTORY "${PROJECT_SOURCE_DIR}"
-    APPEND_STRING PROPERTY _RCLCPP_COMPONENTS_${resource_index}__NODES
-    "${component};${_path}/$<TARGET_FILE_NAME:${target}>\n")
-  set_property(
-    DIRECTORY "${PROJECT_SOURCE_DIR}"
-    APPEND PROPERTY _RCLCPP_COMPONENTS_PACKAGE_RESOURCE_INDICES
-    ${resource_index})
+  rclcpp_components_register_nodes(${target} ${component}
+    RESOURCE_INDEX ${resource_index})
 
   # Select template based on executor type
   if(_use_agnocast_only_template)

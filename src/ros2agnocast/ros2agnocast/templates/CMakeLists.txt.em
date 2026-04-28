@@ -26,11 +26,11 @@ safe_name = msg_type.replace('/', '_')
 pkg = msg_type.split('/')[0]
 }
 # Plugin for @(msg_type)
-add_library(bridge_plugin_@(safe_name) SHARED src/bridge_plugin_@(safe_name).cpp)
-target_link_libraries(bridge_plugin_@(safe_name) agnocastlib::agnocast)
-ament_target_dependencies(bridge_plugin_@(safe_name) rclcpp @(pkg))
+add_library(pubsub_bridge_plugin_@(safe_name) SHARED src/pubsub_bridge_plugin_@(safe_name).cpp)
+target_link_libraries(pubsub_bridge_plugin_@(safe_name) agnocastlib::agnocast)
+ament_target_dependencies(pubsub_bridge_plugin_@(safe_name) rclcpp @(pkg))
 
-install(TARGETS bridge_plugin_@(safe_name)
+install(TARGETS pubsub_bridge_plugin_@(safe_name)
   DESTINATION lib/${PROJECT_NAME})
 
 @[end for]
@@ -54,7 +54,7 @@ install(TARGETS service_bridge_plugin_@(safe_name)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
 @{
 all_targets = (
-  ['bridge_plugin_' + t.replace('/', '_') for t in message_types] +
+  ['pubsub_bridge_plugin_' + t.replace('/', '_') for t in message_types] +
   ['service_bridge_plugin_' + t.replace('/', '_') for t in service_types]
 )
 first_target = all_targets[0]

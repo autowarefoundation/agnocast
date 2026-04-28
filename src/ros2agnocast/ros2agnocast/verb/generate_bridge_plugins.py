@@ -4,9 +4,11 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from importlib.resources import files
 
 import em
+from ament_index_python.packages import get_package_share_directory
 from ros2cli.verb import VerbExtension
 
 
@@ -147,7 +149,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
         """Generate a single plugin C++ source file."""
         flat_type = typ.replace('/', '_')
         if interface_type == InterfaceType.MESSAGE:
-            output_file = os.path.join(src_dir, f'bridge_plugin_{flat_type}.cpp')
+            output_file = os.path.join(src_dir, f'pubsub_bridge_plugin_{flat_type}.cpp')
         else:
             output_file = os.path.join(src_dir, f'service_bridge_plugin_{flat_type}.cpp')
 
@@ -163,7 +165,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
                 'cpp_type': cpp_type,
                 'header_path': header_path,
             }
-            template_file = templates_pkg.joinpath('bridge_plugin.cpp.em')
+            template_file = templates_pkg.joinpath('pubsub_bridge_plugin.cpp.em')
         else:
             data = {
                 'srv_type': typ,
@@ -197,12 +199,20 @@ class GenerateBridgePluginsVerb(VerbExtension):
             interpreter.string(template_content)
             interpreter.shutdown()
 
+    def _get_ros2agnocast_version(self):
+        """Get the version of the ros2agnocast package from its package.xml."""
+        package_xml = os.path.join(
+            get_package_share_directory('ros2agnocast'), 'package.xml')
+        tree = ET.parse(package_xml)
+        return tree.getroot().find('version').text
+
     def _generate_package_xml(self, output_dir, package_names, templates_pkg):
         """Generate package.xml for the plugin package."""
         output_file = os.path.join(output_dir, 'package.xml')
 
         data = {
-            'package_names': sorted(package_names)
+            'package_names': sorted(package_names),
+            'version': self._get_ros2agnocast_version(),
         }
 
         template_file = templates_pkg.joinpath('package.xml.em')

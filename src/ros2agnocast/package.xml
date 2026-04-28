@@ -21,6 +21,7 @@
   <author email="kawaguchitnon@icloud.com">Tetsuhiro Kawaguchi</author>
 
   <exec_depend>agnocast_ioctl_wrapper</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
