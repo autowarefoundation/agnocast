@@ -147,7 +147,7 @@ std::pair<uintptr_t, std::shared_ptr<void>> StandardBridgeLoader::resolve_factor
   dlerror();
   auto [raw_handle, base_addr] = load_library(factory_spec.shared_lib_path);
 
-  if ((raw_handle == nullptr) || (base_addr == 0)) {
+  if (raw_handle == nullptr) {
     if (raw_handle != nullptr) {
       dlclose(raw_handle);
     }
