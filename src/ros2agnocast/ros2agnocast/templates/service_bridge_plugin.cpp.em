@@ -17,9 +17,9 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
   using ServiceT = @(cpp_type);
 
   auto srv_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   auto client_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
   auto agno_client = agnocast::create_client<ServiceT>(
     node.get(), service_name, qos, client_cb_group);
