@@ -31,34 +31,50 @@
 
 #include "agnocast/node/tf2/static_transform_broadcaster.hpp"
 
+#include <algorithm>
 #include <vector>
 
 namespace agnocast
 {
 
-void StaticTransformBroadcaster::sendTransform(const geometry_msgs::msg::TransformStamped & msgtf)
+namespace
 {
-  std::vector<geometry_msgs::msg::TransformStamped> v1;
-  v1.push_back(msgtf);
-  sendTransform(v1);
+void upsert_transform(
+  std::vector<geometry_msgs::msg::TransformStamped> & accumulator,
+  const geometry_msgs::msg::TransformStamped & transform)
+{
+  auto it = std::find_if(
+    accumulator.begin(), accumulator.end(),
+    [&transform](const geometry_msgs::msg::TransformStamped & existing) {
+      return transform.child_frame_id == existing.child_frame_id;
+    });
+  if (it != accumulator.end()) {
+    *it = transform;
+  } else {
+    accumulator.push_back(transform);
+  }
+}
+}  // namespace
+
+void StaticTransformBroadcaster::sendTransform(
+  const geometry_msgs::msg::TransformStamped & transform)
+{
+  upsert_transform(net_message_.transforms, transform);
+
+  // net_message_ accumulates all static transforms for transient_local semantics, so the
+  // entire vector must be re-published each time. The loaned SHM payload is freshly allocated
+  // per publish, so we copy net_message_.transforms into it; persisting the loaned slot would
+  // avoid this copy but requires Agnocast core support.
+  auto msg = publisher_->borrow_loaned_message();
+  msg->transforms = net_message_.transforms;
+  publisher_->publish(std::move(msg));
 }
 
 void StaticTransformBroadcaster::sendTransform(
-  const std::vector<geometry_msgs::msg::TransformStamped> & msgtf)
+  const std::vector<geometry_msgs::msg::TransformStamped> & transforms)
 {
-  for (auto it_in = msgtf.begin(); it_in != msgtf.end(); ++it_in) {
-    bool match_found = false;
-    for (auto it_msg = net_message_.transforms.begin(); it_msg != net_message_.transforms.end();
-         ++it_msg) {
-      if (it_in->child_frame_id == it_msg->child_frame_id) {
-        *it_msg = *it_in;
-        match_found = true;
-        break;
-      }
-    }
-    if (!match_found) {
-      net_message_.transforms.push_back(*it_in);
-    }
+  for (const auto & transform : transforms) {
+    upsert_transform(net_message_.transforms, transform);
   }
 
   // net_message_ accumulates all static transforms for transient_local semantics, so the

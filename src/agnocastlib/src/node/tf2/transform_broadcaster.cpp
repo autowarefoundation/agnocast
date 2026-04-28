@@ -36,21 +36,18 @@
 namespace agnocast
 {
 
-void TransformBroadcaster::sendTransform(const geometry_msgs::msg::TransformStamped & msgtf)
+void TransformBroadcaster::sendTransform(const geometry_msgs::msg::TransformStamped & transform)
 {
-  std::vector<geometry_msgs::msg::TransformStamped> v1;
-  v1.push_back(msgtf);
-  sendTransform(v1);
+  auto msg = publisher_->borrow_loaned_message();
+  msg->transforms.push_back(transform);
+  publisher_->publish(std::move(msg));
 }
 
 void TransformBroadcaster::sendTransform(
-  const std::vector<geometry_msgs::msg::TransformStamped> & msgtf)
+  const std::vector<geometry_msgs::msg::TransformStamped> & transforms)
 {
   auto msg = publisher_->borrow_loaned_message();
-  for (std::vector<geometry_msgs::msg::TransformStamped>::const_iterator it = msgtf.begin();
-       it != msgtf.end(); ++it) {
-    msg->transforms.push_back(*it);
-  }
+  msg->transforms = transforms;
   publisher_->publish(std::move(msg));
 }
 
