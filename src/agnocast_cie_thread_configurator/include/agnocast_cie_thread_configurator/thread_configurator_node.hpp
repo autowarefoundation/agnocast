@@ -49,7 +49,6 @@ private:
   void non_ros_thread_callback(
     const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
 
-  rclcpp::CallbackGroup::SharedPtr cbg_default_callback_group_;
   rclcpp::CallbackGroup::SharedPtr cbg_non_ros_thread_;
 
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;

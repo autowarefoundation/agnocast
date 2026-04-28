@@ -141,8 +141,6 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
-  cbg_default_callback_group_ =
-    this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
@@ -160,17 +158,15 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     },
     non_ros_opts);
 
-  // Create subscription for default domain on this node
-  rclcpp::SubscriptionOptions cbg_opts;
-  cbg_opts.callback_group = cbg_default_callback_group_;
+  // Create subscription for default domain on this node. Uses the node's default
+  // callback group, mirroring the per-domain extra nodes below.
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this,
        default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
-      },
-      cbg_opts));
+      }));
 
   // Create nodes and subscriptions for other domain IDs
   for (size_t domain_id : domain_ids) {
