@@ -293,7 +293,7 @@ TEST_F(SignalHandlerTest, SigintWakesUpWaitingThread)
 TEST_F(SignalHandlerTest, SigintNotifiesEventfdEvenWhenThreadsSpawnedBeforeInstall)
 {
   // Spawn several threads before calling SignalHandler::install()
-  constexpr int pre_spawn_thread_count = 4;
+  constexpr int pre_spawn_thread_count = 30;
   std::atomic<bool> keep_running{true};
   std::vector<std::thread> pre_spawn_threads;
   pre_spawn_threads.reserve(pre_spawn_thread_count);
