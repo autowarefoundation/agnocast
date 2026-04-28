@@ -166,16 +166,17 @@ void SignalHandler::uninstall()
   }
 }
 
-void SignalHandler::register_shutdown_event(int eventfd)
+bool SignalHandler::register_shutdown_event(int eventfd)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (state_ != State::Installed) {
     RCLCPP_WARN(
       logger, "Cannot register shutdown eventfd %d: signal handler is not installed", eventfd);
-    return;
+    return false;
   }
 
   eventfds_.insert(eventfd);
+  return true;
 }
 
 void SignalHandler::unregister_shutdown_event(int eventfd)

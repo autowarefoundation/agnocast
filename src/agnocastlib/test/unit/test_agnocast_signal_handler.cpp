@@ -184,7 +184,7 @@ TEST_F(SignalHandlerTest, SigintNotifiesRegisteredEventfdViaWorkerThread)
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
   send_sigint();
 
@@ -201,7 +201,7 @@ TEST_F(SignalHandlerTest, SigintNotifiesRegisteredEventfdViaWorkerThreadRepeated
     agnocast::SignalHandler::install();
 
     const int fd = create_event_fd();
-    agnocast::SignalHandler::register_shutdown_event(fd);
+    EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
     send_sigint();
 
@@ -217,7 +217,7 @@ TEST_F(SignalHandlerTest, SigtermNotifiesRegisteredEventfdViaWorkerThread)
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
   send_sigterm();
 
@@ -233,8 +233,8 @@ TEST_F(SignalHandlerTest, SigintNotifiesAllRegisteredEventfds)
 
   const int fd1 = create_event_fd();
   const int fd2 = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd1);
-  agnocast::SignalHandler::register_shutdown_event(fd2);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd1));
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd2));
 
   send_sigint();
 
@@ -251,8 +251,8 @@ TEST_F(SignalHandlerTest, DuplicateEventfdRegistrationIsIgnored)
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
   send_sigint();
   EXPECT_TRUE(event_fd_has_notification(fd));
@@ -270,7 +270,7 @@ TEST_F(SignalHandlerTest, UnregisteredEventfdIsNotNotifiedBySigint)
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
   agnocast::SignalHandler::unregister_shutdown_event(fd);
 
   send_sigint();
@@ -285,7 +285,7 @@ TEST_F(SignalHandlerTest, SigintWakesUpWaitingThread)
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
   std::atomic<bool> notified{false};
   std::thread waiter([&]() {
@@ -327,7 +327,7 @@ TEST_F(SignalHandlerTest, SigintNotifiesEventfdEvenWhenThreadsSpawnedBeforeInsta
   agnocast::SignalHandler::install();
 
   const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
 
   send_sigint();
 
@@ -352,7 +352,7 @@ TEST_F(SignalHandlerTest, ManyEventfdsAreNotifiedBySigint)
   for (int i = 0; i < eventfd_count; ++i) {
     const int fd = create_event_fd();
     fds.push_back(fd);
-    agnocast::SignalHandler::register_shutdown_event(fd);
+    EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
   }
 
   send_sigint();
@@ -363,4 +363,67 @@ TEST_F(SignalHandlerTest, ManyEventfdsAreNotifiedBySigint)
   }
 
   agnocast::SignalHandler::uninstall();
+}
+
+TEST_F(SignalHandlerTest, RegisterShutdownEventFailsWhenNotInstalled)
+{
+  const int fd1 = create_event_fd();
+  EXPECT_FALSE(agnocast::SignalHandler::register_shutdown_event(fd1));
+
+  agnocast::SignalHandler::install();
+  agnocast::SignalHandler::uninstall();
+
+  const int fd2 = create_event_fd();
+  EXPECT_FALSE(agnocast::SignalHandler::register_shutdown_event(fd2));
+}
+
+TEST_F(SignalHandlerTest, UnregisterShutdownEventIsIdempotent)
+{
+  agnocast::SignalHandler::install();
+
+  const int fd = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
+
+  agnocast::SignalHandler::unregister_shutdown_event(fd);
+  agnocast::SignalHandler::unregister_shutdown_event(fd);
+
+  send_sigint();
+  EXPECT_FALSE(event_fd_has_notification(fd));
+
+  agnocast::SignalHandler::uninstall();
+}
+
+TEST_F(SignalHandlerTest, RegisteredEventfdsAreClearedAfterUninstallAndReinstall)
+{
+  agnocast::SignalHandler::install();
+
+  const int old_fd = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(old_fd));
+
+  agnocast::SignalHandler::uninstall();
+
+  agnocast::SignalHandler::install();
+
+  const int new_fd = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(new_fd));
+
+  // old_fd must not be notified because registrations are cleared by uninstall().
+  send_sigint();
+  EXPECT_FALSE(event_fd_has_notification(old_fd));
+  EXPECT_TRUE(event_fd_has_notification(new_fd));
+
+  agnocast::SignalHandler::uninstall();
+}
+
+TEST_F(SignalHandlerTest, UnregisterShutdownEventIsSafeAfterUninstall)
+{
+  agnocast::SignalHandler::install();
+
+  const int fd = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
+
+  agnocast::SignalHandler::uninstall();
+
+  // This should not crash or have any observable effect.
+  agnocast::SignalHandler::unregister_shutdown_event(fd);
 }
