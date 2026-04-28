@@ -6,6 +6,7 @@
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 #include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,6 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(
     const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
-  void on_all_configured();
 
   rclcpp::CallbackGroup::SharedPtr cbg_default_callback_group_;
   rclcpp::CallbackGroup::SharedPtr cbg_non_ros_thread_;
@@ -63,7 +63,7 @@ private:
   // thread_name -> ThreadConfig*
   std::map<std::string, ThreadConfig *> id_to_non_ros_thread_config_;
 
-  int unapplied_num_;
-  int cgroup_num_;
-  bool configured_at_least_once_ = false;
+  std::atomic<int> unapplied_num_{0};
+  std::atomic<int> cgroup_num_{0};
+  std::atomic<bool> configured_at_least_once_{false};
 };
