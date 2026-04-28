@@ -599,7 +599,7 @@ public:
   /// Create a service server.
   /// @tparam ServiceT ROS service type.
   /// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
-  /// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) and returns `void`.
+  /// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
   /// @param service_name Service name.
   /// @param callback Callback invoked on each request.
   /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.

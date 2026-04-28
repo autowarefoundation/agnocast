@@ -209,7 +209,7 @@ typename Client<ServiceT>::SharedPtr create_client(
 /// @brief Create an Agnocast service server (Stage 1 free function).
 /// @tparam ServiceT ROS service type.
 /// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
-/// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) and returns `void`.
+/// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
 /// @param node Pointer to rclcpp::Node.
 /// @param service_name Service name.
 /// @param callback Callback invoked on each request.
