@@ -96,15 +96,17 @@ void PrerunNode::topic_callback(
   size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
-  if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
-    return;
+  {
+    std::lock_guard<std::mutex> lock(domain_and_cbg_ids_mutex_);
+    if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
+      return;
+    }
+    domain_and_cbg_ids_.insert(key);
   }
 
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
-
-  domain_and_cbg_ids_.insert(key);
 }
 
 void PrerunNode::non_ros_thread_callback(

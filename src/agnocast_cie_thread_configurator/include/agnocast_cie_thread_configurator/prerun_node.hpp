@@ -7,6 +7,7 @@
 #include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
 #include <filesystem>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -35,6 +36,7 @@ private:
 
   // (domain_id, callback_group_id) pairs
   std::set<std::pair<size_t, std::string>> domain_and_cbg_ids_;
+  std::mutex domain_and_cbg_ids_mutex_;
   // non-ROS thread names
   std::set<std::string> non_ros_thread_names_;
 };
