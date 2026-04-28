@@ -208,14 +208,14 @@ public:
 };
 
 template <typename MessageT>
-std::shared_ptr<PubsubBridgeBase> start_ros_to_agno_node(
+std::shared_ptr<PubsubBridgeBase> start_r2a_pubsub_node(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
   return std::make_shared<RosToAgnocastPubsubBridge<MessageT>>(node, topic_name, qos);
 }
 
 template <typename MessageT>
-std::shared_ptr<PubsubBridgeBase> start_agno_to_ros_node(
+std::shared_ptr<PubsubBridgeBase> start_a2r_pubsub_node(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
   return std::make_shared<AgnocastToRosPubsubBridge<MessageT>>(node, topic_name, qos);
@@ -264,7 +264,7 @@ public:
 };
 
 template <typename ServiceT>
-std::shared_ptr<ServiceBridgeBase> start_ros_to_agnocast_service_node(
+std::shared_ptr<ServiceBridgeBase> start_r2a_service_node(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos)
 {
   return std::make_shared<RosToAgnocastServiceBridge<ServiceT>>(node, service_name, qos);
@@ -325,11 +325,11 @@ void send_standard_pubsub_bridge_request(
   // independently. Storing the reverse factory allows us to instantiate the return path on-demand
   // within the same process.
   auto fn_current = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_ros_to_agno_node<MessageT>
-                                                     : &start_agno_to_ros_node<MessageT>);
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_r2a_pubsub_node<MessageT>
+                                                     : &start_a2r_pubsub_node<MessageT>);
   auto fn_reverse = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_agno_to_ros_node<MessageT>
-                                                     : &start_ros_to_agno_node<MessageT>);
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_a2r_pubsub_node<MessageT>
+                                                     : &start_r2a_pubsub_node<MessageT>);
 
   MqMsgBridge msg = {};
   msg.direction = direction;
@@ -353,7 +353,7 @@ void send_standard_service_bridge_request(
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
   // Service bridges currently support only the ROS2 -> Agnocast direction.
-  auto fn_current = reinterpret_cast<uintptr_t>(&start_ros_to_agno_service_node<ServiceT>);
+  auto fn_current = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
   auto fn_reverse = fn_current;  // dummy value
 
   MqMsgBridge msg = {};
