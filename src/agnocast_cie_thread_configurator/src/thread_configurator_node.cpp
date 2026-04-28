@@ -141,26 +141,36 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
+  cbg_default_callback_group_ =
+    this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
   // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
   // so transient_local is ineffective.
   auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
   // Create subscription for non-ROS thread info
+  rclcpp::SubscriptionOptions non_ros_opts;
+  non_ros_opts.callback_group = cbg_non_ros_thread_;
   non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
     "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
     [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
       this->non_ros_thread_callback(msg);
-    });
+    },
+    non_ros_opts);
 
   // Create subscription for default domain on this node
+  rclcpp::SubscriptionOptions cbg_opts;
+  cbg_opts.callback_group = cbg_default_callback_group_;
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
       [this,
        default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
-      }));
+      },
+      cbg_opts));
 
   // Create nodes and subscriptions for other domain IDs
   for (size_t domain_id : domain_ids) {
