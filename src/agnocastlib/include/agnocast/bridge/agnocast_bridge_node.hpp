@@ -353,8 +353,8 @@ void send_standard_service_bridge_request(
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
   // Service bridges currently support only the ROS2 -> Agnocast direction.
-  auto fn_current = reinterpret_cast<uintptr_t>(&start_ros_to_agnocast_service_node<ServiceT>);
-  uintptr_t fn_reverse = 0;
+  auto fn_current = reinterpret_cast<uintptr_t>(&start_ros_to_agno_service_node<ServiceT>);
+  auto fn_reverse = fn_current;  // dummy value
 
   MqMsgBridge msg = {};
   msg.direction = direction;
