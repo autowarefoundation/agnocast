@@ -63,4 +63,6 @@ bool build_bridge_factory_info(
   BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
   const rclcpp::Logger & logger);
 
+std::pair<std::string, std::string> split_full_node_name(std::string_view fqn);
+
 }  // namespace agnocast

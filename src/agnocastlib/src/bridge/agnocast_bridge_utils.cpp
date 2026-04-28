@@ -258,4 +258,16 @@ bool build_bridge_factory_info(
   return true;
 }
 
+std::pair<std::string, std::string> split_full_node_name(std::string_view fqn)
+{
+  const size_t pos = fqn.rfind('/');
+  if (pos == std::string_view::npos) {
+    return {"/", std::string(fqn)};
+  }
+  if (pos == 0) {
+    return {"/", std::string(fqn.substr(1))};
+  }
+  return {std::string(fqn.substr(0, pos)), std::string(fqn.substr(pos + 1))};
+}
+
 }  // namespace agnocast

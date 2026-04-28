@@ -415,6 +415,7 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
   }
 
   const std::string service_name = static_cast<const char *>(req.srv_target.service_name);
+  const std::string shadow_node_name = static_cast<const char *>(req.srv_target.shadow_node_name);
   if (active_r2a_service_bridges_.count(service_name) != 0U) {
     return;
   }
@@ -446,6 +447,11 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
     const rclcpp::QoS service_qos = get_service_qos(service_name);
 
+    rclcpp::Node::SharedPtr shadow_node;
+    if (req.srv_target.create_shadow_node && !shadow_node_name.empty()) {
+      shadow_node = create_shadow_node_if_needed(shadow_node_name);
+    }
+
     auto bridge = loader_->start_service_bridge(
       service_name, BridgeDirection::ROS2_TO_AGNOCAST, factory_spec, service_qos);
 
@@ -458,13 +464,34 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
       return;
     }
 
-    active_r2a_service_bridges_[service_name] = std::move(bridge);
+    active_r2a_service_bridges_.emplace(
+      service_name, R2AServiceBridgeItem(std::move(bridge), std::move(shadow_node)));
   } catch (const std::exception & e) {
     RCLCPP_WARN(
       logger_, "Failed to create service bridge for '%s': %s", service_name.c_str(), e.what());
   } catch (...) {
     RCLCPP_WARN(logger_, "Unknown error creating service bridge for '%s'", service_name.c_str());
   }
+}
+
+rclcpp::Node::SharedPtr StandardBridgeManager::create_shadow_node_if_needed(
+  const std::string & node_name)
+{
+  auto it = shadow_nodes_.find(node_name);
+  if (it != shadow_nodes_.end()) {
+    if (auto node = it->second.lock()) {
+      return node;
+    }
+  }
+
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  options.start_parameter_event_publisher(false);
+
+  auto [ns, name] = split_full_node_name(node_name);
+  auto node = std::make_shared<rclcpp::Node>(name, ns, options);
+  shadow_nodes_[node_name] = node;
+  return node;
 }
 
 void StandardBridgeManager::check_parent_alive()
@@ -535,7 +562,7 @@ void StandardBridgeManager::check_and_remove_service_bridges()
       RCLCPP_WARN(
         logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), e.what());
 
-      auto [ros_cb, agno_cb] = it->second->get_callback_groups();
+      auto [ros_cb, agno_cb] = it->second.bridge->get_callback_groups();
       if (ros_cb) {
         executor_->stop_callback_group(ros_cb);
       }
