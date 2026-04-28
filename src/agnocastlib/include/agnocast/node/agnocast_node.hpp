@@ -582,6 +582,7 @@ public:
   }
 
   /// Create a service client.
+  /// @tparam ServiceT ROS service type.
   /// @param service_name Service name.
   /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
   /// @param group Callback group. Defaults to `nullptr` (default callback group).
