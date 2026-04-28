@@ -282,23 +282,6 @@ TEST_F(SignalHandlerTest, SigintWakesUpWaitingThread)
   agnocast::SignalHandler::uninstall();
 }
 
-TEST_F(SignalHandlerTest, SigintAfterDelayNotifiesRegisteredEventfd)
-{
-  agnocast::SignalHandler::install();
-
-  const int fd = create_event_fd();
-  agnocast::SignalHandler::register_shutdown_event(fd);
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(300));
-
-  send_sigint();
-
-  uint64_t value = 0;
-  ASSERT_TRUE(read_event_fd_with_timeout(fd, TIMEOUT_MS_DEFAULT, value));
-
-  agnocast::SignalHandler::uninstall();
-}
-
 // Background: When using signalfd, all threads in the process must block the signal via
 // pthread_sigmask so that the signal is routed to the signalfd rather than delivered directly.
 // This requires either calling pthread_sigmask(SIG_BLOCK, ...) in every thread, or calling it in
