@@ -261,6 +261,9 @@ void SignalHandler::signal_handler(int signum)
 void SignalHandler::notify_all_executors()
 {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (state_ != State::Installed) {
+    return;
+  }
   uint64_t val = 1;
   for (auto it = eventfds_.begin(); it != eventfds_.end();) {
     const int fd = *it;
