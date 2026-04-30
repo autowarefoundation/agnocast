@@ -46,7 +46,6 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
     exit(EXIT_FAILURE);
   }
 
-  SignalHandler::install();
   if (!SignalHandler::register_shutdown_event(shutdown_event_fd_)) {
     RCLCPP_ERROR(logger, "Failed to register shutdown eventfd with signal handler");
     close(shutdown_event_fd_);
