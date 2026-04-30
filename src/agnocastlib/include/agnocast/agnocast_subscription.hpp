@@ -125,13 +125,18 @@ class BasicSubscription : public SubscriptionBase
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
     const bool is_bridge)
   {
-    auto node_parameters = node->get_node_parameters_interface();
+    // get_node_parameters_interface() must be called lazily: when this runs from inside the
+    // agnocast::Node initializer list (via ParameterService → BasicService → BasicSubscription),
+    // node_parameters_ is the member currently being initialized and its storage is uninitialized.
+    // rclcpp avoids this by inlining the same lazy pattern in create_subscription.hpp.
+    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+      override_qos ? node->get_node_parameters_interface() : nullptr;
     const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::SubscriptionQosParametersTraits{})
-        : qos;
+      override_qos ? rclcpp::detail::declare_qos_parameters(
+                       options.qos_overriding_options, node_parameters, topic_name_, qos,
+                       rclcpp::detail::SubscriptionQosParametersTraits{})
+                   : qos;
 
     validate_subscription_qos(actual_qos);
 
@@ -234,13 +239,18 @@ private:
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
   {
-    auto node_parameters = node->get_node_parameters_interface();
+    // get_node_parameters_interface() must be called lazily: when this runs from inside the
+    // agnocast::Node initializer list (via ParameterService → BasicService → BasicSubscription),
+    // node_parameters_ is the member currently being initialized and its storage is uninitialized.
+    // rclcpp avoids this by inlining the same lazy pattern in create_subscription.hpp.
+    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+      override_qos ? node->get_node_parameters_interface() : nullptr;
     const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::SubscriptionQosParametersTraits{})
-        : qos;
+      override_qos ? rclcpp::detail::declare_qos_parameters(
+                       options.qos_overriding_options, node_parameters, topic_name_, qos,
+                       rclcpp::detail::SubscriptionQosParametersTraits{})
+                   : qos;
 
     validate_subscription_qos(actual_qos);
 
