@@ -178,31 +178,33 @@ class TopicInfoAgnocastVerb(VerbExtension):
                     bridge_node_names.add(name)
 
             # get ROS 2 pub/sub info for this topic
-            ros2_pub_infos = []
-            ros2_sub_infos = []
+            ros2_pub_infos_all = []
+            ros2_sub_infos_all = []
             try:
-                for info in node.get_publishers_info_by_topic(topic_name):
-                    if args.debug or info.node_name not in bridge_node_names:
-                        ros2_pub_infos.append(info)
+                ros2_pub_infos_all = list(node.get_publishers_info_by_topic(topic_name))
             except NotImplementedError:
                 pass
             try:
-                for info in node.get_subscriptions_info_by_topic(topic_name):
-                    if args.debug or info.node_name not in bridge_node_names:
-                        ros2_sub_infos.append(info)
+                ros2_sub_infos_all = list(node.get_subscriptions_info_by_topic(topic_name))
             except NotImplementedError:
                 pass
 
-            # get topic types from ROS 2 pub/sub info
             topic_types = []
-            for info in ros2_pub_infos + ros2_sub_infos:
+            for info in ros2_pub_infos_all + ros2_sub_infos_all:
                 if info.topic_type and info.topic_type not in topic_types:
                     topic_types.append(info.topic_type)
+
+            if args.debug:
+                ros2_pub_infos = ros2_pub_infos_all
+                ros2_sub_infos = ros2_sub_infos_all
+            else:
+                ros2_pub_infos = [i for i in ros2_pub_infos_all if i.node_name not in bridge_node_names]
+                ros2_sub_infos = [i for i in ros2_sub_infos_all if i.node_name not in bridge_node_names]
 
             # check if topic exists
             if not topic_types:
                 if sub_topic_info_ret_count.value == 0 and pub_topic_info_ret_count.value == 0:
-                    return 'Unkown topic: %s' % topic_name
+                    return 'Unknown topic: %s' % topic_name
                 else:
                     topic_types = ['<UNKNOWN>']
 
