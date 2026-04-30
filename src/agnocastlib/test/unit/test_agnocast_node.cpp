@@ -1,3 +1,4 @@
+#include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
 #include <gtest/gtest.h>
@@ -7,8 +8,8 @@
 class AgnocastNodeConstructionTest : public ::testing::Test
 {
 protected:
-  void SetUp() override { rclcpp::init(0, nullptr); }
-  void TearDown() override { rclcpp::shutdown(); }
+  void SetUp() override { agnocast::init(0, nullptr); }
+  void TearDown() override { agnocast::shutdown(); }
 };
 
 TEST_F(AgnocastNodeConstructionTest, construct_with_parameter_services_enabled)
