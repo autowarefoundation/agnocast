@@ -47,8 +47,6 @@ public:
 
   virtual ~NodeParameters() = default;
 
-  void start_parameter_services(agnocast::Node * node);
-
   const rclcpp::ParameterValue & declare_parameter(
     const std::string & name, const rclcpp::ParameterValue & default_value,
     const rcl_interfaces::msg::ParameterDescriptor & parameter_descriptor =
@@ -121,6 +119,9 @@ public:
   const std::map<std::string, rclcpp::ParameterValue> & get_parameter_overrides() const override;
 
 private:
+  friend class agnocast::Node;
+  void start_parameter_services(agnocast::Node * node);
+
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
 
   mutable std::recursive_mutex parameters_mutex_;

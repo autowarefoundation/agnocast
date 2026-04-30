@@ -348,6 +348,12 @@ NodeParameters::NodeParameters(
 
 void NodeParameters::start_parameter_services(agnocast::Node * node)
 {
+  if (parameter_service_) {
+    RCLCPP_WARN(
+      rclcpp::get_logger(node_base_->get_name()),
+      "start_parameter_services() called more than once; ignoring");
+    return;
+  }
   parameter_service_ = std::make_shared<ParameterService>(node, this);
 }
 
