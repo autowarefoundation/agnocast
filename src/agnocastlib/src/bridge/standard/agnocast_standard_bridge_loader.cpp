@@ -15,7 +15,9 @@
 namespace agnocast
 {
 
-StandardBridgeLoader::StandardBridgeLoader(const rclcpp::Logger & logger) : logger_(logger)
+StandardBridgeLoader::StandardBridgeLoader(
+  const rclcpp::Node::SharedPtr & container_node, const rclcpp::Logger & logger)
+: container_node_(container_node), logger_(logger)
 {
 }
 
@@ -25,28 +27,29 @@ StandardBridgeLoader::~StandardBridgeLoader()
 }
 
 std::shared_ptr<BridgeBase> StandardBridgeLoader::create(
-  const MqMsgBridge & req, const std::string & topic_name_with_direction,
-  const rclcpp::Node::SharedPtr & node, const rclcpp::QoS & qos)
+  const std::string & topic_name, BridgeDirection direction, const BridgeFactorySpec & factory_spec,
+  const rclcpp::QoS & qos)
 {
-  auto [entry_func, lib_handle] = resolve_factory_function(req, topic_name_with_direction);
+  auto [entry_func, lib_handle] = resolve_factory_function(topic_name, direction, factory_spec);
 
   if (entry_func == nullptr) {
     const char * err = dlerror();
     RCLCPP_ERROR(
-      logger_, "Failed to resolve factory for '%s': %s", topic_name_with_direction.c_str(),
+      logger_, "Failed to resolve %s factory for '%s': %s",
+      (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? "R2A" : "A2R", topic_name.c_str(),
       err ? err : "Unknown error");
     return nullptr;
   }
 
-  return create_bridge_instance(entry_func, lib_handle, node, req.target, qos);
+  return create_bridge_instance(entry_func, lib_handle, topic_name, qos);
 }
 
 std::shared_ptr<BridgeBase> StandardBridgeLoader::create_bridge_instance(
-  BridgeFn entry_func, const std::shared_ptr<void> & lib_handle,
-  const rclcpp::Node::SharedPtr & node, const BridgeTargetInfo & target, const rclcpp::QoS & qos)
+  BridgeFn entry_func, const std::shared_ptr<void> & lib_handle, const std::string & topic_name,
+  const rclcpp::QoS & qos)
 {
   try {
-    auto bridge_resource = entry_func(node, target, qos);
+    auto bridge_resource = entry_func(container_node_, topic_name, qos);
     if (!bridge_resource) {
       return nullptr;
     }
@@ -68,14 +71,14 @@ std::shared_ptr<BridgeBase> StandardBridgeLoader::create_bridge_instance(
 }
 
 std::pair<void *, uintptr_t> StandardBridgeLoader::load_library(
-  const char * lib_path, const char * symbol_name)
+  const std::optional<std::string> & shared_lib_path)
 {
   void * handle = nullptr;
 
-  if (std::strcmp(symbol_name, MAIN_EXECUTABLE_SYMBOL) == 0) {
+  if (!shared_lib_path.has_value()) {
     handle = dlopen(nullptr, RTLD_NOW);
   } else {
-    handle = dlopen(lib_path, RTLD_NOW | RTLD_LOCAL);
+    handle = dlopen(shared_lib_path.value().c_str(), RTLD_NOW | RTLD_LOCAL);
   }
 
   if (handle == nullptr) {
@@ -91,9 +94,16 @@ std::pair<void *, uintptr_t> StandardBridgeLoader::load_library(
 }
 
 std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory_function(
-  const MqMsgBridge & req, const std::string & topic_name_with_direction)
+  const std::string & topic_name, BridgeDirection direction, const BridgeFactorySpec & factory_spec)
 {
-  if (auto it = cached_factories_.find(topic_name_with_direction); it != cached_factories_.end()) {
+  std::string key_r2a = topic_name;
+  key_r2a += SUFFIX_R2A;
+  std::string key_a2r = topic_name;
+  key_a2r += SUFFIX_A2R;
+
+  const bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+  if (auto it = cached_factories_.find(is_r2a ? key_r2a : key_a2r); it != cached_factories_.end()) {
     // Return the cached pair of the factory function and the shared library handle.
     return it->second;
   }
@@ -102,9 +112,7 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
   // symbol. This ensures that a subsequent call to dlerror() will report only errors that occurred
   // after this point.
   dlerror();
-  auto [raw_handle, base_addr] = load_library(
-    static_cast<const char *>(req.factory.shared_lib_path),
-    static_cast<const char *>(req.factory.symbol_name));
+  auto [raw_handle, base_addr] = load_library(factory_spec.shared_lib_path);
 
   if ((raw_handle == nullptr) || (base_addr == 0)) {
     if (raw_handle != nullptr) {
@@ -120,41 +128,36 @@ std::pair<BridgeFn, std::shared_ptr<void>> StandardBridgeLoader::resolve_factory
     }
   });
 
-  // Resolve Main Function
-  uintptr_t entry_addr = base_addr + req.factory.fn_offset;
-  BridgeFn entry_func = nullptr;
-
-  if (is_address_in_library_code_segment(raw_handle, entry_addr)) {
-    entry_func = reinterpret_cast<BridgeFn>(entry_addr);
+  // Add R2A function.
+  uintptr_t addr_r2a = base_addr + factory_spec.fn_offset_r2a;
+  BridgeFn func_r2a = nullptr;
+  if (is_address_in_library_code_segment(raw_handle, addr_r2a)) {
+    func_r2a = reinterpret_cast<BridgeFn>(addr_r2a);
   } else {
     RCLCPP_ERROR(
-      logger_, "Main factory function pointer for '%s' is out of bounds: 0x%lx",
-      topic_name_with_direction.c_str(), static_cast<unsigned long>(entry_addr));
+      logger_, "R2A factory function pointer for '%s' is out of bounds: 0x%lx", key_r2a.c_str(),
+      static_cast<unsigned long>(addr_r2a));
     return {nullptr, nullptr};
   }
+  cached_factories_[key_r2a] = {func_r2a, lib_handle_ptr};
 
-  // Register Reverse Function
-  std::string_view suffix =
-    (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? SUFFIX_A2R : SUFFIX_R2A;
-  std::string topic_name_with_reverse(static_cast<const char *>(req.target.topic_name));
-  topic_name_with_reverse += suffix;
-
-  uintptr_t reverse_addr = base_addr + req.factory.fn_offset_reverse;
-  BridgeFn reverse_func = nullptr;
-
-  if (is_address_in_library_code_segment(raw_handle, reverse_addr)) {
-    reverse_func = reinterpret_cast<BridgeFn>(reverse_addr);
+  // Add A2R function.
+  uintptr_t addr_a2r = base_addr + factory_spec.fn_offset_a2r;
+  BridgeFn func_a2r = nullptr;
+  if (is_address_in_library_code_segment(raw_handle, addr_a2r)) {
+    func_a2r = reinterpret_cast<BridgeFn>(addr_a2r);
   } else {
     RCLCPP_ERROR(
-      logger_, "Reverse function pointer for '%s' is out of bounds: 0x%lx",
-      topic_name_with_reverse.c_str(), static_cast<unsigned long>(reverse_addr));
+      logger_, "A2R factory function pointer for '%s' is out of bounds: 0x%lx", key_a2r.c_str(),
+      static_cast<unsigned long>(addr_a2r));
     return {nullptr, nullptr};
   }
+  cached_factories_[key_a2r] = {func_a2r, lib_handle_ptr};
 
-  cached_factories_[topic_name_with_direction] = {entry_func, lib_handle_ptr};
-  cached_factories_[topic_name_with_reverse] = {reverse_func, lib_handle_ptr};
-
-  return {entry_func, lib_handle_ptr};
+  if (is_r2a) {
+    return {func_r2a, lib_handle_ptr};
+  }
+  return {func_a2r, lib_handle_ptr};
 }
 
 bool StandardBridgeLoader::is_address_in_library_code_segment(void * handle, uintptr_t addr)

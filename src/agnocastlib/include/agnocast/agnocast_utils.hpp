@@ -14,7 +14,10 @@ extern rclcpp::Logger logger;
 extern int agnocast_fd;
 extern bool is_bridge_process;
 
-inline void validate_qos(const rclcpp::QoS & qos)
+namespace detail
+{
+
+inline void validate_qos_common(const rclcpp::QoS & qos)
 {
   if (qos.history() == rclcpp::HistoryPolicy::KeepAll) {
     RCLCPP_ERROR(logger, "Agnocast does not support KeepAll history policy. Use KeepLast instead.");
@@ -42,6 +45,35 @@ inline void validate_qos(const rclcpp::QoS & qos)
       logger,
       "Agnocast does not support liveliness_lease_duration QoS policy. It will be ignored.");
   }
+
+  if (qos.depth() == 0) {
+    RCLCPP_WARN(logger, "Agnocast does not support QoS depth=0. No messages will be delivered.");
+  }
+
+  if (rmw_qos.avoid_ros_namespace_conventions) {
+    RCLCPP_WARN(
+      logger,
+      "Agnocast does not honor avoid_ros_namespace_conventions QoS policy. It will be ignored.");
+  }
+}
+
+}  // namespace detail
+
+inline void validate_publisher_qos(const rclcpp::QoS & qos)
+{
+  detail::validate_qos_common(qos);
+
+  if (qos.reliability() == rclcpp::ReliabilityPolicy::BestEffort) {
+    RCLCPP_WARN(
+      logger,
+      "Agnocast publishers do not honor the BestEffort reliability QoS policy. "
+      "Messages are delivered through shared memory regardless of this setting.");
+  }
+}
+
+inline void validate_subscription_qos(const rclcpp::QoS & qos)
+{
+  detail::validate_qos_common(qos);
 }
 
 void validate_ld_preload();

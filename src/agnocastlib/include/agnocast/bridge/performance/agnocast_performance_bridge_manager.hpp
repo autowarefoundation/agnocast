@@ -34,8 +34,9 @@ private:
 
   std::atomic_bool shutdown_requested_ = false;
 
-  std::unordered_map<std::string, PerformanceBridgeResult> active_r2a_bridges_;
-  std::unordered_map<std::string, PerformanceBridgeResult> active_a2r_bridges_;
+  std::unordered_map<std::string, PerformancePubsubBridgeResult> active_pubsub_r2a_bridges_;
+  std::unordered_map<std::string, PerformancePubsubBridgeResult> active_pubsub_a2r_bridges_;
+  std::unordered_map<std::string, PerformanceServiceBridgeResult> active_r2a_service_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   void start_ros_execution();
@@ -43,15 +44,18 @@ private:
   void on_mq_request(int fd);
   void on_signal();
 
-  void check_and_create_bridges();
-  void check_and_remove_bridges();
+  void check_and_create_pubsub_bridges();
+  void check_and_remove_pubsub_bridges();
+  void check_and_remove_service_bridges();
   void check_and_remove_request_cache();
   void check_and_request_shutdown();
 
-  bool should_create_bridge(const std::string & topic_name, BridgeDirection direction) const;
-  void create_bridge_if_needed(
+  bool should_create_pubsub_bridge(const std::string & topic_name, BridgeDirection direction) const;
+  void create_pubsub_bridge_if_needed(
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
+  void create_service_bridge_if_needed(
+    const ServiceBridgeTargetInfo & target, BridgeDirection direction);
   static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 
