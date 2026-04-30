@@ -42,6 +42,12 @@ class InitOkShutdownTest : public ::testing::Test
 {
 protected:
   void SetUp() override { reset_context_for_test(); }
+
+  void TearDown() override
+  {
+    agnocast::shutdown();
+    reset_context_for_test();
+  }
 };
 
 TEST_F(InitOkShutdownTest, OkIsTrueOnlyBetweenInitAndShutdown)
