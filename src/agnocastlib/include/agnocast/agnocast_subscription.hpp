@@ -125,10 +125,6 @@ class BasicSubscription : public SubscriptionBase
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
     const bool is_bridge)
   {
-    // get_node_parameters_interface() must be called lazily: when this runs from inside the
-    // agnocast::Node initializer list (via ParameterService → BasicService → BasicSubscription),
-    // node_parameters_ is the member currently being initialized and its storage is uninitialized.
-    // rclcpp avoids this by inlining the same lazy pattern in create_subscription.hpp.
     const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
     rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
       override_qos ? node->get_node_parameters_interface() : nullptr;
@@ -239,10 +235,6 @@ private:
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
   {
-    // get_node_parameters_interface() must be called lazily: when this runs from inside the
-    // agnocast::Node initializer list (via ParameterService → BasicService → BasicSubscription),
-    // node_parameters_ is the member currently being initialized and its storage is uninitialized.
-    // rclcpp avoids this by inlining the same lazy pattern in create_subscription.hpp.
     const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
     rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
       override_qos ? node->get_node_parameters_interface() : nullptr;
