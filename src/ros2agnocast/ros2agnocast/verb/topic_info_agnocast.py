@@ -177,7 +177,7 @@ class TopicInfoAgnocastVerb(VerbExtension):
                     _, name = self.split_full_node_name(info['node_name'])
                     bridge_node_names.add(name)
 
-            # get ROS2 pub/sub info for this topic (instead of fetching all topics)
+            # get ROS 2 pub/sub info for this topic
             ros2_pub_infos = []
             ros2_sub_infos = []
             try:
@@ -193,19 +193,18 @@ class TopicInfoAgnocastVerb(VerbExtension):
             except NotImplementedError:
                 pass
 
-            # get topic type from ROS2 pub/sub info
-            topic_type = None
+            # get topic types from ROS 2 pub/sub info
+            topic_types = []
             for info in ros2_pub_infos + ros2_sub_infos:
-                if info.topic_type:
-                    topic_type = info.topic_type
-                    break
+                if info.topic_type and info.topic_type not in topic_types:
+                    topic_types.append(info.topic_type)
 
             # check if topic exists
-            if topic_type is None:
+            if not topic_types:
                 if sub_topic_info_ret_count.value == 0 and pub_topic_info_ret_count.value == 0:
                     return 'Unkown topic: %s' % topic_name
                 else:
-                    topic_type = '<UNKNOWN>'
+                    topic_types = ['<UNKNOWN>']
 
             ########################################################################
             # print topic info
@@ -213,12 +212,13 @@ class TopicInfoAgnocastVerb(VerbExtension):
             line_end = '\n'
             if args.verbose:
                 line_end = '\n\n'
-            print('Type: %s' % topic_type, end=line_end)
+            type_str = topic_types[0] if len(topic_types) == 1 else topic_types
+            print('Type: %s' % type_str, end=line_end)
 
-            print_publishers_info_ret = self.print_publishers_info(ros2_pub_infos, topic_type, pub_topic_info_rets, args, line_end)
+            print_publishers_info_ret = self.print_publishers_info(ros2_pub_infos, type_str, pub_topic_info_rets, args, line_end)
             if print_publishers_info_ret:
                 return print_publishers_info_ret
-            print_subscribers_info_ret = self.print_subscribers_info(ros2_sub_infos, topic_type, sub_topic_info_rets, args, line_end)
+            print_subscribers_info_ret = self.print_subscribers_info(ros2_sub_infos, type_str, sub_topic_info_rets, args, line_end)
             if print_subscribers_info_ret:
                 return print_subscribers_info_ret
             ########################################################################
