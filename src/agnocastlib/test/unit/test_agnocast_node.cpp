@@ -11,10 +11,6 @@ protected:
   void TearDown() override { rclcpp::shutdown(); }
 };
 
-// Regression test: agnocast::Node construction with start_parameter_services(true) used to
-// SIGSEGV because Node passed `this` to NodeParameters in the initializer list, which then
-// re-entered the half-built Node via ParameterService → BasicSubscription. Construction must
-// now complete cleanly when parameter services are enabled.
 TEST_F(AgnocastNodeConstructionTest, construct_with_parameter_services_enabled)
 {
   rclcpp::NodeOptions options;
