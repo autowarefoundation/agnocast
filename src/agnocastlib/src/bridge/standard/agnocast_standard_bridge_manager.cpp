@@ -529,6 +529,8 @@ void StandardBridgeManager::check_and_remove_service_bridges()
     const std::string & service_name = it->first;
 
     try {
+      // Use get_service_qos() as a service-bridge liveness probe. It throws when the target
+      // Agnocast service no longer exists.
       get_service_qos(service_name);
       ++it;
     } catch (const std::exception & e) {
