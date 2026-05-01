@@ -135,19 +135,21 @@ class NodeInfoAgnocastVerb(VerbExtension):
             def get_agnocast_node_topics(node_name_bytes):
                 sub_topic_list = []
                 pub_topic_list = []
-                server_list = []
-                client_list = []
+                # service_name_from_response_topic strips the _SEP_<id> suffix,
+                # so multiple response topics can collapse to the same service name.
+                server_set = set()
+                client_set = set()
 
                 with agnocast_topic_array(lib.get_agnocast_sub_topics, node_name_bytes) as topic_names:
                     for topic_name in topic_names:
                         service_name = service_name_from_request_topic(topic_name)
                         if service_name is not None:
-                            server_list.append(service_name)
+                            server_set.add(service_name)
                             continue
 
                         service_name = service_name_from_response_topic(topic_name)
                         if service_name is not None:
-                            client_list.append(service_name)
+                            client_set.add(service_name)
                             continue
 
                         sub_topic_list.append(topic_name)
@@ -164,7 +166,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
                         pub_topic_list.append(topic_name)
 
-                return sub_topic_list, pub_topic_list, server_list, client_list
+                return sub_topic_list, pub_topic_list, server_set, client_set
 
             def divide_ros2_topic_into_pubsub(topic_names):
                 pub_topics = []
