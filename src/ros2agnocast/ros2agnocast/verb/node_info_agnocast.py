@@ -132,13 +132,13 @@ class NodeInfoAgnocastVerb(VerbExtension):
                         suffix = "(WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
                 return suffix
             
-            def get_agnocast_node_topics(node_name):
+            def get_agnocast_node_topics(node_name_bytes):
                 sub_topic_list = []
                 pub_topic_list = []
                 server_list = []
                 client_list = []
 
-                with agnocast_topic_array(lib.get_agnocast_sub_topics, node_name) as topic_names:
+                with agnocast_topic_array(lib.get_agnocast_sub_topics, node_name_bytes) as topic_names:
                     for topic_name in topic_names:
                         service_name = service_name_from_request_topic(topic_name)
                         if service_name is not None:
@@ -152,7 +152,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
                         sub_topic_list.append(topic_name)
 
-                with agnocast_topic_array(lib.get_agnocast_pub_topics, node_name) as topic_names:
+                with agnocast_topic_array(lib.get_agnocast_pub_topics, node_name_bytes) as topic_names:
                     for topic_name in topic_names:
                         # Skip topic names used by services.
                         # They have already been accounted for during the subscription topic scan.
