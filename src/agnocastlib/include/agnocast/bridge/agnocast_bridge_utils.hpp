@@ -15,7 +15,12 @@ inline constexpr std::string_view SUFFIX_PUBSUB_R2A = "_P_R2A";
 inline constexpr std::string_view SUFFIX_PUBSUB_A2R = "_P_A2R";
 inline constexpr std::string_view SUFFIX_SERVICE_R2A = "_S_R2A";
 inline constexpr std::string_view SUFFIX_SERVICE_A2R = "_S_A2R";
-inline constexpr size_t SUFFIX_LEN = SUFFIX_PUBSUB_R2A.length();
+
+inline constexpr size_t SUFFIX_LEN = 6;
+static_assert(SUFFIX_PUBSUB_R2A.length() == SUFFIX_LEN);
+static_assert(SUFFIX_PUBSUB_A2R.length() == SUFFIX_LEN);
+static_assert(SUFFIX_SERVICE_R2A.length() == SUFFIX_LEN);
+static_assert(SUFFIX_SERVICE_A2R.length() == SUFFIX_LEN);
 
 enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };
 
