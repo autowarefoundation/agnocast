@@ -37,8 +37,12 @@ struct NonRosThreadInfo
   std::string name;
 };
 
+constexpr size_t k_wire_tid_size = sizeof(NonRosThreadInfo::tid);
+constexpr size_t k_wire_namelen_size = sizeof(uint16_t);
+constexpr size_t k_wire_header_size = k_wire_tid_size + k_wire_namelen_size;
 constexpr size_t k_non_ros_thread_info_max_name_len = 65535u;
-constexpr size_t k_non_ros_thread_info_max_wire_size = 10u + k_non_ros_thread_info_max_name_len;
+constexpr size_t k_non_ros_thread_info_max_wire_size =
+  k_wire_header_size + k_non_ros_thread_info_max_name_len;
 
 inline socklen_t setup_non_ros_thread_info_sockaddr(sockaddr_un & addr)
 {
@@ -58,30 +62,30 @@ inline bool encode_non_ros_thread_info(
     return false;
   }
   const uint16_t name_len = static_cast<uint16_t>(info.name.size());
-  out_len = 10u + name_len;
+  out_len = k_wire_header_size + name_len;
   if (out_len > buf_cap) {
     return false;
   }
-  std::memcpy(buf, &info.tid, sizeof(info.tid));
-  std::memcpy(buf + 8, &name_len, sizeof(name_len));
+  std::memcpy(buf, &info.tid, k_wire_tid_size);
+  std::memcpy(buf + k_wire_tid_size, &name_len, k_wire_namelen_size);
   if (name_len > 0) {
-    std::memcpy(buf + 10, info.name.data(), name_len);
+    std::memcpy(buf + k_wire_header_size, info.name.data(), name_len);
   }
   return true;
 }
 
 inline bool decode_non_ros_thread_info(const uint8_t * buf, size_t len, NonRosThreadInfo & info)
 {
-  if (len < 10u) {
+  if (len < k_wire_header_size) {
     return false;
   }
   uint16_t name_len = 0;
-  std::memcpy(&info.tid, buf, sizeof(info.tid));
-  std::memcpy(&name_len, buf + 8, sizeof(name_len));
-  if (len != 10u + static_cast<size_t>(name_len)) {
+  std::memcpy(&info.tid, buf, k_wire_tid_size);
+  std::memcpy(&name_len, buf + k_wire_tid_size, k_wire_namelen_size);
+  if (len != k_wire_header_size + static_cast<size_t>(name_len)) {
     return false;
   }
-  info.name.assign(reinterpret_cast<const char *>(buf + 10), name_len);
+  info.name.assign(reinterpret_cast<const char *>(buf + k_wire_header_size), name_len);
   return true;
 }
 
@@ -158,6 +162,14 @@ inline void send_non_ros_thread_info(
 /// Lifetime: the reader thread is started in the constructor and joined in
 /// `stop()` / destructor. `stop()` is idempotent when called from a single
 /// thread.
+///
+/// Threading constraint: `stop()` and the destructor must NOT be called
+/// from within the user callback (the callback runs on the listener's own
+/// reader thread). Doing so would make `thread_.join()` deadlock with
+/// `EDEADLK`, and any subsequent fd cleanup would race with the still-live
+/// reader. If the callback needs to terminate the listener, post that
+/// request to a different thread (e.g. by setting an atomic flag observed
+/// by the executor thread, which then drives destruction).
 class NonRosThreadInfoListener
 {
 public:

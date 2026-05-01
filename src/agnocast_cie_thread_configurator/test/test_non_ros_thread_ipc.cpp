@@ -6,6 +6,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -31,7 +32,7 @@ TEST(NonRosThreadIpcEncode, RoundTripEmptyName)
   std::array<uint8_t, acie::k_non_ros_thread_info_max_wire_size> buf{};
   size_t buf_len = 0;
   ASSERT_TRUE(acie::encode_non_ros_thread_info({42, ""}, buf.data(), buf.size(), buf_len));
-  ASSERT_EQ(buf_len, 10u);
+  ASSERT_EQ(buf_len, acie::k_wire_header_size);
   acie::NonRosThreadInfo out;
   ASSERT_TRUE(acie::decode_non_ros_thread_info(buf.data(), buf_len, out));
   EXPECT_EQ(out.tid, 42);
@@ -56,7 +57,7 @@ TEST(NonRosThreadIpcEncode, RoundTripMaxLengthName)
   std::array<uint8_t, acie::k_non_ros_thread_info_max_wire_size> buf{};
   size_t buf_len = 0;
   ASSERT_TRUE(acie::encode_non_ros_thread_info({-1, name}, buf.data(), buf.size(), buf_len));
-  ASSERT_EQ(buf_len, 10u + 65535u);
+  ASSERT_EQ(buf_len, acie::k_wire_header_size + acie::k_non_ros_thread_info_max_name_len);
   acie::NonRosThreadInfo out;
   ASSERT_TRUE(acie::decode_non_ros_thread_info(buf.data(), buf_len, out));
   EXPECT_EQ(out.tid, -1);
@@ -219,6 +220,13 @@ TEST(NonRosThreadInfoListener, DispatchesReceivedDatagram)
   std::unique_lock<std::mutex> lk(m);
   ASSERT_TRUE(cv.wait_for(lk, std::chrono::seconds(2), [&] { return received.size() == 2u; }));
 
+  // SOCK_DGRAM does not formally guarantee order even on the same host, so
+  // sort by tid before asserting on contents.
+  std::sort(
+    received.begin(), received.end(),
+    [](const acie::NonRosThreadInfo & a, const acie::NonRosThreadInfo & b) {
+      return a.tid < b.tid;
+    });
   EXPECT_EQ(received[0].tid, 100);
   EXPECT_EQ(received[0].name, "alpha");
   EXPECT_EQ(received[1].tid, 200);
