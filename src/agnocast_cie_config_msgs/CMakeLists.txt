@@ -22,6 +22,7 @@ endif()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CallbackGroupInfo.msg"
+  "srv/ReapplyConfig.srv"
 )
 
 ament_package()
