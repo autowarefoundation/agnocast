@@ -229,8 +229,9 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             len(cfg['callback_groups']),
             'reapply must visit every callback_group entry exactly once',
         )
-        self.assertGreaterEqual(
-            len(response.applied_callback_groups), 1,
+        first_key = f"{first['domain_id']}:{first['id']}"
+        self.assertIn(
+            first_key, list(response.applied_callback_groups),
             'modified callback_group must appear in applied_callback_groups',
         )
 

@@ -256,12 +256,9 @@ void ThreadConfiguratorNode::print_all_unapplied()
 
   RCLCPP_WARN(this->get_logger(), "Following non-ROS threads are not yet configured");
 
-  {
-    std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
-    for (auto & config : non_ros_thread_configs_) {
-      if (!config.applied) {
-        RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
-      }
+  for (auto & config : non_ros_thread_configs_) {
+    if (!config.applied) {
+      RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
     }
   }
 }
@@ -575,10 +572,8 @@ void ThreadConfiguratorNode::on_reapply_config_request(
     }
     if (issue_syscalls(cfg)) {
       response->applied_callback_groups.push_back(std::move(key));
-      if (!cfg.applied) {
-        cfg.applied = true;
-        unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
-      }
+      cfg.applied = true;
+      unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
     } else {
       response->failed_callback_groups.push_back(std::move(key));
     }
