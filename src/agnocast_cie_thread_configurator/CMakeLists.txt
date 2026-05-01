@@ -14,8 +14,10 @@ find_package(yaml-cpp REQUIRED)
 add_library(thread_configurator SHARED
   src/util.cpp
   src/non_ros_thread_ipc.cpp
+  src/thread_config.cpp
 )
 ament_target_dependencies(thread_configurator rclcpp agnocast_cie_config_msgs)
+target_link_libraries(thread_configurator yaml-cpp)
 
 add_executable(
   thread_configurator_node
