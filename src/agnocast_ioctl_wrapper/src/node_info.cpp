@@ -38,7 +38,7 @@ char ** get_agnocast_sub_topics(const char * node_name, int * topic_count)
   node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   node_info_args.node_name = {node_name, strlen(node_name)};
   if (ioctl(fd, AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD, &node_info_args) < 0) {
-    perror("AGNOCAST_TAKE_NODE_SUBSCRIBER_TOPICS_CMD failed");
+    perror("AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD failed");
     free(agnocast_topic_buffer);
     close(fd);
     return nullptr;
@@ -109,7 +109,7 @@ char ** get_agnocast_pub_topics(const char * node_name, int * topic_count)
   node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   node_info_args.node_name = {node_name, strlen(node_name)};
   if (ioctl(fd, AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD, &node_info_args) < 0) {
-    perror("AGNOCAST_TAKE_NODE_PUBLISHER_TOPICS_CMD failed");
+    perror("AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD failed");
     free(agnocast_topic_buffer);
     close(fd);
     return nullptr;
