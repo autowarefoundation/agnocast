@@ -6,9 +6,11 @@
 #include "yaml-cpp/yaml.h"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/srv/reapply_config.hpp"
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -16,18 +18,15 @@ class ThreadConfiguratorNode : public rclcpp::Node
 {
   using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
 
-  // Each ThreadConfig instance is touched by exactly one writer:
-  // - callback_group_configs_ entries: written from CallbackGroupInfo
-  //   subscription callbacks dispatched by the SingleThreadedExecutor
-  //   (one subscription on the main node and one per extra per-domain
-  //   node, all on the node's default callback group).
-  // - non_ros_thread_configs_ entries: written from the
-  //   NonRosThreadInfoListener's private reader thread.
-  // The two vectors are disjoint, so there is no shared mutable state
-  // between the executor thread and the listener thread.
-  // print_all_unapplied() reads applied flags only after main.cpp calls
-  // node->stop() (which joins the listener) and after executor->spin()
-  // returns, so no concurrent access is possible at read time.
+  // Concurrency:
+  // - callback_group_configs_ / id_to_callback_group_config_: written by the
+  //   subscription callbacks AND the reapply service handler, all on the same
+  //   SingleThreadedExecutor — no mutex needed.
+  // - non_ros_thread_configs_ / id_to_non_ros_thread_config_: written by both
+  //   the NonRosThreadInfoListener reader thread and the reapply handler;
+  //   all access must hold non_ros_state_mutex_.
+  // - print_all_unapplied(): called only after stop() + executor return, so
+  //   reads need no lock.
 
 public:
   explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
@@ -46,11 +45,16 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
 
+  void on_reapply_config_request(
+    const std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Request> request,
+    std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Response> response);
+
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
   std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
     subs_for_each_domain_;
   std::unique_ptr<agnocast_cie_thread_configurator::NonRosThreadInfoListener>
     non_ros_thread_listener_;
+  rclcpp::Service<agnocast_cie_config_msgs::srv::ReapplyConfig>::SharedPtr reapply_service_;
 
   std::vector<ThreadConfig> callback_group_configs_;
   // (domain_id, callback_group_id) -> ThreadConfig*
@@ -63,4 +67,8 @@ private:
   std::atomic<int> unapplied_num_{0};
   std::atomic<int> cgroup_num_{0};
   std::atomic<bool> configured_at_least_once_{false};
+
+  const std::string config_file_;
+  const size_t default_domain_id_;
+  std::mutex non_ros_state_mutex_;
 };

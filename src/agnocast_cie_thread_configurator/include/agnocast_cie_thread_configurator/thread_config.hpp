@@ -34,13 +34,10 @@ struct ThreadConfig
 extern const std::unordered_map<std::string, int> policy_to_sched_const;
 
 // Parse the given YAML document and populate the two output vectors.
-// Throws std::runtime_error on per-entry validation error (unknown policy,
-// missing SCHED_DEADLINE fields, etc.).
-//
-// Output ThreadConfigs have thread_id=-1 and applied=false.
-//
-// hardware_info / rt_throttling sections are NOT processed here; they are validated
-// at startup only by ThreadConfiguratorNode's constructor.
+// Throws std::runtime_error on per-entry validation error. Output ThreadConfigs
+// have thread_id=-1 and applied=false; callers that re-parse must carry
+// thread_id over from their existing index manually.
+// hardware_info / rt_throttling are validated only at startup, not here.
 void parse_yaml(
   const YAML::Node & yaml, size_t default_domain_id,
   std::vector<ThreadConfig> & callback_groups_out, std::vector<ThreadConfig> & non_ros_threads_out);
