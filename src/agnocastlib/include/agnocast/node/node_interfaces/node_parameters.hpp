@@ -41,9 +41,9 @@ public:
     std::list<rclcpp::node_interfaces::OnSetParametersCallbackHandle::WeakPtr>;
 
   explicit NodeParameters(
-    agnocast::Node * node, rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
-    const std::vector<rclcpp::Parameter> & parameter_overrides, bool start_parameter_services,
-    const rcl_arguments_t * local_args, bool allow_undeclared_parameters = false);
+    rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
+    const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
+    bool allow_undeclared_parameters = false);
 
   virtual ~NodeParameters() = default;
 
@@ -119,6 +119,9 @@ public:
   const std::map<std::string, rclcpp::ParameterValue> & get_parameter_overrides() const override;
 
 private:
+  friend class agnocast::Node;
+  void start_parameter_services(agnocast::Node * node);
+
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
 
   mutable std::recursive_mutex parameters_mutex_;

@@ -11,8 +11,13 @@ find_package(rclcpp REQUIRED)
 find_package(agnocast_cie_config_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-add_library(thread_configurator SHARED src/util.cpp)
+add_library(thread_configurator SHARED
+  src/util.cpp
+  src/non_ros_thread_ipc.cpp
+  src/thread_config.cpp
+)
 ament_target_dependencies(thread_configurator rclcpp agnocast_cie_config_msgs)
+target_link_libraries(thread_configurator yaml-cpp)
 
 add_executable(
   thread_configurator_node
@@ -70,8 +75,18 @@ ament_export_dependencies(agnocast_cie_config_msgs yaml-cpp rclcpp)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(test_${PROJECT_NAME} test/test_sanitize_node_name.cpp)
+  ament_add_gtest(test_${PROJECT_NAME}
+    test/test_non_ros_thread_ipc.cpp
+  )
   target_link_libraries(test_${PROJECT_NAME} thread_configurator)
+
+  ament_add_gtest(test_reapply_config
+    test/test_reapply_config.cpp
+  )
+  target_link_libraries(test_reapply_config thread_configurator yaml-cpp)
+  target_include_directories(test_reapply_config PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
 endif()
 
 ament_package()

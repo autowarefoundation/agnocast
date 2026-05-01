@@ -91,8 +91,9 @@ class TestComponentContainerCIE(unittest.TestCase):
         )
 
     def test_thread_configurator_receives_non_ros_thread_info(self, proc_output, thread_configurator):
-        # spawn_non_ros2_thread creates a fresh rclcpp context with its own DDS participant,
-        # so DDS discovery can be slow on loaded CI machines. Wait for the message to appear.
+        # spawn_non_ros2_thread sends NonRosThreadInfo via abstract Unix datagram socket;
+        # the sender retries up to 1 s waiting for the listener to bind. Wait for the
+        # message to appear in the configurator's log.
         proc_output.assertWaitFor(
             'Received NonRosThreadInfo:',
             timeout=10.0,
