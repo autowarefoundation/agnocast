@@ -79,6 +79,14 @@ if(BUILD_TESTING)
     test/test_non_ros_thread_ipc.cpp
   )
   target_link_libraries(test_${PROJECT_NAME} thread_configurator)
+
+  ament_add_gtest(test_reapply_config
+    test/test_reapply_config.cpp
+  )
+  target_link_libraries(test_reapply_config thread_configurator yaml-cpp)
+  target_include_directories(test_reapply_config PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
 endif()
 
 ament_package()
