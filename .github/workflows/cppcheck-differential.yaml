@@ -17,17 +17,17 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: ${{ env.PR_FETCH_DEPTH }}
 
-      - name: Update apt
-        run: sudo apt-get update
-
-      - name: Install dependencies
-        run: sudo apt-get install -y git
-
-      - name: Install colcon
+      - name: Install dependencies, colcon and cppcheck
         run: |
-          sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
-          curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
-          sudo apt-get install -y python3-colcon-common-extensions
+          sudo mkdir -p /usr/share/keyrings
+          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor | sudo tee /usr/share/keyrings/ros-archive-keyring.gpg > /dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://repo.ros2.org/ubuntu/main $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            python3-colcon-common-extensions \
+            cppcheck
 
       # Cppcheck from apt on Ubuntu 22.04 does not support --check-level, but the apt version on Ubuntu 24.04 does.
       - name: Install Cppcheck
