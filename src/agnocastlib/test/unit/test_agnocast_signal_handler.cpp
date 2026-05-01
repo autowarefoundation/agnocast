@@ -427,3 +427,43 @@ TEST_F(SignalHandlerTest, UnregisterShutdownEventIsSafeAfterUninstall)
   // This should not crash or have any observable effect.
   agnocast::SignalHandler::unregister_shutdown_event(fd);
 }
+
+TEST_F(SignalHandlerTest, NotifyAllExecutorsNotifiesRegisteredEventfdsWhenInstalled)
+{
+  agnocast::SignalHandler::install();
+
+  const int fd1 = create_event_fd();
+  const int fd2 = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd1));
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd2));
+
+  agnocast::SignalHandler::notify_all_executors();
+
+  uint64_t value1 = 0;
+  uint64_t value2 = 0;
+  EXPECT_TRUE(read_event_fd_with_timeout(fd1, TIMEOUT_MS_DEFAULT, value1));
+  EXPECT_TRUE(read_event_fd_with_timeout(fd2, TIMEOUT_MS_DEFAULT, value2));
+
+  agnocast::SignalHandler::uninstall();
+}
+
+TEST_F(SignalHandlerTest, NotifyAllExecutorsFailsWhenNotInstalled)
+{
+  const int fd = create_event_fd();
+  EXPECT_FALSE(agnocast::SignalHandler::register_shutdown_event(fd));
+  agnocast::SignalHandler::notify_all_executors();
+  EXPECT_FALSE(event_fd_has_notification(fd));
+}
+
+TEST_F(SignalHandlerTest, NotifyAllExecutorsFailsAfterUninstall)
+{
+  agnocast::SignalHandler::install();
+
+  const int fd = create_event_fd();
+  EXPECT_TRUE(agnocast::SignalHandler::register_shutdown_event(fd));
+
+  agnocast::SignalHandler::uninstall();
+
+  agnocast::SignalHandler::notify_all_executors();
+  EXPECT_FALSE(event_fd_has_notification(fd));
+}

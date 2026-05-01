@@ -234,6 +234,18 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
+  # agnocast::init(),ok(),shutdown() integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME}
+    test/integration/test_agnocast_init_ok_shutdown.cpp)
+  target_link_libraries(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME}
+    agnocast_cie_config_msgs)
+  set_tests_properties(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 120
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)
   set_target_properties(initialize_shutdown_mock PROPERTIES

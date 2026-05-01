@@ -46,7 +46,6 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
     exit(EXIT_FAILURE);
   }
 
-  SignalHandler::install();
   if (!SignalHandler::register_shutdown_event(shutdown_event_fd_)) {
     RCLCPP_ERROR(logger, "Failed to register shutdown eventfd with signal handler");
     close(shutdown_event_fd_);
@@ -91,18 +90,16 @@ AgnocastOnlyExecutor::~AgnocastOnlyExecutor()
 }
 
 bool AgnocastOnlyExecutor::get_next_agnocast_executable(
-  AgnocastExecutable & agnocast_executable, const int timeout_ms, bool & shutdown_detected)
+  AgnocastExecutable & agnocast_executable, const int timeout_ms)
 {
-  shutdown_detected = false;
-
   if (get_next_ready_agnocast_executable(agnocast_executable)) {
     return true;
   }
 
-  shutdown_detected = agnocast::wait_and_handle_epoll_event(
+  agnocast::wait_and_handle_epoll_event(
     epoll_fd_, my_pid_, timeout_ms, ready_agnocast_executables_mutex_, ready_agnocast_executables_);
 
-  if (shutdown_detected) {
+  if (!agnocast::ok()) {
     return false;
   }
 
