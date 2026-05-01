@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace
 {
@@ -141,22 +142,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[config.thread_str] = &config;
   }
 
-  cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-  // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
-  // so transient_local is ineffective.
-  auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
-  // Create subscription for non-ROS thread info
-  rclcpp::SubscriptionOptions non_ros_opts;
-  non_ros_opts.callback_group = cbg_non_ros_thread_;
-  non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-    "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
-    [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
-      this->non_ros_thread_callback(msg);
-    },
-    non_ros_opts);
+  non_ros_thread_listener_ =
+    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
+      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+        this->non_ros_thread_callback(std::move(info));
+      },
+      this->get_logger());
 
   // Create subscription for default domain on this node. Uses the node's default
   // callback group, mirroring the per-domain extra nodes below.
@@ -304,9 +297,17 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
 {
+  stop();
   const int cgroup_count = cgroup_num_.load();
   for (int i = 0; i < cgroup_count; i++) {
     rmdir(("/sys/fs/cgroup/cpuset/" + std::to_string(i)).c_str());
+  }
+}
+
+void ThreadConfiguratorNode::stop() noexcept
+{
+  if (non_ros_thread_listener_) {
+    non_ros_thread_listener_->stop();
   }
 }
 
@@ -521,15 +522,15 @@ void ThreadConfiguratorNode::callback_group_callback(
 }
 
 void ThreadConfiguratorNode::non_ros_thread_callback(
-  const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+  agnocast_cie_thread_configurator::NonRosThreadInfo info)
 {
-  auto it = id_to_non_ros_thread_config_.find(msg->thread_name);
+  auto it = id_to_non_ros_thread_config_.find(info.name);
   if (it == id_to_non_ros_thread_config_.end()) {
     RCLCPP_INFO(
       this->get_logger(),
       "Received NonRosThreadInfo: but the yaml file does not "
       "contain configuration for name=%s (tid=%ld)",
-      msg->thread_name.c_str(), msg->thread_id);
+      info.name.c_str(), info.tid);
     return;
   }
 
@@ -540,19 +541,19 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
-      msg->thread_name.c_str(), msg->thread_id);
+      info.name.c_str(), info.tid);
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", msg->thread_id,
-    msg->thread_name.c_str());
-  config->thread_id = msg->thread_id;
+    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
+  config->thread_id = info.tid;
 
   if (!issue_syscalls(*config)) {
     RCLCPP_WARN(
       this->get_logger(),
-      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall failure.",
-      msg->thread_name.c_str(), msg->thread_id);
+      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall "
+      "failure.",
+      info.name.c_str(), info.tid);
     return;
   }
 
