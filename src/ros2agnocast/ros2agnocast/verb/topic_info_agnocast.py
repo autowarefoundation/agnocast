@@ -211,7 +211,7 @@ class TopicInfoAgnocastVerb(VerbExtension):
             # check if topic exists
             if topic_types is None:
                 if sub_topic_info_ret_count.value == 0 and pub_topic_info_ret_count.value == 0:
-                    return 'Unkown topic: %s' % topic_name
+                    return 'Unknown topic: %s' % topic_name
                 else:
                     topic_types = '<UNKNOWN>'
 
