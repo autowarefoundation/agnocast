@@ -17,6 +17,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: ${{ env.PR_FETCH_DEPTH }}
 
+      # Cppcheck from apt on Ubuntu 22.04 does not support --check-level, but the apt version on Ubuntu 24.04 does.
       - name: Install dependencies, colcon and cppcheck
         run: |
           sudo mkdir -p /usr/share/keyrings
@@ -28,11 +29,6 @@ jobs:
             git \
             python3-colcon-common-extensions \
             cppcheck
-
-      # Cppcheck from apt on Ubuntu 22.04 does not support --check-level, but the apt version on Ubuntu 24.04 does.
-      - name: Install Cppcheck
-        run: sudo apt-get install -y cppcheck
-
 
       - name: Fetch the base branch with enough history for a common merge-base commit
         run: git fetch origin ${{ github.base_ref }}
