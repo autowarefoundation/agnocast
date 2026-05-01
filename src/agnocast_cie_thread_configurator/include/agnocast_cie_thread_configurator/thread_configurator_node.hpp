@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
+#include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
@@ -13,6 +14,8 @@
 
 class ThreadConfiguratorNode : public rclcpp::Node
 {
+  using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
+
   // Each ThreadConfig instance is touched by exactly one writer:
   // - callback_group_configs_ entries: written from CallbackGroupInfo
   //   subscription callbacks dispatched by the SingleThreadedExecutor
@@ -25,22 +28,6 @@ class ThreadConfiguratorNode : public rclcpp::Node
   // print_all_unapplied() reads applied flags only after main.cpp calls
   // node->stop() (which joins the listener) and after executor->spin()
   // returns, so no concurrent access is possible at read time.
-  struct ThreadConfig
-  {
-    std::string thread_str;  // callback_group_id or thread_name
-    size_t domain_id = 0;
-    int64_t thread_id = -1;
-    std::vector<int> affinity;
-    std::string policy;
-    int priority = 0;
-
-    // For SCHED_DEADLINE
-    unsigned int runtime = 0;
-    unsigned int period = 0;
-    unsigned int deadline = 0;
-
-    bool applied = false;
-  };
 
 public:
   explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
