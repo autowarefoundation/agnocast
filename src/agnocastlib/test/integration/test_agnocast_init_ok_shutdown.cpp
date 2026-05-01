@@ -36,6 +36,35 @@ void wait_until_or_fail(
   FAIL() << failure_message;
 }
 
+template <typename ExecutorT>
+void expect_cancel_stops_spin_without_shutdown(const std::string & executor_name)
+{
+  agnocast::init(0, nullptr);
+  auto executor = std::make_shared<ExecutorT>();
+
+  std::atomic_bool spin_exited{false};
+  std::thread spin_thread([&]() {
+    executor->spin();
+    spin_exited.store(true);
+  });
+
+  std::this_thread::sleep_for(250ms);
+  executor->cancel();
+
+  wait_until_or_fail(
+    [&]() { return spin_exited.load(); }, 2s,
+    executor_name + " spin() did not return after cancel().");
+
+  EXPECT_TRUE(agnocast::ok()) << executor_name
+                              << " cancel() should not change agnocast::ok() without shutdown().";
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+
+  agnocast::shutdown();
+}
+
 }  // namespace
 
 class InitOkShutdownTest : public ::testing::Test
@@ -136,6 +165,24 @@ TEST_F(InitOkShutdownTest, ShutdownStopsAgnocastOnlyCallbackIsolatedExecutorSpin
   if (spin_thread.joinable()) {
     spin_thread.join();
   }
+}
+
+TEST_F(InitOkShutdownTest, CancelStopsAgnocastOnlySingleThreadedExecutorSpinWithoutShutdown)
+{
+  expect_cancel_stops_spin_without_shutdown<agnocast::AgnocastOnlySingleThreadedExecutor>(
+    "AgnocastOnlySingleThreadedExecutor");
+}
+
+TEST_F(InitOkShutdownTest, CancelStopsAgnocastOnlyMultiThreadedExecutorSpinWithoutShutdown)
+{
+  expect_cancel_stops_spin_without_shutdown<agnocast::AgnocastOnlyMultiThreadedExecutor>(
+    "AgnocastOnlyMultiThreadedExecutor");
+}
+
+TEST_F(InitOkShutdownTest, CancelStopsAgnocastOnlyCallbackIsolatedExecutorSpinWithoutShutdown)
+{
+  expect_cancel_stops_spin_without_shutdown<agnocast::AgnocastOnlyCallbackIsolatedExecutor>(
+    "AgnocastOnlyCallbackIsolatedExecutor");
 }
 
 TEST_F(InitOkShutdownTest, CustomLoopUsingOkCanExitCleanly)
