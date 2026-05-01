@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
 
 namespace agnocast_cie_thread_configurator
 {
@@ -91,6 +93,27 @@ void parse_yaml(
       cfg.deadline = nrt["deadline"].as<unsigned int>();
     } else {
       cfg.priority = nrt["priority"].as<int>();
+    }
+  }
+
+  // Reject duplicates: id_to_*_config_ would silently collapse them to the
+  // last-inserted entry, dropping earlier YAML lines without warning.
+  // The std::find_if rewrite cppcheck suggests would hide a side-effecting
+  // predicate inside the algorithm; a plain loop is clearer here.
+  std::unordered_set<std::string> seen_cb;
+  for (const auto & c : callback_groups_out) {
+    // cppcheck-suppress useStlAlgorithm
+    if (!seen_cb.insert(std::to_string(c.domain_id) + ":" + c.thread_str).second) {
+      throw std::runtime_error(
+        "Duplicate callback_group entry: domain_id=" + std::to_string(c.domain_id) +
+        ", id=" + c.thread_str);
+    }
+  }
+  std::unordered_set<std::string> seen_nrt;
+  for (const auto & c : non_ros_threads_out) {
+    // cppcheck-suppress useStlAlgorithm
+    if (!seen_nrt.insert(c.thread_str).second) {
+      throw std::runtime_error("Duplicate non_ros_thread entry: name=" + c.thread_str);
     }
   }
 }
