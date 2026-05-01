@@ -58,6 +58,7 @@ char ** get_agnocast_sub_topics(const char * node_name, int * topic_count)
 
   char ** topic_array = static_cast<char **>(malloc(*topic_count * sizeof(char *)));
   if (topic_array == nullptr) {
+    *topic_count = 0;
     return nullptr;
   }
 
@@ -69,6 +70,7 @@ char ** get_agnocast_sub_topics(const char * node_name, int * topic_count)
         free(topic_array[j]);
       }
       free(topic_array);
+      *topic_count = 0;
       return nullptr;
     }
     std::strcpy(topic_array[i], agnocast_sub_topics[i].c_str());
@@ -123,6 +125,7 @@ char ** get_agnocast_pub_topics(const char * node_name, int * topic_count)
 
   char ** topic_array = static_cast<char **>(malloc(*topic_count * sizeof(char *)));
   if (topic_array == nullptr) {
+    *topic_count = 0;
     return nullptr;
   }
 
@@ -134,6 +137,7 @@ char ** get_agnocast_pub_topics(const char * node_name, int * topic_count)
         free(topic_array[j]);
       }
       free(topic_array);
+      *topic_count = 0;
       return nullptr;
     }
     std::strcpy(topic_array[i], agnocast_pub_topics[i].c_str());

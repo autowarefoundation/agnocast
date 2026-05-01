@@ -81,6 +81,21 @@ class NodeInfoAgnocastVerb(VerbExtension):
                     if array:
                         lib.free_agnocast_topic_info_ret(array)
 
+            @contextmanager
+            def agnocast_topic_array(lib_func, *args):
+                count = ctypes.c_int()
+                array = lib_func(*args, ctypes.byref(count))
+                try:
+                    names = []
+                    if array:
+                        for i in range(count.value):
+                            topic_ptr = ctypes.cast(array[i], ctypes.c_char_p)
+                            names.append(topic_ptr.value.decode('utf-8'))
+                    yield names
+                finally:
+                    if array:
+                        lib.free_agnocast_topics(array, count)
+
             def get_bridge_status(topic_name): 
                 name_b = topic_name.encode('utf-8')
 
@@ -129,43 +144,32 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
                 for topic_name in topic_list:
                     topic_name_bytes = topic_name.encode('utf-8')
-                    # Check Agnocast subscribers
-                    sub_count = ctypes.c_int()
-                    sub_array = lib.get_agnocast_sub_nodes(topic_name_bytes, ctypes.byref(sub_count))
-                    if sub_array:
-                        try:
-                            for i in range(sub_count.value):
-                                if sub_array[i].node_name.decode('utf-8') == node_name:
-                                    # Check if this topic is used by a service server
-                                    service_name = service_name_from_request_topic(topic_name)
-                                    if service_name is not None:
-                                        server_set.add(service_name)
-                                        break
-                                    service_name = service_name_from_response_topic(topic_name)
-                                    if service_name is not None:
-                                        client_set.add(service_name)
-                                        break
-                                    sub_topic_set.add(topic_name)
-                        finally:
-                            lib.free_agnocast_topic_info_ret(sub_array)
 
-                    # Check Agnocast publishers
-                    pub_count = ctypes.c_int()
-                    pub_array = lib.get_agnocast_pub_nodes(topic_name_bytes, ctypes.byref(pub_count))
-                    if pub_array:
-                        try:
-                            for i in range(pub_count.value):
-                                if pub_array[i].node_name.decode('utf-8') == node_name:
-                                    # Skip topic names used by services.
-                                    # They have already been accounted for during the subscription topic scan.
-                                    if (
-                                        service_name_from_request_topic(topic_name) is not None
-                                        or service_name_from_response_topic(topic_name) is not None
-                                    ):
-                                        continue
-                                    pub_topic_set.add(topic_name)
-                        finally:
-                            lib.free_agnocast_topic_info_ret(pub_array)
+                    with agnocast_info_array(lib.get_agnocast_sub_nodes, topic_name_bytes) as nodes:
+                        for n in nodes:
+                            if n.node_name.decode('utf-8') == node_name:
+                                # Check if this topic is used by a service server
+                                service_name = service_name_from_request_topic(topic_name)
+                                if service_name is not None:
+                                    server_set.add(service_name)
+                                    break
+                                service_name = service_name_from_response_topic(topic_name)
+                                if service_name is not None:
+                                    client_set.add(service_name)
+                                    break
+                                sub_topic_set.add(topic_name)
+
+                    with agnocast_info_array(lib.get_agnocast_pub_nodes, topic_name_bytes) as nodes:
+                        for n in nodes:
+                            if n.node_name.decode('utf-8') == node_name:
+                                # Skip topic names used by services.
+                                # They have already been accounted for during the subscription topic scan.
+                                if (
+                                    service_name_from_request_topic(topic_name) is not None
+                                    or service_name_from_response_topic(topic_name) is not None
+                                ):
+                                    continue
+                                pub_topic_set.add(topic_name)
 
                 return list(sub_topic_set), list(pub_topic_set), list(server_set), list(client_set)
             
@@ -175,44 +179,32 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 server_list = []
                 client_list = []
 
-                sub_topic_count = ctypes.c_int()
-                sub_topic_array = lib.get_agnocast_sub_topics(node_name, ctypes.byref(sub_topic_count))
-                for i in range(sub_topic_count.value):
-                    topic_ptr = ctypes.cast(sub_topic_array[i], ctypes.c_char_p)
-                    topic_name = topic_ptr.value.decode('utf-8')
+                with agnocast_topic_array(lib.get_agnocast_sub_topics, node_name) as topic_names:
+                    for topic_name in topic_names:
+                        service_name = service_name_from_request_topic(topic_name)
+                        if service_name is not None:
+                            server_list.append(service_name)
+                            continue
 
-                    service_name = service_name_from_request_topic(topic_name)
-                    if service_name is not None:
-                        server_list.append(service_name)
-                        continue
+                        service_name = service_name_from_response_topic(topic_name)
+                        if service_name is not None:
+                            client_list.append(service_name)
+                            continue
 
-                    service_name = service_name_from_response_topic(topic_name)
-                    if service_name is not None:
-                        client_list.append(service_name)
-                        continue
+                        sub_topic_list.append(topic_name)
 
-                    sub_topic_list.append(topic_name)
-                if sub_topic_count.value != 0:
-                    lib.free_agnocast_topics(sub_topic_array, sub_topic_count)
+                with agnocast_topic_array(lib.get_agnocast_pub_topics, node_name) as topic_names:
+                    for topic_name in topic_names:
+                        # Skip topic names used by services.
+                        # They have already been accounted for during the subscription topic scan.
+                        if (
+                            service_name_from_request_topic(topic_name) is not None
+                            or service_name_from_response_topic(topic_name) is not None
+                        ):
+                            continue
 
-                pub_topic_count = ctypes.c_int()
-                pub_topic_array = lib.get_agnocast_pub_topics(node_name, ctypes.byref(pub_topic_count))
-                for i in range(pub_topic_count.value):
-                    topic_ptr = ctypes.cast(pub_topic_array[i], ctypes.c_char_p)
-                    topic_name = topic_ptr.value.decode('utf-8')
+                        pub_topic_list.append(topic_name)
 
-                    # Skip topic names used by services.
-                    # They have already been accounted for during the subscription topic scan.
-                    if (
-                        service_name_from_request_topic(topic_name) is not None
-                        or service_name_from_response_topic(topic_name) is not None
-                    ):
-                        continue
-
-                    pub_topic_list.append(topic_name)
-                if pub_topic_count.value != 0:
-                    lib.free_agnocast_topics(pub_topic_array, pub_topic_count)
-                
                 return sub_topic_list, pub_topic_list, server_list, client_list
 
             def divide_ros2_topic_into_pubsub(topic_names):
@@ -241,19 +233,9 @@ class NodeInfoAgnocastVerb(VerbExtension):
             # Service names of the owned Agnocast clients
             agnocast_clients = []
 
-            # Get Agnocast all topics
-            topic_count = ctypes.c_int()
-            agnocast_topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count))
-            agnocast_topics = []
-            for i in range(topic_count.value):
-                topic_ptr = ctypes.cast(agnocast_topic_array[i], ctypes.c_char_p)
-                topic_name = topic_ptr.value.decode('utf-8')
-                agnocast_topics.append(topic_name)
-            if topic_count.value != 0:
-                lib.free_agnocast_topics(agnocast_topic_array, topic_count)
-
             # Get Agnocast node info
-            agnocast_subscribers, agnocast_publishers, agnocast_servers, agnocast_clients = get_agnocast_node_info(agnocast_topics, node_name)
+            with agnocast_topic_array(lib.get_agnocast_topics) as agnocast_topics:
+                agnocast_subscribers, agnocast_publishers, agnocast_servers, agnocast_clients = get_agnocast_node_info(agnocast_topics, node_name)
 
             # Get ros2 all node names
             ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=True)
