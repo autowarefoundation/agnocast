@@ -1,6 +1,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 
 #include "agnocast/agnocast_tracepoint_wrapper.h"
+#include "agnocast_signal_handler.hpp"
 
 #include <rcl/error_handling.h>
 #include <rcl/logging.h>
@@ -42,21 +43,32 @@ void Context::init(int argc, char const * const * argv)
   TRACEPOINT(agnocast_init, static_cast<const void *>(this));
 }
 
+void Context::shutdown()
+{
+  if (!initialized_) {
+    return;
+  }
+  initialized_ = false;
+}
+
 void init(int argc, char const * const * argv)
 {
-  std::lock_guard<std::mutex> lock(g_context_mtx);
-  g_context.init(argc, argv);
+  {
+    std::lock_guard<std::mutex> lock(g_context_mtx);
+    g_context.init(argc, argv);
+  }
+  SignalHandler::install();
 }
 
 void shutdown()
 {
-  std::lock_guard<std::mutex> lock(g_context_mtx);
-  if (!g_context.is_initialized()) {
-    return;
+  {
+    std::lock_guard<std::mutex> lock(g_context_mtx);
+    g_context.shutdown();
   }
 
-  // TODO(Koichi98): Add SignalHandler cleanup (uninstall signal handlers, reset state)
-  // and notify all executors to stop spinning via SignalHandler::notify_all_executors().
+  SignalHandler::notify_all_executors();
+  SignalHandler::uninstall();
 
   rcl_ret_t ret = rcl_logging_fini();
   if (ret != RCL_RET_OK) {
@@ -64,6 +76,12 @@ void shutdown()
       "agnocast", "Failed to finalize logging: %s", rcl_get_error_string().str);
     rcl_reset_error();
   }
+}
+
+bool ok()
+{
+  std::lock_guard<std::mutex> lock(g_context_mtx);
+  return g_context.is_initialized();
 }
 
 }  // namespace agnocast

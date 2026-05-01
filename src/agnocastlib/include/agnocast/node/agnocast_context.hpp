@@ -20,6 +20,7 @@ public:
   CommandLineParams command_line_params;
 
   void init(int argc, char const * const * argv);
+  void shutdown();
   bool is_initialized() const { return initialized_; }
 
   const rcl_arguments_t * get_parsed_arguments() const
@@ -46,5 +47,10 @@ void init(int argc, char const * const * argv);
 /// This is the counterpart of rclcpp::shutdown() for agnocast::Node.
 AGNOCAST_PUBLIC
 void shutdown();
+
+/// @brief Check whether Agnocast context is valid (initialized and not shutdown).
+/// This is the counterpart of rclcpp::ok() for agnocast::Node.
+AGNOCAST_PUBLIC
+bool ok();
 
 }  // namespace agnocast

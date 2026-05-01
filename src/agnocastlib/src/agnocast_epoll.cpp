@@ -7,7 +7,7 @@
 namespace agnocast
 {
 
-bool wait_and_handle_epoll_event(
+void wait_and_handle_epoll_event(
   const int epoll_fd, const pid_t my_pid, const int timeout_ms,
   std::mutex & ready_agnocast_executables_mutex,
   std::vector<AgnocastExecutable> & ready_agnocast_executables)
@@ -24,19 +24,19 @@ bool wait_and_handle_epoll_event(
       exit(EXIT_FAILURE);
     }
 
-    return false;
+    return;
   }
 
   // timeout
   if (nfds == 0) {
-    return false;
+    return;
   }
 
   const uint32_t event_id = event.data.u32;
 
   // Shutdown event - only used by AgnocastOnlyExecutor
   if ((event_id & SHUTDOWN_EVENT_FLAG) != 0U) {
-    return true;
+    return;
   }
 
   if ((event_id & TIMER_EVENT_FLAG) != 0U) {
@@ -57,7 +57,7 @@ bool wait_and_handle_epoll_event(
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
       if (!timer_ptr) {
-        return false;  // Timer object has been destroyed
+        return;  // Timer object has been destroyed
       }
       callback_group = timer_info->callback_group;
     }
@@ -67,11 +67,11 @@ bool wait_and_handle_epoll_event(
     {
       std::shared_lock fd_lock(timer_info->fd_mutex);
       if (timer_info->timer_fd < 0) {
-        return false;  // Timer fd was closed (ROS time activated)
+        return;  // Timer fd was closed (ROS time activated)
       }
       const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
       if (ret == -1 || expirations == 0) {
-        return false;
+        return;
       }
     }
 
@@ -111,7 +111,7 @@ bool wait_and_handle_epoll_event(
       timer_info = it->second;
       timer_ptr = timer_info->timer.lock();
       if (!timer_ptr) {
-        return false;  // Timer object has been destroyed
+        return;  // Timer object has been destroyed
       }
       callback_group = timer_info->callback_group;
     }
@@ -119,14 +119,14 @@ bool wait_and_handle_epoll_event(
     uint64_t val = 0;
     const ssize_t ret = read(timer_info->clock_eventfd, &val, sizeof(val));
     if (ret == -1 || val == 0) {
-      return false;
+      return;
     }
 
     // Check if timer is ready (corresponds to rcl_timer_is_ready)
     const int64_t now_ns = timer_info->clock->now().nanoseconds();
     const int64_t next_call_ns = timer_info->next_call_time_ns.load(std::memory_order_relaxed);
     if (now_ns < next_call_ns) {
-      return false;
+      return;
     }
 
     // Create a callable that handles the clock event
@@ -158,7 +158,7 @@ bool wait_and_handle_epoll_event(
       const auto it = id2_callback_info.find(callback_info_id);
       if (it == id2_callback_info.end()) {
         // Callback was unregistered (subscription destroyed) - this is normal
-        return false;
+        return;
       }
 
       callback_info = it->second;
@@ -179,15 +179,13 @@ bool wait_and_handle_epoll_event(
         exit(EXIT_FAILURE);
       }
 
-      return false;
+      return;
     }
 
     agnocast::enqueue_receive_and_execute(
       callback_info_id, my_pid, callback_info, ready_agnocast_executables_mutex,
       ready_agnocast_executables);
   }
-
-  return false;
 }
 
 }  // namespace agnocast

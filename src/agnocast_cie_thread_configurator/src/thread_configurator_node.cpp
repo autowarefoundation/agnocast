@@ -2,6 +2,7 @@
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
+#include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
@@ -15,16 +16,11 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <string>
-#include <unordered_map>
+#include <utility>
 
-namespace
-{
-const std::unordered_map<std::string, int> policy_to_sched_const = {
-  {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
-  {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
-};
-}  // namespace
+using agnocast_cie_thread_configurator::policy_to_sched_const;
 
 ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
 : Node("thread_configurator_node", options)
@@ -47,116 +43,32 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
   RCLCPP_INFO(this->get_logger(), "Loaded config from: %s", config_file.c_str());
 
-  YAML::Node callback_groups = yaml["callback_groups"];
-  YAML::Node non_ros_threads = yaml["non_ros_threads"];
-
-  unapplied_num_.store(static_cast<int>(callback_groups.size() + non_ros_threads.size()));
-  callback_group_configs_.resize(callback_groups.size());
-  non_ros_thread_configs_.resize(non_ros_threads.size());
-
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
-  // For backward compatibility: remove trailing "Waitable@"s
-  auto remove_trailing_waitable = [](std::string s) {
-    static constexpr std::string_view suffix = "@Waitable";
-    const std::size_t suffix_size = suffix.size();
-    std::size_t s_size = s.size();
+  agnocast_cie_thread_configurator::parse_yaml(
+    yaml, default_domain_id, callback_group_configs_, non_ros_thread_configs_);
 
-    while (s_size >= suffix_size &&
-           std::char_traits<char>::compare(
-             s.data() + (s_size - suffix_size), suffix.data(), suffix_size) == 0) {
-      s_size -= suffix_size;
-    }
-    s.resize(s_size);
-
-    return s;
-  };
+  unapplied_num_.store(
+    static_cast<int>(callback_group_configs_.size() + non_ros_thread_configs_.size()));
 
   std::set<size_t> domain_ids;
-  for (size_t i = 0; i < callback_groups.size(); i++) {
-    const auto & callback_group = callback_groups[i];
-    auto & config = callback_group_configs_[i];
-
-    config.thread_str = remove_trailing_waitable(callback_group["id"].as<std::string>());
-
-    // Get domain_id from config, default to default_domain_id for backward compatibility
-    if (callback_group["domain_id"]) {
-      config.domain_id = callback_group["domain_id"].as<size_t>();
-    } else {
-      config.domain_id = default_domain_id;
-    }
-    domain_ids.insert(config.domain_id);
-
-    for (auto & cpu : callback_group["affinity"]) {
-      config.affinity.push_back(cpu.as<int>());
-    }
-    config.policy = callback_group["policy"].as<std::string>();
-
-    if (policy_to_sched_const.count(config.policy) == 0) {
-      throw std::runtime_error(
-        "Unknown scheduling policy '" + config.policy + "' for id=" + config.thread_str +
-        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
-        "SCHED_DEADLINE");
-    }
-
-    if (config.policy == "SCHED_DEADLINE") {
-      config.runtime = callback_group["runtime"].as<unsigned int>();
-      config.period = callback_group["period"].as<unsigned int>();
-      config.deadline = callback_group["deadline"].as<unsigned int>();
-    } else {
-      config.priority = callback_group["priority"].as<int>();
-    }
-
-    auto key = std::make_pair(config.domain_id, config.thread_str);
-    id_to_callback_group_config_[key] = &config;
+  for (auto & cfg : callback_group_configs_) {
+    domain_ids.insert(cfg.domain_id);
+    auto key = std::make_pair(cfg.domain_id, cfg.thread_str);
+    id_to_callback_group_config_[key] = &cfg;
   }
-
-  // Load non-ROS thread configurations
-  for (size_t i = 0; i < non_ros_threads.size(); i++) {
-    const auto & non_ros_thread = non_ros_threads[i];
-    auto & config = non_ros_thread_configs_[i];
-
-    config.thread_str = non_ros_thread["name"].as<std::string>();
-
-    for (auto & cpu : non_ros_thread["affinity"]) {
-      config.affinity.push_back(cpu.as<int>());
-    }
-    config.policy = non_ros_thread["policy"].as<std::string>();
-
-    if (policy_to_sched_const.count(config.policy) == 0) {
-      throw std::runtime_error(
-        "Unknown scheduling policy '" + config.policy + "' for name=" + config.thread_str +
-        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
-        "SCHED_DEADLINE");
-    }
-
-    if (config.policy == "SCHED_DEADLINE") {
-      config.runtime = non_ros_thread["runtime"].as<unsigned int>();
-      config.period = non_ros_thread["period"].as<unsigned int>();
-      config.deadline = non_ros_thread["deadline"].as<unsigned int>();
-    } else {
-      config.priority = non_ros_thread["priority"].as<int>();
-    }
-
-    id_to_non_ros_thread_config_[config.thread_str] = &config;
+  for (auto & cfg : non_ros_thread_configs_) {
+    id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
   }
-
-  cbg_non_ros_thread_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-  // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
-  // so transient_local is ineffective.
-  auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
-  // Create subscription for non-ROS thread info
-  rclcpp::SubscriptionOptions non_ros_opts;
-  non_ros_opts.callback_group = cbg_non_ros_thread_;
-  non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-    "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
-    [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
-      this->non_ros_thread_callback(msg);
-    },
-    non_ros_opts);
+  non_ros_thread_listener_ =
+    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
+      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+        this->non_ros_thread_callback(std::move(info));
+      },
+      this->get_logger());
 
   // Create subscription for default domain on this node. Uses the node's default
   // callback group, mirroring the per-domain extra nodes below.
@@ -304,9 +216,17 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
 {
+  stop();
   const int cgroup_count = cgroup_num_.load();
   for (int i = 0; i < cgroup_count; i++) {
     rmdir(("/sys/fs/cgroup/cpuset/" + std::to_string(i)).c_str());
+  }
+}
+
+void ThreadConfiguratorNode::stop() noexcept
+{
+  if (non_ros_thread_listener_) {
+    non_ros_thread_listener_->stop();
   }
 }
 
@@ -521,15 +441,15 @@ void ThreadConfiguratorNode::callback_group_callback(
 }
 
 void ThreadConfiguratorNode::non_ros_thread_callback(
-  const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+  agnocast_cie_thread_configurator::NonRosThreadInfo info)
 {
-  auto it = id_to_non_ros_thread_config_.find(msg->thread_name);
+  auto it = id_to_non_ros_thread_config_.find(info.name);
   if (it == id_to_non_ros_thread_config_.end()) {
     RCLCPP_INFO(
       this->get_logger(),
       "Received NonRosThreadInfo: but the yaml file does not "
       "contain configuration for name=%s (tid=%ld)",
-      msg->thread_name.c_str(), msg->thread_id);
+      info.name.c_str(), info.tid);
     return;
   }
 
@@ -540,19 +460,19 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
-      msg->thread_name.c_str(), msg->thread_id);
+      info.name.c_str(), info.tid);
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", msg->thread_id,
-    msg->thread_name.c_str());
-  config->thread_id = msg->thread_id;
+    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
+  config->thread_id = info.tid;
 
   if (!issue_syscalls(*config)) {
     RCLCPP_WARN(
       this->get_logger(),
-      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall failure.",
-      msg->thread_name.c_str(), msg->thread_id);
+      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall "
+      "failure.",
+      info.name.c_str(), info.tid);
     return;
   }
 

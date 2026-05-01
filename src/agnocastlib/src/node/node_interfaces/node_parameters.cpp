@@ -328,15 +328,11 @@ auto find_parameter_by_name(ParameterVectorType & parameters, const std::string 
 }  // namespace
 
 NodeParameters::NodeParameters(
-  agnocast::Node * node, rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
-  const std::vector<rclcpp::Parameter> & parameter_overrides, bool start_parameter_services,
-  const rcl_arguments_t * local_args, bool allow_undeclared_parameters)
+  rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
+  const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
+  bool allow_undeclared_parameters)
 : node_base_(std::move(node_base)), allow_undeclared_(allow_undeclared_parameters)
 {
-  if (start_parameter_services) {
-    parameter_service_ = std::make_shared<ParameterService>(node, this);
-  }
-
   const rcl_arguments_t * global_args = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_context_mtx);
@@ -348,6 +344,17 @@ NodeParameters::NodeParameters(
   std::string combined_name = node_base_->get_fully_qualified_name();
   parameter_overrides_ =
     resolve_parameter_overrides(combined_name, parameter_overrides, local_args, global_args);
+}
+
+void NodeParameters::start_parameter_services(agnocast::Node * node)
+{
+  if (parameter_service_) {
+    RCLCPP_WARN(
+      rclcpp::get_logger(node_base_->get_name()),
+      "start_parameter_services() called more than once; ignoring");
+    return;
+  }
+  parameter_service_ = std::make_shared<ParameterService>(node, this);
 }
 
 const rclcpp::ParameterValue & NodeParameters::declare_parameter(
