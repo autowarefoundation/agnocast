@@ -1,6 +1,7 @@
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 
 #include <stdexcept>
 #include <string>
@@ -114,6 +115,25 @@ non_ros_threads:
     policy: NOT_A_POLICY
     priority: 0
     affinity: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, RejectsSchedDeadlineMissingRuntimeField)
+{
+  // SCHED_DEADLINE requires runtime/period/deadline. parse_yaml calls
+  // .as<unsigned int>() on a missing node, which makes yaml-cpp throw
+  // YAML::TypedBadConversion (a subclass of YAML::Exception, which is
+  // a subclass of std::runtime_error). The test catches the most general
+  // shape so it does not couple to the precise yaml-cpp exception type.
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: dl_cbg
+    domain_id: 0
+    policy: SCHED_DEADLINE
+    affinity: []
+non_ros_threads: []
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
   EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
