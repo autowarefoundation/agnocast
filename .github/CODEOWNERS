@@ -1,7 +1,7 @@
-* @atsushi421 @Koichi98 @sykwer @kobayu858
+* @atsushi421 @Koichi98 @sykwer @kobayu858 @ruth561
 
 # agnocast_heaphook
-agnocast_heaphook/ @Koichi98 @veqcc @sykwer
+agnocast_heaphook/ @Koichi98 @sykwer
 
 # agnocastlib
 src/agnocastlib/src/*executor* @Koichi98 @atsushi421 @sykwer
@@ -10,8 +10,11 @@ src/agnocastlib/src/*component_container* @Koichi98 @atsushi421 @sykwer
 src/agnocastlib/include/agnocast/*component_container* @Koichi98 @atsushi421 @sykwer
 src/agnocastlib/src/bridge @kobayu858 @Koichi98 @sykwer
 src/agnocastlib/include/agnocast/bridge @kobayu858 @Koichi98 @sykwer 
-src/agnocastlib/src/node @Koichi98 @sykwer @kobayu858
-src/agnocastlib/include/agnocast/node @Koichi98 @sykwer @kobayu858
+src/agnocastlib/src/node @Koichi98 @sykwer @kobayu858 @ruth561
+src/agnocastlib/include/agnocast/node @Koichi98 @sykwer @kobayu858 @ruth561
 
 # ros2agnocast
-src/ros2agnocast/ @TetsuKawa @veqcc @atsushi421 @Koichi98 @sykwer @kobayu858
+src/ros2agnocast/ @TetsuKawa @atsushi421 @Koichi98 @sykwer @kobayu858
+
+# agnocast_ioctl_wrapper
+src/agnocast_ioctl_wrapper/ @TetsuKawa @atsushi421 @Koichi98 @sykwer @kobayu858

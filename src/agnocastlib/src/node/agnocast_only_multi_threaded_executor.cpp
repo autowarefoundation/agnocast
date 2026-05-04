@@ -46,7 +46,7 @@ void AgnocastOnlyMultiThreadedExecutor::spin()
 
 void AgnocastOnlyMultiThreadedExecutor::agnocast_spin()
 {
-  while (spinning_.load()) {
+  while (spinning_.load() && agnocast::ok()) {
     if (epoll_update_tracker_.take_update_request()) {
       add_callback_groups_from_nodes_associated_to_executor();
       agnocast::prepare_epoll_impl(
@@ -58,26 +58,20 @@ void AgnocastOnlyMultiThreadedExecutor::agnocast_spin()
 
     agnocast::AgnocastExecutable agnocast_executable;
 
-    if (!spinning_.load()) {
+    if (!spinning_.load() || !agnocast::ok()) {
       return;
     }
 
     // As each thread is dedicated to handling Agnocast callbacks, get_next_agnocast_executable()
     // can block indefinitely without a timeout. However, since we need to periodically check for
     // epoll updates, we should implement a long timeout period instead of an infinite block.
-    bool shutdown_detected = false;
     if (get_next_agnocast_executable(
-          agnocast_executable, next_exec_timeout_ms_ /* timed-blocking*/, shutdown_detected)) {
+          agnocast_executable, next_exec_timeout_ms_ /* timed-blocking*/)) {
       if (yield_before_execute_) {
         std::this_thread::yield();
       }
 
       execute_agnocast_executable(agnocast_executable);
-    }
-
-    if (shutdown_detected) {
-      spinning_.store(false);
-      return;
     }
   }
 }

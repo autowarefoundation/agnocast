@@ -1,8 +1,6 @@
 import ctypes
-import sys
 from ros2cli.node.strategy import add_arguments as add_strategy_node_arguments
 from ros2cli.node.strategy import NodeStrategy
-from ros2topic.api import get_topic_names_and_types
 from ros2topic.api import TopicNameCompleter
 from ros2node.verb import VerbExtension
 
@@ -47,21 +45,11 @@ class TopicInfoAgnocastVerb(VerbExtension):
         namespace = namespace if namespace else "/"
         return namespace, node_name
 
-    def print_publishers_info(self, node, topic_name, topic_types, pub_topic_info_rets, args, line_end, bridge_node_names):
+    def print_publishers_info(self, ros2_pub_infos, topic_types, pub_topic_info_rets, args, line_end):
         # Filter out bridge nodes unless debug mode
         if not args.debug:
             pub_topic_info_rets = [p for p in pub_topic_info_rets if not p['is_bridge']]
         agnocast_pub_count = len(pub_topic_info_rets)
-        
-        # Count ROS 2 publishers excluding bridge nodes (unless debug mode)
-        ros2_pub_infos = []
-        try:
-            for info in node.get_publishers_info_by_topic(topic_name):
-                if args.debug or info.node_name not in bridge_node_names:
-                    ros2_pub_infos.append(info)
-        except NotImplementedError:
-            pass
-
         ros2_pub_count = len(ros2_pub_infos)
 
         print('ROS 2 Publisher count: %d' % ros2_pub_count)
@@ -99,21 +87,11 @@ class TopicInfoAgnocastVerb(VerbExtension):
             except NotImplementedError as e:
                 return str(e)
 
-    def print_subscribers_info(self, node, topic_name, topic_types, sub_topic_info_rets, args, line_end, bridge_node_names):
+    def print_subscribers_info(self, ros2_sub_infos, topic_types, sub_topic_info_rets, args, line_end):
         # Filter out bridge nodes unless debug mode
         if not args.debug:
             sub_topic_info_rets = [s for s in sub_topic_info_rets if not s['is_bridge']]
         agnocast_sub_count = len(sub_topic_info_rets)
-        
-        # Count ROS 2 subscribers excluding bridge nodes (unless debug mode)
-        ros2_sub_infos = []
-        try:
-            for info in node.get_subscriptions_info_by_topic(topic_name):
-                if args.debug or info.node_name not in bridge_node_names:
-                    ros2_sub_infos.append(info)
-        except NotImplementedError:
-            pass
-
         ros2_sub_count = len(ros2_sub_infos)
 
         print('ROS 2 Subscription count: %d' % ros2_sub_count)
@@ -199,21 +177,36 @@ class TopicInfoAgnocastVerb(VerbExtension):
                     _, name = self.split_full_node_name(info['node_name'])
                     bridge_node_names.add(name)
 
-            # get ros2 topic list
-            topic_names_and_types = get_topic_names_and_types(node=node, include_hidden_topics=True)
+            # get ROS 2 pub/sub info for this topic
+            ros2_pub_infos_all = []
+            ros2_sub_infos_all = []
+            try:
+                ros2_pub_infos_all = list(node.get_publishers_info_by_topic(topic_name))
+            except NotImplementedError:
+                pass
+            try:
+                ros2_sub_infos_all = list(node.get_subscriptions_info_by_topic(topic_name))
+            except NotImplementedError:
+                pass
 
-            topic_types = None
-            for (t_name, t_types) in topic_names_and_types:
-                if t_name == topic_name:
-                    topic_types = t_types
-                    break
+            topic_types = []
+            for info in ros2_pub_infos_all + ros2_sub_infos_all:
+                if info.topic_type and info.topic_type not in topic_types:
+                    topic_types.append(info.topic_type)
+
+            if args.debug:
+                ros2_pub_infos = ros2_pub_infos_all
+                ros2_sub_infos = ros2_sub_infos_all
+            else:
+                ros2_pub_infos = [i for i in ros2_pub_infos_all if i.node_name not in bridge_node_names]
+                ros2_sub_infos = [i for i in ros2_sub_infos_all if i.node_name not in bridge_node_names]
 
             # check if topic exists
-            if topic_types is None:
+            if not topic_types:
                 if sub_topic_info_ret_count.value == 0 and pub_topic_info_ret_count.value == 0:
-                    return 'Unkown topic: %s' % topic_name
+                    return 'Unknown topic: %s' % topic_name
                 else:
-                    topic_types = '<UNKNOWN>'
+                    topic_types = ['<UNKNOWN>']
 
             ########################################################################
             # print topic info
@@ -224,10 +217,10 @@ class TopicInfoAgnocastVerb(VerbExtension):
             type_str = topic_types[0] if len(topic_types) == 1 else topic_types
             print('Type: %s' % type_str, end=line_end)
 
-            print_publishers_info_ret = self.print_publishers_info(node, topic_name, type_str, pub_topic_info_rets, args, line_end, bridge_node_names)
+            print_publishers_info_ret = self.print_publishers_info(ros2_pub_infos, type_str, pub_topic_info_rets, args, line_end)
             if print_publishers_info_ret:
                 return print_publishers_info_ret
-            print_subscribers_info_ret = self.print_subscribers_info(node, topic_name, type_str, sub_topic_info_rets, args, line_end, bridge_node_names)
+            print_subscribers_info_ret = self.print_subscribers_info(ros2_sub_infos, type_str, sub_topic_info_rets, args, line_end)
             if print_subscribers_info_ret:
                 return print_subscribers_info_ret
             ########################################################################

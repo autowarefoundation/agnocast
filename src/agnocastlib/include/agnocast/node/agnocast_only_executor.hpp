@@ -49,8 +49,7 @@ protected:
   std::list<rclcpp::node_interfaces::NodeBaseInterface::WeakPtr> weak_nodes_
     RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  bool get_next_agnocast_executable(
-    AgnocastExecutable & agnocast_executable, const int timeout_ms, bool & shutdown_detected);
+  bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   bool get_next_ready_agnocast_executable(AgnocastExecutable & agnocast_executable);
   void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
 

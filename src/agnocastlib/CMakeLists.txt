@@ -28,6 +28,10 @@ find_package(agnocast_cie_thread_configurator REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(glog REQUIRED)
 
 add_library(agnocast SHARED
@@ -42,9 +46,10 @@ add_library(agnocast SHARED
   src/cie_client_utils.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
-  src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp)
+  src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
+  src/node/tf2/transform_broadcaster.cpp src/node/tf2/static_transform_broadcaster.cpp)
 
-ament_target_dependencies(agnocast rclcpp agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters)
+ament_target_dependencies(agnocast rclcpp agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs)
 
 target_link_libraries(agnocast
   ${rcl_yaml_param_parser_LIBRARIES}
@@ -128,15 +133,27 @@ if(BUILD_TESTING)
   ament_add_gmock(test_unit_${PROJECT_NAME}
     test/unit/test_agnocast_utils.cpp
     test/unit/test_agnocast_subscription.cpp
+    test/unit/test_agnocast_signal_handler.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
     test/unit/test_agnocast_epoll_update.cpp
     test/unit/test_node_topics.cpp
     test/unit/test_cie_client_utils.cpp)
-  target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include)
+  target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs)
   set_tests_properties(test_unit_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
+  )
+
+  # tf2 broadcaster unit tests (own kmod / publish_core mocks for TFMessage capture)
+  ament_add_gmock(test_unit_tf2_broadcasters_${PROJECT_NAME}
+    test/unit/tf2/test_broadcasters.cpp)
+  target_include_directories(test_unit_tf2_broadcasters_${PROJECT_NAME} PRIVATE include)
+  target_link_libraries(test_unit_tf2_broadcasters_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_unit_tf2_broadcasters_${PROJECT_NAME}
+    geometry_msgs tf2 tf2_msgs tf2_ros)
+  set_tests_properties(test_unit_tf2_broadcasters_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
 
@@ -195,6 +212,16 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
+  # agnocast::Node construction integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_agnocast_node_${PROJECT_NAME}
+    test/integration/test_agnocast_node.cpp)
+  target_link_libraries(test_integration_agnocast_node_${PROJECT_NAME} agnocast)
+  set_tests_properties(test_integration_agnocast_node_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
   # Epoll update integration test (requires kernel module, no mock)
   ament_add_gmock(test_integration_agnocast_epoll_update_${PROJECT_NAME}
     test/integration/test_agnocast_epoll_update.cpp)
@@ -202,6 +229,18 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_agnocast_epoll_update_${PROJECT_NAME}
     agnocast_cie_config_msgs)
   set_tests_properties(test_integration_agnocast_epoll_update_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 120
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # agnocast::init(),ok(),shutdown() integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME}
+    test/integration/test_agnocast_init_ok_shutdown.cpp)
+  target_link_libraries(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME}
+    agnocast_cie_config_msgs)
+  set_tests_properties(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
     LABELS "requires_kernel_module;requires_heaphook"
@@ -227,5 +266,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters)
+ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters tf2 tf2_ros tf2_msgs geometry_msgs)
 ament_package()
