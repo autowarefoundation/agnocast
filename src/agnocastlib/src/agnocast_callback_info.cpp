@@ -179,7 +179,7 @@ void SubscriptionEventHandler::prepare_epoll(
   }
 }
 
-bool SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
+void SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
 {
   // Subscription callback event
   const uint32_t callback_info_id = event_local_id;
@@ -191,7 +191,7 @@ bool SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
     const auto it = id2_callback_info.find(callback_info_id);
     if (it == id2_callback_info.end()) {
       // Callback was unregistered (subscription destroyed) - this is normal
-      return false;
+      return;
     }
 
     callback_info = it->second;
@@ -211,14 +211,12 @@ bool SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
       close(agnocast_fd);
       exit(EXIT_FAILURE);
     }
-    return false;
+    return;
   }
 
   agnocast::enqueue_receive_and_execute(
     callback_info_id, my_pid_, callback_info, *ready_agnocast_executables_mutex_,
     *ready_agnocast_executables_);
-
-  return false;
 }
 
 }  // namespace agnocast

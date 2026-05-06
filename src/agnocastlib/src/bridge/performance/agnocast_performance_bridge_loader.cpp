@@ -25,30 +25,43 @@ PerformanceBridgeLoader::~PerformanceBridgeLoader()
   loaded_libraries_.clear();
 }
 
-PerformanceBridgeResult PerformanceBridgeLoader::create_r2a_bridge(
+PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
-  void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_bridge");
+  void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_pubsub_bridge", false);
   if (symbol == nullptr) {
     return {nullptr, nullptr};
   }
 
-  auto factory = reinterpret_cast<BridgeEntryR2A>(symbol);
+  auto factory = reinterpret_cast<R2APubsubBridgeFactory>(symbol);
   return factory(std::move(node), topic_name, qos);
 }
 
-PerformanceBridgeResult PerformanceBridgeLoader::create_a2r_bridge(
+PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
-  void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_bridge");
+  void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_pubsub_bridge", false);
   if (symbol == nullptr) {
     return {nullptr, nullptr};
   }
 
-  auto factory = reinterpret_cast<BridgeEntryA2R>(symbol);
+  auto factory = reinterpret_cast<A2RPubsubBridgeFactory>(symbol);
   return factory(std::move(node), topic_name, qos);
+}
+
+PerformanceServiceBridgeResult PerformanceBridgeLoader::create_r2a_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
+  const rclcpp::QoS & qos)
+{
+  void * symbol = get_bridge_factory_symbol(service_type, "create_r2a_service_bridge", true);
+  if (symbol == nullptr) {
+    return {nullptr, nullptr, nullptr};
+  }
+
+  auto factory = reinterpret_cast<R2AServiceBridgeFactory>(symbol);
+  return factory(std::move(node), service_name, qos);
 }
 
 std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::string & message_type)
@@ -59,10 +72,11 @@ std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::strin
 }
 
 std::vector<std::string> PerformanceBridgeLoader::generate_library_paths(
-  const std::string & snake_type)
+  const std::string & snake_type, bool is_service)
 {
   std::vector<std::string> paths;
-  const std::string lib_name = "libbridge_plugin_" + snake_type + ".so";
+  const std::string lib_name =
+    (is_service ? "libservice_bridge_plugin_" : "libpubsub_bridge_plugin_") + snake_type + ".so";
 
   // 1. Check environment variable AGNOCAST_BRIDGE_PLUGINS_PATH (colon-separated)
   const char * env_path = std::getenv("AGNOCAST_BRIDGE_PLUGINS_PATH");
@@ -126,10 +140,11 @@ void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::s
 }
 
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
-  const std::string & message_type, const std::string & symbol_name)
+  const std::string & type_name, const std::string & symbol_name, bool is_service)
 {
-  std::string snake_type = convert_type_to_snake_case(message_type);
-  std::vector<std::string> lib_paths = generate_library_paths(snake_type);
+  const char * type_label = is_service ? "service" : "message";
+  std::string snake_type = convert_type_to_snake_case(type_name);
+  std::vector<std::string> lib_paths = generate_library_paths(snake_type, is_service);
 
   void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
@@ -142,17 +157,17 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const char * dlsym_error = dlerror();
   if (dlsym_error != nullptr) {
     RCLCPP_ERROR(
-      logger_, "Failed to find symbol '%s' for message type '%s': %s", symbol_name.c_str(),
-      message_type.c_str(), dlsym_error);
+      logger_, "Failed to find symbol '%s' for %s type '%s': %s", symbol_name.c_str(), type_label,
+      type_name.c_str(), dlsym_error);
     return nullptr;
   }
 
   if (symbol == nullptr) {
     RCLCPP_ERROR(
       logger_,
-      "Symbol '%s' was found for message type '%s' but returned NULL, which is invalid for a "
-      "factory function.",
-      symbol_name.c_str(), message_type.c_str());
+      "Symbol '%s' was found for %s type '%s' but returned NULL, which is invalid for a factory "
+      "function.",
+      symbol_name.c_str(), type_label, type_name.c_str());
     return nullptr;
   }
 

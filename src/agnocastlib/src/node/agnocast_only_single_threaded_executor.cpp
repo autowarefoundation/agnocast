@@ -31,7 +31,7 @@ void AgnocastOnlySingleThreadedExecutor::spin()
 
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
 
-  while (spinning_.load()) {
+  while (spinning_.load() && agnocast::ok()) {
     if (epoll_update_tracker_.take_update_request()) {
       add_callback_groups_from_nodes_associated_to_executor();
       epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
@@ -40,14 +40,8 @@ void AgnocastOnlySingleThreadedExecutor::spin()
     }
 
     agnocast::AgnocastExecutable agnocast_executable;
-    bool shutdown_detected = false;
-    if (get_next_agnocast_executable(
-          agnocast_executable, next_exec_timeout_ms_, shutdown_detected)) {
+    if (get_next_agnocast_executable(agnocast_executable, next_exec_timeout_ms_)) {
       execute_agnocast_executable(agnocast_executable);
-    }
-
-    if (shutdown_detected) {
-      break;
     }
   }
 }

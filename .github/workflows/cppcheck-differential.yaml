@@ -5,7 +5,7 @@ on:
 
 jobs:
   cppcheck-differential:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Set PR fetch depth
@@ -17,22 +17,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: ${{ env.PR_FETCH_DEPTH }}
 
-      - name: Install dependencies
+      # Cppcheck from apt on Ubuntu 22.04 does not support --check-level, but the apt version on Ubuntu 24.04 does.
+      - name: Install dependencies, colcon and cppcheck
         run: |
+          sudo mkdir -p /usr/share/keyrings
+          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor | sudo tee /usr/share/keyrings/ros-archive-keyring.gpg > /dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://repo.ros2.org/ubuntu/main $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
+
           sudo apt-get update
-          sudo apt-get install -y git
-
-      - name: Install colcon
-        run: |
-          sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
-          curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
-          sudo apt update
-          sudo apt install python3-colcon-common-extensions
-
-      # cppcheck from apt does not yet support --check-level args, and thus install from snap
-      - name: Install Cppcheck from snap
-        run: |
-          sudo snap install cppcheck
+          sudo apt-get install -y \
+            git \
+            python3-colcon-common-extensions \
+            cppcheck
 
       - name: Fetch the base branch with enough history for a common merge-base commit
         run: git fetch origin ${{ github.base_ref }}

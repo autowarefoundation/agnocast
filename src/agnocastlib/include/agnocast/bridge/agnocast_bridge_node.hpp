@@ -209,17 +209,15 @@ public:
 
 template <typename MessageT>
 std::shared_ptr<BridgeBase> start_ros_to_agno_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
+  rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
-  std::string topic_name(static_cast<const char *>(info.topic_name));
   return std::make_shared<RosToAgnocastBridge<MessageT>>(node, topic_name, qos);
 }
 
 template <typename MessageT>
 std::shared_ptr<BridgeBase> start_agno_to_ros_node(
-  rclcpp::Node::SharedPtr node, const BridgeTargetInfo & info, const rclcpp::QoS & qos)
+  rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
-  std::string topic_name(static_cast<const char *>(info.topic_name));
   return std::make_shared<AgnocastToRosBridge<MessageT>>(node, topic_name, qos);
 }
 

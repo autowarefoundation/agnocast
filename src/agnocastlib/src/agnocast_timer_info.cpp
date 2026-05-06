@@ -334,7 +334,7 @@ void TimerEventHandler::prepare_epoll(
   }
 }
 
-bool TimerEventHandler::handle(EpollEventLocalID event_local_id)
+void TimerEventHandler::handle(EpollEventLocalID event_local_id)
 {
   // Timer event (timerfd fired)
   const uint32_t timer_id = event_local_id;
@@ -353,7 +353,7 @@ bool TimerEventHandler::handle(EpollEventLocalID event_local_id)
     timer_info = it->second;
     timer_ptr = timer_info->timer.lock();
     if (!timer_ptr) {
-      return false;  // Timer object has been destroyed
+      return;  // Timer object has been destroyed
     }
     callback_group = timer_info->callback_group;
   }
@@ -363,11 +363,11 @@ bool TimerEventHandler::handle(EpollEventLocalID event_local_id)
   {
     std::shared_lock fd_lock(timer_info->fd_mutex);
     if (timer_info->timer_fd < 0) {
-      return false;  // Timer fd was closed (ROS time activated)
+      return;  // Timer fd was closed (ROS time activated)
     }
     const ssize_t ret = read(timer_info->timer_fd, &expirations, sizeof(expirations));
     if (ret == -1 || expirations == 0) {
-      return false;
+      return;
     }
   }
 
@@ -389,8 +389,6 @@ bool TimerEventHandler::handle(EpollEventLocalID event_local_id)
     std::lock_guard<std::mutex> ready_lock{*ready_agnocast_executables_mutex_};
     ready_agnocast_executables_->emplace_back(AgnocastExecutable{callable, callback_group});
   }
-
-  return false;
 }
 
 void ClockEventHandler::prepare_epoll(
@@ -430,7 +428,7 @@ void ClockEventHandler::prepare_epoll(
   }
 }
 
-bool ClockEventHandler::handle(EpollEventLocalID event_local_id)
+void ClockEventHandler::handle(EpollEventLocalID event_local_id)
 {
   // Clock event (ROS_TIME clock updated via time jump callback)
   const uint32_t timer_id = event_local_id;
@@ -449,7 +447,7 @@ bool ClockEventHandler::handle(EpollEventLocalID event_local_id)
     timer_info = it->second;
     timer_ptr = timer_info->timer.lock();
     if (!timer_ptr) {
-      return false;  // Timer object has been destroyed
+      return;  // Timer object has been destroyed
     }
     callback_group = timer_info->callback_group;
   }
@@ -457,14 +455,14 @@ bool ClockEventHandler::handle(EpollEventLocalID event_local_id)
   uint64_t val = 0;
   const ssize_t ret = read(timer_info->clock_eventfd, &val, sizeof(val));
   if (ret == -1 || val == 0) {
-    return false;
+    return;
   }
 
   // Check if timer is ready (corresponds to rcl_timer_is_ready)
   const int64_t now_ns = timer_info->clock->now().nanoseconds();
   const int64_t next_call_ns = timer_info->next_call_time_ns.load(std::memory_order_relaxed);
   if (now_ns < next_call_ns) {
-    return false;
+    return;
   }
 
   // Create a callable that handles the clock event
@@ -485,7 +483,6 @@ bool ClockEventHandler::handle(EpollEventLocalID event_local_id)
     std::lock_guard<std::mutex> ready_lock{*ready_agnocast_executables_mutex_};
     ready_agnocast_executables_->emplace_back(AgnocastExecutable{callable, callback_group});
   }
-  return false;
 }
 
 }  // namespace agnocast

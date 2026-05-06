@@ -18,6 +18,14 @@
 #include <string>
 #include <vector>
 
+namespace agnocast
+{
+
+class Node;
+class ParameterService;
+
+}  // namespace agnocast
+
 namespace agnocast::node_interfaces
 {
 
@@ -111,6 +119,9 @@ public:
   const std::map<std::string, rclcpp::ParameterValue> & get_parameter_overrides() const override;
 
 private:
+  friend class agnocast::Node;
+  void start_parameter_services(agnocast::Node * node);
+
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
 
   mutable std::recursive_mutex parameters_mutex_;
@@ -126,6 +137,8 @@ private:
   CallbacksContainerType on_parameters_set_callback_container_;
 
   bool allow_undeclared_ = false;
+
+  std::shared_ptr<ParameterService> parameter_service_;
 };
 
 }  // namespace agnocast::node_interfaces

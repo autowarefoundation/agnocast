@@ -11,12 +11,11 @@
 namespace agnocast
 {
 
-bool DummyEventHandler::handle(EpollEventLocalID event_local_id)
+void DummyEventHandler::handle(EpollEventLocalID event_local_id)
 {
   RCLCPP_WARN(
     logger, "DummyEventHandler received an unexpected event (local_id=%u). This event is ignored.",
     event_local_id);
-  return false;
 }
 
 EpollManager::EpollManager(EventHandlerArray sources)
@@ -62,7 +61,7 @@ void EpollManager::prepare_epoll(const CallbackGroupValidator & validate_callbac
   }
 }
 
-bool EpollManager::wait_and_handle_epoll_event(const int timeout_ms)
+void EpollManager::wait_and_handle_epoll_event(const int timeout_ms)
 {
   struct epoll_event event = {};
 
@@ -76,12 +75,12 @@ bool EpollManager::wait_and_handle_epoll_event(const int timeout_ms)
       exit(EXIT_FAILURE);
     }
 
-    return false;
+    return;
   }
 
   // timeout
   if (nfds == 0) {
-    return false;
+    return;
   }
 
   const auto [event_type, event_local_id] = unpack_epoll_data(event.data.u64);
@@ -94,7 +93,7 @@ bool EpollManager::wait_and_handle_epoll_event(const int timeout_ms)
     exit(EXIT_FAILURE);
   }
 
-  return sources_[static_cast<uint32_t>(event_type)]->handle(event_local_id);
+  sources_[static_cast<uint32_t>(event_type)]->handle(event_local_id);
 }
 
 }  // namespace agnocast

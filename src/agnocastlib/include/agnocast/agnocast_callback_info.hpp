@@ -151,7 +151,7 @@ public:
 
   void prepare_epoll(int epoll_fd, const CallbackGroupValidator & validate_callback_group) override;
 
-  bool handle(EpollEventLocalID event_local_id) override;
+  void handle(EpollEventLocalID event_local_id) override;
 };
 
 }  // namespace agnocast

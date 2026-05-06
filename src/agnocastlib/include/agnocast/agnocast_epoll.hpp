@@ -31,7 +31,7 @@ public:
   virtual void prepare_epoll(
     int epoll_fd, const CallbackGroupValidator & validate_callback_group) = 0;
 
-  virtual bool handle(EpollEventLocalID event_local_id) = 0;
+  virtual void handle(EpollEventLocalID event_local_id) = 0;
 };
 
 // Shutdown event - only used by AgnocastOnlyExecutor
@@ -48,7 +48,7 @@ public:
     (void)validate_callback_group;
   }
 
-  bool handle(EpollEventLocalID /*event_local_id*/) override { return true; }
+  void handle(EpollEventLocalID /*event_local_id*/) override {}
 };
 
 class DummyEventHandler : public EpollEventHandler
@@ -64,7 +64,7 @@ public:
     (void)validate_callback_group;
   }
 
-  bool handle(EpollEventLocalID event_local_id) override;
+  void handle(EpollEventLocalID event_local_id) override;
 };
 
 using EventHandlerArray =
@@ -84,8 +84,7 @@ public:
 
   void prepare_epoll(const CallbackGroupValidator & validate_callback_group);
 
-  /// @return true if shutdown event detected, false otherwise
-  bool wait_and_handle_epoll_event(int timeout_ms);
+  void wait_and_handle_epoll_event(int timeout_ms);
 
 private:
   int epoll_fd_{-1};

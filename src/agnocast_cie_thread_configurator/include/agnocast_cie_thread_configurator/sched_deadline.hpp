@@ -26,7 +26,7 @@ struct sched_attr
 };
 #endif
 
-int sched_setattr(pid_t pid, const struct sched_attr * attr, unsigned int flags)
+inline int sched_setattr(pid_t pid, const struct sched_attr * attr, unsigned int flags)
 {
   return syscall(__NR_sched_setattr, pid, attr, flags);
 }
