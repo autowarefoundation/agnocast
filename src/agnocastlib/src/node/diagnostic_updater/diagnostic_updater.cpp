@@ -40,7 +40,6 @@
 
 namespace agnocast
 {
-
 Updater::Updater(agnocast::Node & node, double period)
 : verbose_(false),
   node_(node),
@@ -52,41 +51,29 @@ Updater::Updater(agnocast::Node & node, double period)
   warn_nohwid_done_(false)
 {
   constexpr const char * period_param_name = "diagnostic_updater.period";
+  rclcpp::ParameterValue period_param;
   if (node_.has_parameter(period_param_name)) {
-    period = node_.get_parameter(period_param_name).get_parameter_value().get<double>();
+    period_param = node_.get_parameter(period_param_name).get_parameter_value();
   } else {
-    period = node_.declare_parameter(period_param_name, period);
+    period_param = node_.declare_parameter(period_param_name, rclcpp::ParameterValue(period));
   }
+  period = period_param.get<double>();
   period_ = rclcpp::Duration::from_seconds(period);
 
   reset_timer();
 
   constexpr const char * use_fqn_param_name = "diagnostic_updater.use_fqn";
-  bool use_fqn;
+  rclcpp::ParameterValue use_fqn_param;
   if (node_.has_parameter(use_fqn_param_name)) {
-    use_fqn = node_.get_parameter(use_fqn_param_name).get_parameter_value().get<bool>();
+    use_fqn_param = node_.get_parameter(use_fqn_param_name).get_parameter_value();
   } else {
-    use_fqn = node_.declare_parameter(use_fqn_param_name, false);
+    use_fqn_param = node_.declare_parameter(use_fqn_param_name, rclcpp::ParameterValue(false));
   }
-  node_name_ = use_fqn ? node_.get_fully_qualified_name() : node_.get_name();
+  node_name_ = use_fqn_param.get<bool>() ? node_.get_fully_qualified_name() : node_.get_name();
 }
 
-Updater::Updater(agnocast::Node * node, double period) : Updater(*node, period) {}
-
-void Updater::setPeriod(rclcpp::Duration period)
+Updater::Updater(agnocast::Node * node, double period) : Updater(*node, period)
 {
-  period_ = period;
-  reset_timer();
-}
-
-void Updater::setPeriod(double period)
-{
-  setPeriod(rclcpp::Duration::from_seconds(period));
-}
-
-void Updater::force_update()
-{
-  update();
 }
 
 void Updater::broadcast(unsigned char lvl, const std::string msg)
@@ -94,10 +81,13 @@ void Updater::broadcast(unsigned char lvl, const std::string msg)
   std::vector<diagnostic_msgs::msg::DiagnosticStatus> status_vec;
 
   const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
-  for (auto iter = tasks.begin(); iter != tasks.end(); iter++) {
+  for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
+       iter != tasks.end(); iter++) {
     diagnostic_updater::DiagnosticStatusWrapper status;
+
     status.name = iter->getName();
     status.summary(lvl, msg);
+
     status_vec.push_back(status);
   }
 
@@ -108,10 +98,10 @@ void Updater::setHardwareIDf(const char * format, ...)
 {
   va_list va;
   const int kBufferSize = 1000;
-  char buff[kBufferSize];
+  char buff[kBufferSize];  // @todo This could be done more elegantly.
   va_start(va, format);
   if (vsnprintf(buff, kBufferSize, format, va) >= kBufferSize) {
-    RCLCPP_DEBUG(logger_, "Really long string in agnocast::Updater::setHardwareIDf.");
+    RCLCPP_DEBUG(logger_, "Really long string in diagnostic_updater::setHardwareIDf.");
   }
   hwid_ = std::string(buff);
   va_end(va);
@@ -119,52 +109,56 @@ void Updater::setHardwareIDf(const char * format, ...)
 
 void Updater::reset_timer()
 {
-  update_timer_ = node_.create_wall_timer(
+  update_timer_ = node_.create_timer(
     std::chrono::nanoseconds(period_.nanoseconds()), std::bind(&Updater::update, this));
 }
 
 void Updater::update()
 {
-  bool warn_nohwid = hwid_.empty();
+  if (agnocast::ok()) {
+    bool warn_nohwid = hwid_.empty();
 
-  std::vector<diagnostic_msgs::msg::DiagnosticStatus> status_vec;
+    std::vector<diagnostic_msgs::msg::DiagnosticStatus> status_vec;
 
-  std::unique_lock<std::mutex> lock(lock_);
-  const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
-  for (auto iter = tasks.begin(); iter != tasks.end(); iter++) {
-    diagnostic_updater::DiagnosticStatusWrapper status;
+    std::unique_lock<std::mutex> lock(
+      lock_);  // Make sure no adds happen while we are processing here.
+    const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
+    for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
+         iter != tasks.end(); iter++) {
+      diagnostic_updater::DiagnosticStatusWrapper status;
 
-    status.name = iter->getName();
-    status.level = 2;
-    status.message = "No message was set";
-    status.hardware_id = hwid_;
+      status.name = iter->getName();
+      status.level = 2;
+      status.message = "No message was set";
+      status.hardware_id = hwid_;
 
-    iter->run(status);
+      iter->run(status);
 
-    status_vec.push_back(status);
+      status_vec.push_back(status);
 
-    if (status.level) {
-      warn_nohwid = false;
+      if (status.level) {
+        warn_nohwid = false;
+      }
+
+      if (verbose_ && status.level) {
+        RCLCPP_WARN(
+          logger_, "Non-zero diagnostic status. Name: '%s', status %i: '%s'", status.name.c_str(),
+          status.level, status.message.c_str());
+      }
     }
 
-    if (verbose_ && status.level) {
-      RCLCPP_WARN(
-        logger_, "Non-zero diagnostic status. Name: '%s', status %i: '%s'", status.name.c_str(),
-        status.level, status.message.c_str());
+    if (warn_nohwid && !warn_nohwid_done_) {
+      std::string error_msg = "diagnostic_updater: No HW_ID was set.";
+      error_msg += " This is probably a bug. Please report it.";
+      error_msg += " For devices that do not have a HW_ID, set this value to 'none'.";
+      error_msg += " This warning only occurs once all diagnostics are OK.";
+      error_msg += " It is okay to wait until the device is open before calling setHardwareID.";
+      RCLCPP_WARN(logger_, "%s", error_msg.c_str());
+      warn_nohwid_done_ = true;
     }
-  }
 
-  if (warn_nohwid && !warn_nohwid_done_) {
-    std::string error_msg = "diagnostic_updater: No HW_ID was set.";
-    error_msg += " This is probably a bug. Please report it.";
-    error_msg += " For devices that do not have a HW_ID, set this value to 'none'.";
-    error_msg += " This warning only occurs once all diagnostics are OK.";
-    error_msg += " It is okay to wait until the device is open before calling setHardwareID.";
-    RCLCPP_WARN(logger_, "%s", error_msg.c_str());
-    warn_nohwid_done_ = true;
+    publish(status_vec);
   }
-
-  publish(status_vec);
 }
 
 void Updater::publish(diagnostic_msgs::msg::DiagnosticStatus & stat)
@@ -176,8 +170,9 @@ void Updater::publish(diagnostic_msgs::msg::DiagnosticStatus & stat)
 
 void Updater::publish(std::vector<diagnostic_msgs::msg::DiagnosticStatus> & status_vec)
 {
-  for (auto & status : status_vec) {
-    status.name = node_name_ + std::string(": ") + status.name;
+  for (std::vector<diagnostic_msgs::msg::DiagnosticStatus>::iterator iter = status_vec.begin();
+       iter != status_vec.end(); iter++) {
+    iter->name = node_name_ + std::string(": ") + iter->name;
   }
   auto msg = publisher_->borrow_loaned_message();
   msg->status = status_vec;
@@ -192,5 +187,4 @@ void Updater::addedTaskCallback(DiagnosticTaskInternal & task)
   stat.summary(0, "Node starting up");
   publish(stat);
 }
-
 }  // namespace agnocast

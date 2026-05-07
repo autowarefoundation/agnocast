@@ -48,13 +48,14 @@ namespace agnocast
 {
 
 /**
- * \brief agnocast::Node-compatible replacement for diagnostic_updater::Updater.
+ * \brief Manages a list of diagnostic tasks, and calls them in a
+ * rate-limited manner.
  *
- * Reuses DiagnosticTaskVector, DiagnosticTask, DiagnosticStatusWrapper, etc. from
- * the original diagnostic_updater package. Only the publisher and timer are replaced
- * with Agnocast equivalents for zero-copy shared memory transport.
- *
- * The publication rate is determined by the `diagnostic_updater.period` ros2 parameter.
+ * This class manages a list of diagnostic tasks. Its update function
+ * should be called frequently. At some predetermined rate, the update
+ * function will cause all the diagnostic tasks to run, and will collate
+ * and publish the resulting diagnostics. The publication rate is
+ * determined by the "~/diagnostic_updater.period" ros2 parameter.
  * The force_update function can always be triggered async to the period interval.
  */
 class Updater : public diagnostic_updater::DiagnosticTaskVector
@@ -63,19 +64,22 @@ public:
   bool verbose_;
 
   /**
-   * \brief Constructs an updater.
+   * \brief Constructs an updater class.
    *
-   * \param node Reference to an agnocast::Node.
-   * \param period Update period in seconds. Ignored if `diagnostic_updater.period`
-   *   has already been declared on \p node.
+   * \param node Reference to an agnocast::Node to set up diagnostics
+   * \param period Value in seconds to set the update period
+   * \note The given period value not being used if the `diagnostic_updater.period`
+   * ros2 parameter was set previously.
    */
   explicit Updater(agnocast::Node & node, double period = 1.0);
 
   /**
-   * \brief Constructs an updater from an agnocast::Node pointer.
+   * \brief Constructs an updater class.
    *
-   * Provided for compatibility with the upstream `diagnostic_updater::Updater`
-   * idiom `Updater updater_{this};` used pervasively in downstream code.
+   * \param node Pointer to an agnocast::Node to set up diagnostics
+   * \param period Value in seconds to set the update period
+   * \note The given period value not being used if the `diagnostic_updater.period`
+   * ros2 parameter was set previously.
    */
   explicit Updater(agnocast::Node * node, double period = 1.0);
 
@@ -85,45 +89,63 @@ public:
   auto getPeriod() const { return period_; }
 
   /**
-   * \brief Sets the period as a rclcpp::Duration.
+   * \brief Sets the period as a rclcpp::Duration
    */
-  void setPeriod(rclcpp::Duration period);
+  void setPeriod(rclcpp::Duration period)
+  {
+    period_ = period;
+    reset_timer();
+  }
 
   /**
-   * \brief Sets the period given a value in seconds.
+   * \brief Sets the period given a value in seconds
    */
-  void setPeriod(double period);
+  void setPeriod(double period) { setPeriod(rclcpp::Duration::from_seconds(period)); }
 
   /**
    * \brief Forces to send out an update for all known DiagnosticStatus.
    */
-  void force_update();
+  void force_update() { update(); }
 
   /**
    * \brief Output a message on all the known DiagnosticStatus.
    *
-   * Useful if something drastic is happening such as shutdown or a self-test.
+   * Useful if something drastic is happening such as shutdown or a
+   * self-test.
    *
    * \param lvl Level of the diagnostic being output.
+   *
    * \param msg Status message to output.
    */
   void broadcast(unsigned char lvl, const std::string msg);
 
-  /**
-   * \brief Sets the hardware ID using a printf-style format string.
-   */
   void setHardwareIDf(const char * format, ...);
 
-  /**
-   * \brief Sets the hardware ID.
-   */
   void setHardwareID(const std::string & hwid) { hwid_ = hwid; }
 
 private:
   void reset_timer();
+
+  /**
+   * \brief Causes the diagnostics to update if the inter-update interval
+   * has been exceeded.
+   */
   void update();
+
+  /**
+   * Publishes a single diagnostic status.
+   */
   void publish(diagnostic_msgs::msg::DiagnosticStatus & stat);
+
+  /**
+   * Publishes a vector of diagnostic statuses.
+   */
   void publish(std::vector<diagnostic_msgs::msg::DiagnosticStatus> & status_vec);
+
+  /**
+   * Causes a placeholder DiagnosticStatus to be published as soon as a
+   * diagnostic task is added to the Updater.
+   */
   void addedTaskCallback(DiagnosticTaskInternal & task) override;
 
   agnocast::Node & node_;
