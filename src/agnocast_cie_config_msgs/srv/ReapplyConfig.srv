@@ -1,0 +1,16 @@
+# Re-read the YAML at the configurator's 'config_file' parameter and apply
+# scheduling attributes. Added/removed entries are accepted: added entries
+# enter as applied=false (configured once their thread_id is announced),
+# removed entries drop out of in-memory state (kernel scheduling persists).
+# Only YAML parse / per-entry validation rejects the request; on rejection
+# no state is mutated. hardware_info / rt_throttling are NOT re-evaluated
+# on reapply; changes there require a process restart.
+---
+bool success                       # true iff parse + per-entry validation passed
+string error_message               # parse / validation failure reason (empty on success)
+string[] applied_callback_groups   # syscalls succeeded; format "<domain_id>:<callback_group_id>"
+string[] applied_non_ros_threads   # syscalls succeeded; thread name
+string[] failed_callback_groups    # syscall failed (details in configurator log)
+string[] failed_non_ros_threads    # syscall failed (details in configurator log)
+string[] skipped_callback_groups   # thread_id not yet announced; will apply on next announcement
+string[] skipped_non_ros_threads

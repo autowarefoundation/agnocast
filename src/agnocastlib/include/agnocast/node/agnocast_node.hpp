@@ -650,13 +650,13 @@ private:
   // ParsedArguments must be stored to keep rcl_arguments_t alive
   ParsedArguments local_args_;
 
-  rclcpp::Logger logger_{rclcpp::get_logger("agnocast_node")};
   node_interfaces::NodeBase::SharedPtr node_base_;
-  node_interfaces::NodeParameters::SharedPtr node_parameters_;
+  rclcpp::Logger logger_;
   node_interfaces::NodeTopics::SharedPtr node_topics_;
+  node_interfaces::NodeServices::SharedPtr node_services_;
+  node_interfaces::NodeParameters::SharedPtr node_parameters_;
   node_interfaces::NodeClock::SharedPtr node_clock_;
   node_interfaces::NodeTimeSource::SharedPtr node_time_source_;
-  node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeLogging::SharedPtr node_logging_;
 };
 

@@ -125,15 +125,16 @@ class BasicSubscription : public SubscriptionBase
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
     const bool is_bridge)
   {
-    auto node_parameters = node->get_node_parameters_interface();
+    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+      override_qos ? node->get_node_parameters_interface() : nullptr;
     const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::SubscriptionQosParametersTraits{})
-        : qos;
+      override_qos ? rclcpp::detail::declare_qos_parameters(
+                       options.qos_overriding_options, node_parameters, topic_name_, qos,
+                       rclcpp::detail::SubscriptionQosParametersTraits{})
+                   : qos;
 
-    validate_qos(actual_qos);
+    validate_subscription_qos(actual_qos);
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
       actual_qos, false, options.ignore_local_publications, is_bridge,
@@ -234,15 +235,16 @@ private:
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
   {
-    auto node_parameters = node->get_node_parameters_interface();
+    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+      override_qos ? node->get_node_parameters_interface() : nullptr;
     const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::SubscriptionQosParametersTraits{})
-        : qos;
+      override_qos ? rclcpp::detail::declare_qos_parameters(
+                       options.qos_overriding_options, node_parameters, topic_name_, qos,
+                       rclcpp::detail::SubscriptionQosParametersTraits{})
+                   : qos;
 
-    validate_qos(actual_qos);
+    validate_subscription_qos(actual_qos);
 
     union ioctl_add_subscriber_args add_subscriber_args = initialize(
       actual_qos, true, options.ignore_local_publications, false, node->get_fully_qualified_name());
@@ -402,14 +404,15 @@ public:
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
 };
 
-struct RosToAgnocastRequestPolicy;
+struct RosToAgnocastPubsubRequestPolicy;
 
 /// @brief The user-facing event-driven subscription type.
 /// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when
 /// declaring subscription variables.
 AGNOCAST_PUBLIC
 template <typename MessageT>
-using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+using Subscription =
+  agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 /// @brief The user-facing polling take-subscription type.
 /// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly)
@@ -417,7 +420,7 @@ using Subscription = agnocast::BasicSubscription<MessageT, agnocast::RosToAgnoca
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using TakeSubscription =
-  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 /// @brief The user-facing polling subscriber type.
 /// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber
@@ -425,6 +428,6 @@ using TakeSubscription =
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using PollingSubscriber =
-  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastRequestPolicy>;
+  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
 
 }  // namespace agnocast

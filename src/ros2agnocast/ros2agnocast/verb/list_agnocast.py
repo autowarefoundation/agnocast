@@ -115,14 +115,21 @@ class ListAgnocastVerb(VerbExtension):
             
             # Get ros2 topics
             ros2_topics_data = get_topic_names_and_types(node=node)
-            ros2_topics = [name for name, _ in ros2_topics_data]
-            ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(ros2_topics)
+            ros2_all_topics = set(name for name, _ in ros2_topics_data)
 
             ########################################################################
             # Print topic list
             ########################################################################
             agnocast_topics_set = set(agnocast_topics)
-            ros2_topics_set = set(ros2_pub_topics) | set(ros2_sub_topics)
+
+            # Non-agnocast ROS2 topics cannot have bridge nodes, so no filtering needed.
+            ros2_only_topics = ros2_all_topics - agnocast_topics_set
+            # Only query pub/sub breakdown for topics in both sets (expensive ROS2 API calls).
+            overlapping_candidates = list(agnocast_topics_set & ros2_all_topics)
+            ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(overlapping_candidates)
+            ros2_pub_topics_set = set(ros2_pub_topics)
+            ros2_sub_topics_set = set(ros2_sub_topics)
+            ros2_topics_set = ros2_only_topics | ros2_pub_topics_set | ros2_sub_topics_set
 
             for topic in sorted(agnocast_topics_set | ros2_topics_set):
                 if topic in agnocast_topics_set and topic not in ros2_topics_set:
@@ -131,8 +138,8 @@ class ListAgnocastVerb(VerbExtension):
                     suffix = ""
                 else:
                     bridge_status, has_agnocast_pub, has_agnocast_sub = get_bridge_status(topic)
-                    needs_r2a = has_agnocast_sub and topic in ros2_pub_topics
-                    needs_a2r = has_agnocast_pub and topic in ros2_sub_topics
+                    needs_r2a = has_agnocast_sub and topic in ros2_pub_topics_set
+                    needs_a2r = has_agnocast_pub and topic in ros2_sub_topics_set
                     match bridge_status:
                         case BridgeStatus.BIDIRECTION:
                             suffix = " (Agnocast enabled, bridged)"

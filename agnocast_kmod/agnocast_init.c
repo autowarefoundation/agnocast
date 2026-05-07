@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
 // =========================================
@@ -106,7 +107,7 @@ int agnocast_init_kthread(void)
 
   worker_task = kthread_run(exit_worker_thread, NULL, "agnocast_exit_worker");
   if (IS_ERR(worker_task)) {
-    dev_warn(agnocast_device, "failed to create kernel thread. (agnocast_init_kthread)\n");
+    dev_warn(agnocast_device, "failed to create kernel thread. (%s)\n", __func__);
     return PTR_ERR(worker_task);
   }
 

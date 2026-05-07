@@ -2,6 +2,7 @@
 
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_parameter_service.hpp"
 #include "rclcpp/exceptions/exceptions.hpp"
 
 #include <algorithm>
@@ -343,6 +344,17 @@ NodeParameters::NodeParameters(
   std::string combined_name = node_base_->get_fully_qualified_name();
   parameter_overrides_ =
     resolve_parameter_overrides(combined_name, parameter_overrides, local_args, global_args);
+}
+
+void NodeParameters::start_parameter_services(agnocast::Node * node)
+{
+  if (parameter_service_) {
+    RCLCPP_WARN(
+      rclcpp::get_logger(node_base_->get_name()),
+      "start_parameter_services() called more than once; ignoring");
+    return;
+  }
+  parameter_service_ = std::make_shared<ParameterService>(node, this);
 }
 
 const rclcpp::ParameterValue & NodeParameters::declare_parameter(

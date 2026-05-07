@@ -1,18 +1,17 @@
 #pragma once
 
+#include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
 #include "rclcpp/rclcpp.hpp"
-
-#include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
 
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 namespace agnocast_cie_thread_configurator
 {
@@ -26,20 +25,6 @@ size_t get_default_domain_id();
 // Create a node for a different domain
 rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id);
 
-// Replace characters that are not alphanumeric or '_' with '_',
-// producing a valid ROS 2 node name token.
-inline std::string sanitize_node_name(const std::string & name)
-{
-  std::string result;
-  result.reserve(name.size());
-  for (char c : name) {
-    const bool is_alnum =
-      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-    result += (is_alnum || c == '_') ? c : '_';
-  }
-  return result;
-}
-
 /// Spawn a thread whose scheduling policy can be managed through
 /// cie_thread_configurator.
 /// Caution: the `thread_name` must be unique among threads managed by
@@ -49,55 +34,10 @@ std::thread spawn_non_ros2_thread(const char * thread_name, F && f, Args &&... a
 {
   std::thread t([thread_name = std::string(thread_name), func = std::forward<F>(f),
                  captured_args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
-    // Create isolated rclcpp context for publishing thread info
-    rclcpp::InitOptions init_options;
-    init_options.shutdown_on_signal = false;
-    init_options.auto_initialize_logging(false);
-    auto context = std::make_shared<rclcpp::Context>();
-    context->init(0, nullptr, init_options);
-
-    rclcpp::NodeOptions options;
-    options.context(context);
-    auto node = std::make_shared<rclcpp::Node>(
-      "cie_thread_client_" + sanitize_node_name(thread_name), "/agnocast_cie_thread_configurator",
-      options);
-
-    auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-      "/agnocast_cie_thread_configurator/non_ros_thread_info", rclcpp::QoS(5000).reliable());
-    auto tid = static_cast<pid_t>(syscall(SYS_gettid));
-
-    // Wait for subscriber to connect before publishing (timeout: 5 seconds)
-    // DDS discovery with a fresh rclcpp context can be slow on loaded CI machines.
-    constexpr int max_subscriber_wait_iterations = 500;  // 500 * 10ms = 5 seconds
-    int wait_count = 0;
-    while (publisher->get_subscription_count() == 0 &&
-           wait_count < max_subscriber_wait_iterations) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      ++wait_count;
-    }
-
-    if (publisher->get_subscription_count() > 0) {
-      auto message = std::make_shared<agnocast_cie_config_msgs::msg::NonRosThreadInfo>();
-      message->thread_id = tid;
-      message->thread_name = thread_name;
-      publisher->publish(*message);
-      const bool all_acked = publisher->wait_for_all_acked(std::chrono::milliseconds(500));
-      if (!all_acked) {
-        RCLCPP_WARN(
-          node->get_logger(),
-          "Timed out waiting for NonRosThreadInfo acknowledgment (thread '%s').",
-          thread_name.c_str());
-      }
-    } else {
-      RCLCPP_WARN(
-        node->get_logger(),
-        "No subscriber for NonRosThreadInfo (thread '%s'). "
-        "Please run thread_configurator_node if you want to configure thread scheduling.",
-        thread_name.c_str());
-    }
-
-    context->shutdown("cie_thread_client finished.");
-
+    NonRosThreadInfo info;
+    info.tid = static_cast<int64_t>(syscall(SYS_gettid));
+    info.name = std::move(thread_name);
+    send_non_ros_thread_info(info);
     std::apply(std::move(func), std::move(captured_args));
   });
   return t;

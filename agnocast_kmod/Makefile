@@ -53,7 +53,11 @@ all:
 test:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) KUNIT_BUILD=y modules
 
+sparse:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) C=2 modules > sparse.log 2>&1 || { cat sparse.log; exit 1; }
+	! grep 'agnocast_kmod/.*warning' sparse.log && rm -f sparse.log
+
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 
-.PHONY: all test clean
+.PHONY: all test sparse clean

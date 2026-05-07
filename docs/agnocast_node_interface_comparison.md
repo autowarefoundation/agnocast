@@ -103,12 +103,12 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
+| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
 
 **Other differences from rclcpp::NodeParameters**:
 
 | Item | rclcpp::NodeParameters | agnocast::NodeParameters | Planned |
 |------|------------------------|-------------------------|---------|
-| Parameter Service | Creates `ParameterService` (optional) | None | Yes |
 | Parameter Event Publishing | Publishes to `/parameter_events` | None | TBD |
 
 ---
@@ -199,7 +199,7 @@ This provides the same argument parsing functionality as rcl.
 | `--params-file file.yaml` | ✓ | **Full Support** | - | Load parameters from YAML file |
 | `--` (end marker) | ✓ | **Full Support** | - | ROS arguments end marker |
 | `-r node:old:=new` | ✓ | **Full Support** | - | Node-specific remapping |
-| `--log-level` | ✗ | **Unsupported** | TBD | Set log level |
+| `--log-level` | ✓ | **Full Support** | - | Set log level |
 | `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
 | `--disable-external-lib-logs` | ✓ | **Full Support** | - | Disable external library logs (file logging via rcl_logging_spdlog) |
 | `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |
