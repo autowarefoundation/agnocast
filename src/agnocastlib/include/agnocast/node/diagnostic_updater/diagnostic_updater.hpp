@@ -39,6 +39,7 @@
 #include "diagnostic_updater/diagnostic_updater.hpp"
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
+#include "diagnostic_msgs/msg/diagnostic_status.hpp"
 
 #include <memory>
 #include <string>
@@ -55,7 +56,7 @@ namespace agnocast
  * should be called frequently. At some predetermined rate, the update
  * function will cause all the diagnostic tasks to run, and will collate
  * and publish the resulting diagnostics. The publication rate is
- * determined by the "~/diagnostic_updater.period" ros2 parameter.
+ * determined by the "diagnostic_updater.period" ros2 parameter.
  * The force_update function can always be triggered async to the period interval.
  */
 class Updater : public diagnostic_updater::DiagnosticTaskVector
