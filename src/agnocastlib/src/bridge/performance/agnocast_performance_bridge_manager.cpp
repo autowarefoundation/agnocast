@@ -389,9 +389,9 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
     });
     if (exists) {
       RCLCPP_WARN(
-        logger_, "Service '%s' already exists in ROS 2. Not creating bridge for it.",
+        logger_,
+        "Found a ROS 2 service with the same name while creating the R2A service bridge: '%s'",
         service_name.c_str());
-      return;
     }
 
     auto service_qos = get_service_qos(service_name);
