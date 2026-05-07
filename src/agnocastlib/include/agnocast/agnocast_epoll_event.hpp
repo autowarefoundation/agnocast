@@ -6,6 +6,14 @@
 namespace agnocast
 {
 
+/**
+ * @brief Categorizes the event types monitored by the Executor using epoll.
+ *
+ * Events monitored by epoll are identified by a 64-bit integer, which is a
+ * combination of this event type and an event-specific local ID.
+ *
+ * @see EpollEventHandler
+ */
 enum class EpollEventType : uint32_t {
   Subscription = 0,
   Timer,
@@ -16,6 +24,9 @@ enum class EpollEventType : uint32_t {
   Dummy = 0xFFFFFFFF,
 };
 
+/**
+ * @brief Represents a unique local identifier specific to an event type.
+ */
 using EpollEventLocalID = uint32_t;
 
 constexpr uint32_t EPOLL_DATA_TYPE_SHIFT = 32;
