@@ -5,6 +5,9 @@ on:
     paths:
       - 'agnocast_kmod/**'
 
+permissions:
+  contents: read
+
 jobs:
   checkpatch:
     runs-on: ubuntu-22.04
@@ -23,10 +26,15 @@ jobs:
         run: git fetch origin ${{ github.base_ref }}
 
       - name: Download checkpatch.pl
+        env:
+          # Pinned to a specific Linux kernel commit for reproducibility and supply-chain safety.
+          # Bump this SHA periodically to pick up checkpatch updates.
+          CHECKPATCH_SHA: fcee7d82f27d6a8b1ddc5bbefda59b4e441e9bc0
         run: |
-          wget -q https://raw.githubusercontent.com/torvalds/linux/master/scripts/checkpatch.pl
-          wget -q https://raw.githubusercontent.com/torvalds/linux/master/scripts/const_structs.checkpatch
-          wget -q https://raw.githubusercontent.com/torvalds/linux/master/scripts/spelling.txt
+          BASE="https://raw.githubusercontent.com/torvalds/linux/${CHECKPATCH_SHA}/scripts"
+          wget -q "${BASE}/checkpatch.pl"
+          wget -q "${BASE}/const_structs.checkpatch"
+          wget -q "${BASE}/spelling.txt"
           chmod +x checkpatch.pl
 
       - name: Run checkpatch on PR diff
