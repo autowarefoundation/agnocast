@@ -132,10 +132,6 @@ void StandardBridgeManager::on_signal()
 
 void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)
 {
-  if (req.is_service) {
-    return;
-  }
-
   // Locally, unique keys include the direction. However, we register the raw topic name (without
   // direction) to the kernel to enforce single-process ownership for the entire topic.
 
@@ -405,10 +401,6 @@ bool StandardBridgeManager::should_remove_pubsub_bridge(const std::string & topi
 
 void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & req)
 {
-  if (!req.is_service) {
-    return;
-  }
-
   if (req.direction != BridgeDirection::ROS2_TO_AGNOCAST) {
     // A2R service bridge is not implemented yet.
     return;
