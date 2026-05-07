@@ -80,7 +80,7 @@ public:
   EpollManager(EpollManager &&) = delete;
   EpollManager & operator=(EpollManager &&) = delete;
 
-  [[nodiscard]] int add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const;
+  [[nodiscard]] bool add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const;
 
   void prepare_epoll(const CallbackGroupValidator & validate_callback_group);
 

@@ -46,12 +46,16 @@ EpollManager::~EpollManager()
   }
 }
 
-int EpollManager::add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const
+bool EpollManager::add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const
 {
   struct epoll_event ev = {};
   ev.events = EPOLLIN;
   ev.data.u64 = pack_epoll_data(type, local_id);
-  return epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
+  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev) == -1) {
+    RCLCPP_WARN(logger, "epoll_ctl failed: %s", strerror(errno));
+    return false;
+  }
+  return true;
 }
 
 void EpollManager::prepare_epoll(const CallbackGroupValidator & validate_callback_group)

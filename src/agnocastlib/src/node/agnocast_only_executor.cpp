@@ -41,7 +41,7 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
     exit(EXIT_FAILURE);
   }
 
-  if (epoll_manager_->add_event(shutdown_event_fd_, EpollEventType::Shutdown, 0) == -1) {
+  if (!epoll_manager_->add_event(shutdown_event_fd_, EpollEventType::Shutdown, 0)) {
     RCLCPP_ERROR(logger, "epoll_ctl for shutdown_event_fd failed: %s", strerror(errno));
     close(shutdown_event_fd_);
     exit(EXIT_FAILURE);
