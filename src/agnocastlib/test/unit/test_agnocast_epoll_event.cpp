@@ -15,6 +15,9 @@ TEST(EpollEventDataTest, PackAndUnpackRoundTripForAllKnownTypes)
   const std::array<EpollEventType, static_cast<size_t>(EpollEventType::NrEventType)> types = {
     EpollEventType::Subscription, EpollEventType::Timer, EpollEventType::Clock,
     EpollEventType::Shutdown};
+  static_assert(
+    types.size() == static_cast<size_t>(EpollEventType::NrEventType),
+    "Update this test when adding a new EpollEventType");
 
   for (auto type : types) {
     const auto packed = pack_epoll_data(type, id);
