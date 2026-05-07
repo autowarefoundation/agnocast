@@ -244,14 +244,20 @@ public:
     ros_srv_ = parent_node->create_service<ServiceT>(
       service_name,
       [this](
-        const typename ServiceT::Request::SharedPtr ros_req,
-        typename ServiceT::Response::SharedPtr ros_res) {
+        typename rclcpp::Service<ServiceT>::SharedPtr service_handle,
+        std::shared_ptr<rmw_request_id_t> request_header,
+        typename ServiceT::Request::SharedPtr ros_req) {
         auto agno_req = this->agno_client_->borrow_loaned_request();
         *agno_req = *ros_req;
 
-        auto future = this->agno_client_->async_send_request(std::move(agno_req));
-        auto agno_res = future.get();
-        *ros_res = *agno_res;
+        this->agno_client_->async_send_request(
+          std::move(agno_req), [service_handle, request_header](
+                                 typename agnocast::Client<ServiceT>::SharedFuture future) {
+            auto agno_res = future.get();
+            typename ServiceT::Response ros_res;
+            ros_res = *agno_res;
+            service_handle->send_response(*request_header, ros_res);
+          });
       },
       qos.get_rmw_qos_profile(), ros_srv_cb_group_);
   }
