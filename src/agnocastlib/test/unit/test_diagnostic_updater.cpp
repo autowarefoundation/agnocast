@@ -65,6 +65,21 @@ TEST_F(DiagnosticUpdaterTest, constructs_with_default_period)
   EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 1.0);
 }
 
+TEST_F(DiagnosticUpdaterTest, constructs_from_node_pointer)
+{
+  agnocast::Updater updater(node_.get());
+  EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 1.0);
+}
+
+TEST_F(DiagnosticUpdaterTest, constructs_from_node_pointer_with_period)
+{
+  agnocast::Updater updater(node_.get(), 0.25);
+  EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 0.25);
+  ASSERT_TRUE(node_->has_parameter("diagnostic_updater.period"));
+  EXPECT_DOUBLE_EQ(
+    node_->get_parameter("diagnostic_updater.period").get_parameter_value().get<double>(), 0.25);
+}
+
 TEST_F(DiagnosticUpdaterTest, constructor_declares_period_parameter)
 {
   agnocast::Updater updater(*node_, 0.5);

@@ -71,6 +71,8 @@ Updater::Updater(agnocast::Node & node, double period)
   node_name_ = use_fqn ? node_.get_fully_qualified_name() : node_.get_name();
 }
 
+Updater::Updater(agnocast::Node * node, double period) : Updater(*node, period) {}
+
 void Updater::setPeriod(rclcpp::Duration period)
 {
   period_ = period;

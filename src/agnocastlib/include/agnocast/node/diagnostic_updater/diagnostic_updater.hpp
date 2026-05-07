@@ -72,6 +72,14 @@ public:
   explicit Updater(agnocast::Node & node, double period = 1.0);
 
   /**
+   * \brief Constructs an updater from an agnocast::Node pointer.
+   *
+   * Provided for compatibility with the upstream `diagnostic_updater::Updater`
+   * idiom `Updater updater_{this};` used pervasively in downstream code.
+   */
+  explicit Updater(agnocast::Node * node, double period = 1.0);
+
+  /**
    * \brief Returns the interval between updates.
    */
   auto getPeriod() const { return period_; }
