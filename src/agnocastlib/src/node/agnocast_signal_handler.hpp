@@ -45,6 +45,10 @@ public:
   // This operation always succeeds.
   static void unregister_shutdown_event(int eventfd);
 
+  // Sends a notification to all registered executors if the handler is installed.
+  // Does nothing if the handler is not installed.
+  static void notify_all_executors();
+
 private:
   enum class State {
     NotInstalled,
@@ -67,7 +71,6 @@ private:
   static void wait_for_signal_eventfd();
   static void signal_processing_loop();
   static void signal_handler(int signum);
-  static void notify_all_executors();
 };
 
 }  // namespace agnocast

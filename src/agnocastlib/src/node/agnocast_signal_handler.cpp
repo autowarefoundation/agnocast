@@ -1,5 +1,6 @@
 #include "agnocast_signal_handler.hpp"
 
+#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <sys/eventfd.h>
@@ -193,6 +194,10 @@ void SignalHandler::signal_processing_loop()
 {
   while (true) {
     if (signal_received_.exchange(false)) {
+      {
+        std::lock_guard<std::mutex> lock(g_context_mtx);
+        g_context.shutdown();
+      }
       notify_all_executors();
     }
 
@@ -261,6 +266,9 @@ void SignalHandler::signal_handler(int signum)
 void SignalHandler::notify_all_executors()
 {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (state_ != State::Installed) {
+    return;
+  }
   uint64_t val = 1;
   for (auto it = eventfds_.begin(); it != eventfds_.end();) {
     const int fd = *it;
