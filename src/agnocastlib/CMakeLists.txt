@@ -138,6 +138,7 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_executors.cpp
     test/unit/test_agnocast_epoll_event.cpp
     test/unit/test_agnocast_epoll_update.cpp
+    test/unit/test_agnocast_epoll_manager.cpp
     test/unit/test_node_topics.cpp
     test/unit/test_cie_client_utils.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)

@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 
 namespace agnocast
 {
@@ -22,19 +24,19 @@ EpollManager::EpollManager(EventHandlerArray sources)
 : epoll_fd_(epoll_create1(0)), sources_(std::move(sources))
 {
   if (epoll_fd_ == -1) {
-    RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
-    exit(EXIT_FAILURE);
+    throw std::runtime_error(std::string("epoll_create1 failed: ") + strerror(errno));
   }
 
   for (uint32_t type = 0; type < static_cast<uint32_t>(EpollEventType::NrEventType); type++) {
     if (!sources_[type]) {
-      RCLCPP_ERROR(logger, "invalid epoll event source array: sources_[%u] is nullptr", type);
-      exit(EXIT_FAILURE);
+      throw std::invalid_argument(
+        "invalid epoll event source array: sources_[" + std::to_string(type) + "] is nullptr");
     }
     auto source_type = static_cast<uint32_t>(sources_[type]->get_type());
     if (source_type != type && source_type != static_cast<uint32_t>(EpollEventType::Dummy)) {
-      RCLCPP_ERROR(logger, "invalid epoll event type: expected %u, got %u", type, source_type);
-      exit(EXIT_FAILURE);
+      throw std::invalid_argument(
+        "invalid epoll event type: expected " + std::to_string(type) + ", got " +
+        std::to_string(source_type));
     }
   }
 }
