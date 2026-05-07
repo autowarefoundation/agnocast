@@ -61,6 +61,7 @@ bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & to
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name);
 rclcpp::QoS get_service_qos(const std::string & service_name);
+bool is_agnocast_service_alive(const std::string & service_name, std::string & reason);
 
 /// @brief Build `BridgeFactoryInfo` for standard bridge requests.
 /// @return true when the bridge factory is successfully built, false otherwise.

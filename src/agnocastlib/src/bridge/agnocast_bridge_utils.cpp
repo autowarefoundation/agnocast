@@ -216,6 +216,22 @@ rclcpp::QoS get_service_qos(const std::string & service_name)
   return qos;
 }
 
+bool is_agnocast_service_alive(const std::string & service_name, std::string & reason)
+{
+  // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
+  // directly without using get_service_qos() as a probe.
+  try {
+    (void)get_service_qos(service_name);
+    return true;
+  } catch (const std::exception & e) {
+    reason = e.what();
+    return false;
+  } catch (...) {
+    reason = "Unknown error";
+    return false;
+  }
+}
+
 bool build_bridge_factory_info(
   BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
   const rclcpp::Logger & logger)

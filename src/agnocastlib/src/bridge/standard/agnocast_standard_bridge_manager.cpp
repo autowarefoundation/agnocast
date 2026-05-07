@@ -528,24 +528,23 @@ void StandardBridgeManager::check_and_remove_service_bridges()
   for (auto it = active_r2a_service_bridges_.begin(); it != active_r2a_service_bridges_.end();) {
     const std::string & service_name = it->first;
 
-    try {
-      // Use get_service_qos() as a service-bridge liveness probe. It throws when the target
-      // Agnocast service no longer exists.
-      get_service_qos(service_name);
+    std::string reason;
+    if (is_agnocast_service_alive(service_name, reason)) {
       ++it;
-    } catch (const std::exception & e) {
-      RCLCPP_WARN(
-        logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), e.what());
-
-      auto [ros_cb, agno_cb] = it->second->get_callback_groups();
-      if (ros_cb) {
-        executor_->stop_callback_group(ros_cb);
-      }
-      if (agno_cb) {
-        executor_->stop_callback_group(agno_cb);
-      }
-      it = active_r2a_service_bridges_.erase(it);
+      continue;
     }
+
+    RCLCPP_WARN(
+      logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), reason.c_str());
+
+    auto [ros_cb, agno_cb] = it->second->get_callback_groups();
+    if (ros_cb) {
+      executor_->stop_callback_group(ros_cb);
+    }
+    if (agno_cb) {
+      executor_->stop_callback_group(agno_cb);
+    }
+    it = active_r2a_service_bridges_.erase(it);
   }
 }
 
