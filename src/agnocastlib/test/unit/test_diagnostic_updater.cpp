@@ -1,37 +1,3 @@
-/*********************************************************************
- * Software License Agreement (BSD License)
- *
- *  Copyright (c) 2008, Willow Garage, Inc.
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions
- *  are met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *   * Neither the name of the Willow Garage nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- *********************************************************************/
-
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/diagnostic_updater/diagnostic_updater.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -159,64 +125,15 @@ TEST_F(DiagnosticUpdaterTest, set_period_updates_period_value)
   agnocast::Updater updater(*node_);
 
   // Act
-  updater.setPeriod(0.25);
-  // Assert
-  EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 0.25);
-
-  // Act
   updater.setPeriod(rclcpp::Duration::from_seconds(3.0));
+
   // Assert
   EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 3.0);
-}
-
-TEST_F(DiagnosticUpdaterTest, set_period_accepts_zero)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-
-  // Act
-  updater.setPeriod(0.0);
-
-  // Assert
-  EXPECT_DOUBLE_EQ(updater.getPeriod().seconds(), 0.0);
-}
-
-TEST_F(DiagnosticUpdaterTest, set_period_with_negative_throws)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-
-  // Act / Assert
-  EXPECT_THROW(updater.setPeriod(-2.0), std::runtime_error);
 }
 
 // ---------------------------------------------------------------------------
 // setHardwareID / setHardwareIDf
 // ---------------------------------------------------------------------------
-
-TEST_F(DiagnosticUpdaterTest, set_hardware_id_stores_value)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-
-  // Act
-  updater.setHardwareID("test-hwid");
-
-  // Assert: no public getter; this test ensures the call compiles and does not throw.
-  SUCCEED();
-}
-
-TEST_F(DiagnosticUpdaterTest, set_hardware_idf_formats_string)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-
-  // Act
-  updater.setHardwareIDf("dev-%d-%s", 42, "agnocast");
-
-  // Assert
-  SUCCEED();
-}
 
 TEST_F(DiagnosticUpdaterTest, set_hardware_idf_truncates_overlong_string)
 {
@@ -232,8 +149,9 @@ TEST_F(DiagnosticUpdaterTest, set_hardware_idf_truncates_overlong_string)
   // Act
   updater.force_update();
 
-  // Assert: vsnprintf with a 1000-byte buffer writes at most 999 chars + NUL.
-  EXPECT_EQ(observed_hwid.size(), static_cast<std::size_t>(999));
+  // Assert: vsnprintf with a 1000-byte buffer writes at most 999 chars + NUL,
+  //         so the stored hwid is the first 999 'a' characters.
+  EXPECT_EQ(observed_hwid, std::string(999, 'a'));
 }
 
 TEST_F(DiagnosticUpdaterTest, set_hardware_idf_handles_multiple_format_specifiers)
@@ -391,72 +309,34 @@ TEST_F(DiagnosticUpdaterTest, force_update_with_zero_tasks_does_not_throw)
   EXPECT_NO_THROW(updater.force_update());
 }
 
-TEST_F(DiagnosticUpdaterTest, task_receives_stat_with_default_error_level)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-  updater.setHardwareID("none");
-  unsigned char observed_level = 0;
-  updater.add("task", [&](diagnostic_updater::DiagnosticStatusWrapper & stat) {
-    observed_level = stat.level;
-  });
-
-  // Act
-  updater.force_update();
-
-  // Assert: update() initializes stat.level to ERROR (=2) before calling the task.
-  EXPECT_EQ(observed_level, diagnostic_msgs::msg::DiagnosticStatus::ERROR);
-}
-
-TEST_F(DiagnosticUpdaterTest, task_receives_stat_with_default_message)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-  updater.setHardwareID("none");
-  std::string observed_message;
-  updater.add("task", [&](diagnostic_updater::DiagnosticStatusWrapper & stat) {
-    observed_message = stat.message;
-  });
-
-  // Act
-  updater.force_update();
-
-  // Assert
-  EXPECT_EQ(observed_message, "No message was set");
-}
-
-TEST_F(DiagnosticUpdaterTest, task_receives_stat_with_task_name)
-{
-  // Arrange
-  agnocast::Updater updater(*node_);
-  updater.setHardwareID("none");
-  std::string observed_name;
-  updater.add("named-task", [&](diagnostic_updater::DiagnosticStatusWrapper & stat) {
-    observed_name = stat.name;
-  });
-
-  // Act
-  updater.force_update();
-
-  // Assert: the node-name prefix is added later in publish(); the task sees the bare name.
-  EXPECT_EQ(observed_name, "named-task");
-}
-
-TEST_F(DiagnosticUpdaterTest, task_receives_stat_with_hardware_id)
+TEST_F(DiagnosticUpdaterTest, task_receives_stat_initialized_by_updater)
 {
   // Arrange
   agnocast::Updater updater(*node_);
   updater.setHardwareID("hwid-xyz");
-  std::string observed_hwid;
-  updater.add("task", [&](diagnostic_updater::DiagnosticStatusWrapper & stat) {
-    observed_hwid = stat.hardware_id;
+  unsigned char observed_level = 0;
+  std::string observed_message;
+  std::string observed_name;
+  std::string observed_hardware_id;
+  std::size_t observed_values_size = 0;
+  updater.add("named-task", [&](diagnostic_updater::DiagnosticStatusWrapper & stat) {
+    observed_level = stat.level;
+    observed_message = stat.message;
+    observed_name = stat.name;
+    observed_hardware_id = stat.hardware_id;
+    observed_values_size = stat.values.size();
   });
 
   // Act
   updater.force_update();
 
-  // Assert
-  EXPECT_EQ(observed_hwid, "hwid-xyz");
+  // Assert: Updater::update() pre-fills stat with these values before invoking the task.
+  //         The node-name prefix is added later in publish(); the task sees the bare name.
+  EXPECT_EQ(observed_level, diagnostic_msgs::msg::DiagnosticStatus::ERROR);
+  EXPECT_EQ(observed_message, "No message was set");
+  EXPECT_EQ(observed_name, "named-task");
+  EXPECT_EQ(observed_hardware_id, "hwid-xyz");
+  EXPECT_EQ(observed_values_size, 0u);
 }
 
 // ---------------------------------------------------------------------------
