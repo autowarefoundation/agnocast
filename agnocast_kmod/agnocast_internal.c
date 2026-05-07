@@ -229,6 +229,8 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   if (next != queue_head) {  // queue is not full
     exit_pid_queue[queue_tail] = pid;
     queue_tail = next;
+    // Pairs with smp_load_acquire() in the worker thread; ensures the queue write
+    // is visible before the worker observes has_new_pid == 1.
     smp_store_release(&has_new_pid, 1);
     need_wakeup = true;
   }
