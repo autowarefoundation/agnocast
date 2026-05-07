@@ -34,6 +34,8 @@
 
 #include "agnocast/node/diagnostic_updater/diagnostic_updater.hpp"
 
+#include "agnocast/agnocast.hpp"
+
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -98,7 +100,7 @@ void Updater::setHardwareIDf(const char * format, ...)
 {
   va_list va;
   const int kBufferSize = 1000;
-  char buff[kBufferSize];  // @todo This could be done more elegantly.
+  char buff[kBufferSize];
   va_start(va, format);
   if (vsnprintf(buff, kBufferSize, format, va) >= kBufferSize) {
     RCLCPP_DEBUG(logger_, "Really long string in diagnostic_updater::setHardwareIDf.");
@@ -109,8 +111,8 @@ void Updater::setHardwareIDf(const char * format, ...)
 
 void Updater::reset_timer()
 {
-  update_timer_ = node_.create_timer(
-    std::chrono::nanoseconds(period_.nanoseconds()), std::bind(&Updater::update, this));
+  update_timer_ =
+    agnocast::create_timer(&node_, clock_, period_, std::bind(&Updater::update, this));
 }
 
 void Updater::update()
