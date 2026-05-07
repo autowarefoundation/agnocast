@@ -33,8 +33,7 @@
  *********************************************************************/
 
 #include "agnocast/node/agnocast_node.hpp"
-#include "agnocast/node/diagnostic_updater/diagnostic_updater_all.hpp"
-
+#include "agnocast/node/diagnostic_updater/diagnostic_updater.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <gtest/gtest.h>
@@ -47,12 +46,17 @@ class DiagnosticUpdaterTest : public ::testing::Test
 protected:
   void SetUp() override
   {
+    agnocast::init(0, nullptr);
     rclcpp::NodeOptions options;
     options.start_parameter_services(false);
     node_ = std::make_shared<agnocast::Node>("test_diagnostic_updater_node", options);
   }
 
-  void TearDown() override { node_.reset(); }
+  void TearDown() override
+  {
+    node_.reset();
+    agnocast::shutdown();
+  }
 
   std::shared_ptr<agnocast::Node> node_;
 };
@@ -152,7 +156,6 @@ TEST_F(DiagnosticUpdaterTest, broadcast_visits_all_tasks)
   // broadcast does not invoke task callbacks; it only emits the supplied summary.
   // So task_count should remain 0 here.
   task_count = 0;
-  updater.broadcast(
-    diagnostic_msgs::msg::DiagnosticStatus::WARN, "broadcast-msg");
+  updater.broadcast(diagnostic_msgs::msg::DiagnosticStatus::WARN, "broadcast-msg");
   EXPECT_EQ(task_count, 0);
 }
