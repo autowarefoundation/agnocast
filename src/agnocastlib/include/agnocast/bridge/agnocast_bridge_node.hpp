@@ -352,8 +352,8 @@ void send_standard_service_bridge_request(
 {
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
-  // TODO(bdm-k): Branch depending on `direction`.
-  // Service bridges currently support only the ROS2 -> Agnocast direction.
+  // TODO(bdm-k): Branch depending on `direction` and specify `start_a2r_service_node` once it's
+  // implemented. Service bridges currently support only the ROS2 -> Agnocast direction.
   auto fn_current = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
   auto fn_reverse = fn_current;  // dummy value
 
