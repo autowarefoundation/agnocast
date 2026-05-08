@@ -456,11 +456,12 @@ TEST_F(TestNodeBase, get_notify_guard_condition_throws_when_context_is_invalid)
 
 TEST_F(TestNodeBase, get_notify_guard_condition_returns_guard_when_context_is_valid)
 {
-  // Arrange: rclcpp::init() makes the default context valid. Scope the node
-  // so it is destroyed before rclcpp::shutdown() to keep cleanup well-defined.
-  rclcpp::init(0, nullptr);
+  // Arrange: use a local context to avoid coupling with the global default.
+  auto context = std::make_shared<rclcpp::Context>();
+  context->init(0, nullptr);
   {
     auto options = node_options_without_parameter_services();
+    options.context(context);
     auto local_node = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
     auto node_base = local_node->get_node_base_interface();
 
@@ -470,7 +471,7 @@ TEST_F(TestNodeBase, get_notify_guard_condition_returns_guard_when_context_is_va
       (void)guard;
     });
   }
-  rclcpp::shutdown();
+  context->shutdown("test cleanup");
 }
 
 #if RCLCPP_VERSION_MAJOR >= 28
