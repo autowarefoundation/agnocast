@@ -144,6 +144,33 @@ TEST_F(TestNodeBase, get_fully_qualified_name_supports_nested_namespaces)
   EXPECT_STREQ("/ns1/ns2/ns3/my_node", fqn);
 }
 
+TEST_F(TestNodeBase, constructor_applies_node_and_ns_remap_rules)
+{
+  // Arrange
+  auto options = node_options_without_parameter_services();
+  options.arguments({"--ros-args", "-r", "__node:=remapped_node", "-r", "__ns:=/remapped_ns"});
+  node_ = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
+  auto node_base = node_->get_node_base_interface();
+
+  // Act / Assert
+  EXPECT_STREQ("remapped_node", node_base->get_name());
+  EXPECT_STREQ("/remapped_ns", node_base->get_namespace());
+  EXPECT_STREQ("/remapped_ns/remapped_node", node_base->get_fully_qualified_name());
+}
+
+TEST_F(TestNodeBase, constructor_throws_when_no_args_available_for_remap)
+{
+  // Arrange: with both local and global args NULL, rcl_remap_name returns
+  // RCL_RET_INVALID_ARGUMENT.
+  auto context = rclcpp::contexts::get_global_default_context();
+
+  // Act / Assert
+  EXPECT_THROW(
+    agnocast::node_interfaces::NodeBase(
+      "my_node", "/my_ns", context, /*local_args=*/nullptr, /*use_global_arguments=*/false),
+    std::runtime_error);
+}
+
 // =============================================================================
 // Category 2: Context
 //
