@@ -31,7 +31,7 @@ protected:
     const std::string & node_name, const std::string & node_namespace)
   {
     auto base = create_node_base(node_name, node_namespace);
-    return std::dynamic_pointer_cast<agnocast::node_interfaces::NodeBase>(base);
+    return std::static_pointer_cast<agnocast::node_interfaces::NodeBase>(base);
   }
 };
 
@@ -743,7 +743,6 @@ TEST_F(TestNodeBase, on_callback_group_created_fires_for_each_created_group)
 {
   // Arrange
   auto node_base = create_concrete_node_base("my_node", "/my_ns");
-  ASSERT_NE(nullptr, node_base);
   int call_count = 0;
   node_base->set_on_callback_group_created([&call_count]() { ++call_count; });
 
@@ -759,7 +758,6 @@ TEST_F(TestNodeBase, on_callback_group_created_replaces_previous_callback)
 {
   // Arrange
   auto node_base = create_concrete_node_base("my_node", "/my_ns");
-  ASSERT_NE(nullptr, node_base);
   int first_count = 0;
   int second_count = 0;
   node_base->set_on_callback_group_created([&first_count]() { ++first_count; });
@@ -778,7 +776,6 @@ TEST_F(TestNodeBase, on_callback_group_created_fires_after_group_is_registered)
   // Arrange: when the hook fires, the new group must already be discoverable
   // via callback_group_in_node() so the executor can attach to it immediately.
   auto node_base = create_concrete_node_base("my_node", "/my_ns");
-  ASSERT_NE(nullptr, node_base);
 
   rclcpp::CallbackGroup::SharedPtr captured_last_group;
   bool last_group_known_to_node = false;
@@ -813,7 +810,6 @@ TEST_F(TestNodeBase, get_local_args_is_non_null_for_default_options)
 {
   // Arrange
   auto node_base = create_concrete_node_base("my_node", "/my_ns");
-  ASSERT_NE(nullptr, node_base);
 
   // Act
   const rcl_arguments_t * local_args = node_base->get_local_args();
@@ -830,8 +826,7 @@ TEST_F(TestNodeBase, get_global_args_is_null_when_use_global_arguments_is_false)
   options.use_global_arguments(false);
   auto node = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
   auto node_base =
-    std::dynamic_pointer_cast<agnocast::node_interfaces::NodeBase>(node->get_node_base_interface());
-  ASSERT_NE(nullptr, node_base);
+    std::static_pointer_cast<agnocast::node_interfaces::NodeBase>(node->get_node_base_interface());
 
   // Act
   const rcl_arguments_t * global_args = node_base->get_global_args();
