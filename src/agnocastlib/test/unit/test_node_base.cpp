@@ -260,8 +260,7 @@ TEST_F(TestNodeBase, create_callback_group_propagates_auto_add_flag)
 
   // Act
   auto on = node_base->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, true);
-  auto off =
-    node_base->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  auto off = node_base->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   // Assert
   ASSERT_NE(nullptr, on);
