@@ -136,7 +136,9 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_signal_handler.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
+    test/unit/test_agnocast_epoll_event.cpp
     test/unit/test_agnocast_epoll_update.cpp
+    test/unit/test_agnocast_epoll_manager.cpp
     test/unit/test_node_topics.cpp
     test/unit/test_node_base.cpp
     test/unit/test_cie_client_utils.cpp)
