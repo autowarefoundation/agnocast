@@ -229,6 +229,8 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   if (next != queue_head) {  // queue is not full
     exit_pid_queue[queue_tail] = pid;
     queue_tail = next;
+    // Pairs with smp_load_acquire() in the worker thread; ensures the queue write
+    // is visible before the worker observes has_new_pid == 1.
     smp_store_release(&has_new_pid, 1);
     need_wakeup = true;
   }
@@ -303,9 +305,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
       agnocast_get_size_pub_info_htable(wrapper) == 0 &&
       agnocast_get_size_sub_info_htable(wrapper) == 0) {
       hash_del(&wrapper->node);
-      if (wrapper->key) {
-        kfree(wrapper->key);
-      }
+      kfree(wrapper->key);
       kfree(wrapper);
     }
   }
@@ -315,9 +315,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     if (br_info->pid == pid) {
       hash_del(&br_info->node);
-      if (br_info->topic_name) {
-        kfree(br_info->topic_name);
-      }
+      kfree(br_info->topic_name);
       kfree(br_info);
     }
   }
