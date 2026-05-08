@@ -675,6 +675,36 @@ TEST_F(TestNodeBase, resolve_topic_name_throws_for_unknown_substitution)
     node_base->resolve_topic_or_service_name("{unknown}", false, true), std::runtime_error);
 }
 
+TEST_F(TestNodeBase, resolve_topic_name_applies_remap_rule_when_only_expand_false)
+{
+  // Arrange
+  auto options = node_options_without_parameter_services();
+  options.arguments({"--ros-args", "-r", "/foo:=/bar"});
+  node_ = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
+  auto node_base = node_->get_node_base_interface();
+
+  // Act
+  auto resolved = node_base->resolve_topic_or_service_name("/foo", false, false);
+
+  // Assert
+  EXPECT_EQ("/bar", resolved);
+}
+
+TEST_F(TestNodeBase, resolve_service_name_applies_remap_rule_when_only_expand_false)
+{
+  // Arrange
+  auto options = node_options_without_parameter_services();
+  options.arguments({"--ros-args", "-r", "/foo_srv:=/bar_srv"});
+  node_ = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
+  auto node_base = node_->get_node_base_interface();
+
+  // Act
+  auto resolved = node_base->resolve_topic_or_service_name("/foo_srv", true, false);
+
+  // Assert
+  EXPECT_EQ("/bar_srv", resolved);
+}
+
 // =============================================================================
 // Category 9: on_callback_group_created hook
 //
