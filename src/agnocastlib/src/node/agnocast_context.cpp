@@ -30,6 +30,8 @@ void Context::init(int argc, char const * const * argv)
 
   // Initialize rcl logging so that RCLCPP_INFO/WARN/etc. are written to
   // ~/.ros/log/ files via rcl_logging_spdlog, matching rclcpp::init() behavior.
+  // This also applies --log-level from parsed_arguments_ via
+  // rcl_arguments_get_log_levels() internally.
   rcl_allocator_t allocator = rcl_get_default_allocator();
   rcl_ret_t ret = rcl_logging_configure_with_output_handler(
     parsed_arguments_.get(), &allocator, rcl_logging_multiple_output_handler);

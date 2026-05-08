@@ -134,13 +134,11 @@ static int insert_subscriber_info(
 
   *new_info = kmalloc(sizeof(struct subscriber_info), GFP_KERNEL);
   if (!*new_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
   char * node_name_copy = kstrdup(node_name, GFP_KERNEL);
   if (!node_name_copy) {
-    dev_warn(agnocast_device, "kstrdup failed. (%s)\n", __func__);
     kfree(*new_info);
     return -ENOMEM;
   }
@@ -236,13 +234,11 @@ static int insert_publisher_info(
 
   *new_info = kmalloc(sizeof(struct publisher_info), GFP_KERNEL);
   if (!*new_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
   char * node_name_copy = kstrdup(node_name, GFP_KERNEL);
   if (!node_name_copy) {
-    dev_warn(agnocast_device, "kstrdup failed. (%s)\n", __func__);
     kfree(*new_info);
     return -ENOMEM;
   }
@@ -393,7 +389,6 @@ static int insert_message_entry(
 {
   struct entry_node * new_node = kmalloc(sizeof(struct entry_node), GFP_KERNEL);
   if (!new_node) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
@@ -554,7 +549,6 @@ int agnocast_ioctl_add_process(
 
   struct process_info * new_proc_info = kmalloc(sizeof(struct process_info), GFP_KERNEL);
   if (!new_proc_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     ret = -ENOMEM;
     goto unlock;
   }
@@ -1981,7 +1975,6 @@ int agnocast_ioctl_add_bridge(
 
   struct bridge_info * br_info = kmalloc(sizeof(*br_info), GFP_KERNEL);
   if (!br_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (ioctl_add_bridge)\n");
     ret = -ENOMEM;
     goto unlock;
   }

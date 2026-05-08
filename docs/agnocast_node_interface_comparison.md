@@ -199,7 +199,7 @@ This provides the same argument parsing functionality as rcl.
 | `--params-file file.yaml` | ✓ | **Full Support** | - | Load parameters from YAML file |
 | `--` (end marker) | ✓ | **Full Support** | - | ROS arguments end marker |
 | `-r node:old:=new` | ✓ | **Full Support** | - | Node-specific remapping |
-| `--log-level` | ✗ | **Unsupported** | TBD | Set log level |
+| `--log-level` | ✓ | **Full Support** | - | Set log level |
 | `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
 | `--disable-external-lib-logs` | ✓ | **Full Support** | - | Disable external library logs (file logging via rcl_logging_spdlog) |
 | `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |

@@ -1,13 +1,20 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 
+#include <cstdint>
 #include <mutex>
 #include <type_traits>
 
 namespace agnocast
 {
+
+// Capped slightly below UINT32_MAX to provide a safe margin against
+// atomic wrap-around (overflow back to 0) during concurrent fetch_add calls.
+constexpr uint32_t MAX_CALLBACK_INFO_ID_SAFETY_MARGIN = 1000;
+constexpr uint32_t MAX_CALLBACK_INFO_ID = UINT32_MAX - MAX_CALLBACK_INFO_ID_SAFETY_MARGIN;
 
 struct AgnocastExecutable;
 
@@ -123,5 +130,28 @@ void enqueue_receive_and_execute(
   uint32_t callback_info_id, pid_t my_pid, const CallbackInfo & callback_info,
   std::mutex & ready_agnocast_executables_mutex,
   std::vector<AgnocastExecutable> & ready_agnocast_executables);
+
+class SubscriptionEventHandler : public EpollEventHandler
+{
+  pid_t my_pid_;
+  std::mutex * ready_agnocast_executables_mutex_;
+  std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+
+public:
+  SubscriptionEventHandler(
+    const pid_t my_pid, std::mutex * ready_agnocast_executables_mutex,
+    std::vector<AgnocastExecutable> * ready_agnocast_executables)
+  : my_pid_(my_pid),
+    ready_agnocast_executables_mutex_(ready_agnocast_executables_mutex),
+    ready_agnocast_executables_(ready_agnocast_executables)
+  {
+  }
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Subscription; }
+
+  void prepare_epoll(int epoll_fd, const CallbackGroupValidator & validate_callback_group) override;
+
+  void handle(EpollEventLocalID event_local_id) override;
+};
 
 }  // namespace agnocast

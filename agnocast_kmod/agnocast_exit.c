@@ -65,9 +65,7 @@ static void remove_all_bridge_info(void)
   hash_for_each_safe(bridge_htable, bkt, tmp, br_info, node)
   {
     hash_del(&br_info->node);
-    if (br_info->topic_name) {
-      kfree(br_info->topic_name);
-    }
+    kfree(br_info->topic_name);
     kfree(br_info);
   }
 }
