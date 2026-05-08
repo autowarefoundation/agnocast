@@ -803,7 +803,10 @@ TEST_F(TestNodeBase, on_callback_group_created_fires_after_group_is_registered)
 //   - get_local_args() returns the rcl_arguments_t parsed from
 //     NodeOptions::arguments() (non-null even with no arguments).
 //   - get_global_args() returns nullptr when NodeOptions::use_global_arguments
-//     is false; otherwise it reflects the global agnocast context.
+//     is false, or when it is true but agnocast::init() has not been called.
+//     Only when use_global_arguments is true AND agnocast::init() has been
+//     called does it return a non-null pointer reflecting the global agnocast
+//     context.
 // =============================================================================
 
 TEST_F(TestNodeBase, get_local_args_is_non_null_for_default_options)
@@ -833,4 +836,24 @@ TEST_F(TestNodeBase, get_global_args_is_null_when_use_global_arguments_is_false)
 
   // Assert
   EXPECT_EQ(nullptr, global_args);
+}
+
+TEST_F(TestNodeBase, get_global_args_is_non_null_when_g_context_is_initialized)
+{
+  // Arrange: agnocast::init() populates g_context with parsed arguments,
+  // which the constructor reads when use_global_arguments=true (default).
+  agnocast::init(0, nullptr);
+  {
+    auto options = node_options_without_parameter_services();
+    auto node = std::make_shared<agnocast::Node>("my_node", "/my_ns", options);
+    auto node_base = std::static_pointer_cast<agnocast::node_interfaces::NodeBase>(
+      node->get_node_base_interface());
+
+    // Act
+    const rcl_arguments_t * global_args = node_base->get_global_args();
+
+    // Assert
+    EXPECT_NE(nullptr, global_args);
+  }
+  agnocast::shutdown();
 }
