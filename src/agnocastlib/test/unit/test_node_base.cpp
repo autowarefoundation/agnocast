@@ -8,9 +8,6 @@
 class TestNodeBase : public ::testing::Test
 {
 protected:
-  void SetUp() override {}
-  void TearDown() override {}
-
   agnocast::Node::SharedPtr node_;
 
   rclcpp::NodeOptions node_options_without_parameter_services() const
@@ -161,8 +158,8 @@ TEST_F(TestNodeBase, constructor_applies_node_and_ns_remap_rules)
 TEST_F(TestNodeBase, constructor_throws_when_no_args_available_for_remap)
 {
   // Arrange: with both local and global args NULL, rcl_remap_name returns
-  // RCL_RET_INVALID_ARGUMENT.
-  auto context = rclcpp::contexts::get_global_default_context();
+  // RCL_RET_INVALID_ARGUMENT. Use a local context to avoid touching global state.
+  auto context = std::make_shared<rclcpp::Context>();
 
   // Act / Assert
   EXPECT_THROW(
