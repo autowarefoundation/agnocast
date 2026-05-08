@@ -70,7 +70,6 @@ int init_memory_allocator(void)
 
   mempool_entries = kvcalloc(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
   if (!mempool_entries) {
-    pr_err("Agnocast: Failed to allocate mempool_entries array\n");
     return -ENOMEM;
   }
 
