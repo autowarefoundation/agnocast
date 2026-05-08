@@ -237,7 +237,7 @@ bool build_bridge_factory_info(
   const rclcpp::Logger & logger)
 {
   Dl_info info = {};
-  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || !info.dli_fname) {
+  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || info.dli_fname == nullptr) {
     RCLCPP_ERROR(logger, "dladdr failed or filename NULL.");
     return false;
   }

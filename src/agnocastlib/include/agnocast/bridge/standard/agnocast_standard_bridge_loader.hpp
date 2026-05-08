@@ -31,8 +31,7 @@ struct BridgeFactorySpec
 class StandardBridgeLoader
 {
 public:
-  explicit StandardBridgeLoader(
-    const rclcpp::Node::SharedPtr & container_node, const rclcpp::Logger & logger);
+  explicit StandardBridgeLoader(rclcpp::Node::SharedPtr container_node, rclcpp::Logger logger);
   ~StandardBridgeLoader();
 
   StandardBridgeLoader(const StandardBridgeLoader &) = delete;
