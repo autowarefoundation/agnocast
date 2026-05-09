@@ -18,7 +18,7 @@ uint32_t queue_tail;
 
 struct task_struct * worker_task;
 DECLARE_WAIT_QUEUE_HEAD(worker_wait);
-int has_new_pid = false;
+int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
