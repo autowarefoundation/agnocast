@@ -262,10 +262,28 @@ bool build_bridge_factory_info(
     symbol_to_send = info.dli_sname;
   }
 
-  snprintf(
+  int shared_lib_path_len = snprintf(
     static_cast<char *>(factory.shared_lib_path), SHARED_LIB_PATH_BUFFER_SIZE, "%s",
     info.dli_fname);
-  snprintf(static_cast<char *>(factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
+  if (
+    shared_lib_path_len < 0 ||
+    shared_lib_path_len >= static_cast<int>(SHARED_LIB_PATH_BUFFER_SIZE)) {
+    RCLCPP_ERROR(
+      logger,
+      "snprintf failed for shared library path '%s'; length must be %ld characters or fewer",
+      info.dli_fname, SHARED_LIB_PATH_BUFFER_SIZE - 1);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+  int symbol_name_len = snprintf(
+    static_cast<char *>(factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
+  if (symbol_name_len < 0 || symbol_name_len >= static_cast<int>(SYMBOL_NAME_BUFFER_SIZE)) {
+    RCLCPP_ERROR(
+      logger, "snprintf failed for symbol name '%s'; length must be %ld characters or fewer",
+      symbol_to_send, SYMBOL_NAME_BUFFER_SIZE - 1);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
 
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
   factory.fn_offset = fn_current - base_addr;

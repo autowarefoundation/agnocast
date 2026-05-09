@@ -301,10 +301,21 @@ void StandardBridgeManager::send_pubsub_delegation(
   req.is_service = false;
   req.pubsub_target.target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
-  snprintf(
+  int topic_name_len = snprintf(
     static_cast<char *>(req.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
     topic_name.c_str());
   // req.factory can be left zeroed because it is not going to be used.
+
+  if (topic_name_len < 0 || topic_name_len >= TOPIC_NAME_BUFFER_SIZE) {
+    RCLCPP_ERROR(
+      logger_, "snprintf failed for topic name '%s'; length must be %d characters or fewer",
+      topic_name.c_str(), TOPIC_NAME_BUFFER_SIZE - 1);
+    if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+      RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+    }
+    shutdown_requested_ = true;
+    return;
+  }
   /* ------------------------- */
 
   if (mq_send(mq, reinterpret_cast<const char *>(&req), sizeof(req), 0) < 0) {
