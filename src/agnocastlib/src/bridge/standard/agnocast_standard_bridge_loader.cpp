@@ -17,8 +17,8 @@ namespace agnocast
 {
 
 StandardBridgeLoader::StandardBridgeLoader(
-  rclcpp::Node::SharedPtr container_node, rclcpp::Logger logger)
-: container_node_(std::move(container_node)), logger_(std::move(logger))
+  rclcpp::Node::SharedPtr container_node, const rclcpp::Logger & logger)
+: container_node_(std::move(container_node)), logger_(logger)
 {
 }
 
