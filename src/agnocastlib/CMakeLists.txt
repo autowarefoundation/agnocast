@@ -47,7 +47,7 @@ add_library(agnocast SHARED
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
-  src/node/tf2/transform_broadcaster.cpp src/node/tf2/static_transform_broadcaster.cpp)
+  src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp)
 
 ament_target_dependencies(agnocast rclcpp agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs)
 
