@@ -1,5 +1,5 @@
-#include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/tf2/buffer.hpp"
 #include "rclcpp/clock.hpp"
 #include "rclcpp/duration.hpp"
@@ -128,8 +128,7 @@ TEST_F(BufferTest, lookup_unknown_frame_throws_lookup_exception)
 
   // Act / Assert
   EXPECT_THROW(
-    { buffer.lookupTransform("map", "missing", kStamp, tf2::Duration(0)); },
-    tf2::LookupException);
+    { buffer.lookupTransform("map", "missing", kStamp, tf2::Duration(0)); }, tf2::LookupException);
 }
 
 TEST_F(BufferTest, fixed_frame_lookup_composes_two_transforms)
@@ -140,8 +139,7 @@ TEST_F(BufferTest, fixed_frame_lookup_composes_two_transforms)
   buffer.setTransform(make_transform("odom", "base_link", 2.0, kStamp), "test_authority");
 
   // Act
-  auto out =
-    buffer.lookupTransform("map", kStamp, "base_link", kStamp, "odom", tf2::Duration(0));
+  auto out = buffer.lookupTransform("map", kStamp, "base_link", kStamp, "odom", tf2::Duration(0));
 
   // Assert: x translations compose linearly along the chain (1.0 + 2.0).
   EXPECT_DOUBLE_EQ(out.transform.translation.x, 3.0);
@@ -182,8 +180,7 @@ TEST_F(BufferTest, canTransform_fixed_frame_returns_true_for_existing_chain)
   buffer.setTransform(make_transform("odom", "base_link", 2.0, kStamp), "test_authority");
 
   // Act
-  bool result =
-    buffer.canTransform("map", kStamp, "base_link", kStamp, "odom", tf2::Duration(0));
+  bool result = buffer.canTransform("map", kStamp, "base_link", kStamp, "odom", tf2::Duration(0));
 
   // Assert
   EXPECT_TRUE(result);
@@ -305,8 +302,8 @@ TEST_F(BufferTest, lookupTransform_5arg_rclcpp_overload_routes_to_tf2_overload)
 
   // Act
   rclcpp::Time t(10, 0, RCL_ROS_TIME);
-  auto out = buffer.lookupTransform(
-    "map", t, "base_link", t, "odom", rclcpp::Duration::from_seconds(0));
+  auto out =
+    buffer.lookupTransform("map", t, "base_link", t, "odom", rclcpp::Duration::from_seconds(0));
 
   // Assert: composed translation reaches the rclcpp overload through fromRclcpp().
   EXPECT_DOUBLE_EQ(out.transform.translation.x, 3.0);
