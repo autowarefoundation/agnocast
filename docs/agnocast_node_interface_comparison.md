@@ -202,7 +202,7 @@ This provides the same argument parsing functionality as rcl.
 | `--log-level` | ✓ | **Full Support** | - | Set log level |
 | `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
 | `--disable-external-lib-logs` | ✓ | **Full Support** | - | Disable external library logs (file logging via rcl_logging_spdlog) |
-| `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |
+| `--disable-stdout-logs` | ✓ | **Full Support** | - | Disable stdout logging |
 | `-e` (enclave) | ✗ | **Unsupported** | TBD | Specify security enclave |
 
 ### 3.2 Parameter Override Resolution

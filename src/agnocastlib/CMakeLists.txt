@@ -141,7 +141,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_epoll_manager.cpp
     test/unit/test_node_topics.cpp
     test/unit/test_node_base.cpp
-    test/unit/test_cie_client_utils.cpp)
+    test/unit/test_cie_client_utils.cpp
+    test/unit/test_agnocast_context.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs)
