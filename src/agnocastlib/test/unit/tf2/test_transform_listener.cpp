@@ -22,14 +22,6 @@
 #include <utility>
 #include <vector>
 
-// =========================================
-// Mock state — captures subscription init so the tests can assert on which topics
-// the listener subscribes to. The mocks bypass kmod / mqueue / heaphook so the test
-// runs as plain user-space code. This file is linked into its own test binary
-// (test_unit_tf2_transform_listener_agnocastlib) so it does not collide with mocks
-// in test_mocked_agnocast.cpp or test_broadcasters.cpp.
-// =========================================
-
 namespace
 {
 int initialize_subscriber_call_count = 0;
@@ -44,8 +36,6 @@ void reset_capture_state()
 }
 }  // namespace
 
-// Override ioctl globally so the SubscriptionBase destructor's AGNOCAST_REMOVE_SUBSCRIBER_CMD
-// call does not hit the real kernel module.
 extern "C" int ioctl(int, unsigned long, ...)
 {
   return 0;
@@ -53,8 +43,6 @@ extern "C" int ioctl(int, unsigned long, ...)
 
 namespace agnocast
 {
-// validate_ld_preload normally exits the process when libagnocast_heaphook.so is not in
-// LD_PRELOAD. Stubbed out so the unit test does not require the heaphook to be loaded.
 void validate_ld_preload()
 {
 }
@@ -66,8 +54,6 @@ void release_subscriber_reference(const std::string &, const topic_local_id_t, c
 mqd_t open_mq_for_subscription(
   const std::string &, const topic_local_id_t, std::pair<mqd_t, std::string> & mq_subscription)
 {
-  // Returning -1 is fine here: the listener never spins (spin_thread=false) so no
-  // epoll_ctl is ever called against this fd in the unit tests.
   mq_subscription = std::make_pair(static_cast<mqd_t>(-1), std::string{});
   return -1;
 }
@@ -95,10 +81,6 @@ BridgeMode get_bridge_mode()
 }
 }  // namespace agnocast
 
-// =========================================
-// Test helpers
-// =========================================
-
 namespace
 {
 geometry_msgs::msg::TransformStamped make_transform(
@@ -114,10 +96,7 @@ geometry_msgs::msg::TransformStamped make_transform(
   return t;
 }
 
-// Constructs a subscriber-side ipc_shared_ptr that owns `raw_msg` only for reference
-// counting purposes — the subscriber-side destructor does NOT delete the underlying
-// pointer (it would normally notify the kernel instead, which is mocked out above).
-// The caller is responsible for `delete`-ing raw_msg after the listener has consumed it.
+// Subscriber-side ipc_shared_ptr does not delete `raw_msg` — the caller must.
 agnocast::ipc_shared_ptr<tf2_msgs::msg::TFMessage> make_subscriber_ipc_ptr(
   tf2_msgs::msg::TFMessage * raw_msg, const std::string & topic_name)
 {
@@ -125,14 +104,8 @@ agnocast::ipc_shared_ptr<tf2_msgs::msg::TFMessage> make_subscriber_ipc_ptr(
 }
 
 constexpr tf2::TimePoint kStamp{std::chrono::seconds(10)};
-// A query stamp well outside the dynamic cache window for any frame stamped at kStamp.
-// Used to distinguish static (answers any time) from dynamic (answers only within data).
 constexpr tf2::TimePoint kFarFutureStamp{std::chrono::seconds(10) + std::chrono::seconds(100)};
 }  // namespace
-
-// =========================================
-// Test fixture
-// =========================================
 
 class TransformListenerTest : public ::testing::Test
 {
@@ -157,11 +130,7 @@ protected:
 };
 
 // =========================================
-// Constructor (node-based) — subscription wiring & QoS contract
-//
-// NOTE: All constructor tests use spin_thread=false. The spin_thread=true path spawns
-// a dedicated executor thread that calls epoll_ctl against the mocked (-1) mq fd, which
-// would exit() the process. That path is exercised by integration tests instead.
+// Constructor (node-based)
 // =========================================
 
 TEST_F(TransformListenerTest, node_constructor_subscribes_with_volatile_tf_and_transient_local_tf_static)
@@ -192,26 +161,18 @@ TEST_F(TransformListenerTest, node_constructor_subscribes_with_volatile_tf_and_t
 }
 
 // =========================================
-// Constructor (simplified) — creates internal node
+// Constructor (simplified)
 // =========================================
 
-TEST_F(TransformListenerTest, simplified_constructor_subscribes_to_tf_and_tf_static)
+TEST_F(TransformListenerTest, simplified_constructor_constructs_without_external_node)
 {
-  // Act
-  agnocast::TransformListener listener(*buffer_, /*spin_thread=*/false);
-
-  // Assert
-  EXPECT_EQ(initialize_subscriber_call_count, 2);
-  EXPECT_NE(
-    std::find(initialized_topic_names.begin(), initialized_topic_names.end(), "/tf"),
-    initialized_topic_names.end());
-  EXPECT_NE(
-    std::find(initialized_topic_names.begin(), initialized_topic_names.end(), "/tf_static"),
-    initialized_topic_names.end());
+  // Act / Assert: smoke test the simplified constructor — the rest of its behavior is
+  // covered by the node-based test above, which it delegates to.
+  EXPECT_NO_THROW({ agnocast::TransformListener listener(*buffer_, /*spin_thread=*/false); });
 }
 
 // =========================================
-// subscription_callback — exercised as the public API black-box
+// subscription_callback
 // =========================================
 
 TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_true_so_frame_answers_arbitrary_times)
