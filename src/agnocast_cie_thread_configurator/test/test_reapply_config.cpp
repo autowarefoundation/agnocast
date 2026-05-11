@@ -202,3 +202,62 @@ non_ros_threads: []
   ASSERT_EQ(cb.size(), 1u);
   EXPECT_EQ(cb[0].thread_str, "beta");
 }
+
+TEST(ParseYaml, RejectsDuplicateCallbackGroupKey)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: cg
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - id: cg
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, AllowsSameIdInDifferentDomains)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: cg
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - id: cg
+    domain_id: 1
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 2u);
+}
+
+TEST(ParseYaml, RejectsDuplicateNonRosThreadName)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups: []
+non_ros_threads:
+  - name: t
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - name: t
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}

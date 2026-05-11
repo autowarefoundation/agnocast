@@ -55,7 +55,7 @@ private:
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
   void create_service_bridge_if_needed(
-    const ServiceBridgeTargetInfo & target, BridgeDirection direction);
+    const ServiceBridgeTargetInfoWithType & target, BridgeDirection direction);
   static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 

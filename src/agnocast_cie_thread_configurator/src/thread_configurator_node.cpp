@@ -7,6 +7,7 @@
 #include "yaml-cpp/yaml.h"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
+#include "agnocast_cie_config_msgs/srv/reapply_config.hpp"
 
 #include <error.h>
 #include <sys/resource.h>
@@ -23,30 +24,33 @@
 using agnocast_cie_thread_configurator::policy_to_sched_const;
 
 ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
-: Node("thread_configurator_node", options)
+: Node("thread_configurator_node", options),
+  config_file_([this]() {
+    rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = true;
+    return this->declare_parameter<std::string>("config_file", "", desc);
+  }()),
+  default_domain_id_(agnocast_cie_thread_configurator::get_default_domain_id())
 {
-  const auto config_file = this->declare_parameter<std::string>("config_file", "");
-  if (config_file.empty()) {
+  if (config_file_.empty()) {
     throw std::runtime_error(
       "'config_file' parameter must be provided with a valid YAML file path.");
   }
 
   YAML::Node yaml;
   try {
-    yaml = YAML::LoadFile(config_file);
+    yaml = YAML::LoadFile(config_file_);
   } catch (const std::exception & e) {
-    throw std::runtime_error("Error reading the YAML file '" + config_file + "': " + e.what());
+    throw std::runtime_error("Error reading the YAML file '" + config_file_ + "': " + e.what());
   }
 
   validate_hardware_info(yaml);
   validate_rt_throttling(yaml);
 
-  RCLCPP_INFO(this->get_logger(), "Loaded config from: %s", config_file.c_str());
-
-  size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
+  RCLCPP_INFO(this->get_logger(), "Loaded config from: %s", config_file_.c_str());
 
   agnocast_cie_thread_configurator::parse_yaml(
-    yaml, default_domain_id, callback_group_configs_, non_ros_thread_configs_);
+    yaml, default_domain_id_, callback_group_configs_, non_ros_thread_configs_);
 
   unapplied_num_.store(
     static_cast<int>(callback_group_configs_.size() + non_ros_thread_configs_.size()));
@@ -70,19 +74,17 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
       },
       this->get_logger());
 
-  // Create subscription for default domain on this node. Uses the node's default
-  // callback group, mirroring the per-domain extra nodes below.
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this,
-       default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+      [this, default_domain_id = default_domain_id_](
+        const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
         this->callback_group_callback(default_domain_id, msg);
       }));
 
   // Create nodes and subscriptions for other domain IDs
   for (size_t domain_id : domain_ids) {
-    if (domain_id == default_domain_id) {
+    if (domain_id == default_domain_id_) {
       continue;
     }
 
@@ -98,6 +100,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
     RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
   }
+
+  reapply_service_ = this->create_service<agnocast_cie_config_msgs::srv::ReapplyConfig>(
+    "~/reapply_config",
+    [this](
+      const std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Request> request,
+      std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Response> response) {
+      this->on_reapply_config_request(request, response);
+    });
 }
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
@@ -443,6 +453,8 @@ void ThreadConfiguratorNode::callback_group_callback(
 void ThreadConfiguratorNode::non_ros_thread_callback(
   agnocast_cie_thread_configurator::NonRosThreadInfo info)
 {
+  std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
+
   auto it = id_to_non_ros_thread_config_.find(info.name);
   if (it == id_to_non_ros_thread_config_.end()) {
     RCLCPP_INFO(
@@ -484,5 +496,120 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
         RCLCPP_INFO(this->get_logger(), "Success: All of the configurations are applied.");
       }
     }
+  }
+}
+
+void ThreadConfiguratorNode::on_reapply_config_request(
+  const std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Request> /*request*/,
+  std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Response> response)
+{
+  RCLCPP_INFO(this->get_logger(), "Reapplying configuration from: %s", config_file_.c_str());
+
+  YAML::Node yaml;
+  try {
+    yaml = YAML::LoadFile(config_file_);
+  } catch (const std::exception & e) {
+    response->success = false;
+    response->error_message = "YAML parse error for '" + config_file_ + "': " + e.what();
+    RCLCPP_ERROR(this->get_logger(), "Reapply rejected: %s", response->error_message.c_str());
+    return;
+  }
+
+  std::vector<ThreadConfig> new_cb;
+  std::vector<ThreadConfig> new_nrt;
+  try {
+    agnocast_cie_thread_configurator::parse_yaml(yaml, default_domain_id_, new_cb, new_nrt);
+  } catch (const std::exception & e) {
+    response->success = false;
+    response->error_message = "YAML validation error for '" + config_file_ + "': " + e.what();
+    RCLCPP_ERROR(this->get_logger(), "Reapply rejected: %s", response->error_message.c_str());
+    return;
+  }
+
+  // Carry thread_id over from existing state. 'applied' is intentionally NOT
+  // carried: a syscall failure below must leave applied=false, not the stale
+  // 'true' that a verbatim carry-over would imply.
+  for (auto & cfg : new_cb) {
+    auto it = id_to_callback_group_config_.find(std::make_pair(cfg.domain_id, cfg.thread_str));
+    if (it != id_to_callback_group_config_.end()) {
+      cfg.thread_id = it->second->thread_id;
+    }
+  }
+
+  callback_group_configs_ = std::move(new_cb);
+  id_to_callback_group_config_.clear();
+  for (auto & cfg : callback_group_configs_) {
+    id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+  }
+
+  // One lock spans non-ROS carry-over + swap + unapplied_num_ recompute so the
+  // listener cannot write thread_id into the old vector between phases (the
+  // update would be dropped by move-assign) nor race the counter store.
+  {
+    std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
+    for (auto & cfg : new_nrt) {
+      auto it = id_to_non_ros_thread_config_.find(cfg.thread_str);
+      if (it != id_to_non_ros_thread_config_.end()) {
+        cfg.thread_id = it->second->thread_id;
+      }
+    }
+    non_ros_thread_configs_ = std::move(new_nrt);
+    id_to_non_ros_thread_config_.clear();
+    for (auto & cfg : non_ros_thread_configs_) {
+      id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
+    }
+
+    unapplied_num_.store(
+      static_cast<int>(callback_group_configs_.size() + non_ros_thread_configs_.size()),
+      std::memory_order_release);
+  }
+
+  for (auto & cfg : callback_group_configs_) {
+    std::string key = std::to_string(cfg.domain_id) + ":" + cfg.thread_str;
+    if (cfg.thread_id == -1) {
+      response->skipped_callback_groups.push_back(std::move(key));
+      continue;
+    }
+    if (issue_syscalls(cfg)) {
+      response->applied_callback_groups.push_back(std::move(key));
+      cfg.applied = true;
+      unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
+    } else {
+      response->failed_callback_groups.push_back(std::move(key));
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
+    for (auto & cfg : non_ros_thread_configs_) {
+      if (cfg.thread_id == -1) {
+        response->skipped_non_ros_threads.push_back(cfg.thread_str);
+        continue;
+      }
+      if (issue_syscalls(cfg)) {
+        response->applied_non_ros_threads.push_back(cfg.thread_str);
+        if (!cfg.applied) {
+          cfg.applied = true;
+          unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
+        }
+      } else {
+        response->failed_non_ros_threads.push_back(cfg.thread_str);
+      }
+    }
+  }
+
+  response->success = true;
+  RCLCPP_INFO(
+    this->get_logger(), "Reapply done: applied=%zu, failed=%zu, skipped=%zu",
+    response->applied_callback_groups.size() + response->applied_non_ros_threads.size(),
+    response->failed_callback_groups.size() + response->failed_non_ros_threads.size(),
+    response->skipped_callback_groups.size() + response->skipped_non_ros_threads.size());
+
+  // configured_at_least_once_ is one-shot, so the "all applied" log is not
+  // re-emitted on reapply; operators need a dedicated reapply-complete signal.
+  if (
+    response->failed_callback_groups.empty() && response->failed_non_ros_threads.empty() &&
+    response->skipped_callback_groups.empty() && response->skipped_non_ros_threads.empty()) {
+    RCLCPP_INFO(this->get_logger(), "Reapply: all entries successfully (re-)applied.");
   }
 }

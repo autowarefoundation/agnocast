@@ -134,13 +134,11 @@ static int insert_subscriber_info(
 
   *new_info = kmalloc(sizeof(struct subscriber_info), GFP_KERNEL);
   if (!*new_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
   char * node_name_copy = kstrdup(node_name, GFP_KERNEL);
   if (!node_name_copy) {
-    dev_warn(agnocast_device, "kstrdup failed. (%s)\n", __func__);
     kfree(*new_info);
     return -ENOMEM;
   }
@@ -236,13 +234,11 @@ static int insert_publisher_info(
 
   *new_info = kmalloc(sizeof(struct publisher_info), GFP_KERNEL);
   if (!*new_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
   char * node_name_copy = kstrdup(node_name, GFP_KERNEL);
   if (!node_name_copy) {
-    dev_warn(agnocast_device, "kstrdup failed. (%s)\n", __func__);
     kfree(*new_info);
     return -ENOMEM;
   }
@@ -393,7 +389,6 @@ static int insert_message_entry(
 {
   struct entry_node * new_node = kmalloc(sizeof(struct entry_node), GFP_KERNEL);
   if (!new_node) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     return -ENOMEM;
   }
 
@@ -554,7 +549,6 @@ int agnocast_ioctl_add_process(
 
   struct process_info * new_proc_info = kmalloc(sizeof(struct process_info), GFP_KERNEL);
   if (!new_proc_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (%s)\n", __func__);
     ret = -ENOMEM;
     goto unlock;
   }
@@ -869,7 +863,7 @@ static int receive_msg_core(
   for (; node; node = rb_next(node)) {
     struct entry_node * en = container_of(node, struct entry_node, node);
 
-    if (MAX_RECEIVE_NUM == ioctl_ret->ret_entry_num) {
+    if (ioctl_ret->ret_entry_num == MAX_RECEIVE_NUM) {
       ioctl_ret->ret_call_again = true;
       break;
     }
@@ -1557,7 +1551,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
 
   struct topic_info_ret * topic_info_mem = NULL;
   if (subscriber_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * subscriber_num, GFP_KERNEL);
+    topic_info_mem = kvcalloc(subscriber_num, sizeof(struct topic_info_ret), GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;
@@ -1643,7 +1637,7 @@ int agnocast_ioctl_get_topic_publisher_info(
 
   struct topic_info_ret * topic_info_mem = NULL;
   if (publisher_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * publisher_num, GFP_KERNEL);
+    topic_info_mem = kvcalloc(publisher_num, sizeof(struct topic_info_ret), GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;
@@ -1981,7 +1975,6 @@ int agnocast_ioctl_add_bridge(
 
   struct bridge_info * br_info = kmalloc(sizeof(*br_info), GFP_KERNEL);
   if (!br_info) {
-    dev_warn(agnocast_device, "kmalloc failed. (ioctl_add_bridge)\n");
     ret = -ENOMEM;
     goto unlock;
   }
