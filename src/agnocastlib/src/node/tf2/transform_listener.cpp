@@ -139,7 +139,8 @@ void TransformListener::subscription_callback(
 {
   const tf2_msgs::msg::TFMessage & msg_in = *msg;
   std::string authority = "Authority undetectable";
-  // NOLINTNEXTLINE(modernize-loop-convert, readability-uppercase-literal-suffix)
+  // NOLINTBEGIN(modernize-loop-convert, readability-uppercase-literal-suffix)
+  // NOLINTBEGIN(hicpp-uppercase-literal-suffix)
   for (size_t i = 0u; i < msg_in.transforms.size(); i++) {
     try {
       buffer_.setTransform(msg_in.transforms[i], authority, is_static);
@@ -152,6 +153,8 @@ void TransformListener::subscription_callback(
         temp.c_str());
     }
   }
+  // NOLINTEND(hicpp-uppercase-literal-suffix)
+  // NOLINTEND(modernize-loop-convert, readability-uppercase-literal-suffix)
 }
 
 }  // namespace agnocast
