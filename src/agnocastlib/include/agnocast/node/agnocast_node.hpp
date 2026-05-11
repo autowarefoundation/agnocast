@@ -596,7 +596,7 @@ public:
       get_logger(),
       "Agnocast service/client is not officially supported yet and the API may change in the "
       "future: %s",
-      service_name.c_str());
+      get_node_services_interface()->resolve_service_name(service_name).c_str());
     return std::make_shared<Client<ServiceT>>(this, service_name, qos, group);
   }
 
@@ -619,7 +619,7 @@ public:
       get_logger(),
       "Agnocast service/client is not officially supported yet and the API may change in the "
       "future: %s",
-      service_name.c_str());
+      get_node_services_interface()->resolve_service_name(service_name).c_str());
     return std::make_shared<Service<ServiceT>>(
       this, service_name, std::forward<Func>(callback), qos, group);
   }

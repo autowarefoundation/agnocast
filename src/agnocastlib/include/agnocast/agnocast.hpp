@@ -207,7 +207,7 @@ typename Client<ServiceT>::SharedPtr create_client(
     node->get_logger(),
     "Agnocast service/client is not officially supported yet and the API may change in the "
     "future: %s",
-    service_name.c_str());
+    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Client<ServiceT>>(node, service_name, qos, group);
 }
 
@@ -231,7 +231,7 @@ typename Service<ServiceT>::SharedPtr create_service(
     node->get_logger(),
     "Agnocast service/client is not officially supported yet and the API may change in the "
     "future: %s",
-    service_name.c_str());
+    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Service<ServiceT>>(
     node, service_name, std::forward<Func>(callback), qos, group);
 }
