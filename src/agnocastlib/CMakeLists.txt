@@ -134,6 +134,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_utils.cpp
     test/unit/test_agnocast_subscription.cpp
     test/unit/test_agnocast_signal_handler.cpp
+    test/unit/test_agnocast_timer.cpp
+    test/unit/test_agnocast_timer_api.cpp
     test/unit/test_mocked_agnocast.cpp
     test/unit/test_agnocast_executors.cpp
     test/unit/test_agnocast_epoll_event.cpp
