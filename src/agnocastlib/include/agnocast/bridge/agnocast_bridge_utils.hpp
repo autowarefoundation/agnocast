@@ -6,6 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace agnocast
