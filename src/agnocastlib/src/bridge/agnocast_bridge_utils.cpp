@@ -4,8 +4,12 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <dlfcn.h>
+
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -210,6 +214,82 @@ rclcpp::QoS get_service_qos(const std::string & service_name)
                         info.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
                                              : rclcpp::ReliabilityPolicy::BestEffort);
   return qos;
+}
+
+bool is_agnocast_service_alive(const std::string & service_name, std::string & reason)
+{
+  // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
+  // directly without using get_service_qos() as a probe.
+  try {
+    (void)get_service_qos(service_name);
+    return true;
+  } catch (const std::exception & e) {
+    reason = e.what();
+    return false;
+  } catch (...) {
+    reason = "Unknown error";
+    return false;
+  }
+}
+
+bool build_bridge_factory_info(
+  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
+  const rclcpp::Logger & logger)
+{
+  Dl_info info = {};
+  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || info.dli_fname == nullptr) {
+    RCLCPP_ERROR(logger, "dladdr failed or filename NULL.");
+    return false;
+  }
+
+  std::error_code ec;
+  auto self_path = std::filesystem::read_symlink("/proc/self/exe", ec);
+
+  bool is_self_executable = false;
+  if (!ec) {
+    std::filesystem::path factory_lib_path(info.dli_fname);
+    if (std::filesystem::equivalent(factory_lib_path, self_path, ec)) {
+      is_self_executable = true;
+    } else if (ec) {
+      RCLCPP_WARN(
+        logger, "Filesystem check error for '%s' vs '%s': %s", info.dli_fname, self_path.c_str(),
+        ec.message().c_str());
+    }
+  }
+
+  const char * symbol_to_send = MAIN_EXECUTABLE_SYMBOL;
+  if (!is_self_executable && info.dli_sname != nullptr) {
+    symbol_to_send = info.dli_sname;
+  }
+
+  int shared_lib_path_len = snprintf(
+    static_cast<char *>(factory.shared_lib_path), SHARED_LIB_PATH_BUFFER_SIZE, "%s",
+    info.dli_fname);
+  if (
+    shared_lib_path_len < 0 ||
+    shared_lib_path_len >= static_cast<int>(SHARED_LIB_PATH_BUFFER_SIZE)) {
+    RCLCPP_ERROR(
+      logger,
+      "snprintf failed for shared library path '%s'; length must be %ld characters or fewer",
+      info.dli_fname, SHARED_LIB_PATH_BUFFER_SIZE - 1);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+  int symbol_name_len = snprintf(
+    static_cast<char *>(factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
+  if (symbol_name_len < 0 || symbol_name_len >= static_cast<int>(SYMBOL_NAME_BUFFER_SIZE)) {
+    RCLCPP_ERROR(
+      logger, "snprintf failed for symbol name '%s'; length must be %ld characters or fewer",
+      symbol_to_send, SYMBOL_NAME_BUFFER_SIZE - 1);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
+  factory.fn_offset = fn_current - base_addr;
+  factory.fn_offset_reverse = fn_reverse - base_addr;
+
+  return true;
 }
 
 }  // namespace agnocast

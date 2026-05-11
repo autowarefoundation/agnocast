@@ -230,22 +230,22 @@ void PerformanceBridgeManager::check_and_remove_service_bridges()
   while (r2a_srv_it != active_r2a_service_bridges_.end()) {
     const std::string & service_name = r2a_srv_it->first;
 
-    // Verify liveness by attempting to retrieve QoS.
-    try {
-      get_service_qos(service_name);
+    std::string reason;
+    if (is_agnocast_service_alive(service_name, reason)) {
       ++r2a_srv_it;
-    } catch (const std::exception & e) {
-      RCLCPP_WARN(
-        logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), e.what());
-
-      if (r2a_srv_it->second.ros_srv_cb_group) {
-        executor_->stop_callback_group(r2a_srv_it->second.ros_srv_cb_group);
-      }
-      if (r2a_srv_it->second.agno_client_cb_group) {
-        executor_->stop_callback_group(r2a_srv_it->second.agno_client_cb_group);
-      }
-      r2a_srv_it = active_r2a_service_bridges_.erase(r2a_srv_it);
+      continue;
     }
+
+    RCLCPP_WARN(
+      logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), reason.c_str());
+
+    if (r2a_srv_it->second.ros_srv_cb_group) {
+      executor_->stop_callback_group(r2a_srv_it->second.ros_srv_cb_group);
+    }
+    if (r2a_srv_it->second.agno_client_cb_group) {
+      executor_->stop_callback_group(r2a_srv_it->second.agno_client_cb_group);
+    }
+    r2a_srv_it = active_r2a_service_bridges_.erase(r2a_srv_it);
   }
 }
 
@@ -366,7 +366,7 @@ void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
 }
 
 void PerformanceBridgeManager::create_service_bridge_if_needed(
-  const ServiceBridgeTargetInfo & target, BridgeDirection direction)
+  const ServiceBridgeTargetInfoWithType & target, BridgeDirection direction)
 {
   std::string service_name = static_cast<const char *>(target.service_name);
   std::string service_type = static_cast<const char *>(target.service_type);
@@ -389,9 +389,9 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
     });
     if (exists) {
       RCLCPP_WARN(
-        logger_, "Service '%s' already exists in ROS 2. Not creating bridge for it.",
+        logger_,
+        "Found a ROS 2 service with the same name while creating the R2A service bridge: '%s'",
         service_name.c_str());
-      return;
     }
 
     auto service_qos = get_service_qos(service_name);

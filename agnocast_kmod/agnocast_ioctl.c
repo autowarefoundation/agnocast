@@ -863,7 +863,7 @@ static int receive_msg_core(
   for (; node; node = rb_next(node)) {
     struct entry_node * en = container_of(node, struct entry_node, node);
 
-    if (MAX_RECEIVE_NUM == ioctl_ret->ret_entry_num) {
+    if (ioctl_ret->ret_entry_num == MAX_RECEIVE_NUM) {
       ioctl_ret->ret_call_again = true;
       break;
     }
@@ -1551,7 +1551,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
 
   struct topic_info_ret * topic_info_mem = NULL;
   if (subscriber_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * subscriber_num, GFP_KERNEL);
+    topic_info_mem = kvcalloc(subscriber_num, sizeof(struct topic_info_ret), GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;
@@ -1637,7 +1637,7 @@ int agnocast_ioctl_get_topic_publisher_info(
 
   struct topic_info_ret * topic_info_mem = NULL;
   if (publisher_num > 0) {
-    topic_info_mem = kvzalloc(sizeof(struct topic_info_ret) * publisher_num, GFP_KERNEL);
+    topic_info_mem = kvcalloc(publisher_num, sizeof(struct topic_info_ret), GFP_KERNEL);
     if (!topic_info_mem) {
       ret = -ENOMEM;
       goto unlock;

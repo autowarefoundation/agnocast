@@ -33,7 +33,7 @@ int mempool_size_gb = DEFAULT_MEMPOOL_SIZE_GB;
 module_param(mempool_size_gb, int, 0444);
 MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 16)");
 
-uint64_t mempool_size_bytes = 0;
+uint64_t mempool_size_bytes;
 
 int init_memory_allocator(void)
 {

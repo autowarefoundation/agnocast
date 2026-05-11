@@ -4,7 +4,7 @@
 // =========================================
 // Initialize and cleanup
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE
 static char * agnocast_devnode(const struct device * dev, umode_t * mode)
 #else
 static char * agnocast_devnode(struct device * dev, umode_t * mode)
@@ -16,7 +16,7 @@ static char * agnocast_devnode(struct device * dev, umode_t * mode)
   return NULL;
 }
 
-static struct file_operations fops = {
+static const struct file_operations fops = {
   .owner = THIS_MODULE,
   .unlocked_ioctl = agnocast_ioctl,
 };
@@ -76,7 +76,7 @@ int agnocast_init_device(void)
     return major;
   }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#if KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE
   agnocast_class = class_create("agnocast_class");
 #else
   agnocast_class = class_create(THIS_MODULE, "agnocast_class");
