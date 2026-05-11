@@ -6,9 +6,12 @@
 #include <sys/prctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <csignal>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace agnocast
 {

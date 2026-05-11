@@ -6,8 +6,12 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
+#include <thread>
+#include <utility>
 
 namespace agnocast
 {
