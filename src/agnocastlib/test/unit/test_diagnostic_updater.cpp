@@ -352,7 +352,6 @@ TEST_F(DiagnosticUpdaterTest, broadcast_visits_all_tasks)
   int task_count = 0;
   updater.add("a", [&](diagnostic_updater::DiagnosticStatusWrapper &) { task_count++; });
   updater.add("b", [&](diagnostic_updater::DiagnosticStatusWrapper &) { task_count++; });
-  task_count = 0;
 
   // Act: broadcast does not invoke task callbacks; it only emits the supplied summary.
   updater.broadcast(diagnostic_msgs::msg::DiagnosticStatus::WARN, "broadcast-msg");
