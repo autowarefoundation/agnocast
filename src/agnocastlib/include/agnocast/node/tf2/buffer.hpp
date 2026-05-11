@@ -69,7 +69,8 @@ public:
   /// \param cache_time How long to keep a history of transforms
   /// \param node If passed, the buffer will use this node's logger instead of the default
   template <typename NodeT = std::shared_ptr<agnocast::Node>>
-  // cppcheck-suppress noExplicitConstructor  // matches tf2_ros::Buffer signature (upstream alignment)
+  // cppcheck-suppress noExplicitConstructor  // matches tf2_ros::Buffer signature (upstream
+  // alignment)
   Buffer(
     rclcpp::Clock::SharedPtr clock,
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME),
