@@ -46,10 +46,16 @@ TransformListener::TransformListener(tf2::BufferCore & buffer, bool spin_thread)
   // but specify its name in .arguments to override any __node passed on the command line.
   // avoiding sstream because it's behavior can be overridden by external libraries.
   // See this issue: https://github.com/ros2/geometry2/issues/540
+  // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, hicpp-avoid-c-arrays, modernize-avoid-c-arrays)
+  // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers, cert-err33-c)
+  // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay, hicpp-no-array-decay)
   char node_name[42];
   snprintf(
     node_name, sizeof(node_name), "transform_listener_impl_%zx", reinterpret_cast<size_t>(this));
   options.arguments({"--ros-args", "-r", "__node:=" + std::string(node_name)});
+  // NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay, hicpp-no-array-decay)
+  // NOLINTEND(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers, cert-err33-c)
+  // NOLINTEND(cppcoreguidelines-avoid-c-arrays, hicpp-avoid-c-arrays, modernize-avoid-c-arrays)
   options.start_parameter_event_publisher(false);
   options.start_parameter_services(false);
   optional_default_node_ = std::make_shared<agnocast::Node>("_", options);
@@ -78,8 +84,10 @@ void TransformListener::init(
   node_base_interface_ = node.get_node_base_interface();
 
   using callback_t = std::function<void(agnocast::ipc_shared_ptr<tf2_msgs::msg::TFMessage> &&)>;
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   callback_t cb =
     std::bind(&TransformListener::subscription_callback, this, std::placeholders::_1, false);
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   callback_t static_cb =
     std::bind(&TransformListener::subscription_callback, this, std::placeholders::_1, true);
 
@@ -131,6 +139,8 @@ void TransformListener::subscription_callback(
 {
   const tf2_msgs::msg::TFMessage & msg_in = *msg;
   std::string authority = "Authority undetectable";
+  // NOLINTNEXTLINE(modernize-loop-convert, readability-uppercase-literal-suffix)
+  // NOLINTNEXTLINE(hicpp-uppercase-literal-suffix)
   for (size_t i = 0u; i < msg_in.transforms.size(); i++) {
     try {
       buffer_.setTransform(msg_in.transforms[i], authority, is_static);

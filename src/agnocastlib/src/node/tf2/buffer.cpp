@@ -79,7 +79,7 @@ void conditionally_append_timeout_info(
   std::string * errstr, const rclcpp::Time & start_time, const rclcpp::Time & current_time,
   const rclcpp::Duration & timeout)
 {
-  if (errstr) {
+  if (errstr != nullptr) {
     std::stringstream ss;
     ss << ". canTransform returned after "
        << tf2::durationToSec(tf2_ros::fromRclcpp(current_time - start_time)) << " timeout was "
@@ -88,6 +88,8 @@ void conditionally_append_timeout_info(
   }
 }
 
+// Mirrors upstream tf2_ros::Buffer, which calls itself with zero timeout in the poll loop.
+// NOLINTNEXTLINE(misc-no-recursion)
 bool Buffer::canTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration timeout, std::string * errstr) const
@@ -109,10 +111,10 @@ bool Buffer::canTransform(
   rclcpp::Time start_time = clock_->now();
   while (
     clock_->now() < start_time + rclcpp_timeout &&
-    !canTransform(
-      target_frame, source_frame, time, tf2::Duration(std::chrono::nanoseconds::zero()), errstr) &&
+    !canTransform(target_frame, source_frame, time, std::chrono::nanoseconds::zero(), errstr) &&
     (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
     agnocast::ok()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   bool retval = canTransform(target_frame, source_frame, time, errstr);
@@ -121,6 +123,8 @@ bool Buffer::canTransform(
   return retval;
 }
 
+// Mirrors upstream tf2_ros::Buffer, which calls itself with zero timeout in the poll loop.
+// NOLINTNEXTLINE(misc-no-recursion)
 bool Buffer::canTransform(
   const std::string & target_frame, const tf2::TimePoint & target_time,
   const std::string & source_frame, const tf2::TimePoint & source_time,
@@ -144,9 +148,10 @@ bool Buffer::canTransform(
   while (clock_->now() < start_time + rclcpp_timeout &&
          !canTransform(
            target_frame, target_time, source_frame, source_time, fixed_frame,
-           tf2::Duration(std::chrono::nanoseconds::zero()), errstr) &&
+           std::chrono::nanoseconds::zero(), errstr) &&
          (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
          agnocast::ok()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   bool retval =
@@ -156,17 +161,17 @@ bool Buffer::canTransform(
   return retval;
 }
 
-bool Buffer::checkAndErrorDedicatedThreadPresent(std::string * error_str) const
+bool Buffer::checkAndErrorDedicatedThreadPresent(std::string * errstr) const
 {
   if (isUsingDedicatedThread()) {
     return true;
   }
 
-  if (error_str) {
-    *error_str = threading_error;
+  if (errstr != nullptr) {
+    *errstr = static_cast<const char *>(threading_error);
   }
 
-  RCLCPP_ERROR(getLogger(), "%s", threading_error);
+  RCLCPP_ERROR(getLogger(), "%s", static_cast<const char *>(threading_error));
   return false;
 }
 
