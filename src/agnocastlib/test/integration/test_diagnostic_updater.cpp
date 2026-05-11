@@ -379,7 +379,6 @@ TEST_F(TestDiagnosticUpdater, broadcast_does_not_invoke_user_task_callbacks)
   updater.add(
     "t1", [&](diagnostic_updater::DiagnosticStatusWrapper &) { task_callback_count.fetch_add(1); });
   const auto baseline = take_baseline();
-  task_callback_count.store(0);
 
   updater.broadcast(DiagnosticStatus::WARN, "msg");
 
