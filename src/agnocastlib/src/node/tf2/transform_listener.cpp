@@ -116,9 +116,13 @@ void TransformListener::init(
 
 TransformListener::~TransformListener()
 {
-  if (spin_thread_) {
+  // Diverges from upstream tf2_ros::TransformListener: defensive null checks guard
+  // against future changes that could leave these members null while spin_thread_ is true.
+  if (spin_thread_ && executor_) {
     executor_->cancel();
-    dedicated_listener_thread_->join();
+    if (dedicated_listener_thread_) {
+      dedicated_listener_thread_->join();
+    }
   }
 }
 
