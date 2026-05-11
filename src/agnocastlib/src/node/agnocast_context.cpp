@@ -3,8 +3,10 @@
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast_signal_handler.hpp"
 
+#include <rcl/arguments.h>
 #include <rcl/error_handling.h>
 #include <rcl/logging.h>
+#include <rcutils/logging.h>
 #include <rcutils/logging_macros.h>
 
 namespace agnocast
@@ -32,6 +34,10 @@ void Context::init(int argc, char const * const * argv)
   // ~/.ros/log/ files via rcl_logging_spdlog, matching rclcpp::init() behavior.
   // This also applies --log-level from parsed_arguments_ via
   // rcl_arguments_get_log_levels() internally.
+  // rcl_logging_configure_with_output_handler reads --disable-stdout-logs and
+  // --disable-external-lib-logs from parsed_arguments_ and registers only the
+  // enabled sub-handlers inside rcl_logging_multiple_output_handler, so stdout
+  // can be suppressed while file logging via spdlog is preserved.
   rcl_allocator_t allocator = rcl_get_default_allocator();
   rcl_ret_t ret = rcl_logging_configure_with_output_handler(
     parsed_arguments_.get(), &allocator, rcl_logging_multiple_output_handler);
