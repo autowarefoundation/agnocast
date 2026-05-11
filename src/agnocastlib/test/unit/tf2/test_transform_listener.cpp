@@ -68,8 +68,7 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   initialize_subscriber_call_count++;
   initialized_topic_names.push_back(topic_name_);
   initialized_qos_values.push_back(qos);
-  union ioctl_add_subscriber_args args
-  {
+  union ioctl_add_subscriber_args args {
   };
   args.ret_id = 0;
   return args;
@@ -133,7 +132,8 @@ protected:
 // Constructor (node-based)
 // =========================================
 
-TEST_F(TransformListenerTest, node_constructor_subscribes_with_volatile_tf_and_transient_local_tf_static)
+TEST_F(
+  TransformListenerTest, node_constructor_subscribes_with_volatile_tf_and_transient_local_tf_static)
 {
   // Arrange
   const auto expected_dynamic_durability = tf2_ros::DynamicListenerQoS().durability();
@@ -175,7 +175,9 @@ TEST_F(TransformListenerTest, simplified_constructor_constructs_without_external
 // subscription_callback
 // =========================================
 
-TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_true_so_frame_answers_arbitrary_times)
+TEST_F(
+  TransformListenerTest,
+  subscription_callback_forwards_is_static_true_so_frame_answers_arbitrary_times)
 {
   // Arrange
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
@@ -194,7 +196,9 @@ TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_true_so_f
   delete raw_msg;
 }
 
-TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_false_so_frame_does_not_answer_arbitrary_times)
+TEST_F(
+  TransformListenerTest,
+  subscription_callback_forwards_is_static_false_so_frame_does_not_answer_arbitrary_times)
 {
   // Arrange
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
@@ -218,8 +222,8 @@ TEST_F(TransformListenerTest, subscription_callback_handles_empty_message_safely
   auto * raw_msg = new tf2_msgs::msg::TFMessage();
 
   // Act
-  EXPECT_NO_THROW(listener.subscription_callback(
-    make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false));
+  EXPECT_NO_THROW(
+    listener.subscription_callback(make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false));
 
   // Assert
   EXPECT_FALSE(buffer_->canTransform("map", "base_link", kStamp));
