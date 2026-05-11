@@ -592,6 +592,11 @@ public:
     const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
     rclcpp::CallbackGroup::SharedPtr group = nullptr)
   {
+    RCLCPP_WARN(
+      get_logger(),
+      "Agnocast service/client is not officially supported yet and the API may change in the "
+      "future: %s",
+      service_name.c_str());
     return std::make_shared<Client<ServiceT>>(this, service_name, qos, group);
   }
 
@@ -610,6 +615,11 @@ public:
     const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
     rclcpp::CallbackGroup::SharedPtr group = nullptr)
   {
+    RCLCPP_WARN(
+      get_logger(),
+      "Agnocast service/client is not officially supported yet and the API may change in the "
+      "future: %s",
+      service_name.c_str());
     return std::make_shared<Service<ServiceT>>(
       this, service_name, std::forward<Func>(callback), qos, group);
   }
