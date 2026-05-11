@@ -4,12 +4,6 @@
 // the DiagnosticArray messages flowing out on /diagnostics, captured via a
 // real agnocast::Subscription that runs on an
 // AgnocastOnlySingleThreadedExecutor.
-//
-// Style: flowing (no Arrange/Act/Assert labels) — integration tests have an
-// inherent "wait-for-system-to-settle" step that does not fit a clean AAA
-// shape. Compare with test/integration/test_agnocast_init_ok_shutdown.cpp.
-//
-// Requires the Agnocast kernel module + heaphook (see CMakeLists labels).
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/node/agnocast_node.hpp"
@@ -182,12 +176,9 @@ protected:
 // =============================================================================
 // Category 1: add() — placeholder publish (addedTaskCallback)
 //
-// Specification:
-//   - add(name, fn) immediately publishes a DiagnosticArray containing exactly
-//     one status with name="<node>: <name>", level=OK, message="Node starting up".
-//   - The user-supplied task callback `fn` is NOT invoked by add() itself.
-//   - The placeholder status' hardware_id is always "" — the Updater's
-//     setHardwareID value is NOT propagated to placeholder publishes.
+// add(name, fn) immediately publishes a placeholder DiagnosticArray with a
+// single status (level=OK, message="Node starting up", hardware_id=""). The
+// user callback `fn` is NOT invoked, and setHardwareID is NOT propagated.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, add_publishes_node_starting_up_placeholder)
@@ -240,16 +231,12 @@ TEST_F(TestDiagnosticUpdater, add_placeholder_carries_empty_hardware_id_even_aft
 // =============================================================================
 // Category 2: force_update() — published DiagnosticArray contents
 //
-// Specification:
-//   - With one task that calls summary(level, msg), force_update() publishes
-//     one DiagnosticArray containing one status whose name is the prefixed
-//     task name, hardware_id is the setHardwareID value, and level/message
-//     are what the task wrote.
-//   - With a "silent" task that never calls summary, the published status
-//     carries the Updater-prefilled defaults (level=ERROR,
-//     message="No message was set").
-//   - With multiple tasks, all statuses appear in a single DiagnosticArray
-//     in the order tasks were registered.
+// force_update() publishes one DiagnosticArray with one status per task.
+// Each status carries the prefixed name, the setHardwareID value, and the
+// level/message the task wrote (or the Updater defaults — level=ERROR,
+// message="No message was set" — if the task never called summary()).
+// Statuses appear in task registration order, also propagating any KeyValues
+// the task added.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, force_update_publishes_one_status_with_full_fields_set)
@@ -353,13 +340,10 @@ TEST_F(TestDiagnosticUpdater, force_update_aggregates_multiple_tasks_in_registra
 // =============================================================================
 // Category 3: broadcast()
 //
-// Specification:
-//   - broadcast(lvl, msg) publishes one DiagnosticArray containing one status
-//     per registered task. Each status carries the prefixed task name, the
-//     supplied lvl, and the supplied msg.
-//   - User task callbacks are NOT invoked by broadcast.
-//   - With zero registered tasks, the published DiagnosticArray has an empty
-//     status vector.
+// broadcast(lvl, msg) publishes one DiagnosticArray with one status per
+// task, each carrying the prefixed name and the supplied lvl/msg. Task
+// callbacks are NOT invoked, and hwid_ is NOT propagated. With zero tasks,
+// the published status vector is empty.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, broadcast_publishes_status_per_task_with_supplied_level_and_message)
@@ -420,9 +404,8 @@ TEST_F(TestDiagnosticUpdater, broadcast_with_zero_tasks_publishes_empty_status_v
 // =============================================================================
 // Category 4: removeByName
 //
-// Specification:
-//   - After removeByName(name) returns true, the next force_update publishes
-//     a DiagnosticArray that does NOT contain a status for that task.
+// After removeByName(name), the next force_update output does NOT contain a
+// status for that task.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, removeByName_excludes_task_from_subsequent_force_update_output)
@@ -448,10 +431,8 @@ TEST_F(TestDiagnosticUpdater, removeByName_excludes_task_from_subsequent_force_u
 // =============================================================================
 // Category 5: setHardwareIDf
 //
-// Specification:
-//   - setHardwareIDf(format, ...) stores a printf-formatted hwid that
-//     subsequently appears in the published status' hardware_id field on
-//     update / force_update.
+// The printf-formatted hwid set via setHardwareIDf appears in the published
+// status' hardware_id on subsequent update/force_update.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, setHardwareIDf_formatted_value_appears_in_published_hardware_id)
@@ -473,13 +454,9 @@ TEST_F(TestDiagnosticUpdater, setHardwareIDf_formatted_value_appears_in_publishe
 // =============================================================================
 // Category 6: diagnostic_updater.use_fqn parameter
 //
-// Specification:
-//   - When diagnostic_updater.use_fqn=true is declared on the node BEFORE the
-//     Updater is constructed, every published status name uses the node's
-//     fully-qualified name as the prefix instead of the bare node name.
-//
-// (The "default prefix is node name" case is implicitly verified by every
-//  test in Categories 1-5, so it does not need its own test here.)
+// Pre-declaring diagnostic_updater.use_fqn=true switches the status name
+// prefix from the bare node name to the fully-qualified name. (The bare-name
+// default is implicitly verified by Categories 1-5.)
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, use_fqn_true_changes_status_name_prefix_to_fully_qualified_name)
@@ -501,13 +478,10 @@ TEST_F(TestDiagnosticUpdater, use_fqn_true_changes_status_name_prefix_to_fully_q
 // =============================================================================
 // Category 7: Periodic timer — three configuration paths to the publish rate
 //
-// Specification:
-//   - The Updater installs a wall timer that triggers update() at a period
-//     determined by (in precedence order):
-//       (a) the diagnostic_updater.period parameter if pre-declared on the node,
-//       (b) otherwise the constructor's `period` argument.
-//     setPeriod() at any time replaces the period and restarts the timer.
-//   - At each tick the timer publishes one DiagnosticArray.
+// A wall timer triggers update() (= one DiagnosticArray publish per tick) at
+// a period taken from, in order: the pre-declared diagnostic_updater.period
+// parameter, else the constructor's `period` argument. setPeriod() replaces
+// it at any time and restarts the timer.
 // =============================================================================
 
 namespace
@@ -583,10 +557,8 @@ TEST_F(TestDiagnosticUpdater, setPeriod_changes_subsequent_periodic_publish_rate
 // =============================================================================
 // Category 8: Constructor — pointer overload
 //
-// Specification:
-//   - Updater(agnocast::Node *, period) delegates to the reference overload
-//     and publishes diagnostics through the same path. A non-null pointer
-//     yields a fully functional Updater.
+// Updater(agnocast::Node *, period) delegates to the reference overload and
+// yields a fully functional Updater.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, constructor_with_node_pointer_overload_publishes_diagnostics)
@@ -606,10 +578,8 @@ TEST_F(TestDiagnosticUpdater, constructor_with_node_pointer_overload_publishes_d
 // =============================================================================
 // Category 9: Header timestamp
 //
-// Specification:
-//   - The published DiagnosticArray's header.stamp is sampled from the node's
-//     clock at the moment publish() runs — non-zero and in the [before, after]
-//     window of the call.
+// header.stamp is sampled from the node's clock at publish time — non-zero
+// and in [before, after] of the publish call.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, force_update_sets_header_stamp_to_node_clock_now_window)
