@@ -98,19 +98,19 @@ target_include_directories(sim_time_timer PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
-add_library(listener_component SHARED src/minimal_subscriber.cpp)
-ament_target_dependencies(listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
-target_include_directories(listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+add_library(agnocast_listener_component SHARED src/minimal_subscriber.cpp)
+ament_target_dependencies(agnocast_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
 agnocast_components_register_node(
-  listener_component
+  agnocast_listener_component
   PLUGIN "MinimalSubscriber"
   EXECUTABLE listener
 )
 
-ament_export_targets(export_listener_component)
-install(TARGETS listener_component
-        EXPORT export_listener_component
+ament_export_targets(export_agnocast_listener_component)
+install(TARGETS agnocast_listener_component
+        EXPORT export_agnocast_listener_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
