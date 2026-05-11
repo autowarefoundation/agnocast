@@ -78,13 +78,13 @@ Updater::Updater(agnocast::Node * node, double period) : Updater(*node, period)
 {
 }
 
-void Updater::broadcast(unsigned char lvl, const std::string msg)
+void Updater::broadcast(unsigned char lvl, const std::string & msg)
 {
   std::vector<diagnostic_msgs::msg::DiagnosticStatus> status_vec;
 
   const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
   for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
-       iter != tasks.end(); iter++) {
+       iter != tasks.end(); ++iter) {
     diagnostic_updater::DiagnosticStatusWrapper status;
 
     status.name = iter->getName();
@@ -126,7 +126,7 @@ void Updater::update()
       lock_);  // Make sure no adds happen while we are processing here.
     const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
     for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
-         iter != tasks.end(); iter++) {
+         iter != tasks.end(); ++iter) {
       diagnostic_updater::DiagnosticStatusWrapper status;
 
       status.name = iter->getName();
@@ -173,7 +173,7 @@ void Updater::publish(diagnostic_msgs::msg::DiagnosticStatus & stat)
 void Updater::publish(std::vector<diagnostic_msgs::msg::DiagnosticStatus> & status_vec)
 {
   for (std::vector<diagnostic_msgs::msg::DiagnosticStatus>::iterator iter = status_vec.begin();
-       iter != status_vec.end(); iter++) {
+       iter != status_vec.end(); ++iter) {
     iter->name = node_name_ + std::string(": ") + iter->name;
   }
   auto msg = publisher_->borrow_loaned_message();

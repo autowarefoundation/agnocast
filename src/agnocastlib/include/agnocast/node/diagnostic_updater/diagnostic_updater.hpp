@@ -118,7 +118,7 @@ public:
    *
    * \param msg Status message to output.
    */
-  void broadcast(unsigned char lvl, const std::string msg);
+  void broadcast(unsigned char lvl, const std::string & msg);
 
   void setHardwareIDf(const char * format, ...);
 
