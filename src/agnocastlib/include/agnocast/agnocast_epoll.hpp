@@ -1,118 +1,151 @@
 #pragma once
 
-#include "agnocast/agnocast_callback_info.hpp"
-#include "agnocast/agnocast_timer_info.hpp"
-#include "sys/epoll.h"
+#include "agnocast/agnocast_epoll_event.hpp"
 
-#include <atomic>
-#include <mutex>
-#include <shared_mutex>
-#include <vector>
+#include <rclcpp/callback_group.hpp>
+
+#include <array>
+#include <functional>
+#include <memory>
 
 namespace agnocast
 {
 
-struct AgnocastExecutable;
+using CallbackGroupValidator = std::function<bool(const rclcpp::CallbackGroup::SharedPtr &)>;
 
-constexpr uint32_t TIMER_EVENT_FLAG = 0x80000000;
-constexpr uint32_t CLOCK_EVENT_FLAG = 0x40000000;     // For clock_eventfd events (ROS_TIME timers)
-constexpr uint32_t SHUTDOWN_EVENT_FLAG = 0x20000000;  // For shutdown events (AgnocastOnlyExecutor)
-constexpr uint32_t EPOLL_EVENT_ID_RESERVED_MASK =
-  TIMER_EVENT_FLAG | CLOCK_EVENT_FLAG | SHUTDOWN_EVENT_FLAG;
-
-void wait_and_handle_epoll_event(
-  int epoll_fd, pid_t my_pid, int timeout_ms, std::mutex & ready_agnocast_executables_mutex,
-  std::vector<AgnocastExecutable> & ready_agnocast_executables);
-
-template <class ValidateFn>
-void prepare_epoll_impl(
-  const int epoll_fd, const pid_t my_pid, std::mutex & ready_agnocast_executables_mutex,
-  std::vector<AgnocastExecutable> & ready_agnocast_executables,
-  ValidateFn && validate_callback_group)
+/**
+ * @brief Abstract base class implemented for each type of event (e.g., Timer, Subscription,
+ * Shutdown events). Please refer to EpollEventType for details on event classification. Derived
+ * classes inheriting from this class must implement the processing logic specific to each event.
+ */
+class EpollEventHandler
 {
-  // Register subscription callbacks to epoll
+public:
+  EpollEventHandler() = default;
+
+  virtual ~EpollEventHandler() = default;
+
+  EpollEventHandler(const EpollEventHandler &) = delete;
+  EpollEventHandler & operator=(const EpollEventHandler &) = delete;
+
+  EpollEventHandler(EpollEventHandler &&) = delete;
+  EpollEventHandler & operator=(EpollEventHandler &&) = delete;
+
+  [[nodiscard]] virtual EpollEventType get_type() const = 0;
+
+  /**
+   * @brief Configures event-specific settings, such as adding events to epoll.
+   *
+   * @param epoll_fd The file descriptor for the epoll instance.
+   * @param validate_callback_group A function that takes a callback group and
+   * determines whether the entities belonging to that group are under
+   * its management.
+   */
+  virtual void prepare_epoll(
+    int epoll_fd, const CallbackGroupValidator & validate_callback_group) = 0;
+
+  /**
+   * @brief Invoked when an event belonging to this event type occurs.
+   *
+   * @param event_local_id The local ID used to identify the specific event.
+   */
+  virtual void handle(EpollEventLocalID event_local_id) = 0;
+};
+
+/**
+ * @brief Shutdown handler used by AgnocastOnlyExecutor to receive shutdown notifications via an
+ * eventfd.
+ */
+class ShutdownEventHandler : public EpollEventHandler
+{
+public:
+  ShutdownEventHandler() = default;
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Shutdown; }
+
+  void prepare_epoll(int epoll_fd, const CallbackGroupValidator & validate_callback_group) override
   {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-
-    for (auto & it : id2_callback_info) {
-      const uint32_t callback_info_id = it.first;
-      CallbackInfo & callback_info = it.second;
-
-      if (!callback_info.need_epoll_update) {
-        continue;
-      }
-
-      if (!validate_callback_group(callback_info.callback_group)) {
-        continue;
-      }
-
-      struct epoll_event ev = {};
-      ev.events = EPOLLIN;
-      ev.data.u32 = callback_info_id;
-
-      if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.mqdes, &ev) == -1) {
-        RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
-      }
-
-      if (callback_info.is_transient_local) {
-        agnocast::enqueue_receive_and_execute(
-          callback_info_id, my_pid, callback_info, ready_agnocast_executables_mutex,
-          ready_agnocast_executables);
-      }
-
-      callback_info.need_epoll_update = false;
-    }
+    (void)epoll_fd;
+    (void)validate_callback_group;
   }
 
-  // Register timers to epoll
+  void handle(EpollEventLocalID /*event_local_id*/) override {}
+};
+
+/**
+ * @brief Dummy handler used to fill unused slots in the EventHandlerArray.
+ * Logs a warning if an event notification is unexpectedly received.
+ * Since EpollManager requires every slot in the EventHandlerArray to be populated with a valid
+ * handler, any slot corresponding to an unused event must be filled with a DummyEventHandler.
+ */
+class DummyEventHandler : public EpollEventHandler
+{
+public:
+  DummyEventHandler() = default;
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Dummy; }
+
+  void prepare_epoll(int epoll_fd, const CallbackGroupValidator & validate_callback_group) override
   {
-    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-
-    for (auto & it : id2_timer_info) {
-      const uint32_t timer_id = it.first;
-      TimerInfo & timer_info = *it.second;
-
-      if (!timer_info.need_epoll_update) {
-        continue;
-      }
-
-      if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
-        continue;
-      }
-
-      std::shared_lock fd_lock(timer_info.fd_mutex);
-
-      // Register clock_eventfd for ROS_TIME timers (simulation time support)
-      if (timer_info.clock_eventfd >= 0) {
-        struct epoll_event clock_ev = {};
-        clock_ev.events = EPOLLIN;
-        clock_ev.data.u32 = timer_id | CLOCK_EVENT_FLAG;
-
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.clock_eventfd, &clock_ev) == -1) {
-          RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
-          close(agnocast_fd);
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      // Register timerfd (wall clock based firing)
-      if (timer_info.timer_fd >= 0) {
-        struct epoll_event ev = {};
-        ev.events = EPOLLIN;
-        ev.data.u32 = timer_id | TIMER_EVENT_FLAG;
-
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &ev) == -1) {
-          RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-          close(agnocast_fd);
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      timer_info.need_epoll_update = false;
-    }
+    (void)epoll_fd;
+    (void)validate_callback_group;
   }
-}
+
+  void handle(EpollEventLocalID event_local_id) override;
+};
+
+using EventHandlerArray =
+  std::array<std::unique_ptr<EpollEventHandler>, static_cast<size_t>(EpollEventType::NrEventType)>;
+
+/**
+ * @brief A facade class that manages event waiting via epoll, primarily used by the Executor.
+ */
+class EpollManager final
+{
+public:
+  /**
+   * @param sources An array of event handlers mapped by event type.
+   * Every slot in this array must contain a valid handler instance.
+   */
+  explicit EpollManager(EventHandlerArray sources);
+  ~EpollManager();
+  EpollManager(const EpollManager &) = delete;
+  EpollManager & operator=(const EpollManager &) = delete;
+  EpollManager(EpollManager &&) = delete;
+  EpollManager & operator=(EpollManager &&) = delete;
+
+  /**
+   * @brief Directly adds a new event to be monitored by epoll.
+   *
+   * @param fd The file descriptor associated with the event.
+   * @param type The category of the event.
+   * @param local_id The unique local ID specific to this event.
+   *
+   * @return true on success, or false on failure.
+   */
+  [[nodiscard]] bool add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const;
+
+  /**
+   * @brief Updates the set of events monitored by epoll (e.g., adding or removing events).
+   *
+   * This function works together with EpollUpdateTracker. When the Executor is
+   * notified that the target events have changed, it calls this function.
+   *
+   * @param validate_callback_group A function that takes a callback group and
+   * determines whether the entities belonging to that group are under its management.
+   */
+  void prepare_epoll(const CallbackGroupValidator & validate_callback_group);
+
+  /**
+   * @brief Waits for events to occur and executes their corresponding handlers.
+   *
+   * @param timeout_ms The maximum time to wait in milliseconds.
+   */
+  void wait_and_handle_epoll_event(int timeout_ms);
+
+private:
+  int epoll_fd_{-1};
+  EventHandlerArray sources_{nullptr};
+};
 
 }  // namespace agnocast

@@ -6,7 +6,6 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -24,6 +23,8 @@
 
 namespace agnocast
 {
+
+struct NoBridgeRequestPolicy;
 
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
