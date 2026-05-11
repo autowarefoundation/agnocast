@@ -84,12 +84,12 @@ void TransformListener::init(
   node_base_interface_ = node.get_node_base_interface();
 
   using callback_t = std::function<void(agnocast::ipc_shared_ptr<tf2_msgs::msg::TFMessage> &&)>;
-  // NOLINTNEXTLINE(modernize-avoid-bind)
+  // NOLINTBEGIN(modernize-avoid-bind)
   callback_t cb =
     std::bind(&TransformListener::subscription_callback, this, std::placeholders::_1, false);
-  // NOLINTNEXTLINE(modernize-avoid-bind)
   callback_t static_cb =
     std::bind(&TransformListener::subscription_callback, this, std::placeholders::_1, true);
+  // NOLINTEND(modernize-avoid-bind)
 
   if (spin_thread_) {
     // Create new callback group for message_subscription of tf and tf_static
@@ -140,7 +140,6 @@ void TransformListener::subscription_callback(
   const tf2_msgs::msg::TFMessage & msg_in = *msg;
   std::string authority = "Authority undetectable";
   // NOLINTNEXTLINE(modernize-loop-convert, readability-uppercase-literal-suffix)
-  // NOLINTNEXTLINE(hicpp-uppercase-literal-suffix)
   for (size_t i = 0u; i < msg_in.transforms.size(); i++) {
     try {
       buffer_.setTransform(msg_in.transforms[i], authority, is_static);
