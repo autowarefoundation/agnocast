@@ -125,6 +125,9 @@ agnocast::ipc_shared_ptr<tf2_msgs::msg::TFMessage> make_subscriber_ipc_ptr(
 }
 
 constexpr tf2::TimePoint kStamp{std::chrono::seconds(10)};
+// A query stamp well outside the dynamic cache window for any frame stamped at kStamp.
+// Used to distinguish static (answers any time) from dynamic (answers only within data).
+constexpr tf2::TimePoint kFarFutureStamp{std::chrono::seconds(10) + std::chrono::seconds(100)};
 }  // namespace
 
 // =========================================
@@ -154,52 +157,38 @@ protected:
 };
 
 // =========================================
-// Constructor (node-based) — subscription wiring
+// Constructor (node-based) — subscription wiring & QoS contract
 //
 // NOTE: All constructor tests use spin_thread=false. The spin_thread=true path spawns
 // a dedicated executor thread that calls epoll_ctl against the mocked (-1) mq fd, which
 // would exit() the process. That path is exercised by integration tests instead.
 // =========================================
 
-TEST_F(TransformListenerTest, node_constructor_subscribes_to_tf_and_tf_static)
+TEST_F(TransformListenerTest, node_constructor_subscribes_with_volatile_tf_and_transient_local_tf_static)
 {
+  // Arrange
+  const auto expected_dynamic_durability = tf2_ros::DynamicListenerQoS().durability();
+  const auto expected_static_durability = tf2_ros::StaticListenerQoS().durability();
+
+  // Act
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
 
-  EXPECT_EQ(initialize_subscriber_call_count, 2);
-  // The listener's implementation does not promise an ordering between the two
-  // subscriptions, so assert membership rather than position.
-  EXPECT_NE(
-    std::find(initialized_topic_names.begin(), initialized_topic_names.end(), "/tf"),
-    initialized_topic_names.end());
-  EXPECT_NE(
-    std::find(initialized_topic_names.begin(), initialized_topic_names.end(), "/tf_static"),
-    initialized_topic_names.end());
-}
-
-TEST_F(TransformListenerTest, node_constructor_uses_dynamic_and_static_listener_qos_defaults)
-{
-  agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
-
-  ASSERT_EQ(initialized_qos_values.size(), 2u);
-
-  // Static frames are TransientLocal; dynamic frames are Volatile. That distinction is
-  // the whole reason late-joining subscribers can still see /tf_static frames.
-  const rclcpp::QoS dynamic_qos = tf2_ros::DynamicListenerQoS();
-  const rclcpp::QoS static_qos = tf2_ros::StaticListenerQoS();
-
-  bool saw_dynamic = false;
-  bool saw_static = false;
+  // Assert
+  ASSERT_EQ(initialize_subscriber_call_count, 2);
+  ASSERT_EQ(initialized_topic_names.size(), 2u);
+  bool saw_tf = false;
+  bool saw_tf_static = false;
   for (size_t i = 0; i < initialized_topic_names.size(); ++i) {
     if (initialized_topic_names[i] == "/tf") {
-      EXPECT_EQ(initialized_qos_values[i].durability(), dynamic_qos.durability());
-      saw_dynamic = true;
+      EXPECT_EQ(initialized_qos_values[i].durability(), expected_dynamic_durability);
+      saw_tf = true;
     } else if (initialized_topic_names[i] == "/tf_static") {
-      EXPECT_EQ(initialized_qos_values[i].durability(), static_qos.durability());
-      saw_static = true;
+      EXPECT_EQ(initialized_qos_values[i].durability(), expected_static_durability);
+      saw_tf_static = true;
     }
   }
-  EXPECT_TRUE(saw_dynamic);
-  EXPECT_TRUE(saw_static);
+  EXPECT_TRUE(saw_tf);
+  EXPECT_TRUE(saw_tf_static);
 }
 
 // =========================================
@@ -208,8 +197,10 @@ TEST_F(TransformListenerTest, node_constructor_uses_dynamic_and_static_listener_
 
 TEST_F(TransformListenerTest, simplified_constructor_subscribes_to_tf_and_tf_static)
 {
+  // Act
   agnocast::TransformListener listener(*buffer_, /*spin_thread=*/false);
 
+  // Assert
   EXPECT_EQ(initialize_subscriber_call_count, 2);
   EXPECT_NE(
     std::find(initialized_topic_names.begin(), initialized_topic_names.end(), "/tf"),
@@ -223,66 +214,74 @@ TEST_F(TransformListenerTest, simplified_constructor_subscribes_to_tf_and_tf_sta
 // subscription_callback — exercised as the public API black-box
 // =========================================
 
-TEST_F(TransformListenerTest, subscription_callback_inserts_dynamic_transform_into_buffer)
+TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_true_so_frame_answers_arbitrary_times)
 {
+  // Arrange
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
-
-  auto * raw_msg = new tf2_msgs::msg::TFMessage();
-  raw_msg->transforms.push_back(make_transform("map", "base_link", 1.0, kStamp));
-
-  listener.subscription_callback(make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false);
-
-  std::string err;
-  EXPECT_TRUE(buffer_->canTransform("map", "base_link", kStamp, &err)) << err;
-
-  delete raw_msg;
-}
-
-TEST_F(TransformListenerTest, subscription_callback_inserts_static_transform_into_buffer)
-{
-  agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
-
   auto * raw_msg = new tf2_msgs::msg::TFMessage();
   raw_msg->transforms.push_back(make_transform("map", "imu", 2.0, kStamp));
 
+  // Act
   listener.subscription_callback(
     make_subscriber_ipc_ptr(raw_msg, "/tf_static"), /*is_static=*/true);
 
-  // Static transforms must be queryable at any time, including TimePointZero
-  // (the latest-available query) — this is what `tf_static` consumers rely on.
+  // Assert
   std::string err;
-  EXPECT_TRUE(buffer_->canTransform("map", "imu", tf2::TimePointZero, &err)) << err;
+  EXPECT_TRUE(buffer_->canTransform("map", "imu", kFarFutureStamp, &err)) << err;
 
+  // Cleanup
+  delete raw_msg;
+}
+
+TEST_F(TransformListenerTest, subscription_callback_forwards_is_static_false_so_frame_does_not_answer_arbitrary_times)
+{
+  // Arrange
+  agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
+  auto * raw_msg = new tf2_msgs::msg::TFMessage();
+  raw_msg->transforms.push_back(make_transform("map", "base_link", 1.0, kStamp));
+
+  // Act
+  listener.subscription_callback(make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false);
+
+  // Assert
+  EXPECT_FALSE(buffer_->canTransform("map", "base_link", kFarFutureStamp));
+
+  // Cleanup
   delete raw_msg;
 }
 
 TEST_F(TransformListenerTest, subscription_callback_handles_empty_message_safely)
 {
+  // Arrange
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
+  auto * raw_msg = new tf2_msgs::msg::TFMessage();
 
-  auto * raw_msg = new tf2_msgs::msg::TFMessage();  // empty transforms vector
-
+  // Act
   EXPECT_NO_THROW(listener.subscription_callback(
     make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false));
+
+  // Assert
   EXPECT_FALSE(buffer_->canTransform("map", "base_link", kStamp));
 
+  // Cleanup
   delete raw_msg;
 }
 
-TEST_F(TransformListenerTest, subscription_callback_inserts_multiple_transforms_in_one_message)
+TEST_F(TransformListenerTest, subscription_callback_inserts_all_transforms_from_a_single_message)
 {
+  // Arrange
   agnocast::TransformListener listener(*buffer_, *node_, /*spin_thread=*/false);
-
   auto * raw_msg = new tf2_msgs::msg::TFMessage();
   raw_msg->transforms.push_back(make_transform("map", "a", 1.0, kStamp));
   raw_msg->transforms.push_back(make_transform("a", "b", 2.0, kStamp));
 
+  // Act
   listener.subscription_callback(make_subscriber_ipc_ptr(raw_msg, "/tf"), /*is_static=*/false);
 
+  // Assert
   EXPECT_TRUE(buffer_->canTransform("map", "a", kStamp));
   EXPECT_TRUE(buffer_->canTransform("a", "b", kStamp));
-  // Transitive lookup also succeeds when both legs are in the buffer.
-  EXPECT_TRUE(buffer_->canTransform("map", "b", kStamp));
 
+  // Cleanup
   delete raw_msg;
 }

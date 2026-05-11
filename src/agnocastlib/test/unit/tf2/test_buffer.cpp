@@ -174,8 +174,11 @@ TEST_F(BufferTest, canTransform_unknown_frame_with_null_errstr_does_not_crash)
 
 TEST_F(BufferTest, canTransform_fixed_frame_returns_true_for_existing_chain)
 {
-  // Arrange
+  // Arrange: setUsingDedicatedThread(true) bypasses the threading guard that fires
+  // unconditionally on Humble (rclcpp<28) even for timeout=0. This test is about the
+  // fixed-frame chain lookup, not the guard — that behavior is covered separately.
   agnocast::Buffer buffer(clock_);
+  buffer.setUsingDedicatedThread(true);
   buffer.setTransform(make_transform("map", "odom", 1.0, kStamp), "test_authority");
   buffer.setTransform(make_transform("odom", "base_link", 2.0, kStamp), "test_authority");
 
@@ -311,8 +314,10 @@ TEST_F(BufferTest, lookupTransform_5arg_rclcpp_overload_routes_to_tf2_overload)
 
 TEST_F(BufferTest, canTransform_3arg_rclcpp_overload_routes_to_tf2_overload)
 {
-  // Arrange
+  // Arrange: setUsingDedicatedThread(true) bypasses the Humble (rclcpp<28) threading
+  // guard so this test exercises only the rclcpp->tf2 overload-routing path.
   agnocast::Buffer buffer(clock_);
+  buffer.setUsingDedicatedThread(true);
   buffer.setTransform(make_transform("map", "base_link", 1.0, kStamp), "test_authority");
 
   // Act
@@ -325,8 +330,9 @@ TEST_F(BufferTest, canTransform_3arg_rclcpp_overload_routes_to_tf2_overload)
 
 TEST_F(BufferTest, canTransform_5arg_rclcpp_overload_routes_to_tf2_overload)
 {
-  // Arrange
+  // Arrange: see the 3-arg routing test above for why setUsingDedicatedThread is set.
   agnocast::Buffer buffer(clock_);
+  buffer.setUsingDedicatedThread(true);
   buffer.setTransform(make_transform("map", "odom", 1.0, kStamp), "test_authority");
   buffer.setTransform(make_transform("odom", "base_link", 2.0, kStamp), "test_authority");
 
