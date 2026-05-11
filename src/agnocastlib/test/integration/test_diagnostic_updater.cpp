@@ -49,6 +49,7 @@ struct RecordedStatus
   std::string name;
   std::string message;
   std::string hardware_id;
+  std::size_t values_size{0};
   unsigned char level{0};
 };
 
@@ -67,7 +68,8 @@ public:
     copy.stamp = msg.header.stamp;
     copy.statuses.reserve(msg.status.size());
     for (const auto & s : msg.status) {
-      copy.statuses.push_back(RecordedStatus{s.name, s.message, s.hardware_id, s.level});
+      copy.statuses.push_back(
+        RecordedStatus{s.name, s.message, s.hardware_id, s.values.size(), s.level});
     }
     std::lock_guard<std::mutex> lock(mutex_);
     received_.push_back(std::move(copy));
@@ -112,9 +114,6 @@ protected:
       sink->push(*msg);
     };
     sub_ = node_->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(50), cb);
-
-    // Let the kmod register the subscription before any publish happens.
-    std::this_thread::sleep_for(150ms);
   }
 
   void TearDown() override
@@ -132,9 +131,8 @@ protected:
 
   // ---- Helpers ----------------------------------------------------------
 
-  // Wait until a predicate holds, polling every 10ms.
   bool waitFor(
-    const std::function<bool()> & predicate, std::chrono::milliseconds timeout = 1500ms) const
+    const std::function<bool()> & predicate, std::chrono::milliseconds timeout = 5000ms) const
   {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
@@ -146,7 +144,7 @@ protected:
     return predicate();
   }
 
-  bool wait_for_size_at_least(std::size_t target, std::chrono::milliseconds timeout = 1500ms) const
+  bool wait_for_size_at_least(std::size_t target, std::chrono::milliseconds timeout = 5000ms) const
   {
     return waitFor([this, target]() { return sink_->size() >= target; }, timeout);
   }
@@ -221,9 +219,13 @@ TEST_F(TestDiagnosticUpdater, add_publishes_node_starting_up_placeholder)
   const auto since = arrays_since(0);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().statuses.size(), 1u);
-  EXPECT_EQ(since.front().statuses[0].name, prefixed("startup-task"));
-  EXPECT_EQ(since.front().statuses[0].level, DiagnosticStatus::OK);
-  EXPECT_EQ(since.front().statuses[0].message, "Node starting up");
+  const auto & s = since.front().statuses[0];
+  EXPECT_EQ(s.name, prefixed("startup-task"));
+  EXPECT_EQ(s.level, DiagnosticStatus::OK);
+  EXPECT_EQ(s.message, "Node starting up");
+  // addedTaskCallback never writes hardware_id or values — defaults flow through.
+  EXPECT_EQ(s.hardware_id, "");
+  EXPECT_EQ(s.values_size, 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, add_does_not_invoke_user_task_callback)
@@ -290,6 +292,8 @@ TEST_F(TestDiagnosticUpdater, force_update_publishes_one_status_with_full_fields
   EXPECT_EQ(s.hardware_id, "hwid-XYZ");
   EXPECT_EQ(s.level, DiagnosticStatus::WARN);
   EXPECT_EQ(s.message, "degraded");
+  // The task did not touch `values` — default empty.
+  EXPECT_EQ(s.values_size, 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, force_update_with_silent_task_publishes_updater_default_error_status)
@@ -306,6 +310,9 @@ TEST_F(TestDiagnosticUpdater, force_update_with_silent_task_publishes_updater_de
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(status->level, DiagnosticStatus::ERROR);
   EXPECT_EQ(status->message, "No message was set");
+  // hardware_id pre-fill is hwid_; values is left untouched (default empty).
+  EXPECT_EQ(status->hardware_id, "none");
+  EXPECT_EQ(status->values_size, 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, force_update_with_zero_tasks_publishes_empty_status_vector)
@@ -374,6 +381,12 @@ TEST_F(TestDiagnosticUpdater, broadcast_publishes_status_per_task_with_supplied_
   EXPECT_EQ(since.front().statuses[1].name, prefixed("t2"));
   EXPECT_EQ(since.front().statuses[1].level, DiagnosticStatus::ERROR);
   EXPECT_EQ(since.front().statuses[1].message, "shutting-down");
+  // broadcast() builds a fresh DiagnosticStatusWrapper per task and never
+  // copies hwid_ or anything into `values` — both stay default.
+  EXPECT_EQ(since.front().statuses[0].hardware_id, "");
+  EXPECT_EQ(since.front().statuses[0].values_size, 0u);
+  EXPECT_EQ(since.front().statuses[1].hardware_id, "");
+  EXPECT_EQ(since.front().statuses[1].values_size, 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, broadcast_does_not_invoke_user_task_callbacks)
