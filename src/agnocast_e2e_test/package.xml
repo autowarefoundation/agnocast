@@ -7,7 +7,6 @@
     E2E test for Agnocast.
   </description>
   <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
-  <maintainer email="ryuta.kambe@tier4.jp">Ryuta Kambe</maintainer>
   <maintainer email="atsushi.yano.2@tier4.jp">Atsushi Yano</maintainer>
   <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
   <maintainer email="kawaguchitnon@icloud.com">Tetsuhiro Kawaguchi</maintainer>
@@ -15,7 +14,7 @@
 
   <!-- Original authors -->
   <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
-  <author email="ryuta.kambe@tier4.jp">Ryuta Kambe</author>
+  <author email="veqcc.c@gmail.com">Ryuta Kambe</author>
   <author email="atsushi.yano.2@tier4.jp">Atsushi Yano</author>
   <author email="koichi.imai.2@tier4.jp">Koichi Imai</author>
 
@@ -29,6 +28,7 @@
   <depend>agnocast_components</depend>
   <depend>agnocast_cie_thread_configurator</depend>
 
+  <test_depend>agnocast_cie_config_msgs</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
 
   <export>

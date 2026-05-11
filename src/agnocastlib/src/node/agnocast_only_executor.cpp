@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast_signal_handler.hpp"
@@ -18,36 +19,39 @@ namespace agnocast
 
 AgnocastOnlyExecutor::AgnocastOnlyExecutor()
 : spinning_(false),
-  epoll_fd_(epoll_create1(0)),
   shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
   my_pid_(getpid()),
   epoll_update_tracker_(EpollUpdateDispatcher::get_instance().register_tracker())
 {
-  if (epoll_fd_ == -1) {
-    RCLCPP_ERROR(logger, "epoll_create1 failed: %s", strerror(errno));
-    exit(EXIT_FAILURE);
-  }
+  EventHandlerArray sources;
+  sources[static_cast<uint32_t>(EpollEventType::Subscription)] =
+    std::make_unique<SubscriptionEventHandler>(
+      my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Timer)] = std::make_unique<TimerEventHandler>(
+    my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Clock)] = std::make_unique<ClockEventHandler>(
+    my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
+  sources[static_cast<uint32_t>(EpollEventType::Shutdown)] =
+    std::make_unique<ShutdownEventHandler>();
+
+  epoll_manager_ = std::make_unique<EpollManager>(std::move(sources));
 
   if (shutdown_event_fd_ == -1) {
     RCLCPP_ERROR(logger, "eventfd failed: %s", strerror(errno));
-    close(epoll_fd_);
     exit(EXIT_FAILURE);
   }
 
-  struct epoll_event ev
-  {
-  };
-  ev.events = EPOLLIN;
-  ev.data.u32 = SHUTDOWN_EVENT_FLAG;
-  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, shutdown_event_fd_, &ev) == -1) {
+  if (!epoll_manager_->add_event(shutdown_event_fd_, EpollEventType::Shutdown, 0)) {
     RCLCPP_ERROR(logger, "epoll_ctl for shutdown_event_fd failed: %s", strerror(errno));
     close(shutdown_event_fd_);
-    close(epoll_fd_);
     exit(EXIT_FAILURE);
   }
 
-  SignalHandler::install();
-  SignalHandler::register_shutdown_event(shutdown_event_fd_);
+  if (!SignalHandler::register_shutdown_event(shutdown_event_fd_)) {
+    RCLCPP_ERROR(logger, "Failed to register shutdown eventfd with signal handler");
+    close(shutdown_event_fd_);
+    exit(EXIT_FAILURE);
+  }
 }
 
 AgnocastOnlyExecutor::~AgnocastOnlyExecutor()
@@ -82,22 +86,18 @@ AgnocastOnlyExecutor::~AgnocastOnlyExecutor()
 
   SignalHandler::unregister_shutdown_event(shutdown_event_fd_);
   close(shutdown_event_fd_);
-  close(epoll_fd_);
 }
 
 bool AgnocastOnlyExecutor::get_next_agnocast_executable(
-  AgnocastExecutable & agnocast_executable, const int timeout_ms, bool & shutdown_detected)
+  AgnocastExecutable & agnocast_executable, const int timeout_ms)
 {
-  shutdown_detected = false;
-
   if (get_next_ready_agnocast_executable(agnocast_executable)) {
     return true;
   }
 
-  shutdown_detected = agnocast::wait_and_handle_epoll_event(
-    epoll_fd_, my_pid_, timeout_ms, ready_agnocast_executables_mutex_, ready_agnocast_executables_);
+  epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
 
-  if (shutdown_detected) {
+  if (!agnocast::ok()) {
     return false;
   }
 

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <set>
 #include <string>
+#include <utility>
 
 PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node", options)
 {
@@ -42,18 +43,16 @@ PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node"
   size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
 
   auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-  // volatile: publisher context in spawn_non_ros2_thread is destroyed after publish,
-  // so transient_local is ineffective.
-  auto non_ros_thread_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable();
 
-  // Create subscription for non-ROS thread info
-  non_ros_thread_sub_ = this->create_subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>(
-    "/agnocast_cie_thread_configurator/non_ros_thread_info", non_ros_thread_qos,
-    [this](const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg) {
-      this->non_ros_thread_callback(msg);
-    });
+  non_ros_thread_listener_ =
+    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
+      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+        this->non_ros_thread_callback(std::move(info));
+      },
+      this->get_logger());
 
-  // Create subscription for default domain on this node
+  // Create subscription for default domain on this node. Uses the node's default
+  // callback group, mirroring the per-domain extra nodes below.
   subs_for_each_domain_.push_back(
     this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
       "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
@@ -86,32 +85,32 @@ void PrerunNode::topic_callback(
   size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
   auto key = std::make_pair(domain_id, msg->callback_group_id);
-  if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
-    return;
+  {
+    std::lock_guard<std::mutex> lock(domain_and_cbg_ids_mutex_);
+    if (domain_and_cbg_ids_.find(key) != domain_and_cbg_ids_.end()) {
+      return;
+    }
+    domain_and_cbg_ids_.insert(key);
   }
 
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
-
-  domain_and_cbg_ids_.insert(key);
 }
 
-void PrerunNode::non_ros_thread_callback(
-  const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg)
+void PrerunNode::non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info)
 {
-  if (non_ros_thread_names_.find(msg->thread_name) != non_ros_thread_names_.end()) {
+  if (non_ros_thread_names_.find(info.name) != non_ros_thread_names_.end()) {
     RCLCPP_ERROR(
-      this->get_logger(), "Duplicate thread_name received: tid=%ld | %s", msg->thread_id,
-      msg->thread_name.c_str());
+      this->get_logger(), "Duplicate thread_name received: tid=%ld | %s", info.tid,
+      info.name.c_str());
     return;
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", msg->thread_id,
-    msg->thread_name.c_str());
+    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
 
-  non_ros_thread_names_.insert(msg->thread_name);
+  non_ros_thread_names_.insert(std::move(info.name));
 }
 
 const std::vector<rclcpp::Node::SharedPtr> & PrerunNode::get_domain_nodes() const
@@ -183,4 +182,16 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   fout.close();
 
   std::cout << "template.yaml is created in the current directory" << std::endl;
+}
+
+PrerunNode::~PrerunNode()
+{
+  stop();
+}
+
+void PrerunNode::stop() noexcept
+{
+  if (non_ros_thread_listener_) {
+    non_ros_thread_listener_->stop();
+  }
 }

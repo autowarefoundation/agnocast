@@ -15,7 +15,12 @@ inline constexpr std::string_view SUFFIX_PUBSUB_R2A = "_P_R2A";
 inline constexpr std::string_view SUFFIX_PUBSUB_A2R = "_P_A2R";
 inline constexpr std::string_view SUFFIX_SERVICE_R2A = "_S_R2A";
 inline constexpr std::string_view SUFFIX_SERVICE_A2R = "_S_A2R";
-inline constexpr size_t SUFFIX_LEN = SUFFIX_PUBSUB_R2A.length();
+
+inline constexpr size_t SUFFIX_LEN = 6;
+static_assert(SUFFIX_PUBSUB_R2A.length() == SUFFIX_LEN);
+static_assert(SUFFIX_PUBSUB_A2R.length() == SUFFIX_LEN);
+static_assert(SUFFIX_SERVICE_R2A.length() == SUFFIX_LEN);
+static_assert(SUFFIX_SERVICE_A2R.length() == SUFFIX_LEN);
 
 enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };
 
@@ -56,6 +61,7 @@ bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & to
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name);
 rclcpp::QoS get_service_qos(const std::string & service_name);
+bool is_agnocast_service_alive(const std::string & service_name, std::string & reason);
 
 /// @brief Build `BridgeFactoryInfo` for standard bridge requests.
 /// @return true when the bridge factory is successfully built, false otherwise.

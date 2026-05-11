@@ -17,8 +17,8 @@ namespace agnocast
 {
 
 StandardBridgeLoader::StandardBridgeLoader(
-  const rclcpp::Node::SharedPtr & container_node, const rclcpp::Logger & logger)
-: container_node_(container_node), logger_(logger)
+  rclcpp::Node::SharedPtr container_node, const rclcpp::Logger & logger)
+: container_node_(std::move(container_node)), logger_(logger)
 {
 }
 
@@ -51,10 +51,6 @@ std::shared_ptr<ServiceBridgeBase> StandardBridgeLoader::start_service_bridge(
   const std::string & service_name, BridgeDirection direction,
   const BridgeFactorySpec & factory_spec, const rclcpp::QoS & qos)
 {
-  if (direction != BridgeDirection::ROS2_TO_AGNOCAST) {
-    return nullptr;
-  }
-
   auto [entry_func, lib_handle] =
     resolve_factory_function(service_name, direction, factory_spec, true);
 
@@ -167,13 +163,6 @@ std::pair<uintptr_t, std::shared_ptr<void>> StandardBridgeLoader::resolve_factor
     return {0, nullptr};
   }
   cached_factories_[key_r2a] = {addr_r2a, lib_handle_ptr};
-
-  if (is_service) {
-    // Service bridges are currently created only for R2A. There is no A2R service bridge factory to
-    // cache or validate yet, so returning the validated R2A entry here is sufficient and
-    // intentional.
-    return {addr_r2a, lib_handle_ptr};
-  }
 
   // Add A2R function.
   uintptr_t addr_a2r = base_addr + factory_spec.fn_offset_a2r;

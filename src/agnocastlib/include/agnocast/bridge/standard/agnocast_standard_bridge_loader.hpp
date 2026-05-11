@@ -32,7 +32,7 @@ class StandardBridgeLoader
 {
 public:
   explicit StandardBridgeLoader(
-    const rclcpp::Node::SharedPtr & container_node, const rclcpp::Logger & logger);
+    rclcpp::Node::SharedPtr container_node, const rclcpp::Logger & logger);
   ~StandardBridgeLoader();
 
   StandardBridgeLoader(const StandardBridgeLoader &) = delete;

@@ -4,7 +4,7 @@
 // =========================================
 // Initialize and cleanup
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#if KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE
 static char * agnocast_devnode(const struct device * dev, umode_t * mode)
 #else
 static char * agnocast_devnode(struct device * dev, umode_t * mode)
@@ -16,7 +16,7 @@ static char * agnocast_devnode(struct device * dev, umode_t * mode)
   return NULL;
 }
 
-static struct file_operations fops = {
+static const struct file_operations fops = {
   .owner = THIS_MODULE,
   .unlocked_ioctl = agnocast_ioctl,
 };
@@ -24,6 +24,8 @@ static struct file_operations fops = {
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
+    // Pairs with smp_store_release() in agnocast_enqueue_exit_pid(); ensures all
+    // queue writes from the enqueuer are visible before we read the queue.
     wait_event_interruptible(worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
@@ -42,6 +44,8 @@ static int exit_worker_thread(void * data)
         got_pid = true;
       }
 
+      // Release ensures the queue-drain reads complete before has_new_pid is cleared,
+      // preventing the enqueuer from seeing a stale 0 after re-checking the queue.
       if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
       spin_unlock_irqrestore(&pid_queue_lock, flags);
@@ -72,7 +76,7 @@ int agnocast_init_device(void)
     return major;
   }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#if KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE
   agnocast_class = class_create("agnocast_class");
 #else
   agnocast_class = class_create(THIS_MODULE, "agnocast_class");

@@ -7,7 +7,6 @@
     Sample interfaces for the Agnocast sample application.
   </description>
   <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
-  <maintainer email="ryuta.kambe@tier4.jp">Ryuta Kambe</maintainer>
   <maintainer email="atsushi.yano.2@tier4.jp">Atsushi Yano</maintainer>
   <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
   <maintainer email="kawaguchitnon@icloud.com">Tetsuhiro Kawaguchi</maintainer>
@@ -15,7 +14,7 @@
 
   <!-- Original authors -->
   <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
-  <author email="ryuta.kambe@tier4.jp">Ryuta Kambe</author>
+  <author email="veqcc.c@gmail.com">Ryuta Kambe</author>
   <author email="atsushi.yano.2@tier4.jp">Atsushi Yano</author>
   <author email="koichi.imai.2@tier4.jp">Koichi Imai</author>
 

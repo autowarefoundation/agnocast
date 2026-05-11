@@ -5,6 +5,7 @@
 #include "agnocast/agnocast_single_threaded_executor.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_callback_isolated_executor.hpp"
+#include "agnocast/node/agnocast_only_executor.hpp"
 #include "agnocast/node/agnocast_only_multi_threaded_executor.hpp"
 #include "agnocast/node/agnocast_only_single_threaded_executor.hpp"
 
@@ -31,11 +32,22 @@ class EpollUpdateTest : public ::testing::Test
 protected:
   void SetUp() override
   {
-    rclcpp::init(0, nullptr);
+    if constexpr (std::is_base_of_v<agnocast::AgnocastOnlyExecutor, ExecutorType>) {
+      agnocast::init(0, nullptr);
+    } else {
+      rclcpp::init(0, nullptr);
+    }
     executor_ = std::make_shared<ExecutorType>();
   }
 
-  void TearDown() override { rclcpp::shutdown(); }
+  void TearDown() override
+  {
+    if constexpr (std::is_base_of_v<agnocast::AgnocastOnlyExecutor, ExecutorType>) {
+      agnocast::shutdown();
+    } else {
+      rclcpp::shutdown();
+    }
+  }
 
   void start_spinning()
   {
@@ -67,31 +79,39 @@ protected:
     return false;
   }
 
-  std::shared_ptr<rclcpp::Node> create_test_node(const std::string & name = "test_node")
+  auto create_test_node(const std::string & name = "test_node")
   {
-    return std::make_shared<rclcpp::Node>(name);
+    if constexpr (std::is_base_of_v<agnocast::AgnocastOnlyExecutor, ExecutorType>) {
+      return std::make_shared<agnocast::Node>(name);
+    } else {
+      return std::make_shared<rclcpp::Node>(name);
+    }
   }
 
+  template <typename NodeT>
   rclcpp::CallbackGroup::SharedPtr create_cbg(
-    const std::shared_ptr<rclcpp::Node> & node,
+    const std::shared_ptr<NodeT> & node,
     rclcpp::CallbackGroupType type = rclcpp::CallbackGroupType::MutuallyExclusive)
   {
     return node->create_callback_group(type);
   }
 
-  void add_node_to_executor(std::shared_ptr<rclcpp::Node> & node)
+  template <typename NodeT>
+  void add_node_to_executor(const std::shared_ptr<NodeT> & node)
   {
     executor_->add_node(node->get_node_base_interface());
   }
 
+  template <typename NodeT>
   void add_callback_group_to_executor(
-    const rclcpp::CallbackGroup::SharedPtr & cbg, const std::shared_ptr<rclcpp::Node> & node)
+    const rclcpp::CallbackGroup::SharedPtr & cbg, const std::shared_ptr<NodeT> & node)
   {
     executor_->add_callback_group(cbg, node->get_node_base_interface());
   }
 
+  template <typename NodeT>
   agnocast::TimerBase::SharedPtr create_flag_timer(
-    std::shared_ptr<rclcpp::Node> node, rclcpp::CallbackGroup::SharedPtr cbg,
+    const std::shared_ptr<NodeT> & node, const rclcpp::CallbackGroup::SharedPtr & cbg,
     std::atomic_bool & flag_to_set, std::chrono::milliseconds period = 50ms)
   {
     return agnocast::create_timer(

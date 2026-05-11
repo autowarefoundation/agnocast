@@ -135,6 +135,7 @@ if(BUILD_TESTING)
   add_launch_test(test/functional/test_agnocast_callback_isolated_executor_launch.py TIMEOUT 120)
   add_launch_test(test/functional/test_multi_domain_cie_talker_launch.py TIMEOUT 120)
   add_launch_test(test/functional/test_thread_configurator_restart_launch.py TIMEOUT 120)
+  add_launch_test(test/functional/test_thread_configurator_reapply_launch.py TIMEOUT 120)
 endif()
 
 ament_package()
