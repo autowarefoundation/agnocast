@@ -44,38 +44,19 @@ using DiagnosticStatus = diagnostic_msgs::msg::DiagnosticStatus;
 // timer-driven path does not race with explicit force_update/broadcast calls.
 constexpr double kInactiveTimerPeriod = 60.0;
 
-struct RecordedStatus
-{
-  std::string name;
-  std::string message;
-  std::string hardware_id;
-  std::size_t values_size{0};
-  unsigned char level{0};
-};
-
-struct RecordedDiagArray
-{
-  builtin_interfaces::msg::Time stamp;
-  std::vector<RecordedStatus> statuses;
-};
-
+// Captures published DiagnosticArray messages by value. Each push() does a
+// deep copy from shared memory into a regular DiagnosticArray, so tests can
+// inspect messages with the same types production code consumes.
 class DiagnosticSink
 {
 public:
   void push(const DiagnosticArray & msg)
   {
-    RecordedDiagArray copy;
-    copy.stamp = msg.header.stamp;
-    copy.statuses.reserve(msg.status.size());
-    for (const auto & s : msg.status) {
-      copy.statuses.push_back(
-        RecordedStatus{s.name, s.message, s.hardware_id, s.values.size(), s.level});
-    }
     std::lock_guard<std::mutex> lock(mutex_);
-    received_.push_back(std::move(copy));
+    received_.push_back(msg);
   }
 
-  std::vector<RecordedDiagArray> snapshot() const
+  std::vector<DiagnosticArray> snapshot() const
   {
     std::lock_guard<std::mutex> lock(mutex_);
     return received_;
@@ -89,7 +70,7 @@ public:
 
 private:
   mutable std::mutex mutex_;
-  std::vector<RecordedDiagArray> received_;
+  std::vector<DiagnosticArray> received_;
 };
 
 }  // namespace
@@ -162,18 +143,18 @@ protected:
     return sink_->size();
   }
 
-  std::vector<RecordedDiagArray> arrays_since(std::size_t baseline) const
+  std::vector<DiagnosticArray> arrays_since(std::size_t baseline) const
   {
     auto all = sink_->snapshot();
     if (baseline >= all.size()) return {};
-    return std::vector<RecordedDiagArray>(all.begin() + baseline, all.end());
+    return std::vector<DiagnosticArray>(all.begin() + baseline, all.end());
   }
 
-  static std::optional<RecordedStatus> find_status(
-    const std::vector<RecordedDiagArray> & arrays, const std::string & name)
+  static std::optional<DiagnosticStatus> find_status(
+    const std::vector<DiagnosticArray> & arrays, const std::string & name)
   {
     for (const auto & a : arrays) {
-      for (const auto & s : a.statuses) {
+      for (const auto & s : a.status) {
         if (s.name == name) return s;
       }
     }
@@ -218,14 +199,13 @@ TEST_F(TestDiagnosticUpdater, add_publishes_node_starting_up_placeholder)
   ASSERT_TRUE(wait_for_size_at_least(1));
   const auto since = arrays_since(0);
   ASSERT_FALSE(since.empty());
-  ASSERT_EQ(since.front().statuses.size(), 1u);
-  const auto & s = since.front().statuses[0];
+  ASSERT_EQ(since.front().status.size(), 1u);
+  const auto & s = since.front().status[0];
   EXPECT_EQ(s.name, prefixed("startup-task"));
   EXPECT_EQ(s.level, DiagnosticStatus::OK);
   EXPECT_EQ(s.message, "Node starting up");
-  // addedTaskCallback never writes hardware_id or values — defaults flow through.
   EXPECT_EQ(s.hardware_id, "");
-  EXPECT_EQ(s.values_size, 0u);
+  EXPECT_EQ(s.values.size(), 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, add_does_not_invoke_user_task_callback)
@@ -251,10 +231,10 @@ TEST_F(TestDiagnosticUpdater, add_placeholder_carries_empty_hardware_id_even_aft
 
   ASSERT_TRUE(wait_for_size_at_least(1));
   const auto since = arrays_since(0);
-  ASSERT_EQ(since.front().statuses.size(), 1u);
+  ASSERT_EQ(since.front().status.size(), 1u);
   // Characterization: addedTaskCallback constructs a fresh DiagnosticStatusWrapper
   // that does NOT see the Updater's hwid_ field.
-  EXPECT_EQ(since.front().statuses[0].hardware_id, "");
+  EXPECT_EQ(since.front().status[0].hardware_id, "");
 }
 
 // =============================================================================
@@ -286,14 +266,13 @@ TEST_F(TestDiagnosticUpdater, force_update_publishes_one_status_with_full_fields
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  ASSERT_EQ(since.front().statuses.size(), 1u);
-  const auto & s = since.front().statuses[0];
+  ASSERT_EQ(since.front().status.size(), 1u);
+  const auto & s = since.front().status[0];
   EXPECT_EQ(s.name, prefixed("worker"));
   EXPECT_EQ(s.hardware_id, "hwid-XYZ");
   EXPECT_EQ(s.level, DiagnosticStatus::WARN);
   EXPECT_EQ(s.message, "degraded");
-  // The task did not touch `values` — default empty.
-  EXPECT_EQ(s.values_size, 0u);
+  EXPECT_EQ(s.values.size(), 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, force_update_with_silent_task_publishes_updater_default_error_status)
@@ -310,9 +289,8 @@ TEST_F(TestDiagnosticUpdater, force_update_with_silent_task_publishes_updater_de
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(status->level, DiagnosticStatus::ERROR);
   EXPECT_EQ(status->message, "No message was set");
-  // hardware_id pre-fill is hwid_; values is left untouched (default empty).
   EXPECT_EQ(status->hardware_id, "none");
-  EXPECT_EQ(status->values_size, 0u);
+  EXPECT_EQ(status->values.size(), 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, force_update_with_zero_tasks_publishes_empty_status_vector)
@@ -326,7 +304,30 @@ TEST_F(TestDiagnosticUpdater, force_update_with_zero_tasks_publishes_empty_statu
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  EXPECT_EQ(since.front().statuses.size(), 0u);
+  EXPECT_EQ(since.front().status.size(), 0u);
+}
+
+TEST_F(TestDiagnosticUpdater, force_update_propagates_task_added_key_values_to_published_status)
+{
+  agnocast::Updater updater(*node_, kInactiveTimerPeriod);
+  updater.setHardwareID("none");
+  updater.add("worker", [](diagnostic_updater::DiagnosticStatusWrapper & s) {
+    s.summary(DiagnosticStatus::OK, "ok");
+    s.add("k1", "v1");
+    s.add("k2", "v2");
+  });
+  const auto baseline = take_baseline();
+
+  updater.force_update();
+
+  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  const auto status = find_status(arrays_since(baseline), prefixed("worker"));
+  ASSERT_TRUE(status.has_value());
+  ASSERT_EQ(status->values.size(), 2u);
+  EXPECT_EQ(status->values[0].key, "k1");
+  EXPECT_EQ(status->values[0].value, "v1");
+  EXPECT_EQ(status->values[1].key, "k2");
+  EXPECT_EQ(status->values[1].value, "v2");
 }
 
 TEST_F(TestDiagnosticUpdater, force_update_aggregates_multiple_tasks_in_registration_order)
@@ -343,10 +344,10 @@ TEST_F(TestDiagnosticUpdater, force_update_aggregates_multiple_tasks_in_registra
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  ASSERT_EQ(since.front().statuses.size(), 3u);
-  EXPECT_EQ(since.front().statuses[0].name, prefixed("z"));
-  EXPECT_EQ(since.front().statuses[1].name, prefixed("a"));
-  EXPECT_EQ(since.front().statuses[2].name, prefixed("m"));
+  ASSERT_EQ(since.front().status.size(), 3u);
+  EXPECT_EQ(since.front().status[0].name, prefixed("z"));
+  EXPECT_EQ(since.front().status[1].name, prefixed("a"));
+  EXPECT_EQ(since.front().status[2].name, prefixed("m"));
 }
 
 // =============================================================================
@@ -374,19 +375,17 @@ TEST_F(TestDiagnosticUpdater, broadcast_publishes_status_per_task_with_supplied_
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  ASSERT_EQ(since.front().statuses.size(), 2u);
-  EXPECT_EQ(since.front().statuses[0].name, prefixed("t1"));
-  EXPECT_EQ(since.front().statuses[0].level, DiagnosticStatus::ERROR);
-  EXPECT_EQ(since.front().statuses[0].message, "shutting-down");
-  EXPECT_EQ(since.front().statuses[1].name, prefixed("t2"));
-  EXPECT_EQ(since.front().statuses[1].level, DiagnosticStatus::ERROR);
-  EXPECT_EQ(since.front().statuses[1].message, "shutting-down");
-  // broadcast() builds a fresh DiagnosticStatusWrapper per task and never
-  // copies hwid_ or anything into `values` — both stay default.
-  EXPECT_EQ(since.front().statuses[0].hardware_id, "");
-  EXPECT_EQ(since.front().statuses[0].values_size, 0u);
-  EXPECT_EQ(since.front().statuses[1].hardware_id, "");
-  EXPECT_EQ(since.front().statuses[1].values_size, 0u);
+  ASSERT_EQ(since.front().status.size(), 2u);
+  EXPECT_EQ(since.front().status[0].name, prefixed("t1"));
+  EXPECT_EQ(since.front().status[0].level, DiagnosticStatus::ERROR);
+  EXPECT_EQ(since.front().status[0].message, "shutting-down");
+  EXPECT_EQ(since.front().status[1].name, prefixed("t2"));
+  EXPECT_EQ(since.front().status[1].level, DiagnosticStatus::ERROR);
+  EXPECT_EQ(since.front().status[1].message, "shutting-down");
+  EXPECT_EQ(since.front().status[0].hardware_id, "");
+  EXPECT_EQ(since.front().status[0].values.size(), 0u);
+  EXPECT_EQ(since.front().status[1].hardware_id, "");
+  EXPECT_EQ(since.front().status[1].values.size(), 0u);
 }
 
 TEST_F(TestDiagnosticUpdater, broadcast_does_not_invoke_user_task_callbacks)
@@ -415,7 +414,7 @@ TEST_F(TestDiagnosticUpdater, broadcast_with_zero_tasks_publishes_empty_status_v
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  EXPECT_EQ(since.front().statuses.size(), 0u);
+  EXPECT_EQ(since.front().status.size(), 0u);
 }
 
 // =============================================================================
@@ -441,8 +440,8 @@ TEST_F(TestDiagnosticUpdater, removeByName_excludes_task_from_subsequent_force_u
   ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  ASSERT_EQ(since.front().statuses.size(), 1u);
-  EXPECT_EQ(since.front().statuses[0].name, prefixed("kept"));
+  ASSERT_EQ(since.front().status.size(), 1u);
+  EXPECT_EQ(since.front().status[0].name, prefixed("kept"));
   EXPECT_FALSE(find_status(since, prefixed("dropped")).has_value());
 }
 
@@ -515,11 +514,11 @@ namespace
 {
 // Count arrays in `since` that contain a status named `name`.
 std::size_t count_publishes_for(
-  const std::vector<RecordedDiagArray> & since, const std::string & name)
+  const std::vector<DiagnosticArray> & since, const std::string & name)
 {
   std::size_t count = 0;
   for (const auto & a : since) {
-    for (const auto & s : a.statuses) {
+    for (const auto & s : a.status) {
       if (s.name == name) {
         count++;
         break;
@@ -628,7 +627,7 @@ TEST_F(TestDiagnosticUpdater, force_update_sets_header_stamp_to_node_clock_now_w
 
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
-  rclcpp::Time stamp(since.front().stamp);
+  rclcpp::Time stamp(since.front().header.stamp);
   EXPECT_GT(stamp.nanoseconds(), 0);
   EXPECT_GE(stamp, before);
   EXPECT_LE(stamp, after);
