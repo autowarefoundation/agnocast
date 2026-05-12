@@ -74,8 +74,6 @@ private:
 
   void create_service_bridge_if_needed(
     const ServiceBridgeTargetInfoWithType & target, BridgeDirection direction);
-  rclcpp::Node::SharedPtr create_shadow_node_if_needed(
-    const std::string & ns, const std::string & name);
 };
 
 }  // namespace agnocast

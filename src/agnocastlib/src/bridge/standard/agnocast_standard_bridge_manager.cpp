@@ -457,7 +457,8 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
     rclcpp::Node::SharedPtr shadow_node;
     if (req.srv_target.create_shadow_node && !shadow_node_name.empty()) {
-      shadow_node = create_shadow_node_if_needed(shadow_node_namespace, shadow_node_name);
+      shadow_node = find_or_create_shadow_node(
+        active_r2a_service_bridges_, shadow_node_namespace, shadow_node_name);
     }
 
     auto bridge = loader_->start_service_bridge(
@@ -480,26 +481,6 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
   } catch (...) {
     RCLCPP_WARN(logger_, "Unknown error creating service bridge for '%s'", service_name.c_str());
   }
-}
-
-rclcpp::Node::SharedPtr StandardBridgeManager::create_shadow_node_if_needed(
-  const std::string & ns, const std::string & name)
-{
-  for (const auto & [_, item] : active_r2a_service_bridges_) {
-    const auto & shadow_node = item.shadow_node;
-    if (shadow_node->get_name() == name && shadow_node->get_namespace() == ns) {
-      return shadow_node;
-    }
-  }
-
-  rclcpp::NodeOptions options;
-  options.start_parameter_services(false);
-  options.start_parameter_event_publisher(false);
-  options.enable_rosout(false);
-  options.use_global_arguments(false);
-
-  auto node = std::make_shared<rclcpp::Node>(name, ns, options);
-  return node;
 }
 
 void StandardBridgeManager::check_parent_alive()

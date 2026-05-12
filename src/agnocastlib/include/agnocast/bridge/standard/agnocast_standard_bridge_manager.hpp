@@ -112,8 +112,6 @@ private:
   bool should_remove_pubsub_bridge(const std::string & topic_name, bool is_r2a);
 
   void create_service_bridge_if_needed(const MqMsgBridge & req);
-  rclcpp::Node::SharedPtr create_shadow_node_if_needed(
-    const std::string & ns, const std::string & name);
 
   void check_parent_alive();
   void check_active_pubsub_bridges();

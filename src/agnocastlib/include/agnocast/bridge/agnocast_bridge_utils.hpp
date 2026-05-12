@@ -5,6 +5,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,5 +70,24 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 bool build_bridge_factory_info(
   BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
   const rclcpp::Logger & logger);
+
+template <typename MapT>
+rclcpp::Node::SharedPtr find_or_create_shadow_node(
+  const MapT & active_r2a_service_bridges, const std::string & ns, const std::string & name)
+{
+  for (const auto & [_, item] : active_r2a_service_bridges) {
+    const rclcpp::Node::SharedPtr & shadow_node = item.shadow_node;
+    if (shadow_node && shadow_node->get_name() == name && shadow_node->get_namespace() == ns) {
+      return shadow_node;
+    }
+  }
+
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  options.start_parameter_event_publisher(false);
+  options.enable_rosout(false);
+
+  return std::make_shared<rclcpp::Node>(name, ns, options);
+}
 
 }  // namespace agnocast
