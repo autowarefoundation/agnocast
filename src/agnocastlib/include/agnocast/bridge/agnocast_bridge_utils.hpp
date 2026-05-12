@@ -72,22 +72,37 @@ bool build_bridge_factory_info(
   const rclcpp::Logger & logger);
 
 template <typename MapT>
-rclcpp::Node::SharedPtr find_or_create_shadow_node(
+std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
   const MapT & active_r2a_service_bridges, const std::string & ns, const std::string & name)
 {
   for (const auto & [_, item] : active_r2a_service_bridges) {
-    const rclcpp::Node::SharedPtr & shadow_node = item.shadow_node;
-    if (shadow_node && shadow_node->get_name() == name && shadow_node->get_namespace() == ns) {
+    const std::shared_ptr<rcl_node_t> & shadow_node = item.shadow_node;
+    if (
+      strcmp(rcl_node_get_name(shadow_node.get()), name.c_str()) == 0 &&
+      strcmp(rcl_node_get_namespace(shadow_node.get()), ns.c_str()) == 0) {
       return shadow_node;
     }
   }
 
-  rclcpp::NodeOptions options;
-  options.start_parameter_services(false);
-  options.start_parameter_event_publisher(false);
-  options.enable_rosout(false);
+  rcl_context_t * rcl_ctx = rclcpp::contexts::get_global_default_context()->get_rcl_context().get();
 
-  return std::make_shared<rclcpp::Node>(name, ns, options);
+  rcl_node_options_t options = rcl_node_get_default_options();
+  options.enable_rosout = false;
+
+  auto del = [](rcl_node_t * node) {
+    if (rcl_node_fini(node) != RCL_RET_OK) {
+      RCUTILS_LOG_ERROR_NAMED(
+        "agnocast_bridge", "Error in destruction of shadow node: %s", rcl_get_error_string().str);
+    }
+    delete node;
+  };
+  auto node = std::shared_ptr<rcl_node_t>(new rcl_node_t{}, del);
+
+  if (rcl_node_init(node.get(), name.c_str(), ns.c_str(), rcl_ctx, &options) != RCL_RET_OK) {
+    throw std::runtime_error("Failed to initialize shadow node");
+  }
+
+  return node;
 }
 
 }  // namespace agnocast

@@ -30,10 +30,10 @@ private:
   struct R2AServiceBridgeItem
   {
     PerformanceServiceBridgeResult result;
-    rclcpp::Node::SharedPtr shadow_node;
+    std::shared_ptr<rcl_node_t> shadow_node;
 
     R2AServiceBridgeItem(
-      PerformanceServiceBridgeResult && result, rclcpp::Node::SharedPtr && shadow_node)
+      PerformanceServiceBridgeResult && result, std::shared_ptr<rcl_node_t> && shadow_node)
     : result(std::move(result)), shadow_node(std::move(shadow_node))
     {
     }

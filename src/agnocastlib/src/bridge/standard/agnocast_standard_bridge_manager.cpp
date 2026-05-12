@@ -455,7 +455,7 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
     const rclcpp::QoS service_qos = get_service_qos(service_name);
 
-    rclcpp::Node::SharedPtr shadow_node;
+    std::shared_ptr<rcl_node_t> shadow_node;
     if (req.srv_target.create_shadow_node && !shadow_node_name.empty()) {
       shadow_node = find_or_create_shadow_node(
         active_r2a_service_bridges_, shadow_node_namespace, shadow_node_name);

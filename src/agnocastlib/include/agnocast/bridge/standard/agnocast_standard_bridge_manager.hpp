@@ -69,10 +69,10 @@ private:
   struct R2AServiceBridgeItem
   {
     std::shared_ptr<ServiceBridgeBase> bridge;
-    rclcpp::Node::SharedPtr shadow_node;
+    std::shared_ptr<rcl_node_t> shadow_node;
 
     R2AServiceBridgeItem(
-      std::shared_ptr<ServiceBridgeBase> bridge, rclcpp::Node::SharedPtr shadow_node)
+      std::shared_ptr<ServiceBridgeBase> bridge, std::shared_ptr<rcl_node_t> shadow_node)
     : bridge(std::move(bridge)), shadow_node(std::move(shadow_node))
     {
     }
