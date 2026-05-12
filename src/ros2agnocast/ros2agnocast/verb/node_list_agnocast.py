@@ -1,5 +1,4 @@
 import ctypes
-import sys
 
 from ros2cli.node.strategy import add_arguments
 from ros2cli.node.strategy import NodeStrategy
