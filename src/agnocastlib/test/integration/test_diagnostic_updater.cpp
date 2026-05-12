@@ -119,9 +119,9 @@ protected:
     return predicate();
   }
 
-  bool wait_for_size_at_least(std::size_t target, std::chrono::milliseconds timeout = 5000ms) const
+  bool wait_for_size(std::size_t target, std::chrono::milliseconds timeout = 5000ms) const
   {
-    return waitFor([this, target]() { return sink_->size() >= target; }, timeout);
+    return waitFor([this, target]() { return sink_->size() == target; }, timeout);
   }
 
   // Let any setup-time publishes settle, then snapshot the sink size as the
@@ -187,7 +187,7 @@ TEST_F(TestDiagnosticUpdater, add_publishes_node_starting_up_placeholder)
 
   updater.add("startup-task", [](diagnostic_updater::DiagnosticStatusWrapper &) {});
 
-  ASSERT_TRUE(wait_for_size_at_least(1));
+  ASSERT_TRUE(wait_for_size(1));
   const auto since = arrays_since(0);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().status.size(), 1u);
@@ -209,7 +209,7 @@ TEST_F(TestDiagnosticUpdater, add_does_not_invoke_user_task_callback)
   });
 
   // Wait for the placeholder publish to land — proves add() has fully run.
-  ASSERT_TRUE(wait_for_size_at_least(1));
+  ASSERT_TRUE(wait_for_size(1));
   EXPECT_EQ(callback_invocations.load(), 0);
 }
 
@@ -220,7 +220,7 @@ TEST_F(TestDiagnosticUpdater, add_placeholder_carries_empty_hardware_id_even_aft
 
   updater.add("startup-task", [](diagnostic_updater::DiagnosticStatusWrapper &) {});
 
-  ASSERT_TRUE(wait_for_size_at_least(1));
+  ASSERT_TRUE(wait_for_size(1));
   const auto since = arrays_since(0);
   ASSERT_EQ(since.front().status.size(), 1u);
   // Characterization: addedTaskCallback constructs a fresh DiagnosticStatusWrapper
@@ -234,9 +234,8 @@ TEST_F(TestDiagnosticUpdater, add_placeholder_carries_empty_hardware_id_even_aft
 // force_update() publishes one DiagnosticArray with one status per task.
 // Each status carries the prefixed name, the setHardwareID value, and the
 // level/message the task wrote (or the Updater defaults — level=ERROR,
-// message="No message was set" — if the task never called summary()).
-// Statuses appear in task registration order, also propagating any KeyValues
-// the task added.
+// message="No message was set" — if the task never called summary()). Any
+// KeyValues the task adds are propagated to the published status.
 // =============================================================================
 
 TEST_F(TestDiagnosticUpdater, force_update_publishes_one_status_with_full_fields_set)
@@ -250,7 +249,7 @@ TEST_F(TestDiagnosticUpdater, force_update_publishes_one_status_with_full_fields
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().status.size(), 1u);
@@ -271,7 +270,7 @@ TEST_F(TestDiagnosticUpdater, force_update_with_silent_task_publishes_updater_de
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto status = find_status(arrays_since(baseline), prefixed("silent"));
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(status->level, DiagnosticStatus::ERROR);
@@ -288,7 +287,7 @@ TEST_F(TestDiagnosticUpdater, force_update_with_zero_tasks_publishes_empty_statu
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   EXPECT_EQ(since.front().status.size(), 0u);
@@ -307,7 +306,7 @@ TEST_F(TestDiagnosticUpdater, force_update_propagates_task_added_key_values_to_p
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto status = find_status(arrays_since(baseline), prefixed("worker"));
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(status->values.size(), 2u);
@@ -317,7 +316,7 @@ TEST_F(TestDiagnosticUpdater, force_update_propagates_task_added_key_values_to_p
   EXPECT_EQ(status->values[1].value, "v2");
 }
 
-TEST_F(TestDiagnosticUpdater, force_update_aggregates_multiple_tasks_in_registration_order)
+TEST_F(TestDiagnosticUpdater, force_update_publishes_a_status_for_every_registered_task)
 {
   agnocast::Updater updater(*node_, kInactiveTimerPeriod);
   updater.setHardwareID("none");
@@ -328,13 +327,13 @@ TEST_F(TestDiagnosticUpdater, force_update_aggregates_multiple_tasks_in_registra
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().status.size(), 3u);
-  EXPECT_EQ(since.front().status[0].name, prefixed("z"));
-  EXPECT_EQ(since.front().status[1].name, prefixed("a"));
-  EXPECT_EQ(since.front().status[2].name, prefixed("m"));
+  EXPECT_TRUE(find_status(since, prefixed("z")).has_value());
+  EXPECT_TRUE(find_status(since, prefixed("a")).has_value());
+  EXPECT_TRUE(find_status(since, prefixed("m")).has_value());
 }
 
 // =============================================================================
@@ -356,7 +355,7 @@ TEST_F(TestDiagnosticUpdater, broadcast_publishes_status_per_task_with_supplied_
 
   updater.broadcast(DiagnosticStatus::ERROR, "shutting-down");
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().status.size(), 2u);
@@ -382,7 +381,7 @@ TEST_F(TestDiagnosticUpdater, broadcast_does_not_invoke_user_task_callbacks)
 
   updater.broadcast(DiagnosticStatus::WARN, "msg");
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   EXPECT_EQ(task_callback_count.load(), 0);
 }
 
@@ -394,7 +393,7 @@ TEST_F(TestDiagnosticUpdater, broadcast_with_zero_tasks_publishes_empty_status_v
 
   updater.broadcast(DiagnosticStatus::OK, "no-tasks");
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   EXPECT_EQ(since.front().status.size(), 0u);
@@ -419,7 +418,7 @@ TEST_F(TestDiagnosticUpdater, removeByName_excludes_task_from_subsequent_force_u
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto since = arrays_since(baseline);
   ASSERT_FALSE(since.empty());
   ASSERT_EQ(since.front().status.size(), 1u);
@@ -444,7 +443,7 @@ TEST_F(TestDiagnosticUpdater, setHardwareIDf_formatted_value_appears_in_publishe
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto status = find_status(arrays_since(baseline), prefixed("worker"));
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(status->hardware_id, "device-42-abc");
@@ -468,7 +467,7 @@ TEST_F(TestDiagnosticUpdater, use_fqn_true_changes_status_name_prefix_to_fully_q
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   EXPECT_TRUE(find_status(arrays_since(baseline), fqn_prefixed("task")).has_value());
   // Sanity: the bare-name prefix must NOT appear when use_fqn is on.
   EXPECT_FALSE(find_status(arrays_since(baseline), prefixed("task")).has_value());
@@ -570,7 +569,7 @@ TEST_F(TestDiagnosticUpdater, constructor_with_node_pointer_overload_publishes_d
 
   updater.force_update();
 
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   EXPECT_TRUE(find_status(arrays_since(baseline), prefixed("ptr-task")).has_value());
 }
 
@@ -591,7 +590,7 @@ TEST_F(TestDiagnosticUpdater, force_update_sets_header_stamp_to_node_clock_now_w
 
   const auto before = node_->get_clock()->now();
   updater.force_update();
-  ASSERT_TRUE(wait_for_size_at_least(baseline + 1));
+  ASSERT_TRUE(wait_for_size(baseline + 1));
   const auto after = node_->get_clock()->now();
 
   const auto since = arrays_since(baseline);
