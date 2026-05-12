@@ -97,10 +97,16 @@ class ListAgnocastVerb(VerbExtension):
 
               ns, name = split_fqn(fqn)
               try:
-                # A normal rclcpp node is likely to have parameter services
-                if len(node.get_service_names_and_types_by_node(name, ns)) == 0:
-                  return True
-                return False
+                # A normal rclcpp node is likely to have parameter services, so start by testing
+                # services.
+                if (
+                  len(node.get_service_names_and_types_by_node(name, ns)) != 0
+                  or len(node.get_publisher_names_and_types_by_node(name, ns)) != 0
+                  or len(node.get_subscriber_names_and_types_by_node(name, ns)) != 0
+                  or len(node.get_client_names_and_types_by_node(name, ns)) != 0
+                ):
+                  return False
+                return True
               except Exception:
                 return False
 
