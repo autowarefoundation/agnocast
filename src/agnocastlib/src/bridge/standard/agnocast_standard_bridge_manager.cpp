@@ -496,6 +496,7 @@ rclcpp::Node::SharedPtr StandardBridgeManager::create_shadow_node_if_needed(
   options.start_parameter_services(false);
   options.start_parameter_event_publisher(false);
   options.enable_rosout(false);
+  options.use_global_arguments(false);
 
   auto node = std::make_shared<rclcpp::Node>(name, ns, options);
   return node;
