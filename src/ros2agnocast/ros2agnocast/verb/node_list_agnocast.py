@@ -7,8 +7,8 @@ from ros2node.api import get_node_names
 from ros2topic.verb import VerbExtension
 
 def split_fqn(fqn):
-  namespace, _, name = fqn.rpartition('/')
-  return (namespace or '/'), name
+    namespace, _, name = fqn.rpartition('/')
+    return (namespace or '/'), name
 
 class TopicInfoRet(ctypes.Structure):
     _fields_ = [
@@ -92,27 +92,27 @@ class ListAgnocastVerb(VerbExtension):
             # invent a deterministic way to identify shadow nodes.
 
             def likely_shadow_node(fqn):
-              if fqn not in agnocast_node_name:
-                return False
+                if fqn not in agnocast_node_name:
+                    return False
 
-              ns, name = split_fqn(fqn)
-              try:
-                # A normal rclcpp node is likely to have parameter services, so start by testing
-                # services.
-                if (
-                  len(node.get_service_names_and_types_by_node(name, ns)) != 0
-                  or len(node.get_publisher_names_and_types_by_node(name, ns)) != 0
-                  or len(node.get_subscriber_names_and_types_by_node(name, ns)) != 0
-                  or len(node.get_client_names_and_types_by_node(name, ns)) != 0
-                ):
-                  return False
-                return True
-              except Exception:
-                return False
+                ns, name = split_fqn(fqn)
+                try:
+                    # A normal rclcpp node is likely to have parameter services, so start by testing
+                    # services.
+                    if (
+                        len(node.get_service_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_publisher_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_subscriber_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_client_names_and_types_by_node(name, ns)) != 0
+                    ):
+                        return False
+                    return True
+                except Exception:
+                    return False
 
             # Get ros2 node names.
-            # Exclude shadow nodes so that the corresponding Agnocast nodes are listed with "(Agnocast enabled)"
             ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=args.all)
+            # Exclude shadow nodes so that the corresponding Agnocast nodes are listed with "(Agnocast enabled)"
             ros2_node_name = {n.full_name for n in ros2_node_name_list if not likely_shadow_node(n.full_name)}
 
             ########################################################################

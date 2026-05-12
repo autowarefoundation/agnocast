@@ -5,7 +5,9 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -78,7 +80,7 @@ std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
   for (const auto & [_, item] : active_r2a_service_bridges) {
     const std::shared_ptr<rcl_node_t> & shadow_node = item.shadow_node;
     if (
-      strcmp(rcl_node_get_name(shadow_node.get()), name.c_str()) == 0 &&
+      shadow_node != nullptr && strcmp(rcl_node_get_name(shadow_node.get()), name.c_str()) == 0 &&
       strcmp(rcl_node_get_namespace(shadow_node.get()), ns.c_str()) == 0) {
       return shadow_node;
     }
@@ -90,9 +92,12 @@ std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
   options.enable_rosout = false;
 
   auto del = [](rcl_node_t * node) {
-    if (rcl_node_fini(node) != RCL_RET_OK) {
-      RCUTILS_LOG_ERROR_NAMED(
-        "agnocast_bridge", "Error in destruction of shadow node: %s", rcl_get_error_string().str);
+    if (rcl_node_is_valid(node)) {
+      if (rcl_node_fini(node) != RCL_RET_OK) {
+        RCUTILS_LOG_ERROR_NAMED(
+          "agnocast_bridge", "Error in destruction of shadow node: %s", rcl_get_error_string().str);
+        rcl_reset_error();
+      }
     }
     delete node;
   };
