@@ -370,6 +370,7 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
 {
   std::string service_name = static_cast<const char *>(target.service_name);
   std::string service_type = static_cast<const char *>(target.service_type);
+  std::string shadow_node_namespace = static_cast<const char *>(target.shadow_node_namespace);
   std::string shadow_node_name = static_cast<const char *>(target.shadow_node_name);
 
   if (direction == BridgeDirection::AGNOCAST_TO_ROS2) {
@@ -399,7 +400,7 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
 
     rclcpp::Node::SharedPtr shadow_node;
     if (target.create_shadow_node && !shadow_node_name.empty()) {
-      shadow_node = create_shadow_node_if_needed(shadow_node_name);
+      shadow_node = create_shadow_node_if_needed(shadow_node_namespace, shadow_node_name);
     }
 
     PerformanceServiceBridgeResult result =
@@ -439,22 +440,21 @@ void PerformanceBridgeManager::remove_invalid_requests(
 }
 
 rclcpp::Node::SharedPtr PerformanceBridgeManager::create_shadow_node_if_needed(
-  const std::string & node_name)
+  const std::string & ns, const std::string & name)
 {
-  auto it = shadow_nodes_.find(node_name);
-  if (it != shadow_nodes_.end()) {
-    if (auto node = it->second.lock()) {
-      return node;
+  for (const auto & [_, item] : active_r2a_service_bridges_) {
+    const rclcpp::Node::SharedPtr & shadow_node = item.shadow_node;
+    if (shadow_node->get_name() == name && shadow_node->get_namespace() == ns) {
+      return shadow_node;
     }
   }
 
   rclcpp::NodeOptions options;
   options.start_parameter_services(false);
   options.start_parameter_event_publisher(false);
+  options.enable_rosout(false);
 
-  auto [ns, name] = split_full_node_name(node_name);
   auto node = std::make_shared<rclcpp::Node>(name, ns, options);
-  shadow_nodes_[node_name] = node;
   return node;
 }
 

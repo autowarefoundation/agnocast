@@ -54,7 +54,6 @@ private:
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   std::unordered_map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
-  std::unordered_map<std::string, rclcpp::Node::WeakPtr> shadow_nodes_;
 
   void start_ros_execution();
 
@@ -75,7 +74,8 @@ private:
 
   void create_service_bridge_if_needed(
     const ServiceBridgeTargetInfoWithType & target, BridgeDirection direction);
-  rclcpp::Node::SharedPtr create_shadow_node_if_needed(const std::string & node_name);
+  rclcpp::Node::SharedPtr create_shadow_node_if_needed(
+    const std::string & ns, const std::string & name);
 };
 
 }  // namespace agnocast
