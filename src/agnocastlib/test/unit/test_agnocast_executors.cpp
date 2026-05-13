@@ -300,3 +300,148 @@ TEST_F(CallbackIsolatedAgnocastExecutorTest, cancel_from_child_callback_does_not
 
   EXPECT_TRUE(spin_finished);
 }
+
+// Regression test: add_callback_group called while spin() is already running must immediately
+// spawn a child executor, so callbacks start dispatching without waiting for spin to restart.
+// Uses automatically_add_to_executor_with_node=false so the monitor loop cannot pick up the
+// group: the eager-spawn path is the only way callbacks can fire here.
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_callback_group_during_spin_dispatches_callbacks)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  executor->add_node(node);
+
+  std::thread spin_thread([this]() { executor->spin(); });
+
+  // Let spin() reach its monitor loop before we attach a new group.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+  auto group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
+  std::atomic_bool callback_called{false};
+  auto timer = node->create_wall_timer(
+    std::chrono::milliseconds(10), [&]() { callback_called = true; }, group);
+
+  executor->add_callback_group(group, node->get_node_base_interface());
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!callback_called) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+      << "Callback never fired after add_callback_group during spin";
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  executor->cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}
+
+// Regression test: remove_callback_group must tear down the child executor and prevent further
+// dispatch for the group, even when the group's owning node remains in the executor.
+TEST_F(CallbackIsolatedAgnocastExecutorTest, remove_callback_group_stops_dispatch)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  executor->add_node(node);
+
+  auto group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
+  std::atomic_int callback_count{0};
+  auto timer =
+    node->create_wall_timer(std::chrono::milliseconds(10), [&]() { callback_count++; }, group);
+
+  executor->add_callback_group(group, node->get_node_base_interface());
+
+  std::thread spin_thread([this]() { executor->spin(); });
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (callback_count.load() == 0) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline) << "Callback never fired";
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  executor->remove_callback_group(group);
+
+  int count_at_remove = callback_count.load();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(callback_count.load(), count_at_remove)
+    << "Callbacks must not fire after remove_callback_group";
+
+  executor->cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}
+
+// Regression test: a group with automatically_add_to_executor_with_node=false on an already-added
+// node must be allowed by add_callback_group. The strict sanity check applies only to auto-add=true
+// groups (which would conflict with the monitor loop).
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_callback_group_auto_add_false_on_added_node)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  executor->add_node(node);
+
+  auto group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
+
+  EXPECT_NO_FATAL_FAILURE(executor->add_callback_group(group, node->get_node_base_interface()));
+  EXPECT_EQ(executor->get_manually_added_callback_groups().size(), 1u);
+
+  executor->remove_callback_group(group);
+  EXPECT_EQ(executor->get_manually_added_callback_groups().size(), 0u);
+}
+
+// Regression test: an auto-add=true group whose owning node is already added must still abort,
+// because it would double-attach (once via the monitor loop, once via add_callback_group).
+TEST_F(CallbackIsolatedAgnocastExecutorTest, add_callback_group_auto_add_true_on_added_node_exits)
+{
+  EXPECT_EXIT(
+    {
+      auto node = std::make_shared<rclcpp::Node>("test_node");
+      executor->add_node(node);
+      auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+      executor->add_callback_group(group, node->get_node_base_interface());
+    },
+    ::testing::ExitedWithCode(EXIT_FAILURE), "auto-add and already discoverable");
+}
+
+// Regression test: after remove_callback_group, the same group can be added again. The
+// stopped_groups_ sentinel that suppresses monitor-loop respawn must not block explicit re-attach.
+TEST_F(CallbackIsolatedAgnocastExecutorTest, re_add_after_remove_succeeds)
+{
+  auto node = std::make_shared<rclcpp::Node>("test_node");
+  executor->add_node(node);
+
+  auto group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
+  std::atomic_int callback_count{0};
+  auto timer =
+    node->create_wall_timer(std::chrono::milliseconds(10), [&]() { callback_count++; }, group);
+
+  std::thread spin_thread([this]() { executor->spin(); });
+
+  auto wait_for_more_than = [&](int from) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (callback_count.load() <= from) {
+      ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  };
+
+  executor->add_callback_group(group, node->get_node_base_interface());
+  wait_for_more_than(0);
+
+  executor->remove_callback_group(group);
+  int count_after_remove = callback_count.load();
+
+  executor->add_callback_group(group, node->get_node_base_interface());
+  wait_for_more_than(count_after_remove);
+
+  executor->cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}

@@ -16,10 +16,14 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
 {
   using ServiceT = @(cpp_type);
 
-  auto srv_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  // The bridge manager attaches/detaches these groups explicitly; opt out of monitor-loop
+  // auto-discovery to avoid re-spawn races with stop_callback_group().
+  auto srv_cb_group = node->create_callback_group(
+    rclcpp::CallbackGroupType::Reentrant,
+    /*automatically_add_to_executor_with_node=*/false);
+  auto client_cb_group = node->create_callback_group(
+    rclcpp::CallbackGroupType::Reentrant,
+    /*automatically_add_to_executor_with_node=*/false);
 
   auto agno_client = agnocast::create_client<ServiceT>(
     node.get(), service_name, qos, client_cb_group);

@@ -257,6 +257,10 @@ bool StandardBridgeManager::activate_pubsub_bridge(const DirectedPubsubBridgeRef
       return false;
     }
 
+    if (auto cb_group = bridge->get_callback_group()) {
+      executor_->add_callback_group(cb_group, container_node_->get_node_base_interface());
+    }
+
     if (is_r2a) {
       if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
         RCLCPP_ERROR(

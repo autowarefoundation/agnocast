@@ -132,8 +132,11 @@ public:
     agnocast_pub_ = std::make_shared<AgnoPub>(
       parent_node.get(), topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).transient_local(), agno_opts,
       true);
-    ros_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    // Bridge groups are attached/detached explicitly by the bridge manager. Opt out of monitor
+    // loop auto-discovery to avoid re-spawn races with stop_callback_group().
+    ros_cb_group_ = parent_node->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive,
+      /*automatically_add_to_executor_with_node=*/false);
 
     rclcpp::SubscriptionOptions ros_opts;
     ros_opts.ignore_local_publications = true;
@@ -180,8 +183,9 @@ public:
     // ROS subscribers without connectivity issues.
     ros_pub_ = parent_node->create_publisher<MessageT>(
       topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).reliable().transient_local());
-    agno_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    agno_cb_group_ = parent_node->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive,
+      /*automatically_add_to_executor_with_node=*/false);
 
     agnocast::SubscriptionOptions agno_opts;
     agno_opts.ignore_local_publications = true;

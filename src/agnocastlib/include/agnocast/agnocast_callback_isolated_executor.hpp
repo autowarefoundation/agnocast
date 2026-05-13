@@ -1,7 +1,10 @@
 #pragma once
 #include "agnocast/agnocast_executor.hpp"
 #include "agnocast/agnocast_public_api.hpp"
+#include "agnocast/cie_client_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
+
+#include <mutex>
 
 namespace agnocast
 {
@@ -45,6 +48,16 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
 
   // Child threads created during spin()
   std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Sentinel for groups stopped via stop_callback_group(): suppresses respawn by the monitor
+  // loop while the group is still owned by its caller (associated_with_executor flag is cleared
+  // on stop, but the group may outlive that and look like an orphan to the monitor loop).
+  std::set<rclcpp::CallbackGroup::WeakPtr, std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
+    stopped_groups_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  std::once_flag client_publisher_once_;
+  rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
+  std::mutex client_publisher_mutex_;
 
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_manually_added_callback_groups_internal() const
     RCPPUTILS_TSA_REQUIRES(mutex_);
@@ -133,6 +146,14 @@ public:
   /// @param notify If true, wake the executor so it picks up the change immediately.
   AGNOCAST_PUBLIC
   void remove_node(rclcpp::Node::SharedPtr node_ptr, bool notify = true) override;
+
+private:
+  void spawn_child_executor_locked(
+    const rclcpp::CallbackGroup::SharedPtr & group,
+    const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node)
+    RCPPUTILS_TSA_REQUIRES(child_resources_mutex_);
+
+  void ensure_client_publisher();
 };
 
 }  // namespace agnocast

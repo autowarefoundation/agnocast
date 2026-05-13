@@ -23,7 +23,11 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
     agnocast::PublisherOptions{},
     true);
 
-  auto ros_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  // The bridge manager attaches/detaches this group explicitly; opt out of monitor-loop
+  // auto-discovery to avoid re-spawn races with stop_callback_group().
+  auto ros_cb_group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
 
   rclcpp::SubscriptionOptions ros_opts;
   ros_opts.ignore_local_publications = true;
@@ -50,7 +54,9 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
   auto ros_pub = node->create_publisher<@(cpp_type)>(
     topic_name, rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto cb_group = node->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive,
+    /*automatically_add_to_executor_with_node=*/false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<@(cpp_type)> msg) {
     auto loaned_msg = ros_pub->borrow_loaned_message();
