@@ -582,9 +582,10 @@ public:
   }
 
   /// Create a service client.
+  /// @tparam ServiceT ROS service type.
   /// @param service_name Service name.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created client.
   // AGNOCAST_PUBLIC
   template <typename ServiceT>
@@ -601,12 +602,13 @@ public:
   }
 
   /// Create a service server.
-  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&,
-  /// agnocast::ipc_shared_ptr<ResponseT>&).
+  /// @tparam ServiceT ROS service type.
+  /// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
+  /// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
   /// @param service_name Service name.
   /// @param callback Callback invoked on each request.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created service.
   // AGNOCAST_PUBLIC
   template <typename ServiceT, typename Func>

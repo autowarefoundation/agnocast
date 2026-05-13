@@ -194,8 +194,8 @@ typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
 /// @tparam ServiceT ROS service type.
 /// @param node Pointer to rclcpp::Node.
 /// @param service_name Service name.
-/// @param qos Quality of service profile.
-/// @param group Callback group (nullptr = default).
+/// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+/// @param group Callback group. Defaults to `nullptr` (default callback group).
 /// @return Shared pointer to the created client.
 // AGNOCAST_PUBLIC
 template <typename ServiceT>
@@ -213,13 +213,13 @@ typename Client<ServiceT>::SharedPtr create_client(
 
 /// @brief Create an Agnocast service server (Stage 1 free function).
 /// @tparam ServiceT ROS service type.
-/// @tparam Func Callable with signature `void(const agnocast::ipc_shared_ptr<const RequestT>&,
-/// agnocast::ipc_shared_ptr<ResponseT>&)`.
+/// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
+/// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
 /// @param node Pointer to rclcpp::Node.
 /// @param service_name Service name.
 /// @param callback Callback invoked on each request.
-/// @param qos Quality of service profile.
-/// @param group Callback group (nullptr = default).
+/// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+/// @param group Callback group. Defaults to `nullptr` (default callback group).
 /// @return Shared pointer to the created service.
 // AGNOCAST_PUBLIC
 template <typename ServiceT, typename Func>
