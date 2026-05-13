@@ -143,11 +143,11 @@ void Updater::update()
 
       status_vec.push_back(status);
 
-      if (status.level != 0u) {
+      if (status.level != 0U) {
         warn_nohwid = false;
       }
 
-      if (verbose_ && status.level != 0u) {
+      if (verbose_ && status.level != 0U) {
         RCLCPP_WARN(
           logger_, "Non-zero diagnostic status. Name: '%s', status %i: '%s'", status.name.c_str(),
           status.level, status.message.c_str());
