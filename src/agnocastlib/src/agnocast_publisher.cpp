@@ -9,7 +9,15 @@
 namespace agnocast
 {
 
-thread_local uint32_t borrowed_publisher_num = 0;
+// Keep the initial-exec TLS model here: it avoids the following infinite recursion that causes a
+// SIGSEGV:
+// 1. heaphook malloc() is called.
+// 2. agnocast_get_borrowed_publisher_num() is called and accesses a thread_local variable.
+// 3. __tls_get_addr() is called to resolve the address.
+// 4. _dl_resize_dtv() is called to resize the DTV region. This occurs when new .so libraries are
+//    loaded via dlopen() and the number of managed TLS variables increases.
+// 5. _dl_resize_dtv() calls malloc(), which loops back to step 1.
+__attribute__((tls_model("initial-exec"))) thread_local uint32_t borrowed_publisher_num = 0;
 
 extern "C" uint32_t agnocast_get_borrowed_publisher_num()
 {
