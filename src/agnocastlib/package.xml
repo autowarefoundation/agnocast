@@ -32,6 +32,8 @@
 
   <depend>agnocast_cie_config_msgs</depend>
   <depend>agnocast_cie_thread_configurator</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>diagnostic_updater</depend>
   <depend>geometry_msgs</depend>
   <depend>tf2</depend>
   <depend>tf2_msgs</depend>
