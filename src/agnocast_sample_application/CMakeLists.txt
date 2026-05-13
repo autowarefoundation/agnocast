@@ -29,22 +29,22 @@ target_include_directories(cie_talker PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
-add_library(cie_listener_component SHARED src/cie_subscriber.cpp)
-ament_target_dependencies(cie_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
-target_include_directories(cie_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+add_library(agnocast_cie_listener_component SHARED src/cie_subscriber.cpp)
+ament_target_dependencies(agnocast_cie_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_cie_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
 agnocast_components_register_node(
-  cie_listener_component
+  agnocast_cie_listener_component
   PLUGIN "CieSubscriber"
   EXECUTABLE cie_listener
 )
 
-add_library(no_rclcpp_listener_component SHARED src/no_rclcpp_subscriber.cpp)
-ament_target_dependencies(no_rclcpp_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
-target_include_directories(no_rclcpp_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+add_library(agnocast_no_rclcpp_listener_component SHARED src/no_rclcpp_subscriber.cpp)
+ament_target_dependencies(agnocast_no_rclcpp_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_no_rclcpp_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
 agnocast_components_register_node(
-  no_rclcpp_listener_component
+  agnocast_no_rclcpp_listener_component
   PLUGIN "NoRclcppSubscriber"
   EXECUTABLE no_rclcpp_listener
   EXECUTOR AgnocastOnlySingleThreadedExecutor
@@ -98,27 +98,27 @@ target_include_directories(sim_time_timer PRIVATE
   ${agnocastlib_INCLUDE_DIRS}
 )
 
-add_library(listener_component SHARED src/minimal_subscriber.cpp)
-ament_target_dependencies(listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
-target_include_directories(listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+add_library(agnocast_listener_component SHARED src/minimal_subscriber.cpp)
+ament_target_dependencies(agnocast_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
 
 agnocast_components_register_node(
-  listener_component
+  agnocast_listener_component
   PLUGIN "MinimalSubscriber"
   EXECUTABLE listener
 )
 
-ament_export_targets(export_listener_component)
-install(TARGETS listener_component
-        EXPORT export_listener_component
+ament_export_targets(export_agnocast_listener_component)
+install(TARGETS agnocast_listener_component
+        EXPORT export_agnocast_listener_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
 )
 
-ament_export_targets(export_cie_listener_component)
-install(TARGETS cie_listener_component
-        EXPORT export_cie_listener_component
+ament_export_targets(export_agnocast_cie_listener_component)
+install(TARGETS agnocast_cie_listener_component
+        EXPORT export_agnocast_cie_listener_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
@@ -133,9 +133,9 @@ install(TARGETS cie_talker
 install(TARGETS cie_tutorial_node
   DESTINATION lib/${PROJECT_NAME})
 
-ament_export_targets(export_no_rclcpp_listener_component)
-install(TARGETS no_rclcpp_listener_component
-        EXPORT export_no_rclcpp_listener_component
+ament_export_targets(export_agnocast_no_rclcpp_listener_component)
+install(TARGETS agnocast_no_rclcpp_listener_component
+        EXPORT export_agnocast_no_rclcpp_listener_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin

@@ -44,7 +44,8 @@ StandardBridgeManager::~StandardBridgeManager()
     }
   }
 
-  active_bridges_.clear();
+  active_pubsub_bridges_.clear();
+  active_r2a_service_bridges_.clear();
   container_node_.reset();
   executor_.reset();
 
@@ -71,8 +72,9 @@ void StandardBridgeManager::run()
     }
 
     check_parent_alive();
-    check_managed_bridges();
-    check_active_bridges();
+    check_managed_pubsub_bridges();
+    check_active_pubsub_bridges();
+    check_and_remove_service_bridges();
     check_should_exit();
   }
 }
@@ -109,7 +111,11 @@ void StandardBridgeManager::on_mq_request(mqd_t fd)
     if (shutdown_requested_) {
       break;
     }
-    register_request(req);
+    if (req.is_service) {
+      create_service_bridge_if_needed(req);
+    } else {
+      register_pubsub_request(req);
+    }
   }
 }
 
@@ -124,17 +130,22 @@ void StandardBridgeManager::on_signal()
   }
 }
 
-void StandardBridgeManager::register_request(const MqMsgBridge & req)
+void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)
 {
   // Locally, unique keys include the direction. However, we register the raw topic name (without
   // direction) to the kernel to enforce single-process ownership for the entire topic.
-  const auto [topic_name, topic_name_with_direction] = extract_topic_info(req);
-  if (active_bridges_.count(topic_name_with_direction) != 0U) {
+
+  const std::string topic_name = static_cast<const char *>(req.pubsub_target.topic_name);
+  std::string_view suffix =
+    (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? SUFFIX_PUBSUB_R2A : SUFFIX_PUBSUB_A2R;
+  const std::string topic_name_with_direction = topic_name + std::string(suffix);
+
+  if (active_pubsub_bridges_.count(topic_name_with_direction) != 0U) {
     return;
   }
 
-  auto it = managed_bridges_.find(topic_name);
-  if (it == managed_bridges_.end()) {
+  auto it = managed_pubsub_bridges_.find(topic_name);
+  if (it == managed_pubsub_bridges_.end()) {
     if (*static_cast<const char *>(req.factory.shared_lib_path) == '\0') {
       RCLCPP_WARN(
         logger_,
@@ -145,7 +156,7 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
       return;
     }
 
-    auto & entry = managed_bridges_[topic_name];
+    auto & entry = managed_pubsub_bridges_[topic_name];
 
     if (
       std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) ==
@@ -159,13 +170,13 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
       entry.factory_spec.fn_offset_r2a = req.factory.fn_offset;
       entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
-      entry.target_id_r2a = req.target.target_id;
+      entry.target_id_r2a = req.pubsub_target.target_id;
       entry.is_requested_r2a = true;
       entry.reset_a2r();
     } else {
       entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_reverse;
       entry.factory_spec.fn_offset_a2r = req.factory.fn_offset;
-      entry.target_id_a2r = req.target.target_id;
+      entry.target_id_a2r = req.pubsub_target.target_id;
       entry.is_requested_a2r = true;
       entry.reset_r2a();
     }
@@ -173,16 +184,16 @@ void StandardBridgeManager::register_request(const MqMsgBridge & req)
     auto & entry = it->second;
 
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-      entry.target_id_r2a = req.target.target_id;
+      entry.target_id_r2a = req.pubsub_target.target_id;
       entry.is_requested_r2a = true;
     } else {
-      entry.target_id_a2r = req.target.target_id;
+      entry.target_id_a2r = req.pubsub_target.target_id;
       entry.is_requested_a2r = true;
     }
   }
 }
 
-StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_to_kernel(
+StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_pubsub_bridge_to_kernel(
   const std::string & topic_name, bool is_r2a)
 {
   struct ioctl_add_bridge_args add_bridge_args
@@ -202,7 +213,8 @@ StandardBridgeManager::BridgeKernelResult StandardBridgeManager::try_add_bridge_
   return BridgeKernelResult{AddBridgeResult::ERROR, 0, false, false};
 }
 
-void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topic_name, bool is_r2a)
+void StandardBridgeManager::rollback_pubsub_bridge_from_kernel(
+  const std::string & topic_name, bool is_r2a)
 {
   struct ioctl_remove_bridge_args remove_bridge_args
   {
@@ -217,15 +229,15 @@ void StandardBridgeManager::rollback_bridge_from_kernel(const std::string & topi
   }
 }
 
-bool StandardBridgeManager::activate_bridge(const DirectedBridgeRef bridge_ref)
+bool StandardBridgeManager::activate_pubsub_bridge(const DirectedPubsubBridgeRef bridge_ref)
 {
   const auto & [topic_name, entry, direction] = bridge_ref;
 
   bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
-  std::string_view suffix = is_r2a ? SUFFIX_R2A : SUFFIX_A2R;
+  std::string_view suffix = is_r2a ? SUFFIX_PUBSUB_R2A : SUFFIX_PUBSUB_A2R;
   std::string topic_name_with_direction = topic_name + std::string(suffix);
 
-  if (active_bridges_.count(topic_name_with_direction) != 0U) {
+  if (active_pubsub_bridges_.count(topic_name_with_direction) != 0U) {
     return true;
   }
 
@@ -233,7 +245,8 @@ bool StandardBridgeManager::activate_bridge(const DirectedBridgeRef bridge_ref)
     rclcpp::QoS target_qos = is_r2a ? get_subscriber_qos(topic_name, entry.target_id_r2a)
                                     : get_publisher_qos(topic_name, entry.target_id_a2r);
 
-    auto bridge = loader_->create(topic_name, direction, entry.factory_spec, target_qos);
+    auto bridge =
+      loader_->start_pubsub_bridge(topic_name, direction, entry.factory_spec, target_qos);
 
     if (!bridge) {
       RCLCPP_ERROR(logger_, "Failed to create bridge for '%s'", topic_name_with_direction.c_str());
@@ -255,7 +268,7 @@ bool StandardBridgeManager::activate_bridge(const DirectedBridgeRef bridge_ref)
           logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
       }
     }
-    active_bridges_[topic_name_with_direction] = bridge;
+    active_pubsub_bridges_[topic_name_with_direction] = bridge;
 
     return true;
 
@@ -267,7 +280,8 @@ bool StandardBridgeManager::activate_bridge(const DirectedBridgeRef bridge_ref)
   }
 }
 
-void StandardBridgeManager::send_delegation(const DirectedBridgeRef bridge_ref, pid_t owner_pid)
+void StandardBridgeManager::send_pubsub_delegation(
+  const DirectedPubsubBridgeRef bridge_ref, pid_t owner_pid)
 {
   const auto & [topic_name, entry, direction] = bridge_ref;
 
@@ -284,11 +298,24 @@ void StandardBridgeManager::send_delegation(const DirectedBridgeRef bridge_ref, 
   /* --- Construct request --- */
   MqMsgBridge req{};
   req.direction = direction;
-  req.target.target_id =
+  req.is_service = false;
+  req.pubsub_target.target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
-  snprintf(
-    static_cast<char *>(req.target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
+  int topic_name_len = snprintf(
+    static_cast<char *>(req.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
+    topic_name.c_str());
   // req.factory can be left zeroed because it is not going to be used.
+
+  if (topic_name_len < 0 || topic_name_len >= TOPIC_NAME_BUFFER_SIZE) {
+    RCLCPP_ERROR(
+      logger_, "snprintf failed for topic name '%s'; length must be %d characters or fewer",
+      topic_name.c_str(), TOPIC_NAME_BUFFER_SIZE - 1);
+    if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+      RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+    }
+    shutdown_requested_ = true;
+    return;
+  }
   /* ------------------------- */
 
   if (mq_send(mq, reinterpret_cast<const char *>(&req), sizeof(req), 0) < 0) {
@@ -302,7 +329,7 @@ void StandardBridgeManager::send_delegation(const DirectedBridgeRef bridge_ref, 
   mq_close(mq);
 }
 
-void StandardBridgeManager::process_managed_bridge(const DirectedBridgeRef bridge_ref)
+void StandardBridgeManager::process_managed_pubsub_bridge(const DirectedPubsubBridgeRef bridge_ref)
 {
   const auto & [topic_name, entry, direction] = bridge_ref;
 
@@ -328,20 +355,20 @@ void StandardBridgeManager::process_managed_bridge(const DirectedBridgeRef bridg
   }
 
   auto [status, owner_pid, kernel_has_r2a, kernel_has_a2r] =
-    try_add_bridge_to_kernel(topic_name, is_r2a);
+    try_add_pubsub_bridge_to_kernel(topic_name, is_r2a);
   bool is_active_in_owner = is_r2a ? kernel_has_r2a : kernel_has_a2r;
 
   switch (status) {
     case AddBridgeResult::SUCCESS:
-      if (!activate_bridge(bridge_ref)) {
+      if (!activate_pubsub_bridge(bridge_ref)) {
         // Rollback: remove bridge from kernel if activation failed
-        rollback_bridge_from_kernel(topic_name, is_r2a);
+        rollback_pubsub_bridge_from_kernel(topic_name, is_r2a);
       }
       break;
 
     case AddBridgeResult::EXIST:
       if (!is_active_in_owner) {
-        send_delegation(bridge_ref, owner_pid);
+        send_pubsub_delegation(bridge_ref, owner_pid);
       }
       break;
 
@@ -351,7 +378,7 @@ void StandardBridgeManager::process_managed_bridge(const DirectedBridgeRef bridg
   }
 }
 
-bool StandardBridgeManager::should_remove_bridge(const std::string & topic_name, bool is_r2a)
+bool StandardBridgeManager::should_remove_pubsub_bridge(const std::string & topic_name, bool is_r2a)
 {
   int count = 0;
   bool is_demanded_by_ros2 = false;
@@ -383,6 +410,66 @@ bool StandardBridgeManager::should_remove_bridge(const std::string & topic_name,
   return !is_demanded_by_ros2;
 }
 
+void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & req)
+{
+  if (req.direction != BridgeDirection::ROS2_TO_AGNOCAST) {
+    // A2R service bridge is not implemented yet.
+    return;
+  }
+
+  const std::string service_name = static_cast<const char *>(req.srv_target.service_name);
+  if (active_r2a_service_bridges_.count(service_name) != 0U) {
+    return;
+  }
+
+  // Build the bridge factory spec.
+  BridgeFactorySpec factory_spec;
+  if (
+    std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) == 0) {
+    factory_spec.shared_lib_path = std::nullopt;
+  } else {
+    factory_spec.shared_lib_path =
+      std::string(static_cast<const char *>(req.factory.shared_lib_path));
+  }
+  factory_spec.fn_offset_r2a = req.factory.fn_offset;
+  factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
+
+  try {
+    // Check that the target service does not already exist in ROS 2.
+    const auto services = container_node_->get_service_names_and_types();
+    bool exists = std::any_of(services.begin(), services.end(), [&service_name](const auto & s) {
+      return s.first == service_name;
+    });
+    if (exists) {
+      RCLCPP_WARN(
+        logger_,
+        "Found a ROS 2 service with the same name while creating the R2A service bridge: '%s'",
+        service_name.c_str());
+    }
+
+    const rclcpp::QoS service_qos = get_service_qos(service_name);
+
+    auto bridge = loader_->start_service_bridge(
+      service_name, BridgeDirection::ROS2_TO_AGNOCAST, factory_spec, service_qos);
+
+    if (!bridge) {
+      RCLCPP_ERROR(logger_, "Bridge loader failed for '%s'", service_name.c_str());
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
+      shutdown_requested_ = true;
+      return;
+    }
+
+    active_r2a_service_bridges_[service_name] = std::move(bridge);
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(
+      logger_, "Failed to create service bridge for '%s': %s", service_name.c_str(), e.what());
+  } catch (...) {
+    RCLCPP_WARN(logger_, "Unknown error creating service bridge for '%s'", service_name.c_str());
+  }
+}
+
 void StandardBridgeManager::check_parent_alive()
 {
   if (!is_parent_alive_) {
@@ -390,15 +477,15 @@ void StandardBridgeManager::check_parent_alive()
   }
   if (kill(target_pid_, 0) != 0) {
     is_parent_alive_ = false;
-    managed_bridges_.clear();
+    managed_pubsub_bridges_.clear();
   }
 }
 
-void StandardBridgeManager::check_active_bridges()
+void StandardBridgeManager::check_active_pubsub_bridges()
 {
-  for (auto it = active_bridges_.begin(); it != active_bridges_.end();) {
+  for (auto it = active_pubsub_bridges_.begin(); it != active_pubsub_bridges_.end();) {
     const std::string & key = it->first;
-    const std::shared_ptr<BridgeBase> & bridge = it->second;
+    const std::shared_ptr<PubsubBridgeBase> & bridge = it->second;
     if (key.size() <= SUFFIX_LEN) {
       ++it;
       continue;
@@ -408,10 +495,10 @@ void StandardBridgeManager::check_active_bridges()
     std::string_view suffix = key_view.substr(key_view.size() - SUFFIX_LEN);
     std::string_view topic_name_view = key_view.substr(0, key_view.size() - SUFFIX_LEN);
 
-    bool is_r2a = (suffix == SUFFIX_R2A);
+    bool is_r2a = (suffix == SUFFIX_PUBSUB_R2A);
     std::string topic_name_str(topic_name_view);
 
-    if (!should_remove_bridge(topic_name_str, is_r2a)) {
+    if (!should_remove_pubsub_bridge(topic_name_str, is_r2a)) {
       ++it;
       continue;
     }
@@ -435,13 +522,38 @@ void StandardBridgeManager::check_active_bridges()
     }
 
     // Erase the bridge in-place.
-    it = active_bridges_.erase(it);
+    it = active_pubsub_bridges_.erase(it);
   }
 }
 
-void StandardBridgeManager::check_managed_bridges()
+void StandardBridgeManager::check_and_remove_service_bridges()
 {
-  for (auto it = managed_bridges_.begin(); it != managed_bridges_.end();) {
+  for (auto it = active_r2a_service_bridges_.begin(); it != active_r2a_service_bridges_.end();) {
+    const std::string & service_name = it->first;
+
+    std::string reason;
+    if (is_agnocast_service_alive(service_name, reason)) {
+      ++it;
+      continue;
+    }
+
+    RCLCPP_WARN(
+      logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), reason.c_str());
+
+    auto [ros_cb, agno_cb] = it->second->get_callback_groups();
+    if (ros_cb) {
+      executor_->stop_callback_group(ros_cb);
+    }
+    if (agno_cb) {
+      executor_->stop_callback_group(agno_cb);
+    }
+    it = active_r2a_service_bridges_.erase(it);
+  }
+}
+
+void StandardBridgeManager::check_managed_pubsub_bridges()
+{
+  for (auto it = managed_pubsub_bridges_.begin(); it != managed_pubsub_bridges_.end();) {
     if (shutdown_requested_) {
       break;
     }
@@ -459,19 +571,21 @@ void StandardBridgeManager::check_managed_bridges()
     }
 
     if (!entry.is_requested_r2a && !entry.is_requested_a2r) {
-      it = managed_bridges_.erase(it);
+      it = managed_pubsub_bridges_.erase(it);
       continue;
     }
 
-    process_managed_bridge(DirectedBridgeRef{topic_name, entry, BridgeDirection::ROS2_TO_AGNOCAST});
-    process_managed_bridge(DirectedBridgeRef{topic_name, entry, BridgeDirection::AGNOCAST_TO_ROS2});
+    process_managed_pubsub_bridge(
+      DirectedPubsubBridgeRef{topic_name, entry, BridgeDirection::ROS2_TO_AGNOCAST});
+    process_managed_pubsub_bridge(
+      DirectedPubsubBridgeRef{topic_name, entry, BridgeDirection::AGNOCAST_TO_ROS2});
     ++it;
   }
 }
 
 void StandardBridgeManager::check_should_exit()
 {
-  if (!is_parent_alive_ && active_bridges_.empty()) {
+  if (!is_parent_alive_ && active_pubsub_bridges_.empty() && active_r2a_service_bridges_.empty()) {
     if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
       RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
     }
@@ -480,18 +594,6 @@ void StandardBridgeManager::check_should_exit()
       executor_->cancel();
     }
   }
-}
-
-std::pair<std::string, std::string> StandardBridgeManager::extract_topic_info(
-  const MqMsgBridge & req)
-{
-  std::string raw_name(
-    &req.target.topic_name[0], strnlen(&req.target.topic_name[0], sizeof(req.target.topic_name)));
-
-  std::string_view suffix =
-    (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? SUFFIX_R2A : SUFFIX_A2R;
-
-  return {raw_name, raw_name + std::string(suffix)};
 }
 
 }  // namespace agnocast

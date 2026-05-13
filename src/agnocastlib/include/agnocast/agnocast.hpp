@@ -203,6 +203,11 @@ typename Client<ServiceT>::SharedPtr create_client(
   rclcpp::Node * node, const std::string & service_name,
   const rclcpp::QoS & qos = rclcpp::ServicesQoS(), rclcpp::CallbackGroup::SharedPtr group = nullptr)
 {
+  RCLCPP_WARN(
+    node->get_logger(),
+    "Agnocast service/client is not officially supported yet and the API may change in the "
+    "future: %s",
+    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Client<ServiceT>>(node, service_name, qos, group);
 }
 
@@ -222,6 +227,11 @@ typename Service<ServiceT>::SharedPtr create_service(
   rclcpp::Node * node, const std::string & service_name, Func && callback,
   const rclcpp::QoS & qos = rclcpp::ServicesQoS(), rclcpp::CallbackGroup::SharedPtr group = nullptr)
 {
+  RCLCPP_WARN(
+    node->get_logger(),
+    "Agnocast service/client is not officially supported yet and the API may change in the "
+    "future: %s",
+    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Service<ServiceT>>(
     node, service_name, std::forward<Func>(callback), qos, group);
 }

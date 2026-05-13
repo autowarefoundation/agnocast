@@ -6,7 +6,6 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -24,6 +23,8 @@
 
 namespace agnocast
 {
+
+struct NoBridgeRequestPolicy;
 
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
@@ -126,12 +127,6 @@ public:
     static_assert(
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
-
-    RCLCPP_WARN(
-      logger_,
-      "Agnocast service/client is not officially supported yet and the API may change in the "
-      "future: %s",
-      service_name_.c_str());
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();

@@ -25,12 +25,15 @@ Node::Node(
   node_topics_(std::make_shared<node_interfaces::NodeTopics>(node_base_)),
   node_services_(std::make_shared<node_interfaces::NodeServices>(node_base_)),
   node_parameters_(std::make_shared<node_interfaces::NodeParameters>(
-    this, node_base_, options.parameter_overrides(), options.start_parameter_services(),
-    local_args_.get())),
+    node_base_, options.parameter_overrides(), local_args_.get())),
   node_clock_(std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME)),
   node_time_source_(std::make_shared<node_interfaces::NodeTimeSource>(node_clock_, this)),
   node_logging_(std::make_shared<node_interfaces::NodeLogging>(logger_))
 {
+  if (options.start_parameter_services()) {
+    node_parameters_->start_parameter_services(this);
+  }
+
   TRACEPOINT(
     agnocast_node_init, static_cast<const void *>(node_base_.get()), this->get_name().c_str(),
     this->get_namespace().c_str());

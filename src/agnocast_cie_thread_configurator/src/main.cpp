@@ -72,6 +72,7 @@ int main(int argc, char * argv[])
 
       executor->spin();
 
+      node->stop();
       node->dump_yaml_config(std::filesystem::current_path());
     } else {
       rclcpp::NodeOptions options;
@@ -89,6 +90,7 @@ int main(int argc, char * argv[])
 
       executor->spin();
 
+      node->stop();
       node->print_all_unapplied();
     }
   } catch (const std::exception & e) {

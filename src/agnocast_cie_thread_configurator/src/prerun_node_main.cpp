@@ -20,6 +20,7 @@ int main(int argc, char * argv[])
 
     executor->spin();
 
+    node->stop();
     node->dump_yaml_config(std::filesystem::current_path());
   } catch (const std::exception & e) {
     std::cerr << "[ERROR] " << e.what() << std::endl;
