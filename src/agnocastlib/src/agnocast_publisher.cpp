@@ -9,7 +9,7 @@
 namespace agnocast
 {
 
-thread_local uint32_t borrowed_publisher_num = 0;
+__attribute__((tls_model("initial-exec"))) thread_local uint32_t borrowed_publisher_num = 0;
 
 extern "C" uint32_t agnocast_get_borrowed_publisher_num()
 {
