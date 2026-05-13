@@ -128,12 +128,6 @@ public:
       std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
       "NodeT must be either rclcpp::Node or agnocast::Node");
 
-    RCLCPP_WARN(
-      logger_,
-      "Agnocast service/client is not officially supported yet and the API may change in the "
-      "future: %s",
-      service_name_.c_str());
-
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
 
