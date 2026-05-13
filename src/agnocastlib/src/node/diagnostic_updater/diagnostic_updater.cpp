@@ -36,6 +36,7 @@
 
 #include "agnocast/agnocast.hpp"
 
+#include <array>
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -83,8 +84,8 @@ void Updater::broadcast(unsigned char lvl, const std::string & msg)
   std::vector<diagnostic_msgs::msg::DiagnosticStatus> status_vec;
 
   const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
-  for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
-       iter != tasks.end(); ++iter) {
+  // NOLINTBEGIN(modernize-loop-convert)
+  for (auto iter = tasks.begin(); iter != tasks.end(); ++iter) {
     diagnostic_updater::DiagnosticStatusWrapper status;
 
     status.name = iter->getName();
@@ -92,27 +93,31 @@ void Updater::broadcast(unsigned char lvl, const std::string & msg)
 
     status_vec.push_back(status);
   }
+  // NOLINTEND(modernize-loop-convert)
 
   publish(status_vec);
 }
 
+// NOLINTBEGIN(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
 void Updater::setHardwareIDf(const char * format, ...)
 {
   va_list va;
   const int kBufferSize = 1000;
-  char buff[kBufferSize];
+  std::array<char, kBufferSize> buff;
   va_start(va, format);
-  if (vsnprintf(buff, kBufferSize, format, va) >= kBufferSize) {
+  if (vsnprintf(buff.data(), kBufferSize, format, va) >= kBufferSize) {
     RCLCPP_DEBUG(logger_, "Really long string in diagnostic_updater::setHardwareIDf.");
   }
-  hwid_ = std::string(buff);
+  hwid_ = std::string(buff.data());
   va_end(va);
 }
+// NOLINTEND(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
 
 void Updater::reset_timer()
 {
-  update_timer_ =
-    agnocast::create_timer(&node_, clock_, period_, std::bind(&Updater::update, this));
+  update_timer_ = agnocast::create_timer(&node_, clock_, period_, [this]() { update(); });
 }
 
 void Updater::update()
@@ -125,8 +130,8 @@ void Updater::update()
     std::unique_lock<std::mutex> lock(
       lock_);  // Make sure no adds happen while we are processing here.
     const std::vector<DiagnosticTaskInternal> & tasks = getTasks();
-    for (std::vector<DiagnosticTaskInternal>::const_iterator iter = tasks.begin();
-         iter != tasks.end(); ++iter) {
+    // NOLINTBEGIN(modernize-loop-convert)
+    for (auto iter = tasks.begin(); iter != tasks.end(); ++iter) {
       diagnostic_updater::DiagnosticStatusWrapper status;
 
       status.name = iter->getName();
@@ -138,16 +143,17 @@ void Updater::update()
 
       status_vec.push_back(status);
 
-      if (status.level) {
+      if (status.level != 0u) {
         warn_nohwid = false;
       }
 
-      if (verbose_ && status.level) {
+      if (verbose_ && status.level != 0u) {
         RCLCPP_WARN(
           logger_, "Non-zero diagnostic status. Name: '%s', status %i: '%s'", status.name.c_str(),
           status.level, status.message.c_str());
       }
     }
+    // NOLINTEND(modernize-loop-convert)
 
     if (warn_nohwid && !warn_nohwid_done_) {
       std::string error_msg = "diagnostic_updater: No HW_ID was set.";
@@ -172,10 +178,11 @@ void Updater::publish(diagnostic_msgs::msg::DiagnosticStatus & stat)
 
 void Updater::publish(std::vector<diagnostic_msgs::msg::DiagnosticStatus> & status_vec)
 {
-  for (std::vector<diagnostic_msgs::msg::DiagnosticStatus>::iterator iter = status_vec.begin();
-       iter != status_vec.end(); ++iter) {
+  // NOLINTBEGIN(modernize-loop-convert)
+  for (auto iter = status_vec.begin(); iter != status_vec.end(); ++iter) {
     iter->name = node_name_ + std::string(": ") + iter->name;
   }
+  // NOLINTEND(modernize-loop-convert)
   auto msg = publisher_->borrow_loaned_message();
   msg->status = status_vec;
   msg->header.stamp = clock_->now();
