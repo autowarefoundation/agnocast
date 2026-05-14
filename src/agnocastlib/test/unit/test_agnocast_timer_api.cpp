@@ -33,11 +33,14 @@ protected:
 
 TEST_F(CreateTimerFreeFunctionTest, create_timer_returns_timer_with_specified_clock)
 {
+  // Arrange
   auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
   const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
 
+  // Act
   auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
 
+  // Assert
   ASSERT_NE(timer, nullptr);
   EXPECT_EQ(timer->get_clock()->get_clock_type(), RCL_STEADY_TIME);
 }
