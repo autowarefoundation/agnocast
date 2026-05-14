@@ -48,7 +48,7 @@ struct TimerInfo
   std::atomic<int64_t> last_call_time_ns;
   std::atomic<int64_t> next_call_time_ns;
   std::atomic<int64_t> time_credit{0};  // Credit for time elapsed before ROS time is activated
-  std::chrono::nanoseconds period;
+  std::atomic<int64_t> period_ns;
   bool need_epoll_update = true;
 
   rclcpp::Clock::SharedPtr clock;

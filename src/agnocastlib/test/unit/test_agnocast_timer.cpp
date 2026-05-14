@@ -56,7 +56,7 @@ protected:
   {
     auto info = std::make_shared<agnocast::TimerInfo>();
     info->timer_id = 1;
-    info->period = std::chrono::nanoseconds{period_ns};
+    info->period_ns.store(period_ns, std::memory_order_relaxed);
     info->clock = std::move(clock);
     info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
     info->next_call_time_ns.store(now_ns + period_ns, std::memory_order_relaxed);
@@ -505,7 +505,7 @@ TEST_F(TestTimer, set_period_updates_period_only_without_modifying_call_time_anc
   info->set_period(new_period);
 
   // Assert — period swapped; call-time anchors untouched.
-  EXPECT_EQ(info->period, new_period);
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), new_period.count());
   EXPECT_EQ(info->next_call_time_ns.load(std::memory_order_relaxed), snapshot_next);
   EXPECT_EQ(info->last_call_time_ns.load(std::memory_order_relaxed), last_call_ns);
 }
@@ -600,7 +600,7 @@ TEST_F(TestTimer, set_period_skips_timer_fd_re_arm_when_fd_is_minus_one)
 
   // Act / Assert
   EXPECT_NO_THROW(info->set_period(new_period));
-  EXPECT_EQ(info->period, new_period);
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), new_period.count());
   EXPECT_EQ(info->next_call_time_ns.load(std::memory_order_relaxed), snapshot_next);
 }
 
@@ -733,7 +733,7 @@ TEST_F(TestRegisterTimerInfo, populates_timer_info_from_arguments_and_clock)
   // Argument forwarding: each argument is stored verbatim.
   EXPECT_EQ(info->timer_id, timer_id);
   EXPECT_EQ(info->timer.lock(), timer);
-  EXPECT_EQ(info->period, period);
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), period.count());
   EXPECT_EQ(info->callback_group, cb_group);
   // Call-time anchors initialized from clock->now().
   EXPECT_EQ(info->last_call_time_ns.load(std::memory_order_relaxed), now_ns);

@@ -65,7 +65,7 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
 
   const int64_t last_call_ns = timer_info.last_call_time_ns.load(std::memory_order_relaxed);
   const int64_t next_call_ns = timer_info.next_call_time_ns.load(std::memory_order_relaxed);
-  const int64_t period_ns = timer_info.period.count();
+  const int64_t period_ns = timer_info.period_ns.load(std::memory_order_relaxed);
 
   if (jump.clock_change == RCL_ROS_TIME_ACTIVATED) {
     // ROS time activated: close timerfd (simulation time will use clock_eventfd)
@@ -192,12 +192,13 @@ static void arm_timer_fd(int timer_fd, uint32_t timer_id, std::chrono::nanosecon
 void TimerInfo::reset()
 {
   const int64_t now_ns = clock->now().nanoseconds();
-  next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
+  const int64_t cur_period_ns = period_ns.load(std::memory_order_relaxed);
+  next_call_time_ns.store(now_ns + cur_period_ns, std::memory_order_relaxed);
 
   std::shared_lock fd_lock(fd_mutex);
 
   if (timer_fd != -1) {
-    arm_timer_fd(timer_fd, timer_id, period);
+    arm_timer_fd(timer_fd, timer_id, std::chrono::nanoseconds{cur_period_ns});
   }
 }
 
@@ -246,7 +247,7 @@ void register_timer_info(
   timer_info->timer = timer;
   timer_info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
   timer_info->next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
-  timer_info->period = period;
+  timer_info->period_ns.store(period.count(), std::memory_order_relaxed);
   timer_info->callback_group = callback_group;
   timer_info->need_epoll_update = true;
   timer_info->clock = clock;
@@ -305,7 +306,7 @@ void handle_timer_event(TimerInfo & timer_info)
 
   timer_info.last_call_time_ns.store(now_ns, std::memory_order_relaxed);
 
-  const int64_t period_ns = timer_info.period.count();
+  const int64_t period_ns = timer_info.period_ns.load(std::memory_order_relaxed);
   int64_t next_call_time_ns =
     timer_info.next_call_time_ns.load(std::memory_order_relaxed) + period_ns;
 
@@ -336,7 +337,7 @@ void unregister_timer_info(uint32_t timer_id)
 void TimerInfo::set_period(std::chrono::nanoseconds new_period)
 {
   // rcl_timer_exchange_period semantics.
-  period = new_period;
+  period_ns.store(new_period.count(), std::memory_order_relaxed);
 
   std::shared_lock fd_lock(fd_mutex);
   if (timer_fd == -1) {
