@@ -1,7 +1,7 @@
-// White-box regression tests coupled to the current TimerInfo / JumpHandler
-// design — rewrite or delete on internal refactor, not a stability contract.
-// The user-facing timer contract lives in test/integration/test_agnocast_create_timer.cpp.
+// White-box tests for the timer subsystem internals — rewrite or delete on internal
+// refactor. The public-API spec lives in test_agnocast_timer_api.cpp.
 
+#include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
@@ -669,4 +669,63 @@ TEST_F(TestRegisterTimerInfo, attaches_jump_handler_only_for_ros_time)
     ASSERT_NE(info, nullptr);
     EXPECT_NE(info->jump_handler, nullptr);
   }
+}
+
+// =============================================================================
+// create_timer (free function) — wrapper over register_timer_info; tested here
+// because the default-callback-group fallback is observable only via the
+// internal registry (no public API exposes the callback group).
+// =============================================================================
+
+TEST_F(TestRegisterTimerInfo, create_timer_uses_default_callback_group_when_nullptr)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto expected_group = default_callback_group();
+
+  // Act — pass nullptr explicitly; create_timer must fall back to the node's default.
+  auto timer = agnocast::create_timer(node_.get(), clock, period, []() {}, nullptr);
+
+  // Assert — locate the registered TimerInfo by timer instance and verify the group.
+  ASSERT_NE(timer, nullptr);
+  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+  bool found = false;
+  for (const auto & [id, info] : agnocast::id2_timer_info) {
+    if (info->callback_group == expected_group && info->timer.lock() == timer) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "create_timer with nullptr group must use the node's default";
+}
+
+// =============================================================================
+// allocate_timer_id — overflow guard against the reserved epoll-flag bits region
+// =============================================================================
+
+TEST(AllocateTimerIdTest, throws_when_id_reaches_reserved_range)
+{
+  // Arrange — pin next_timer_id at the boundary so the next allocation overflows.
+  const uint32_t original = agnocast::next_timer_id.load();
+  agnocast::next_timer_id.store(agnocast::MAX_TIMER_ID);
+
+  // Act & Assert
+  EXPECT_THROW(agnocast::allocate_timer_id(), std::runtime_error);
+
+  // Cleanup
+  agnocast::next_timer_id.store(original);
+}
+
+TEST(AllocateTimerIdTest, succeeds_at_the_highest_valid_id)
+{
+  // Arrange — last allocatable ID is MAX_TIMER_ID - 1.
+  const uint32_t original = agnocast::next_timer_id.load();
+  agnocast::next_timer_id.store(agnocast::MAX_TIMER_ID - 1);
+
+  // Act & Assert
+  EXPECT_EQ(agnocast::allocate_timer_id(), agnocast::MAX_TIMER_ID - 1);
+
+  // Cleanup
+  agnocast::next_timer_id.store(original);
 }
