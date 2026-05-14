@@ -57,6 +57,49 @@ TEST_F(CreateTimerFreeFunctionTest, callback_is_invoked)
   EXPECT_TRUE(called);
 }
 
+TEST_F(CreateTimerFreeFunctionTest, callback_with_timer_base_argument_receives_self)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(10));
+  agnocast::TimerBase * captured = nullptr;
+  auto timer = agnocast::create_timer(
+    node.get(), clock, period,
+    [&captured](agnocast::TimerBase & self) { captured = &self; });
+
+  // Act
+  timer->execute_callback();
+
+  // Assert
+  EXPECT_EQ(captured, timer.get());
+}
+
+TEST_F(CreateTimerFreeFunctionTest, is_steady_reflects_clock_type)
+{
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+
+  // STEADY_TIME
+  {
+    auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+    auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+    EXPECT_TRUE(timer->is_steady());
+  }
+
+  // ROS_TIME
+  {
+    auto clock = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
+    auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+    EXPECT_FALSE(timer->is_steady());
+  }
+
+  // SYSTEM_TIME
+  {
+    auto clock = std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME);
+    auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+    EXPECT_FALSE(timer->is_steady());
+  }
+}
+
 // =========================================
 // cancel and reset and time_until_trigger function tests
 // =========================================
@@ -154,5 +197,37 @@ TEST_F(CreateTimerFreeFunctionTest, time_until_trigger_cancel_and_reset_ros_time
   EXPECT_EQ(tut_after_reset, std::chrono::nanoseconds(kPeriodNs));
   EXPECT_EQ(tut_after_wait, std::chrono::nanoseconds(kPeriodNs - kAdvanceNs));
   EXPECT_FALSE(called);
+}
+
+TEST_F(CreateTimerFreeFunctionTest, reset_re_anchors_next_call_when_time_has_advanced)
+{
+  // Arrange
+  constexpr int64_t kT0Ns = 1'000'000'000;
+  constexpr int64_t kPeriodNs = 100'000'000;
+  constexpr int64_t kHalfPeriodNs = 50'000'000;
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
+  rcl_clock_t * rcl_clock = clock->get_clock_handle();
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    ASSERT_EQ(rcl_enable_ros_time_override(rcl_clock), RCL_RET_OK);
+    ASSERT_EQ(rcl_set_ros_time_override(rcl_clock, kT0Ns), RCL_RET_OK);
+  }
+  const auto period = rclcpp::Duration(std::chrono::nanoseconds(kPeriodNs));
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+
+  // Act
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    ASSERT_EQ(rcl_set_ros_time_override(rcl_clock, kT0Ns + kHalfPeriodNs), RCL_RET_OK);
+  }
+  const auto tut_before_reset = timer->time_until_trigger();
+  const bool was_canceled_before_reset = timer->is_canceled();
+  timer->reset();
+  const auto tut_after_reset = timer->time_until_trigger();
+
+  // Assert
+  EXPECT_FALSE(was_canceled_before_reset);
+  EXPECT_EQ(tut_before_reset, std::chrono::nanoseconds(kPeriodNs - kHalfPeriodNs));
+  EXPECT_EQ(tut_after_reset, std::chrono::nanoseconds(kPeriodNs));
 }
 
