@@ -90,6 +90,11 @@ std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
 
   rcl_node_options_t options = rcl_node_get_default_options();
   options.enable_rosout = false;
+  options.use_global_arguments = false;
+  if (rcl_parse_arguments(0, nullptr, options.allocator, &(options.arguments)) != RCL_RET_OK) {
+    rcl_reset_error();
+    throw std::runtime_error("Failed to parse arguments while creating shadow node");
+  }
 
   auto del = [](rcl_node_t * node) {
     if (rcl_node_is_valid(node)) {
@@ -104,6 +109,7 @@ std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
   auto node = std::shared_ptr<rcl_node_t>(new rcl_node_t{}, del);
 
   if (rcl_node_init(node.get(), name.c_str(), ns.c_str(), rcl_ctx, &options) != RCL_RET_OK) {
+    rcl_reset_error();
     throw std::runtime_error("Failed to initialize shadow node");
   }
 
