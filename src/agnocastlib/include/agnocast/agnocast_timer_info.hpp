@@ -30,6 +30,9 @@ struct TimerInfo
 
   void reset();
 
+  // Implementation of TimerBase::set_period; see that for semantics.
+  void set_period(std::chrono::nanoseconds new_period);
+
   // Mutex to protect timer_fd access.
   // - shared_lock: for reading timer_fd (read(), epoll_ctl()).
   // - unique_lock: for writing timer_fd (close()).
