@@ -174,9 +174,10 @@ static struct timespec ns_to_armed_timespec(int64_t ns)
 static void set_timer_fd(int timer_fd, uint32_t timer_id, const struct itimerspec & spec)
 {
   if (timerfd_settime(timer_fd, 0, &spec, nullptr) == -1) {
+    const int saved_errno = errno;
     throw std::runtime_error(
       "timerfd_settime failed for timer_id=" + std::to_string(timer_id) + ": " +
-      std::strerror(errno));
+      std::strerror(saved_errno));
   }
 }
 
