@@ -67,8 +67,7 @@ TEST_F(CreateTimerFreeFunctionTest, callback_with_timer_base_argument_receives_s
   const auto period = rclcpp::Duration(std::chrono::milliseconds(10));
   agnocast::TimerBase * captured = nullptr;
   auto timer = agnocast::create_timer(
-    node.get(), clock, period,
-    [&captured](agnocast::TimerBase & self) { captured = &self; });
+    node.get(), clock, period, [&captured](agnocast::TimerBase & self) { captured = &self; });
 
   // Act
   timer->execute_callback();
@@ -233,4 +232,3 @@ TEST_F(CreateTimerFreeFunctionTest, reset_re_anchors_next_call_when_time_has_adv
   EXPECT_EQ(tut_before_reset, std::chrono::nanoseconds(kPeriodNs - kHalfPeriodNs));
   EXPECT_EQ(tut_after_reset, std::chrono::nanoseconds(kPeriodNs));
 }
-
