@@ -316,6 +316,5 @@ TEST_F(CreateTimerFreeFunctionTest, set_period_throws_when_underlying_timer_info
   }
 
   // Act / Assert
-  EXPECT_THROW(
-    timer->set_period(std::chrono::nanoseconds{50'000'000}), std::runtime_error);
+  EXPECT_THROW(timer->set_period(std::chrono::nanoseconds{50'000'000}), std::runtime_error);
 }
