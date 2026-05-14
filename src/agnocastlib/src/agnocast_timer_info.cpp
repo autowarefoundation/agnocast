@@ -97,7 +97,12 @@ void handle_post_time_jump(TimerInfo & timer_info, const rcl_time_jump_t & jump)
       "ROS time deactivation is not yet supported. Timer behavior may be incorrect.");
   } else if (next_call_ns <= now_ns) {
     // Post forward jump and timer is ready
-    if (timer_info.clock_eventfd >= 0) {
+    auto timer = timer_info.timer.lock();
+    if (!timer) {
+      RCLCPP_WARN(rclcpp::get_logger("Agnocast"), "Failed to lock timer.");
+      return;
+    }
+    if (timer_info.clock_eventfd >= 0 && !timer->is_canceled()) {
       const uint64_t val = 1;
       if (write(timer_info.clock_eventfd, &val, sizeof(val)) == -1) {
         RCLCPP_WARN(
@@ -155,20 +160,8 @@ TimerInfo::~TimerInfo()
   }
 }
 
-int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period, rcl_clock_type_t clock_type)
+static void arm_timer_fd(int timer_fd, uint32_t timer_id, std::chrono::nanoseconds period)
 {
-  // Use CLOCK_MONOTONIC for STEADY_TIME, CLOCK_REALTIME for others (SYSTEM_TIME, ROS_TIME)
-  // This matches rclcpp's behavior where:
-  // - RCL_STEADY_TIME uses monotonic clock
-  // - RCL_SYSTEM_TIME and RCL_ROS_TIME use system clock
-  const int clockid = (clock_type == RCL_STEADY_TIME) ? CLOCK_MONOTONIC : CLOCK_REALTIME;
-  int timer_fd = timerfd_create(clockid, TFD_NONBLOCK | TFD_CLOEXEC);
-  if (timer_fd == -1) {
-    throw std::runtime_error(
-      "timerfd_create failed for timer_id=" + std::to_string(timer_id) + ": " +
-      std::strerror(errno));
-  }
-
   struct itimerspec spec = {};
   const auto period_count = period.count();
   if (period_count == 0) {
@@ -184,10 +177,43 @@ int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period, rcl_cloc
 
   if (timerfd_settime(timer_fd, 0, &spec, nullptr) == -1) {
     const int saved_errno = errno;
-    close(timer_fd);
     throw std::runtime_error(
       "timerfd_settime failed for timer_id=" + std::to_string(timer_id) +
       ", period=" + std::to_string(period_count) + "ns: " + std::strerror(saved_errno));
+  }
+}
+
+void TimerInfo::reset()
+{
+  const int64_t now_ns = clock->now().nanoseconds();
+  next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
+
+  std::shared_lock fd_lock(fd_mutex);
+
+  if (timer_fd != -1) {
+    arm_timer_fd(timer_fd, timer_id, period);
+  }
+}
+
+int create_timer_fd(uint32_t timer_id, std::chrono::nanoseconds period, rcl_clock_type_t clock_type)
+{
+  // Use CLOCK_MONOTONIC for STEADY_TIME, CLOCK_REALTIME for others (SYSTEM_TIME, ROS_TIME)
+  // This matches rclcpp's behavior where:
+  // - RCL_STEADY_TIME uses monotonic clock
+  // - RCL_SYSTEM_TIME and RCL_ROS_TIME use system clock
+  const int clockid = (clock_type == RCL_STEADY_TIME) ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+  int timer_fd = timerfd_create(clockid, TFD_NONBLOCK | TFD_CLOEXEC);
+  if (timer_fd == -1) {
+    throw std::runtime_error(
+      "timerfd_create failed for timer_id=" + std::to_string(timer_id) + ": " +
+      std::strerror(errno));
+  }
+
+  try {
+    arm_timer_fd(timer_fd, timer_id, period);
+  } catch (...) {
+    close(timer_fd);
+    throw;
   }
 
   return timer_fd;
@@ -238,6 +264,8 @@ void register_timer_info(
     timer_info->timer_fd = create_timer_fd(timer_id, period, clock->get_clock_type());
   }
 
+  timer->set_timer_info(timer_info);
+
   setup_time_jump_callback(timer_info, clock);
 
   if (timer_info->timer_fd >= 0) {
@@ -258,11 +286,13 @@ void register_timer_info(
 
 void handle_timer_event(TimerInfo & timer_info)
 {
-  // TODO(Koichi98): Add canceled check here
-
   auto timer = timer_info.timer.lock();
   if (!timer) {
     return;  // Timer object has been destroyed
+  }
+
+  if (timer->is_canceled()) {
+    return;
   }
 
   const int64_t now_ns = timer_info.clock->now().nanoseconds();

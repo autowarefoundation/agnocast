@@ -4,6 +4,7 @@
 #include "rclcpp/clock.hpp"
 #include "rclcpp/macros.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -12,6 +13,8 @@
 
 namespace agnocast
 {
+
+struct TimerInfo;
 
 /**
  * @brief Base class for Agnocast timers providing periodic callback execution.
@@ -27,14 +30,25 @@ public:
 
   virtual ~TimerBase();
 
-  // TODO: The following methods are planned to be added for rclcpp API compatibility:
-  // void cancel(), bool is_canceled(), void reset(), std::chrono::nanoseconds time_until_trigger(),
-  // etc.
+  AGNOCAST_PUBLIC
+  void cancel() { canceled_.store(true); }
+
+  // Non-const to align with rclcpp::TimerBase::is_canceled().
+  AGNOCAST_PUBLIC
+  bool is_canceled() { return canceled_.load(); }
+
+  AGNOCAST_PUBLIC
+  void reset();
+
+  AGNOCAST_PUBLIC
+  std::chrono::nanoseconds time_until_trigger();
+
+  void set_timer_info(std::weak_ptr<TimerInfo> timer_info) { timer_info_ = timer_info; }
 
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
   AGNOCAST_PUBLIC
-  virtual bool is_steady() const { return true; }
+  virtual bool is_steady() const = 0;
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
@@ -44,13 +58,14 @@ public:
   virtual void execute_callback() = 0;
 
 protected:
-  TimerBase(uint32_t timer_id, std::chrono::nanoseconds period)
-  : timer_id_(timer_id), period_(period)
+  TimerBase(uint32_t timer_id, [[maybe_unused]] std::chrono::nanoseconds period)
+  : timer_id_(timer_id), timer_info_(), canceled_(false)
   {
   }
 
   uint32_t timer_id_;
-  std::chrono::nanoseconds period_;
+  std::weak_ptr<TimerInfo> timer_info_;
+  std::atomic<bool> canceled_;
 };
 
 /**

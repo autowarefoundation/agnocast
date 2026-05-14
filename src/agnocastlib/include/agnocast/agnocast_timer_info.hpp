@@ -28,6 +28,8 @@ struct TimerInfo
 {
   ~TimerInfo();
 
+  void reset();
+
   // Mutex to protect timer_fd access.
   // - shared_lock: for reading timer_fd (read(), epoll_ctl()).
   // - unique_lock: for writing timer_fd (close()).
