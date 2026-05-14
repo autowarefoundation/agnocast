@@ -91,6 +91,7 @@ create_rclcpp_client_publisher()
   options.start_parameter_services(false);
   options.start_parameter_event_publisher(false);
   options.enable_rosout(false);
+  options.use_clock_thread(false);
   auto node = std::make_shared<rclcpp::Node>(
     "client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator", options);
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
@@ -109,6 +110,7 @@ create_agnocast_client_publisher()
   options.start_parameter_services(false);
   options.start_parameter_event_publisher(false);
   options.enable_rosout(false);
+  options.use_clock_thread(false);
   auto node = std::make_shared<agnocast::Node>(
     "agnocast_client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator",
     options);
