@@ -6,9 +6,12 @@
 #include <sys/prctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <csignal>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace agnocast
 {
@@ -418,6 +421,9 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
   }
 
   const std::string service_name = static_cast<const char *>(req.srv_target.service_name);
+  const std::string shadow_node_namespace =
+    static_cast<const char *>(req.srv_target.shadow_node_namespace);
+  const std::string shadow_node_name = static_cast<const char *>(req.srv_target.shadow_node_name);
   if (active_r2a_service_bridges_.count(service_name) != 0U) {
     return;
   }
@@ -449,6 +455,12 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
     const rclcpp::QoS service_qos = get_service_qos(service_name);
 
+    std::shared_ptr<rcl_node_t> shadow_node;
+    if (req.srv_target.create_shadow_node && !shadow_node_name.empty()) {
+      shadow_node = find_or_create_shadow_node(
+        active_r2a_service_bridges_, shadow_node_namespace, shadow_node_name);
+    }
+
     auto bridge = loader_->start_service_bridge(
       service_name, BridgeDirection::ROS2_TO_AGNOCAST, factory_spec, service_qos);
 
@@ -461,7 +473,8 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
       return;
     }
 
-    active_r2a_service_bridges_[service_name] = std::move(bridge);
+    active_r2a_service_bridges_.emplace(
+      service_name, R2AServiceBridgeItem(std::move(bridge), std::move(shadow_node)));
   } catch (const std::exception & e) {
     RCLCPP_WARN(
       logger_, "Failed to create service bridge for '%s': %s", service_name.c_str(), e.what());
@@ -540,7 +553,7 @@ void StandardBridgeManager::check_and_remove_service_bridges()
     RCLCPP_WARN(
       logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), reason.c_str());
 
-    auto [ros_cb, agno_cb] = it->second->get_callback_groups();
+    auto [ros_cb, agno_cb] = it->second.bridge->get_callback_groups();
     if (ros_cb) {
       executor_->stop_callback_group(ros_cb);
     }

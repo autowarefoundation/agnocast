@@ -239,11 +239,11 @@ void PerformanceBridgeManager::check_and_remove_service_bridges()
     RCLCPP_WARN(
       logger_, "Removing R2A service bridge for '%s': %s", service_name.c_str(), reason.c_str());
 
-    if (r2a_srv_it->second.ros_srv_cb_group) {
-      executor_->stop_callback_group(r2a_srv_it->second.ros_srv_cb_group);
+    if (r2a_srv_it->second.result.ros_srv_cb_group) {
+      executor_->stop_callback_group(r2a_srv_it->second.result.ros_srv_cb_group);
     }
-    if (r2a_srv_it->second.agno_client_cb_group) {
-      executor_->stop_callback_group(r2a_srv_it->second.agno_client_cb_group);
+    if (r2a_srv_it->second.result.agno_client_cb_group) {
+      executor_->stop_callback_group(r2a_srv_it->second.result.agno_client_cb_group);
     }
     r2a_srv_it = active_r2a_service_bridges_.erase(r2a_srv_it);
   }
@@ -370,6 +370,8 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
 {
   std::string service_name = static_cast<const char *>(target.service_name);
   std::string service_type = static_cast<const char *>(target.service_type);
+  std::string shadow_node_namespace = static_cast<const char *>(target.shadow_node_namespace);
+  std::string shadow_node_name = static_cast<const char *>(target.shadow_node_name);
 
   if (direction == BridgeDirection::AGNOCAST_TO_ROS2) {
     // A2R service bridge is not implemented yet.
@@ -396,10 +398,17 @@ void PerformanceBridgeManager::create_service_bridge_if_needed(
 
     auto service_qos = get_service_qos(service_name);
 
+    std::shared_ptr<rcl_node_t> shadow_node;
+    if (target.create_shadow_node && !shadow_node_name.empty()) {
+      shadow_node = find_or_create_shadow_node(
+        active_r2a_service_bridges_, shadow_node_namespace, shadow_node_name);
+    }
+
     PerformanceServiceBridgeResult result =
       loader_.create_r2a_service_bridge(container_node_, service_name, service_type, service_qos);
     if (result.entity_handle) {
-      active_r2a_service_bridges_[service_name] = std::move(result);
+      active_r2a_service_bridges_.emplace(
+        service_name, R2AServiceBridgeItem(std::move(result), std::move(shadow_node)));
     }
   } catch (const std::exception & e) {
     RCLCPP_WARN(
