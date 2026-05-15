@@ -86,7 +86,10 @@ if [ "$LOWER_BRIDGE_MODE" = "performance" ] || [ "$LOWER_BRIDGE_MODE" = "2" ]; t
     else
         ros2 agnocast generate-bridge-plugins --all
     fi
-    colcon build --packages-select agnocast_bridge_plugins
+    if ! colcon build --packages-select agnocast_bridge_plugins; then
+        echo "ERROR: colcon build failed for agnocast_bridge_plugins" | sudo tee /dev/kmsg
+        exit 1
+    fi
     source install/setup.bash
 
     echo "Performance mode cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
