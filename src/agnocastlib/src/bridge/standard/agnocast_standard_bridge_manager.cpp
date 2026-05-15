@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace agnocast
 {
@@ -297,20 +298,21 @@ void StandardBridgeManager::send_pubsub_delegation(
   }
 
   /* --- Construct request --- */
-  MqMsgBridge req{};
-  req.direction = direction;
-  req.is_service = false;
-  req.pubsub_target.target_id =
+  const topic_local_id_t target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
-  int topic_name_len = snprintf(
-    static_cast<char *>(req.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
-    topic_name.c_str());
+
+  auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger_)
+                   .set_direction(direction)
+                   .set_is_service(false)
+                   .set_topic_name(topic_name.c_str())
+                   .set_target_id(target_id);
+  auto [req, reason] = std::move(builder).build_standard_message();
   // req.factory can be left zeroed because it is not going to be used.
 
-  if (topic_name_len < 0 || topic_name_len >= TOPIC_NAME_BUFFER_SIZE) {
+  if (!reason.empty()) {
     RCLCPP_ERROR(
-      logger_, "snprintf failed for topic name '%s'; length must be %d characters or fewer",
-      topic_name.c_str(), TOPIC_NAME_BUFFER_SIZE - 1);
+      logger_, "Failed to build delegation request for topic '%s': %s", topic_name.c_str(),
+      reason.c_str());
     if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
       RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
     }
