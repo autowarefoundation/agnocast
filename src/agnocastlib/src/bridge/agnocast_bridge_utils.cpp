@@ -320,17 +320,10 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_factory(uintptr_t fn_r2a,
     }
   }
 
-  const char * symbol_to_send = MAIN_EXECUTABLE_SYMBOL;
-  if (!is_self_executable && info.dli_sname != nullptr) {
-    symbol_to_send = info.dli_sname;
-  }
-
   checked_snprintf(
     "shared_lib_path", static_cast<char *>(standard_msg.factory.shared_lib_path),
-    SHARED_LIB_PATH_BUFFER_SIZE, "%s", info.dli_fname);
-  checked_snprintf(
-    "symbol_name", static_cast<char *>(standard_msg.factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE,
-    "%s", symbol_to_send);
+    SHARED_LIB_PATH_BUFFER_SIZE, "%s",
+    is_self_executable ? MAIN_EXECUTABLE_SYMBOL : info.dli_fname);
 
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
   standard_msg.factory.fn_offset_r2a = fn_r2a - base_addr;
