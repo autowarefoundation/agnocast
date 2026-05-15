@@ -445,15 +445,15 @@ void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
     });
   }
 
-  agnocast::AgnocastExecutable agnocast_executable;
   int next_exec_timeout_ms;
   if (timeout < std::chrono::nanoseconds::zero()) {
     next_exec_timeout_ms = -1;
   } else {
     next_exec_timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
   }
-  if (get_next_agnocast_executable(agnocast_executable, next_exec_timeout_ms)) {
-    execute_agnocast_executable(agnocast_executable);
+  AgnocastExecutable agnocast_exec;
+  if (get_next_agnocast_executable(agnocast_exec, timeout)) {
+    execute_agnocast_executable(agnocast_exec);
   }
 }
 
