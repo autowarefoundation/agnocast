@@ -169,16 +169,14 @@ void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)
       entry.factory_spec.shared_lib_path =
         std::string(static_cast<const char *>(req.factory.shared_lib_path));
     }
+    entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_r2a;
+    entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_a2r;
 
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset;
-      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
       entry.target_id_r2a = req.pubsub_target.target_id;
       entry.is_requested_r2a = true;
       entry.reset_a2r();
     } else {
-      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_reverse;
-      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset;
       entry.target_id_a2r = req.pubsub_target.target_id;
       entry.is_requested_a2r = true;
       entry.reset_r2a();
@@ -437,8 +435,8 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
     factory_spec.shared_lib_path =
       std::string(static_cast<const char *>(req.factory.shared_lib_path));
   }
-  factory_spec.fn_offset_r2a = req.factory.fn_offset;
-  factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
+  factory_spec.fn_offset_r2a = req.factory.fn_offset_r2a;
+  factory_spec.fn_offset_a2r = req.factory.fn_offset_a2r;
 
   try {
     // Check that the target service does not already exist in ROS 2.

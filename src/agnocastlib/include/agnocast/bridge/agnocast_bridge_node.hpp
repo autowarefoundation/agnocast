@@ -343,15 +343,11 @@ void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_bridge_requester");
-  // We capture 'fn_reverse' because bridge_manager is responsible for managing both directions
-  // independently. Storing the reverse factory allows us to instantiate the return path on-demand
-  // within the same process.
-  auto fn_current = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_r2a_pubsub_node<MessageT>
-                                                     : &start_a2r_pubsub_node<MessageT>);
-  auto fn_reverse = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_a2r_pubsub_node<MessageT>
-                                                     : &start_r2a_pubsub_node<MessageT>);
+  // We capture both `fn_r2a` and `fn_a2r` because the bridge manager is responsible for managing
+  // both directions independenly. Storing both factories allows us to instantiate the opposite path
+  // on-demand within the same process.
+  auto fn_r2a = reinterpret_cast<uintptr_t>(&start_r2a_pubsub_node<MessageT>);
+  auto fn_a2r = reinterpret_cast<uintptr_t>(&start_a2r_pubsub_node<MessageT>);
 
   MqMsgBridge msg = {};
   msg.direction = direction;
@@ -360,7 +356,7 @@ void send_standard_pubsub_bridge_request(
   snprintf(
     static_cast<char *>(msg.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
     topic_name.c_str());
-  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
+  if (!build_bridge_factory_info(msg.factory, fn_r2a, fn_a2r, logger)) {
     return;
   }
 
@@ -375,10 +371,10 @@ void send_standard_service_bridge_request(
 {
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
-  // TODO(bdm-k): Branch depending on `direction` and specify `start_a2r_service_node` once it's
-  // implemented. Service bridges currently support only the ROS2 -> Agnocast direction.
-  auto fn_current = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
-  auto fn_reverse = fn_current;  // dummy value
+  auto fn_r2a = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
+  // TODO(bdm-k): Specify `start_a2r_service_node` once it's implemented.
+  // Service bridges currently support only the ROS2 -> Agnocast direction.
+  auto fn_a2r = fn_r2a;  // dummy value
 
   MqMsgBridge msg = {};
   msg.direction = direction;
@@ -393,7 +389,7 @@ void send_standard_service_bridge_request(
   snprintf(
     static_cast<char *>(msg.srv_target.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
     shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "");
-  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
+  if (!build_bridge_factory_info(msg.factory, fn_r2a, fn_a2r, logger)) {
     return;
   }
 

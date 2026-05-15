@@ -233,11 +233,10 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 }
 
 bool build_bridge_factory_info(
-  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
-  const rclcpp::Logger & logger)
+  BridgeFactoryInfo & factory, uintptr_t fn_r2a, uintptr_t fn_a2r, const rclcpp::Logger & logger)
 {
   Dl_info info = {};
-  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || info.dli_fname == nullptr) {
+  if (dladdr(reinterpret_cast<void *>(fn_r2a), &info) == 0 || info.dli_fname == nullptr) {
     RCLCPP_ERROR(logger, "dladdr failed or filename NULL.");
     return false;
   }
@@ -286,8 +285,8 @@ bool build_bridge_factory_info(
   }
 
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
-  factory.fn_offset = fn_current - base_addr;
-  factory.fn_offset_reverse = fn_reverse - base_addr;
+  factory.fn_offset_r2a = fn_r2a - base_addr;
+  factory.fn_offset_a2r = fn_a2r - base_addr;
 
   return true;
 }

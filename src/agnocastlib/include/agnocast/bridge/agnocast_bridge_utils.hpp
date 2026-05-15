@@ -70,8 +70,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 /// @brief Build `BridgeFactoryInfo` for standard bridge requests.
 /// @return true when the bridge factory is successfully built, false otherwise.
 bool build_bridge_factory_info(
-  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
-  const rclcpp::Logger & logger);
+  BridgeFactoryInfo & factory, uintptr_t fn_r2a, uintptr_t fn_a2r, const rclcpp::Logger & logger);
 
 template <typename MapT>
 std::shared_ptr<rcl_node_t> find_or_create_shadow_node(

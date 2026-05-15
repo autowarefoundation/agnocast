@@ -34,8 +34,8 @@ struct BridgeFactoryInfo
 {
   char shared_lib_path[SHARED_LIB_PATH_BUFFER_SIZE];
   char symbol_name[SYMBOL_NAME_BUFFER_SIZE];
-  uintptr_t fn_offset;
-  uintptr_t fn_offset_reverse;
+  uintptr_t fn_offset_r2a;
+  uintptr_t fn_offset_a2r;
 };
 
 struct PubsubBridgeTargetInfo
