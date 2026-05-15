@@ -589,6 +589,25 @@ TEST_F(TestTimer, set_period_with_zero_period_arms_timer_fd_with_one_nanosecond_
   EXPECT_EQ(spec.it_interval.tv_nsec, 1);
 }
 
+TEST_F(TestTimer, set_period_throws_when_underlying_timer_info_is_invalid)
+{
+  // Arrange — rcl's RCL_RET_TIMER_INVALID equivalent: the weak_ptr to TimerInfo fails to
+  // lock. Reproduced here by force-erasing the global registry to drop the only strong ref.
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  auto node = std::make_shared<agnocast::Node>("test_timer_set_period_invalid", options);
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info.clear();
+  }
+
+  // Act / Assert
+  EXPECT_THROW(timer->set_period(std::chrono::nanoseconds{50'000'000}), std::runtime_error);
+}
+
 TEST_F(TestTimer, set_period_skips_timer_fd_re_arm_when_fd_is_minus_one)
 {
   // Arrange — sim-time path: no timerfd. period is updated; next_call is preserved.

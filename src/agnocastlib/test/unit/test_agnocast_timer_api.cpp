@@ -302,19 +302,3 @@ TEST_F(CreateTimerFreeFunctionTest, set_period_preserves_canceled_state)
   // Assert
   EXPECT_TRUE(timer->is_canceled());
 }
-
-TEST_F(CreateTimerFreeFunctionTest, set_period_throws_when_underlying_timer_info_is_invalid)
-{
-  // Arrange — rcl's RCL_RET_TIMER_INVALID equivalent: the weak_ptr to TimerInfo fails to
-  // lock. Reproduced here by force-erasing the global registry to drop the only strong ref.
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
-  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
-  {
-    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
-    agnocast::id2_timer_info.clear();
-  }
-
-  // Act / Assert
-  EXPECT_THROW(timer->set_period(std::chrono::nanoseconds{50'000'000}), std::runtime_error);
-}

@@ -53,7 +53,6 @@ public:
    *
    * @param period New firing period.
    * @throw std::runtime_error If the underlying TimerInfo has been unregistered. */
-  AGNOCAST_PUBLIC
   void set_period(std::chrono::nanoseconds period);
 
   /** @brief Return whether this timer uses a steady clock.
