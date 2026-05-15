@@ -6,8 +6,12 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
+#include <thread>
+#include <utility>
 
 namespace agnocast
 {
@@ -62,6 +66,18 @@ private:
     BridgeDirection direction;
   };
 
+  struct R2AServiceBridgeItem
+  {
+    std::shared_ptr<ServiceBridgeBase> bridge;
+    std::shared_ptr<rcl_node_t> shadow_node;
+
+    R2AServiceBridgeItem(
+      std::shared_ptr<ServiceBridgeBase> bridge, std::shared_ptr<rcl_node_t> shadow_node)
+    : bridge(std::move(bridge)), shadow_node(std::move(shadow_node))
+    {
+    }
+  };
+
   const pid_t target_pid_;
   rclcpp::Logger logger_;
 
@@ -78,7 +94,7 @@ private:
   std::map<std::string, std::shared_ptr<PubsubBridgeBase>> active_pubsub_bridges_;
   std::map<std::string, ManagedPubsubBridgeEntry> managed_pubsub_bridges_;
 
-  std::map<std::string, std::shared_ptr<ServiceBridgeBase>> active_r2a_service_bridges_;
+  std::map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
 
   void start_ros_execution();
 

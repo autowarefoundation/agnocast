@@ -5,7 +5,11 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <cstring>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace agnocast
@@ -68,5 +72,48 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 bool build_bridge_factory_info(
   BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
   const rclcpp::Logger & logger);
+
+template <typename MapT>
+std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
+  const MapT & active_r2a_service_bridges, const std::string & ns, const std::string & name)
+{
+  for (const auto & [_, item] : active_r2a_service_bridges) {
+    const std::shared_ptr<rcl_node_t> & shadow_node = item.shadow_node;
+    if (
+      shadow_node != nullptr && strcmp(rcl_node_get_name(shadow_node.get()), name.c_str()) == 0 &&
+      strcmp(rcl_node_get_namespace(shadow_node.get()), ns.c_str()) == 0) {
+      return shadow_node;
+    }
+  }
+
+  rcl_context_t * rcl_ctx = rclcpp::contexts::get_global_default_context()->get_rcl_context().get();
+
+  rcl_node_options_t options = rcl_node_get_default_options();
+  options.enable_rosout = false;
+  options.use_global_arguments = false;
+  if (rcl_parse_arguments(0, nullptr, options.allocator, &(options.arguments)) != RCL_RET_OK) {
+    rcl_reset_error();
+    throw std::runtime_error("Failed to parse arguments while creating shadow node");
+  }
+
+  auto del = [](rcl_node_t * node) {
+    if (rcl_node_is_valid(node)) {
+      if (rcl_node_fini(node) != RCL_RET_OK) {
+        RCUTILS_LOG_ERROR_NAMED(
+          "agnocast_bridge", "Error in destruction of shadow node: %s", rcl_get_error_string().str);
+        rcl_reset_error();
+      }
+    }
+    delete node;
+  };
+  auto node = std::shared_ptr<rcl_node_t>(new rcl_node_t{}, del);
+
+  if (rcl_node_init(node.get(), name.c_str(), ns.c_str(), rcl_ctx, &options) != RCL_RET_OK) {
+    rcl_reset_error();
+    throw std::runtime_error("Failed to initialize shadow node");
+  }
+
+  return node;
+}
 
 }  // namespace agnocast
