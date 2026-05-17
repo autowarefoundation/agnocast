@@ -232,3 +232,73 @@ TEST_F(CreateTimerFreeFunctionTest, reset_re_anchors_next_call_when_time_has_adv
   EXPECT_EQ(tut_before_reset, std::chrono::nanoseconds(kPeriodNs - kHalfPeriodNs));
   EXPECT_EQ(tut_after_reset, std::chrono::nanoseconds(kPeriodNs));
 }
+
+// =========================================
+// set_period function tests
+// =========================================
+
+TEST_F(CreateTimerFreeFunctionTest, set_period_does_not_change_immediate_time_until_trigger)
+{
+  // Arrange — pin ROS time so before/after time_until_trigger comparisons are exact.
+  constexpr int64_t kT0Ns = 1'000'000'000;
+  constexpr int64_t kPeriodNs = 100'000'000;
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
+  rcl_clock_t * rcl_clock = clock->get_clock_handle();
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    ASSERT_EQ(rcl_enable_ros_time_override(rcl_clock), RCL_RET_OK);
+    ASSERT_EQ(rcl_set_ros_time_override(rcl_clock, kT0Ns), RCL_RET_OK);
+  }
+  const auto period = rclcpp::Duration(std::chrono::nanoseconds(kPeriodNs));
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+
+  // Act — swap to a deliberately different period.
+  const auto tut_before = timer->time_until_trigger();
+  timer->set_period(std::chrono::nanoseconds{kPeriodNs * 5});
+  const auto tut_after = timer->time_until_trigger();
+
+  // Assert — the already-scheduled next firing must keep its time across the period swap.
+  EXPECT_EQ(tut_before, std::chrono::nanoseconds(kPeriodNs));
+  EXPECT_EQ(tut_after, tut_before);
+}
+
+TEST_F(CreateTimerFreeFunctionTest, set_period_takes_effect_on_subsequent_reset)
+{
+  // Arrange
+  constexpr int64_t kT0Ns = 1'000'000'000;
+  constexpr int64_t kInitialPeriodNs = 100'000'000;
+  constexpr int64_t kNewPeriodNs = 50'000'000;
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
+  rcl_clock_t * rcl_clock = clock->get_clock_handle();
+  {
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    ASSERT_EQ(rcl_enable_ros_time_override(rcl_clock), RCL_RET_OK);
+    ASSERT_EQ(rcl_set_ros_time_override(rcl_clock, kT0Ns), RCL_RET_OK);
+  }
+  auto timer = agnocast::create_timer(
+    node.get(), clock, rclcpp::Duration(std::chrono::nanoseconds(kInitialPeriodNs)), []() {});
+
+  // Act — reset() anchors next_call at now + period using the latest period value.
+  timer->set_period(std::chrono::nanoseconds{kNewPeriodNs});
+  timer->reset();
+
+  // Assert
+  EXPECT_EQ(timer->time_until_trigger(), std::chrono::nanoseconds(kNewPeriodNs));
+}
+
+TEST_F(CreateTimerFreeFunctionTest, set_period_preserves_canceled_state)
+{
+  // Arrange — set_period and cancel are orthogonal; calling set_period on a canceled
+  // timer must not implicitly un-cancel it.
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+  timer->cancel();
+  ASSERT_TRUE(timer->is_canceled());
+
+  // Act
+  timer->set_period(std::chrono::nanoseconds{50'000'000});
+
+  // Assert
+  EXPECT_TRUE(timer->is_canceled());
+}

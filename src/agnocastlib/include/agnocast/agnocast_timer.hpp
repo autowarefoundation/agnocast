@@ -45,6 +45,16 @@ public:
 
   void set_timer_info(std::weak_ptr<TimerInfo> timer_info) { timer_info_ = timer_info; }
 
+  /** @brief Update the timer's period.
+   *
+   * Aligned with `rcl_timer_exchange_period`: the already-scheduled next firing keeps its
+   * time; only subsequent firings adopt the new period. Throws on an invalidated timer
+   * (rcl's equivalent is `RCL_RET_TIMER_INVALID`).
+   *
+   * @param period New firing period.
+   * @throw std::runtime_error If the underlying TimerInfo has been unregistered. */
+  void set_period(std::chrono::nanoseconds period);
+
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
   AGNOCAST_PUBLIC
