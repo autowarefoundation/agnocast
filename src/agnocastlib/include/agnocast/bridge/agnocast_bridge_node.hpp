@@ -17,7 +17,9 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace agnocast
@@ -31,13 +33,15 @@ void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename ServiceT>
 void send_standard_service_bridge_request(
-  const std::string & service_name, BridgeDirection direction);
+  const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 template <typename MessageT>
 void send_performance_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 template <typename ServiceT>
 void send_performance_service_bridge_request(
-  const std::string & service_name, BridgeDirection direction);
+  const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
 template <typename MessageT>
 void request_pubsub_bridge_core(
@@ -52,13 +56,16 @@ void request_pubsub_bridge_core(
 }
 
 template <typename ServiceT>
-void request_service_bridge_core(const std::string & service_name, BridgeDirection direction)
+void request_service_bridge_core(
+  const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::Standard) {
-    send_standard_service_bridge_request<ServiceT>(service_name, direction);
+    send_standard_service_bridge_request<ServiceT>(service_name, direction, shadow_node_identity);
   } else if (bridge_mode == BridgeMode::Performance) {
-    send_performance_service_bridge_request<ServiceT>(service_name, direction);
+    send_performance_service_bridge_request<ServiceT>(
+      service_name, direction, shadow_node_identity);
   }
 }
 
@@ -88,10 +95,16 @@ struct AgnocastToRosPubsubRequestPolicy
 // Requests a bridge that forwards requests from ROS 2 to Agnocast (R2A).
 struct RosToAgnocastServiceRequestPolicy
 {
-  template <typename ServiceT>
-  static void request_bridge(const std::string & service_name)
+  template <typename NodeT, typename ServiceT>
+  static void request_bridge(NodeT * node, const std::string & service_name)
   {
-    request_service_bridge_core<ServiceT>(service_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    std::optional<std::pair<std::string, std::string>> shadow_node_identity{std::nullopt};
+    if constexpr (std::is_same_v<std::remove_cv_t<NodeT>, agnocast::Node>) {
+      shadow_node_identity =
+        std::make_pair(std::string(node->get_namespace()), std::string(node->get_name()));
+    }
+    request_service_bridge_core<ServiceT>(
+      service_name, BridgeDirection::ROS2_TO_AGNOCAST, shadow_node_identity);
   }
 };
 
@@ -108,7 +121,10 @@ struct NoBridgeRequestPolicy
 
 private:
   static void request_bridge_impl(const std::string &, topic_local_id_t) {}
-  static void request_bridge_impl(const std::string &) {}
+  template <typename NodeT>
+  static void request_bridge_impl(NodeT *, const std::string &)
+  {
+  }
 };
 
 template <typename MessageT>
@@ -354,7 +370,8 @@ void send_standard_pubsub_bridge_request(
 
 template <typename ServiceT>
 void send_standard_service_bridge_request(
-  const std::string & service_name, BridgeDirection direction)
+  const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
@@ -369,6 +386,13 @@ void send_standard_service_bridge_request(
   snprintf(
     static_cast<char *>(msg.srv_target.service_name), SERVICE_NAME_BUFFER_SIZE, "%s",
     service_name.c_str());
+  msg.srv_target.create_shadow_node = shadow_node_identity.has_value();
+  snprintf(
+    static_cast<char *>(msg.srv_target.shadow_node_namespace), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "");
+  snprintf(
+    static_cast<char *>(msg.srv_target.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "");
   if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
     return;
   }
@@ -399,7 +423,8 @@ void send_performance_pubsub_bridge_request(
 
 template <typename ServiceT>
 void send_performance_service_bridge_request(
-  const std::string & service_name, BridgeDirection direction)
+  const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_requester");
 
@@ -408,6 +433,13 @@ void send_performance_service_bridge_request(
   MqMsgPerformanceBridge msg = {};
   snprintf(msg.srv_target.service_type, SERVICE_TYPE_BUFFER_SIZE, "%s", service_type_name.c_str());
   snprintf(msg.srv_target.service_name, SERVICE_NAME_BUFFER_SIZE, "%s", service_name.c_str());
+  msg.srv_target.create_shadow_node = shadow_node_identity.has_value();
+  snprintf(
+    static_cast<char *>(msg.srv_target.shadow_node_namespace), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "");
+  snprintf(
+    static_cast<char *>(msg.srv_target.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "");
   msg.direction = direction;
   msg.is_service = true;
 

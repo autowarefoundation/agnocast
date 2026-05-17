@@ -47,6 +47,9 @@ struct PubsubBridgeTargetInfo
 struct ServiceBridgeTargetInfo
 {
   char service_name[SERVICE_NAME_BUFFER_SIZE];
+  bool create_shadow_node;
+  char shadow_node_namespace[NODE_NAME_BUFFER_SIZE];
+  char shadow_node_name[NODE_NAME_BUFFER_SIZE];
 };
 
 struct MqMsgBridge
@@ -71,6 +74,9 @@ struct ServiceBridgeTargetInfoWithType
 {
   char service_type[SERVICE_TYPE_BUFFER_SIZE];
   char service_name[SERVICE_NAME_BUFFER_SIZE];
+  bool create_shadow_node;
+  char shadow_node_namespace[NODE_NAME_BUFFER_SIZE];
+  char shadow_node_name[NODE_NAME_BUFFER_SIZE];
 };
 
 struct MqMsgPerformanceBridge

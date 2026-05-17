@@ -1,10 +1,13 @@
 import ctypes
-import sys
 
 from ros2cli.node.strategy import add_arguments
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import get_node_names
 from ros2topic.verb import VerbExtension
+
+def split_fqn(fqn):
+    namespace, _, name = fqn.rpartition('/')
+    return (namespace or '/'), name
 
 class TopicInfoRet(ctypes.Structure):
     _fields_ = [
@@ -67,7 +70,7 @@ class ListAgnocastVerb(VerbExtension):
                     lib.free_agnocast_topic_info_ret(pub_array)
 
                 return node_names
-            
+
             # Get Agnocast topics
             topic_count = ctypes.c_int()
             agnocast_topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count))
@@ -83,10 +86,33 @@ class ListAgnocastVerb(VerbExtension):
             agnocast_node_name = set()
             for topic in agnocast_topics:
                 agnocast_node_name = agnocast_node_name | get_node_name_set(topic)
-            
-            # Get ros2 node names
+
+            # TODO(bdm-k): The current impl determines shadow nodes in a heuristic way. We need to
+            # invent a deterministic way to identify shadow nodes.
+
+            def likely_shadow_node(fqn):
+                if fqn not in agnocast_node_name:
+                    return False
+
+                ns, name = split_fqn(fqn)
+                try:
+                    # A normal rclcpp node is likely to have parameter services, so start by testing
+                    # services.
+                    if (
+                        len(node.get_service_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_publisher_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_subscriber_names_and_types_by_node(name, ns)) != 0
+                        or len(node.get_client_names_and_types_by_node(name, ns)) != 0
+                    ):
+                        return False
+                    return True
+                except Exception:
+                    return False
+
+            # Get ros2 node names.
             ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=args.all)
-            ros2_node_name = {n.full_name for n in ros2_node_name_list}
+            # Exclude shadow nodes so that the corresponding Agnocast nodes are listed with "(Agnocast enabled)"
+            ros2_node_name = {n.full_name for n in ros2_node_name_list if not likely_shadow_node(n.full_name)}
 
             ########################################################################
             # Print node list
@@ -98,7 +124,6 @@ class ListAgnocastVerb(VerbExtension):
                 total_nodes = len(agnocast_node_name | ros2_node_name)
                 print(total_nodes)
             else:
-
                 for node_name in sorted(merged_node_name):
                     if node_name in agnocast_node_name and node_name not in ros2_node_name:
                         suffix = " (Agnocast enabled)"

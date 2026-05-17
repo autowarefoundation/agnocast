@@ -117,7 +117,7 @@ public:
     subscriber_ = std::make_shared<BasicSubscription<RequestT, NoBridgeRequestPolicy>>(
       node, topic_name, qos_, std::move(subscriber_callback), options);
 
-    BridgeRequestPolicy::template request_bridge<ServiceT>(service_name_);
+    BridgeRequestPolicy::template request_bridge<NodeT, ServiceT>(node, service_name_);
   }
 };
 
