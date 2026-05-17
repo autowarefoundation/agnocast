@@ -275,7 +275,7 @@ public:
             service_handle->send_response(*request_header, ros_res);
           });
       },
-      qos.get_rmw_qos_profile(), ros_srv_cb_group_);
+      qos, ros_srv_cb_group_);
   }
 
   std::pair<rclcpp::CallbackGroup::SharedPtr, rclcpp::CallbackGroup::SharedPtr>
