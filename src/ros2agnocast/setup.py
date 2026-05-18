@@ -15,6 +15,10 @@ setup(
         'ros2agnocast.templates': [
             '*.em',
         ],
+        'ros2agnocast.static_sources': [
+            '*.hpp',
+            '*.cpp',
+        ],
     },
     entry_points={
         'ros2cli.command': [
