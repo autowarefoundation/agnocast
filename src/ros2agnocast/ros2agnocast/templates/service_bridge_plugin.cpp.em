@@ -4,6 +4,7 @@
 #include "agnocast/agnocast.hpp"
 
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 
 #include <utility>
 
@@ -42,7 +43,11 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge_@(snake_type
           service_handle->send_response(*request_header, ros_res);
         });
     },
+#if RCLCPP_VERSION_MAJOR >= 28
+    qos, srv_cb_group);
+#else
     qos.get_rmw_qos_profile(), srv_cb_group);
+#endif
 
   return {ros_srv, srv_cb_group, client_cb_group};
 }
