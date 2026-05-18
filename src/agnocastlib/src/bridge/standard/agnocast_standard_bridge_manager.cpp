@@ -305,7 +305,7 @@ void StandardBridgeManager::send_pubsub_delegation(
                    .set_direction(direction)
                    .set_is_service(false)
                    .set_topic_name(topic_name.c_str())
-                   .set_target_id(target_id);
+                   .set_pubsub_target_id(target_id);
   auto [req, reason] = std::move(builder).build_standard_message();
   // req.factory can be left zeroed because it is not going to be used.
 

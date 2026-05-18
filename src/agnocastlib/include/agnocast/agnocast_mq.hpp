@@ -31,6 +31,8 @@ struct MqMsgROS2Publish
 
 struct BridgeFactoryInfo
 {
+  // When the bridge factories reside in a shared library, this holds the library's file path.
+  // When it resides in the main executable, this holds the sentinel MAIN_EXECUTABLE_SYMBOL.
   char shared_lib_path[SHARED_LIB_PATH_BUFFER_SIZE];
   uintptr_t fn_offset_r2a;
   uintptr_t fn_offset_a2r;

@@ -360,7 +360,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_topic_name(const char * t
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_target_id(topic_local_id_t target_id)
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_pubsub_target_id(topic_local_id_t target_id)
 {
   std::visit([target_id](auto && msg) { msg.pubsub_target.target_id = target_id; }, msg_);
   return *this;

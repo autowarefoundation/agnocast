@@ -350,7 +350,7 @@ void send_standard_pubsub_bridge_request(
   auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
                    .set_direction(direction)
                    .set_is_service(false)
-                   .set_target_id(id)
+                   .set_pubsub_target_id(id)
                    .set_topic_name(topic_name.c_str())
                    .set_factory(fn_r2a, fn_a2r);
   auto [msg, reason] = std::move(builder).build_standard_message();
@@ -406,7 +406,7 @@ void send_performance_pubsub_bridge_request(
                    .set_is_service(false)
                    .set_message_type(message_type_name.c_str())
                    .set_topic_name(topic_name.c_str())
-                   .set_target_id(id);
+                   .set_pubsub_target_id(id);
   auto [msg, reason] = std::move(builder).build_performance_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(logger, "Failed to build performance pubsub bridge request: %s", reason.c_str());

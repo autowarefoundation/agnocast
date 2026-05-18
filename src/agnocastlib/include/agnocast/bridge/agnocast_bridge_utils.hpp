@@ -72,7 +72,8 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 ///
 /// It handles errors such as setting non-existent fields or invalid values for each field, and the
 /// `build_*` member functions return an error reason. However, it does not check whether the
-/// computed message as a whole is valid.
+/// computed message as a whole is valid. It's the caller's responsibility to invoke a correct
+/// set of setters to build a valid message.
 class BridgeRequestMsgBuilder
 {
   std::variant<MqMsgBridge, MqMsgPerformanceBridge> msg_;
@@ -97,7 +98,7 @@ public:
   BridgeRequestMsgBuilder & set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r);
   BridgeRequestMsgBuilder & set_message_type(const char * message_type);
   BridgeRequestMsgBuilder & set_topic_name(const char * topic_name);
-  BridgeRequestMsgBuilder & set_target_id(topic_local_id_t target_id);
+  BridgeRequestMsgBuilder & set_pubsub_target_id(topic_local_id_t target_id);
   BridgeRequestMsgBuilder & set_service_type(const char * service_type);
   BridgeRequestMsgBuilder & set_service_name(const char * service_name);
   BridgeRequestMsgBuilder & set_shadow_node_identity(
