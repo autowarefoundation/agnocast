@@ -26,7 +26,7 @@ EXPECT_ROS2_SUB_NUM: int
 
 BRIDGE_OFF = check_bridge_mode()
 TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
-TIMEOUT = os.environ.get('STRESS_TEST_TIMEOUT')
+TIMEOUT = float(os.environ.get('STRESS_TEST_TIMEOUT', 0.0))
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 
 
@@ -67,6 +67,10 @@ def calc_action_delays(config: dict) -> tuple:
     # ReadyToTest must fire within launch_testing's ~15s limit; the stress
     # soak is done in Test1To1.setUpClass.
     ready_delay = pub_delay + sub_delay + 10.0
+    assert ready_delay < 15.0, (
+        f'ready_delay={ready_delay:.2f}s exceeds launch_testing\'s ~15s cap; '
+        f'reduce pub_qos_depth or the soak buffer'
+    )
     return pub_delay, sub_delay, ready_delay
 
 
@@ -264,8 +268,8 @@ class Test1To1(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Stress soak: forever=True nodes keep running while we sleep here.
-        if TIMEOUT:
-            time.sleep(float(TIMEOUT))
+        if FOREVER:
+            time.sleep(TIMEOUT)
 
     def test_pub(self, proc_output, test_pub):
         output_text = "".join(
