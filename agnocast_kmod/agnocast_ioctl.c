@@ -1795,8 +1795,10 @@ int agnocast_ioctl_remove_subscriber(
   kfree(sub_info->node_name);
   kfree(sub_info);
 
-  dev_info(
-    agnocast_device, "Subscriber (id=%d) removed from topic %s.\n", subscriber_id, topic_name);
+  if (!is_parameter_service_topic(topic_name)) {
+    dev_info(
+      agnocast_device, "Subscriber (id=%d) removed from topic %s.\n", subscriber_id, topic_name);
+  }
 
   if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
@@ -1908,8 +1910,10 @@ int agnocast_ioctl_remove_publisher(
     kfree(pub_info->node_name);
     kfree(pub_info);
 
-    dev_info(
-      agnocast_device, "Publisher (id=%d) removed from topic %s.\n", publisher_id, topic_name);
+    if (!is_parameter_service_topic(topic_name)) {
+      dev_info(
+        agnocast_device, "Publisher (id=%d) removed from topic %s.\n", publisher_id, topic_name);
+    }
   }
 
   if (
