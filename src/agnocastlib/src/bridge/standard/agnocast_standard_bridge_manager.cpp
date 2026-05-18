@@ -162,9 +162,7 @@ void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)
 
     auto & entry = managed_pubsub_bridges_[topic_name];
 
-    if (
-      std::strcmp(static_cast<const char *>(req.factory.shared_lib_path), MAIN_EXECUTABLE_SYMBOL) ==
-      0) {
+    if (req.factory.in_main_executable) {
       entry.factory_spec.shared_lib_path = std::nullopt;
     } else {
       entry.factory_spec.shared_lib_path =
@@ -430,9 +428,7 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
   // Build the bridge factory spec.
   BridgeFactorySpec factory_spec;
-  if (
-    std::strcmp(static_cast<const char *>(req.factory.shared_lib_path), MAIN_EXECUTABLE_SYMBOL) ==
-    0) {
+  if (req.factory.in_main_executable) {
     factory_spec.shared_lib_path = std::nullopt;
   } else {
     factory_spec.shared_lib_path =

@@ -16,8 +16,6 @@ inline constexpr size_t SERVICE_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t MESSAGE_TYPE_BUFFER_SIZE = 256;
 inline constexpr size_t SERVICE_TYPE_BUFFER_SIZE = 256;
 
-inline constexpr const char * MAIN_EXECUTABLE_SYMBOL = "__MAIN_EXECUTABLE__";
-
 enum class BridgeDirection : uint32_t { ROS2_TO_AGNOCAST = 0, AGNOCAST_TO_ROS2 = 1 };
 
 struct MqMsgAgnocast
@@ -31,9 +29,8 @@ struct MqMsgROS2Publish
 
 struct BridgeFactoryInfo
 {
-  // When the bridge factories reside in a shared library, this holds the library's file path.
-  // When it resides in the main executable, this holds the sentinel MAIN_EXECUTABLE_SYMBOL.
   char shared_lib_path[SHARED_LIB_PATH_BUFFER_SIZE];
+  bool in_main_executable;
   uintptr_t fn_offset_r2a;
   uintptr_t fn_offset_a2r;
 };

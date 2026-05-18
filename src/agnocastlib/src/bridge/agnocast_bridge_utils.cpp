@@ -322,8 +322,8 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_factory(uintptr_t fn_r2a,
 
   checked_snprintf(
     "shared_lib_path", static_cast<char *>(standard_msg.factory.shared_lib_path),
-    SHARED_LIB_PATH_BUFFER_SIZE, "%s",
-    is_self_executable ? MAIN_EXECUTABLE_SYMBOL : info.dli_fname);
+    SHARED_LIB_PATH_BUFFER_SIZE, "%s", info.dli_fname);
+  standard_msg.factory.in_main_executable = is_self_executable;
 
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
   standard_msg.factory.fn_offset_r2a = fn_r2a - base_addr;
