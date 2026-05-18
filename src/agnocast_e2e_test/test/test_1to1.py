@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 import launch_testing
@@ -63,7 +64,9 @@ def calc_action_delays(config: dict) -> tuple:
     unit_delay = 1.0
     pub_delay = 0.0 if config['launch_pub_before_sub'] else unit_delay
     sub_delay = 0.01 * EXPECT_INIT_PUB_NUM + unit_delay if config['launch_pub_before_sub'] else 0.0
-    ready_delay = float(TIMEOUT) if TIMEOUT else pub_delay + sub_delay + 10.0
+    # ReadyToTest must fire within launch_testing's ~15s limit; the stress
+    # soak is done in Test1To1.setUpClass.
+    ready_delay = pub_delay + sub_delay + 10.0
     return pub_delay, sub_delay, ready_delay
 
 
@@ -257,6 +260,12 @@ def generate_test_description():
 
 
 class Test1To1(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # Stress soak: forever=True nodes keep running while we sleep here.
+        if TIMEOUT:
+            time.sleep(float(TIMEOUT))
 
     def test_pub(self, proc_output, test_pub):
         output_text = "".join(
