@@ -90,6 +90,16 @@ static int add_topic(
   return 0;
 }
 
+// Returns true for parameter service topics, whose registration logs are
+// suppressed to avoid flooding the kernel log when many agnocast nodes start up.
+static bool is_parameter_service_topic(const char * key)
+{
+  if (strncmp(key, "/AGNOCAST_SRV_", 14) != 0) return false;
+  return strstr(key, "/get_parameters") || strstr(key, "/set_parameters") ||
+         strstr(key, "/get_parameter_types") || strstr(key, "/describe_parameters") ||
+         strstr(key, "/list_parameters");
+}
+
 static struct subscriber_info * find_subscriber_info(
   const struct topic_wrapper * wrapper, const topic_local_id_t subscriber_id)
 {
@@ -165,11 +175,13 @@ static int insert_subscriber_info(
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic.sub_info_htable, &(*new_info)->node, hash_val);
 
-  dev_info(
-    agnocast_device,
-    "Subscriber (topic_local_id=%d, pid=%d, node_name=%s) is added to the topic (topic_name=%s). "
-    "(%s)\n",
-    new_id, subscriber_pid, node_name, wrapper->key, __func__);
+  if (!is_parameter_service_topic(wrapper->key)) {
+    dev_info(
+      agnocast_device,
+      "Subscriber (topic_local_id=%d, pid=%d, node_name=%s) is added to the topic (topic_name=%s). "
+      "(%s)\n",
+      new_id, subscriber_pid, node_name, wrapper->key, __func__);
+  }
 
   // Check if the topic has any volatile publishers.
   if (qos_is_transient_local) {
@@ -257,11 +269,13 @@ static int insert_publisher_info(
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
   hash_add(wrapper->topic.pub_info_htable, &(*new_info)->node, hash_val);
 
-  dev_info(
-    agnocast_device,
-    "Publisher (topic_local_id=%d, pid=%d, node_name=%s) is added to the topic (topic_name=%s). "
-    "(%s)\n",
-    new_id, publisher_pid, node_name, wrapper->key, __func__);
+  if (!is_parameter_service_topic(wrapper->key)) {
+    dev_info(
+      agnocast_device,
+      "Publisher (topic_local_id=%d, pid=%d, node_name=%s) is added to the topic (topic_name=%s). "
+      "(%s)\n",
+      new_id, publisher_pid, node_name, wrapper->key, __func__);
+  }
 
   // Check if the topic has any transient local subscribers.
   if (!qos_is_transient_local) {
