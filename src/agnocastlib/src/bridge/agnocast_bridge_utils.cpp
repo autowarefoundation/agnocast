@@ -8,11 +8,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace agnocast
 {
@@ -242,6 +245,8 @@ BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger
   }
 }
 
+// NOLINTBEGIN(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
 BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...)
 {
   va_list args;
@@ -249,10 +254,17 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...
   int n = vsnprintf(nullptr, 0, format, args);
   va_end(args);
 
+  if (n < 0) {
+    failed_ = true;
+    reason_ = "Failed to format error message";
+    return *this;
+  }
+
   std::string buf(n + 1, '\0');
   va_start(args, format);
   vsnprintf(buf.data(), n + 1, format, args);
   va_end(args);
+  // Drop the trailing null terminator.
   buf.resize(n);
 
   failed_ = true;
@@ -278,6 +290,8 @@ int BridgeRequestMsgBuilder::checked_snprintf(
 
   return n;
 }
+// NOLINTEND(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
 
 BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_direction(BridgeDirection direction)
 {
