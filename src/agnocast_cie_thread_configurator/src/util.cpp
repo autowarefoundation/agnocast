@@ -3,6 +3,8 @@
 
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <sstream>
