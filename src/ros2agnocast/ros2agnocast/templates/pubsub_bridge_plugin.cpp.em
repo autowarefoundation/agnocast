@@ -34,7 +34,15 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_n
     [agno_pub](std::shared_ptr<rclcpp::SerializedMessage> serialized_msg) {
       static const rclcpp::Serialization<MsgT> serialization;
       auto loaned_msg = agno_pub->borrow_loaned_message();
-      serialization.deserialize_message(serialized_msg.get(), &(*loaned_msg));
+      try {
+        serialization.deserialize_message(serialized_msg.get(), &(*loaned_msg));
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(
+          rclcpp::get_logger("ros2agnocast"),
+          "Failed to deserialize message in r2a bridge: %s",
+          e.what());
+        return;
+      }
       agno_pub->publish(std::move(loaned_msg));
     });
 }
@@ -55,7 +63,15 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<MsgT> msg) {
     static const rclcpp::Serialization<MsgT> serialization;
     rclcpp::SerializedMessage serialized_msg;
-    serialization.serialize_message(msg.get(), &serialized_msg);
+    try {
+      serialization.serialize_message(msg.get(), &serialized_msg);
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(
+        rclcpp::get_logger("ros2agnocast"),
+        "Failed to serialize message in a2r bridge: %s",
+        e.what());
+      return;
+    }
     ros_pub->publish(serialized_msg);
   };
 
