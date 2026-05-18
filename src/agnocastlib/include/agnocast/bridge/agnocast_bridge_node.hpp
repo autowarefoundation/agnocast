@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 
 #include <fcntl.h>
 #include <mqueue.h>
@@ -275,7 +276,11 @@ public:
             service_handle->send_response(*request_header, ros_res);
           });
       },
+#if RCLCPP_VERSION_MAJOR >= 28
+      qos, ros_srv_cb_group_);
+#else
       qos.get_rmw_qos_profile(), ros_srv_cb_group_);
+#endif
   }
 
   std::pair<rclcpp::CallbackGroup::SharedPtr, rclcpp::CallbackGroup::SharedPtr>
