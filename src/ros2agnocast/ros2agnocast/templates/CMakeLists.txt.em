@@ -30,6 +30,7 @@ find_package(@(pkg) REQUIRED)
 @[end for]
 
 add_library(${PROJECT_NAME} SHARED
+  src/generic_functions.cpp
 @[for msg_type in message_types]
   src/pubsub_bridge_plugin_@(msg_type.replace('/', '_')).cpp
 @[end for]
