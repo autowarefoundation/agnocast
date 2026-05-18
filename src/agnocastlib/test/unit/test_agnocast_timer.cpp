@@ -9,6 +9,7 @@
 #include <poll.h>
 #include <rcl/time.h>
 #include <sys/eventfd.h>
+#include <sys/timerfd.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -55,7 +56,7 @@ protected:
   {
     auto info = std::make_shared<agnocast::TimerInfo>();
     info->timer_id = 1;
-    info->period = std::chrono::nanoseconds{period_ns};
+    info->period_ns.store(period_ns, std::memory_order_relaxed);
     info->clock = std::move(clock);
     info->last_call_time_ns.store(now_ns, std::memory_order_relaxed);
     info->next_call_time_ns.store(now_ns + period_ns, std::memory_order_relaxed);
@@ -486,6 +487,143 @@ TEST_F(TestTimer, handle_timer_event_with_zero_period_sets_next_call_to_now)
 }
 
 // =============================================================================
+// TimerInfo::set_period — semantics defined in TimerBase::set_period docstring.
+// =============================================================================
+
+TEST_F(TestTimer, set_period_updates_period_only_without_modifying_call_time_anchors)
+{
+  // Arrange — last_call != now catches an anchor-to-now regression (set_period must not
+  // behave like reset).
+  const int64_t last_call_ns = 1'000'000'000;
+  const int64_t now_ns = 1'200'000'000;
+  auto clock = make_ros_clock_at(now_ns);
+  auto info = make_timer_info(clock, /*now_ns=*/last_call_ns);
+  const int64_t snapshot_next = info->next_call_time_ns.load(std::memory_order_relaxed);
+  const std::chrono::nanoseconds new_period{500'000'000};
+
+  // Act
+  info->set_period(new_period);
+
+  // Assert — period swapped; call-time anchors untouched.
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), new_period.count());
+  EXPECT_EQ(info->next_call_time_ns.load(std::memory_order_relaxed), snapshot_next);
+  EXPECT_EQ(info->last_call_time_ns.load(std::memory_order_relaxed), last_call_ns);
+}
+
+TEST_F(TestTimer, set_period_arms_timer_fd_to_fire_at_existing_next_call_then_every_new_period)
+{
+  // Arrange — pin now 30ms before next_call so remaining = 30ms. Expect it_value=remaining
+  // (preserves the existing firing time) and it_interval=new_period (subsequent firings).
+  const int64_t last_call_ns = 1'000'000'000;
+  const int64_t now_ns = last_call_ns + 70'000'000;
+  auto clock = make_ros_clock_at(now_ns);
+  auto info = make_timer_info(clock, /*now_ns=*/last_call_ns);
+  const int64_t expected_remaining_ns =
+    info->next_call_time_ns.load(std::memory_order_relaxed) - now_ns;
+  ASSERT_EQ(expected_remaining_ns, 30'000'000);
+  info->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+  ASSERT_GE(info->timer_fd, 0);
+  const std::chrono::nanoseconds new_period{250'000'000};
+
+  // Act
+  info->set_period(new_period);
+
+  // Assert
+  struct itimerspec spec = {};
+  ASSERT_EQ(timerfd_gettime(info->timer_fd, &spec), 0);
+  // it_value: kernel reports remaining time. Slack because nanoseconds elapse between
+  // set_period and timerfd_gettime.
+  const int64_t got_value_ns = spec.it_value.tv_sec * 1'000'000'000LL + spec.it_value.tv_nsec;
+  EXPECT_GT(got_value_ns, 0);
+  EXPECT_LE(got_value_ns, expected_remaining_ns);
+  const int64_t got_interval_ns =
+    spec.it_interval.tv_sec * 1'000'000'000LL + spec.it_interval.tv_nsec;
+  EXPECT_EQ(got_interval_ns, new_period.count());
+}
+
+TEST_F(TestTimer, set_period_arms_timer_fd_to_fire_immediately_when_already_overdue)
+{
+  // Arrange — now > next_call → remaining is negative. set_period must clamp it_value to
+  // 1ns (0 disarms the timerfd; negative is rejected with EINVAL). The 1ns expiry fires
+  // essentially immediately; verify by polling the timerfd for readability rather than
+  // by reading it_value (which the kernel auto-overwrites with the next interval).
+  const int64_t last_call_ns = 1'000'000'000;
+  const int64_t now_ns = last_call_ns + 500'000'000;
+  auto clock = make_ros_clock_at(now_ns);
+  auto info = make_timer_info(clock, /*now_ns=*/last_call_ns);
+  ASSERT_LT(info->next_call_time_ns.load(std::memory_order_relaxed), now_ns);
+  info->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+  ASSERT_GE(info->timer_fd, 0);
+
+  // Act
+  info->set_period(std::chrono::nanoseconds{250'000'000});
+
+  // Assert
+  pollfd pfd{info->timer_fd, POLLIN, 0};
+  ASSERT_GT(poll(&pfd, 1, /*timeout_ms=*/100), 0) << "timerfd should be readable within 100ms";
+  EXPECT_TRUE(pfd.revents & POLLIN);
+  uint64_t expirations = 0;
+  ASSERT_EQ(
+    read(info->timer_fd, &expirations, sizeof(expirations)),
+    static_cast<ssize_t>(sizeof(expirations)));
+  EXPECT_GE(expirations, 1u);
+}
+
+TEST_F(TestTimer, set_period_with_zero_period_arms_timer_fd_with_one_nanosecond_interval)
+{
+  // Arrange — same 1ns interval workaround as arm_timer_fd: zero would disarm the timerfd.
+  const int64_t last_call_ns = 1'000'000'000;
+  const int64_t now_ns = last_call_ns + 30'000'000;
+  auto clock = make_ros_clock_at(now_ns);
+  auto info = make_timer_info(clock, /*now_ns=*/last_call_ns);
+  info->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+  ASSERT_GE(info->timer_fd, 0);
+
+  // Act
+  info->set_period(std::chrono::nanoseconds{0});
+
+  // Assert
+  struct itimerspec spec = {};
+  ASSERT_EQ(timerfd_gettime(info->timer_fd, &spec), 0);
+  EXPECT_EQ(spec.it_interval.tv_sec, 0);
+  EXPECT_EQ(spec.it_interval.tv_nsec, 1);
+}
+
+TEST_F(TestTimer, set_period_throws_when_underlying_timer_info_is_invalid)
+{
+  // Arrange — rcl's RCL_RET_TIMER_INVALID equivalent: the weak_ptr to TimerInfo fails to
+  // lock. Reproduced here by force-erasing the global registry to drop the only strong ref.
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  auto node = std::make_shared<agnocast::Node>("test_timer_set_period_invalid", options);
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
+  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info.clear();
+  }
+
+  // Act / Assert
+  EXPECT_THROW(timer->set_period(std::chrono::nanoseconds{50'000'000}), std::runtime_error);
+}
+
+TEST_F(TestTimer, set_period_skips_timer_fd_re_arm_when_fd_is_minus_one)
+{
+  // Arrange — sim-time path: no timerfd. period is updated; next_call is preserved.
+  auto clock = make_ros_clock_at(1'200'000'000);
+  auto info = make_timer_info(clock, /*now_ns=*/1'000'000'000);
+  ASSERT_EQ(info->timer_fd, -1);
+  const int64_t snapshot_next = info->next_call_time_ns.load(std::memory_order_relaxed);
+  const std::chrono::nanoseconds new_period{250'000'000};
+
+  // Act / Assert
+  EXPECT_NO_THROW(info->set_period(new_period));
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), new_period.count());
+  EXPECT_EQ(info->next_call_time_ns.load(std::memory_order_relaxed), snapshot_next);
+}
+
+// =============================================================================
 // register_timer_info — initializes TimerInfo and inserts into the registry
 // =============================================================================
 
@@ -614,7 +752,7 @@ TEST_F(TestRegisterTimerInfo, populates_timer_info_from_arguments_and_clock)
   // Argument forwarding: each argument is stored verbatim.
   EXPECT_EQ(info->timer_id, timer_id);
   EXPECT_EQ(info->timer.lock(), timer);
-  EXPECT_EQ(info->period, period);
+  EXPECT_EQ(info->period_ns.load(std::memory_order_relaxed), period.count());
   EXPECT_EQ(info->callback_group, cb_group);
   // Call-time anchors initialized from clock->now().
   EXPECT_EQ(info->last_call_time_ns.load(std::memory_order_relaxed), now_ns);

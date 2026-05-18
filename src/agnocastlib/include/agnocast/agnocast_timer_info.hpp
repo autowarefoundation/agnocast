@@ -30,6 +30,9 @@ struct TimerInfo
 
   void reset();
 
+  // Implementation of TimerBase::set_period; see that for semantics.
+  void set_period(std::chrono::nanoseconds new_period);
+
   // Mutex to protect timer_fd access.
   // - shared_lock: for reading timer_fd (read(), epoll_ctl()).
   // - unique_lock: for writing timer_fd (close()).
@@ -45,7 +48,7 @@ struct TimerInfo
   std::atomic<int64_t> last_call_time_ns;
   std::atomic<int64_t> next_call_time_ns;
   std::atomic<int64_t> time_credit{0};  // Credit for time elapsed before ROS time is activated
-  std::chrono::nanoseconds period;
+  std::atomic<int64_t> period_ns;
   bool need_epoll_update = true;
 
   rclcpp::Clock::SharedPtr clock;
