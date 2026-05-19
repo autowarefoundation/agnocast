@@ -330,11 +330,11 @@ auto find_parameter_by_name(ParameterVectorType & parameters, const std::string 
 NodeParameters::NodeParameters(
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
   const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
-  bool allow_undeclared_parameters)
+  bool use_global_arguments, bool allow_undeclared_parameters)
 : node_base_(std::move(node_base)), allow_undeclared_(allow_undeclared_parameters)
 {
   const rcl_arguments_t * global_args = nullptr;
-  {
+  if (use_global_arguments) {
     std::lock_guard<std::mutex> lock(g_context_mtx);
     if (g_context.is_initialized()) {
       global_args = g_context.get_parsed_arguments();
