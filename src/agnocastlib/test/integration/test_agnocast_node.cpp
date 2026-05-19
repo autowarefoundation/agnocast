@@ -1,6 +1,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/callback_group.hpp"
+#include "rclcpp/exceptions.hpp"
 #include "rclcpp/parameter.hpp"
 
 #include <gtest/gtest.h>
@@ -98,6 +99,31 @@ TEST_F(AgnocastNodeConstructionTest, use_global_arguments_false_ignores_global_u
   auto node = std::make_shared<agnocast::Node>("test_node_global_args_off", options);
 
   EXPECT_FALSE(node->get_parameter("use_sim_time").as_bool());
+}
+
+// Verifies that agnocast::Node forwards NodeOptions::allow_undeclared_parameters() to
+// NodeParameters: getting an undeclared parameter throws only when the option is false.
+TEST_F(AgnocastNodeConstructionTest, allow_undeclared_parameters_true_permits_undeclared_get)
+{
+  agnocast::init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(true);
+  auto node = std::make_shared<agnocast::Node>("test_node_allow_undeclared_on", options);
+
+  EXPECT_NO_THROW({ node->get_parameter("undeclared_param"); });
+}
+
+TEST_F(AgnocastNodeConstructionTest, allow_undeclared_parameters_false_rejects_undeclared_get)
+{
+  agnocast::init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  auto node = std::make_shared<agnocast::Node>("test_node_allow_undeclared_off", options);
+
+  EXPECT_THROW(
+    { node->get_parameter("undeclared_param"); }, rclcpp::exceptions::ParameterNotDeclaredException);
 }
 
 // agnocast::Node must forward `options.use_clock_thread()` to NodeTimeSource, which creates
