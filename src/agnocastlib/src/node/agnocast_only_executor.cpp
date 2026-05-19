@@ -18,8 +18,7 @@ namespace agnocast
 {
 
 AgnocastOnlyExecutor::AgnocastOnlyExecutor()
-: spinning_(false),
-  shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
+: shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
   my_pid_(getpid()),
   epoll_update_tracker_(EpollUpdateDispatcher::get_instance().register_tracker())
 {

@@ -37,7 +37,7 @@ AGNOCAST_PUBLIC
 class AgnocastOnlyExecutor
 {
 protected:
-  std::atomic_bool spinning_;
+  std::atomic_bool spinning_{false};
   // Sticky cancel flag: set by cancel(), never cleared, so a cancel() before spin() is not lost
   // when spin() does spinning_.exchange(true). Never cleared -> the executor is one-shot.
   std::atomic_bool cancel_requested_{false};
