@@ -2,6 +2,8 @@
 #include <agnocast/node/agnocast_context.hpp>
 #include <agnocast/node/agnocast_only_callback_isolated_executor.hpp>
 #include <agnocast/node/agnocast_only_executor.hpp>
+#include <agnocast/node/agnocast_only_multi_threaded_executor.hpp>
+#include <agnocast/node/agnocast_only_single_threaded_executor.hpp>
 
 #include <agnocast_cie_config_msgs/msg/callback_group_info.hpp>
 
@@ -159,4 +161,42 @@ TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, cancel_via_base_class_pointer_u
 
   // Assert
   EXPECT_TRUE(spin_exited) << "spin() did not unblock after cancel() via base class pointer";
+}
+
+// Verifies that a cancel() issued before spin() starts still makes spin() return.
+template <typename ExecutorT>
+void expect_spin_returns_when_cancelled_before_spin()
+{
+  ExecutorT executor;
+  executor.cancel();  // cancel() happens before spin() ever starts
+
+  std::atomic_bool spin_returned{false};
+  std::thread spin_thread([&executor, &spin_returned]() {
+    executor.spin();
+    spin_returned = true;
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!spin_returned) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+      << "spin() did not return after a cancel() that preceded it (cancel-before-spin race)";
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  spin_thread.join();
+  EXPECT_TRUE(spin_returned);
+}
+
+TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, single_threaded_cancel_before_spin_returns)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlySingleThreadedExecutor>();
+}
+
+TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, multi_threaded_cancel_before_spin_returns)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlyMultiThreadedExecutor>();
+}
+
+TEST_F(AgnocastOnlyCallbackIsolatedExecutorTest, callback_isolated_cancel_before_spin_returns)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlyCallbackIsolatedExecutor>();
 }

@@ -143,6 +143,7 @@ void AgnocastOnlyExecutor::execute_agnocast_executable(AgnocastExecutable & agno
 
 void AgnocastOnlyExecutor::cancel()
 {
+  cancel_requested_.store(true);
   spinning_.store(false);
   uint64_t val = 1;
   if (write(shutdown_event_fd_, &val, sizeof(val)) == -1) {
