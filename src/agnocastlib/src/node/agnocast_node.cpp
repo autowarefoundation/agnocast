@@ -28,7 +28,7 @@ Node::Node(
     node_base_, options.parameter_overrides(), local_args_.get())),
   node_clock_(std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME)),
   node_time_source_(std::make_shared<node_interfaces::NodeTimeSource>(
-    node_clock_, this, rclcpp::ClockQoS(), options.use_clock_thread())),
+    node_clock_, this, options.clock_qos(), options.use_clock_thread())),
   node_logging_(std::make_shared<node_interfaces::NodeLogging>(logger_))
 {
   if (options.start_parameter_services()) {
