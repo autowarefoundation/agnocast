@@ -80,7 +80,9 @@ public:
   AGNOCAST_PUBLIC
   virtual void spin() = 0;
 
-  /// Request the executor to stop spinning. Causes the current or next spin() call to return.
+  /// Request the executor to stop spinning. Causes the current spin() call to return.
+  /// One-shot: once called, the executor is permanently stopped -- every subsequent spin()
+  /// returns immediately. Create a new instance to spin again.
   AGNOCAST_PUBLIC
   virtual void cancel();
 
