@@ -123,7 +123,8 @@ TEST_F(AgnocastNodeConstructionTest, allow_undeclared_parameters_false_rejects_u
   auto node = std::make_shared<agnocast::Node>("test_node_allow_undeclared_off", options);
 
   EXPECT_THROW(
-    { node->get_parameter("undeclared_param"); }, rclcpp::exceptions::ParameterNotDeclaredException);
+    { node->get_parameter("undeclared_param"); },
+    rclcpp::exceptions::ParameterNotDeclaredException);
 }
 
 // agnocast::Node must forward `options.use_clock_thread()` to NodeTimeSource, which creates
