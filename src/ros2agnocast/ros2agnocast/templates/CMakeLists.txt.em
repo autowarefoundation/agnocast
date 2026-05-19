@@ -17,7 +17,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # GCC 12/13 emits false-positive -Warray-bounds / -Wstringop-overflow
   # inside std::vector<bool> when ROS message types (e.g. test_msgs) are
   # instantiated under optimization.
-  # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=109945
+  # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=110498
   if(CMAKE_COMPILER_IS_GNUCXX)
     add_compile_options(-Wno-array-bounds -Wno-stringop-overflow)
   endif()
