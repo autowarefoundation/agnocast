@@ -65,6 +65,33 @@ void expect_cancel_stops_spin_without_shutdown(const std::string & executor_name
   agnocast::shutdown();
 }
 
+// Verifies that a cancel() issued *before* spin() ever starts still makes spin() return.
+template <typename ExecutorT>
+void expect_spin_returns_when_cancelled_before_spin(const std::string & executor_name)
+{
+  agnocast::init(0, nullptr);
+  auto executor = std::make_shared<ExecutorT>();
+
+  // cancel() happens before spin() is ever called.
+  executor->cancel();
+
+  std::atomic_bool spin_exited{false};
+  std::thread spin_thread([&]() {
+    executor->spin();
+    spin_exited.store(true);
+  });
+
+  wait_until_or_fail(
+    [&]() { return spin_exited.load(); }, 2s,
+    executor_name + " spin() did not return after a cancel() that preceded it.");
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+
+  agnocast::shutdown();
+}
+
 }  // namespace
 
 class InitOkShutdownTest : public ::testing::Test
@@ -182,6 +209,24 @@ TEST_F(InitOkShutdownTest, CancelStopsAgnocastOnlyMultiThreadedExecutorSpinWitho
 TEST_F(InitOkShutdownTest, CancelStopsAgnocastOnlyCallbackIsolatedExecutorSpinWithoutShutdown)
 {
   expect_cancel_stops_spin_without_shutdown<agnocast::AgnocastOnlyCallbackIsolatedExecutor>(
+    "AgnocastOnlyCallbackIsolatedExecutor");
+}
+
+TEST_F(InitOkShutdownTest, CancelBeforeSpinStopsAgnocastOnlySingleThreadedExecutorSpin)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlySingleThreadedExecutor>(
+    "AgnocastOnlySingleThreadedExecutor");
+}
+
+TEST_F(InitOkShutdownTest, CancelBeforeSpinStopsAgnocastOnlyMultiThreadedExecutorSpin)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlyMultiThreadedExecutor>(
+    "AgnocastOnlyMultiThreadedExecutor");
+}
+
+TEST_F(InitOkShutdownTest, CancelBeforeSpinStopsAgnocastOnlyCallbackIsolatedExecutorSpin)
+{
+  expect_spin_returns_when_cancelled_before_spin<agnocast::AgnocastOnlyCallbackIsolatedExecutor>(
     "AgnocastOnlyCallbackIsolatedExecutor");
 }
 
