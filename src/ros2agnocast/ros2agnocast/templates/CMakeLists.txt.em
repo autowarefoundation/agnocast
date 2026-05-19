@@ -14,6 +14,14 @@ endif()
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 
+  # GCC 12/13 emits false-positive -Warray-bounds / -Wstringop-overflow
+  # inside std::vector<bool> when ROS message types (e.g. test_msgs) are
+  # instantiated under optimization.
+  # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=110498
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    add_compile_options(-Wno-array-bounds -Wno-stringop-overflow)
+  endif()
+
   find_program(LLD_LINKER lld)
   if(LLD_LINKER)
     add_link_options("-fuse-ld=lld")
