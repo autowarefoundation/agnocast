@@ -3,6 +3,8 @@
 
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -11,6 +13,16 @@
 namespace agnocast_cie_thread_configurator
 {
 
+namespace
+{
+// Functor deleter for popen() streams; avoids the -Wignored-attributes that
+// decltype(&pclose) triggers by carrying glibc's attributes into a type arg.
+struct PcloseDeleter
+{
+  void operator()(FILE * stream) const noexcept { pclose(stream); }
+};
+}  // namespace
+
 std::map<std::string, std::string> get_hardware_info()
 {
   std::map<std::string, std::string> hw_info;
@@ -18,7 +30,7 @@ std::map<std::string, std::string> get_hardware_info()
   // Execute lscpu command and capture output
   std::array<char, 128> buffer;
   std::string result;
-  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen("/usr/bin/lscpu", "r"), pclose);
+  std::unique_ptr<FILE, PcloseDeleter> pipe(popen("/usr/bin/lscpu", "r"));
 
   if (!pipe) {
     return hw_info;

@@ -38,11 +38,10 @@ private:
   std::unordered_map<std::string, void *> loaded_libraries_;
 
   static std::string convert_type_to_snake_case(const std::string & message_type);
-  static std::vector<std::string> generate_library_paths(
-    const std::string & snake_type, bool is_service);
+  static std::vector<std::string> generate_library_paths();
   void * load_library_from_paths(const std::vector<std::string> & paths);
   void * get_bridge_factory_symbol(
-    const std::string & type_name, const std::string & symbol_name, bool is_service);
+    const std::string & type_name, const std::string & symbol_name_prefix, bool is_service);
 };
 
 }  // namespace agnocast

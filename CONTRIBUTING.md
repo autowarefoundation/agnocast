@@ -9,7 +9,7 @@ Thank you for your interest in contributing to Agnocast!
 Every pull request **must** have exactly one of the following labels:
 
 - **`need-major-update`**: User API breaking changes - requires MAJOR version update
-- **`need-minor-update`**: Internal API breaking changes (heaphook/kmod/agnocastlib compatibility) - requires MINOR version update
+- **`need-minor-update`**: Internal API breaking changes (kmod/agnocastlib compatibility) - requires MINOR version update
 - **`need-patch-update`**: Bug fixes and other changes - requires PATCH version update
 
 **Important notes:**
@@ -18,7 +18,6 @@ Every pull request **must** have exactly one of the following labels:
 - **PR Title Convention**: If you need `need-major-update` or `need-minor-update`, please include this in the PR title as well.
   - Example: `fix(foo)[needs major version update]: bar`
   - Example: `feat(baz)[needs minor version update]: qux`
-- **Build Test Requirement**: After receiving approval from reviewers, add the `run-build-test` label. The PR can only be merged after the build tests pass.
 
 ## Versioning Rules
 
@@ -40,7 +39,6 @@ Increment when you make **breaking changes to internal APIs or component compati
 
 This includes changes that affect compatibility between:
 
-- heaphook
 - kmod
 - agnocastlib
 
@@ -48,7 +46,7 @@ Examples:
 
 - Removing or renaming ioctl commands
 - Modifying data structures used in ioctl interfaces
-- Changing shared data structures between heaphook/kmod/agnocastlib
+- Changing shared data structures between kmod/agnocastlib
 - Breaking changes to internal APIs not exposed to end users
 
 ### PATCH version (`need-patch-update`)
@@ -67,7 +65,7 @@ Examples:
 
 Before submitting a PR, please ensure the following tests pass:
 
-- [ ] Autoware (required)
+- [ ] Autoware
 - [ ] `bash scripts/test/e2e_test_1to1.bash` (required)
 - [ ] `bash scripts/test/e2e_test_2to2.bash` (required)
 - [ ] kunit tests (required when modifying the kernel module)

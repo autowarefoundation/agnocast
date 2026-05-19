@@ -1,9 +1,11 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/callback_group.hpp"
 #include "rclcpp/parameter.hpp"
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <memory>
 #include <mutex>
 
@@ -20,6 +22,13 @@ void init_with_global_use_sim_time()
 {
   const char * argv[] = {"test_agnocast_node", "--ros-args", "-p", "use_sim_time:=true"};
   agnocast::init(static_cast<int>(sizeof(argv) / sizeof(argv[0])), argv);
+}
+
+std::size_t count_callback_groups(const std::shared_ptr<agnocast::Node> & node)
+{
+  std::size_t count = 0;
+  node->for_each_callback_group([&count](const rclcpp::CallbackGroup::SharedPtr &) { ++count; });
+  return count;
 }
 }  // namespace
 
@@ -87,4 +96,36 @@ TEST_F(AgnocastNodeConstructionTest, use_global_arguments_false_ignores_global_u
   auto node = std::make_shared<agnocast::Node>("test_node_global_args_off", options);
 
   EXPECT_FALSE(node->get_parameter("use_sim_time").as_bool());
+}
+
+// agnocast::Node must forward `options.use_clock_thread()` to NodeTimeSource, which creates
+// a dedicated clock callback group only when it is true. These tests pin that by counting
+// callback groups. `use_sim_time` is enabled to trigger the clock subscription setup.
+
+TEST_F(AgnocastNodeConstructionTest, clock_thread_disabled_skips_clock_callback_group)
+{
+  agnocast::init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({rclcpp::Parameter("use_sim_time", true)});
+  options.use_clock_thread(false);
+
+  auto node = std::make_shared<agnocast::Node>("test_node_clock_thread_off", options);
+
+  // Only the default callback group exists; no dedicated clock callback group is created.
+  EXPECT_EQ(count_callback_groups(node), 1u);
+}
+
+TEST_F(AgnocastNodeConstructionTest, clock_thread_enabled_creates_clock_callback_group)
+{
+  agnocast::init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({rclcpp::Parameter("use_sim_time", true)});
+  options.use_clock_thread(true);
+
+  auto node = std::make_shared<agnocast::Node>("test_node_clock_thread_on", options);
+
+  // The default callback group plus the dedicated clock callback group.
+  EXPECT_EQ(count_callback_groups(node), 2u);
 }
