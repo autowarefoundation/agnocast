@@ -40,9 +40,10 @@ def test_ioctl_to_endpoint_copies_all_fields():
         qos_is_reliable=False,
         is_bridge=True,
     )
-    ep = _ioctl_to_endpoint(info)
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub')
     assert ep.node_name == '/talker_node'
-    assert ep.pid == 0  # best-effort empty
+    # No registry provided => pid stays 0.
+    assert ep.pid == 0
     assert ep.qos_depth == 7
     assert ep.qos_is_transient_local is True
     assert ep.qos_is_reliable is False
@@ -51,8 +52,23 @@ def test_ioctl_to_endpoint_copies_all_fields():
 
 def test_ioctl_to_endpoint_handles_short_name():
     info = _make_info('/x')
-    ep = _ioctl_to_endpoint(info)
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub')
     assert ep.node_name == '/x'
+
+
+def test_ioctl_to_endpoint_fills_pid_from_registry():
+    """When a registry entry matches (topic, role, node), the pid is filled."""
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    class FakeRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'pub', '/talker_node'):
+                return RegistryEntry(pid=4242, type_name='std_msgs/msg/Int32')
+            return None
+
+    info = _make_info('/talker_node')
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub', FakeRegistry())
+    assert ep.pid == 4242
 
 
 def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
@@ -109,13 +125,33 @@ def test_read_local_topics_combines_pub_and_sub():
     assert len(topics) == 1
     topic = topics[0]
     assert topic.topic_name == '/chatter'
-    assert topic.type_name == ''  # best-effort empty
+    # No registry passed => type stays empty.
+    assert topic.type_name == ''
     assert topic.domain_id == 0
     assert len(topic.publishers) == 1
     assert topic.publishers[0].node_name == '/talker_node'
     assert topic.publishers[0].qos_depth == 3
     assert len(topic.subscribers) == 1
     assert topic.subscribers[0].node_name == '/listener_node'
+
+
+def test_read_local_topics_resolves_type_from_registry():
+    """A registry entry for any endpoint on the topic populates `type_name`."""
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    pub_info = _make_info('/talker_node')
+    lib = _make_mock_lib({'/chatter': {'pub': [pub_info], 'sub': []}})
+
+    class FakeRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'pub', '/talker_node'):
+                return RegistryEntry(pid=99, type_name='std_msgs/msg/Int32')
+            return None
+
+    topics = read_local_topics(lib, FakeRegistry())
+    assert len(topics) == 1
+    assert topics[0].type_name == 'std_msgs/msg/Int32'
+    assert topics[0].publishers[0].pid == 99
 
 
 def test_read_local_topics_returns_empty_when_no_topics():
