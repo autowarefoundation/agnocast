@@ -9,6 +9,8 @@
 #include "rcpputils/thread_safety_annotations.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <list>
 #include <map>
 #include <memory>

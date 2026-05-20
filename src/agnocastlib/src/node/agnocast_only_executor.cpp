@@ -412,7 +412,6 @@ rclcpp::FutureReturnCode AgnocastOnlyExecutor::spin_until_future_complete_impl(
   std::chrono::nanoseconds timeout_left = timeout_ns;
 
   if (spinning_.exchange(true)) {
-    close(agnocast_fd);
     throw std::runtime_error("spin_until_future_complete() called while already spinning");
   }
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
@@ -461,7 +460,6 @@ void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
 void AgnocastOnlyExecutor::spin_once(std::chrono::nanoseconds timeout)
 {
   if (spinning_.exchange(true)) {
-    close(agnocast_fd);
     throw std::runtime_error("spin_once() called while already spinning");
   }
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
