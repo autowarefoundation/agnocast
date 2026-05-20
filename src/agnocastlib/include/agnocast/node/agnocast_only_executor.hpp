@@ -51,6 +51,9 @@ protected:
   std::list<rclcpp::node_interfaces::NodeBaseInterface::WeakPtr> weak_nodes_
     RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
+  bool get_next_agnocast_executable(
+    AgnocastExecutable & agnocast_executable,
+    std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
   bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   bool get_next_ready_agnocast_executable(AgnocastExecutable & agnocast_executable);
   void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
@@ -64,6 +67,8 @@ protected:
     const std::function<std::future_status(std::chrono::nanoseconds wait_time)> & wait_for_future);
 
   virtual void spin_once_impl(std::chrono::nanoseconds timeout);
+
+  void wait_for_work(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
 
 public:
   /// Construct the executor.

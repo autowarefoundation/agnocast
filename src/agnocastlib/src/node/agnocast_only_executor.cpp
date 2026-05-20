@@ -89,13 +89,13 @@ AgnocastOnlyExecutor::~AgnocastOnlyExecutor()
 }
 
 bool AgnocastOnlyExecutor::get_next_agnocast_executable(
-  AgnocastExecutable & agnocast_executable, const int timeout_ms)
+  AgnocastExecutable & agnocast_executable, std::chrono::nanoseconds timeout)
 {
   if (get_next_ready_agnocast_executable(agnocast_executable)) {
     return true;
   }
 
-  epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
+  wait_for_work(timeout);
 
   if (!agnocast::ok()) {
     return false;
@@ -103,6 +103,13 @@ bool AgnocastOnlyExecutor::get_next_agnocast_executable(
 
   // Try again
   return get_next_ready_agnocast_executable(agnocast_executable);
+}
+
+bool AgnocastOnlyExecutor::get_next_agnocast_executable(
+  AgnocastExecutable & agnocast_executable, const int timeout_ms)
+{
+  return get_next_agnocast_executable(
+    agnocast_executable, std::chrono::nanoseconds{timeout_ms * 1000});
 }
 
 bool AgnocastOnlyExecutor::get_next_ready_agnocast_executable(
@@ -445,12 +452,6 @@ void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
     });
   }
 
-  int next_exec_timeout_ms;
-  if (timeout < std::chrono::nanoseconds::zero()) {
-    next_exec_timeout_ms = -1;
-  } else {
-    next_exec_timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
-  }
   AgnocastExecutable agnocast_exec;
   if (get_next_agnocast_executable(agnocast_exec, timeout)) {
     execute_agnocast_executable(agnocast_exec);
@@ -470,6 +471,17 @@ void AgnocastOnlyExecutor::spin_once(std::chrono::nanoseconds timeout)
 bool AgnocastOnlyExecutor::is_spinning()
 {
   return spinning_;
+}
+
+void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
+{
+  int timeout_ms;
+  if (timeout < std::chrono::nanoseconds::zero()) {
+    timeout_ms = -1;
+  } else {
+    timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
+  }
+  epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
 }
 
 }  // namespace agnocast
