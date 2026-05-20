@@ -404,8 +404,7 @@ rclcpp::FutureReturnCode AgnocastOnlyExecutor::spin_until_future_complete_impl(
   }
 
   auto end_time = std::chrono::steady_clock::now();
-  std::chrono::nanoseconds timeout_ns =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(timeout);
+  std::chrono::nanoseconds timeout_ns = timeout;
   if (timeout_ns > std::chrono::nanoseconds::zero()) {
     end_time += timeout_ns;
   }

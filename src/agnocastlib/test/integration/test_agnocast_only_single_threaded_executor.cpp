@@ -3,7 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <future>
+#include <memory>
+#include <sstream>
 #include <thread>
 
 using namespace std::chrono_literals;
