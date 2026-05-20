@@ -142,9 +142,18 @@ public:
   AGNOCAST_PUBLIC
   void remove_node(const std::shared_ptr<agnocast::Node> & node, bool notify = true);
 
+  /// Collect work once and execute the next available work, optionally within a duration.
+  /// @param timeout timeout The maximum amount of time to spend waiting for work. `-1` is
+  /// potentially block forever waiting for work.
   AGNOCAST_PUBLIC
   virtual void spin_once(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
 
+  /// Spin (blocking) until the future is complete, it times out waiting, or rclcpp is interrupted.
+  /// @param future The future to wait on. If this function returns SUCCESS, the future can be
+  /// accessed without blocking (though it may still throw an exception).
+  /// @param timeout Optional timeout parameter, which gets passed to Executor::spin_node_once. `-1`
+  /// is block forever, `0` is non-blocking.
+  /// @return The return code, one of `SUCCESS`, `INTERRUPTED`, or `TIMEOUT`.
   template <typename FutureT, typename TimeRepT = int64_t, typename TimeT = std::milli>
   rclcpp::FutureReturnCode spin_until_future_complete(
     const FutureT & future,
@@ -155,6 +164,8 @@ public:
       [&future](std::chrono::nanoseconds wait_time) { return future.wait_for(wait_time); });
   }
 
+  /// Returns true if the executor is currently spinning.
+  /// @return True if the executor is currently spinning.
   AGNOCAST_PUBLIC
   bool is_spinning();
 };
