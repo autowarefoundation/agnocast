@@ -22,8 +22,10 @@ namespace agnocast::internal
 
 namespace
 {
-// Default tmpfs root. Overridable for tests via `set_base_dir_for_test()`.
-std::string g_base_dir = "/run/agnocast";  // NOLINT(runtime/string)
+// Default tmpfs root. `/dev/shm/` is world-writable (1777) on Linux so any
+// user process can create entries without needing root. Overridable for
+// tests via `set_base_dir_for_test()`.
+std::string g_base_dir = "/dev/shm/agnocast_type_registry";  // NOLINT(runtime/string)
 
 bool ensure_dir(const std::string & path, mode_t mode)
 {

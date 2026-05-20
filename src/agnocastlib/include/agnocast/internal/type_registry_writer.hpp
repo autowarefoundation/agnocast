@@ -4,7 +4,7 @@
 // Per-process file writer that announces every `Publisher<T>` and
 // `Subscription<T>` registration to the per-IPC-namespace
 // `ros2agnocast_discovery_agent` via a tmpfs file under
-// `/run/agnocast/<ipc_ns_inode>/<pid>.txt`.
+// `/dev/shm/agnocast_type_registry/<ipc_ns_inode>/<pid>.txt`.
 //
 // Each line is tab-separated and `\n`-terminated:
 //
