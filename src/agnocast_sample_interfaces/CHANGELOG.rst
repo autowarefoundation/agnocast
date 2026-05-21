@@ -2,6 +2,10 @@
 Changelog for package agnocast_sample_interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* chore: remove @veqcc from maintainers (`#1296 <https://github.com/autowarefoundation/agnocast/issues/1296>`_)
+
 2.3.3 (2026-04-02)
 ------------------
 
