@@ -21,9 +21,11 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -58,8 +60,8 @@ protected:
   void TearDown() override
   {
     agnocast::internal::TypeRegistryWriter::instance().reset_for_test();
-    const std::string cmd = "rm -rf " + base_dir_;
-    (void)std::system(cmd.c_str());
+    std::error_code ec;
+    std::filesystem::remove_all(base_dir_, ec);  // best-effort cleanup
   }
 
   std::string base_dir_;
