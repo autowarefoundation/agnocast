@@ -22,10 +22,29 @@ namespace agnocast::internal
 
 namespace
 {
-// Default tmpfs root. `/dev/shm/` is world-writable (1777) on Linux so any
-// user process can create entries without needing root. Overridable for
-// tests via `set_base_dir_for_test()`.
-std::string g_base_dir = "/dev/shm/agnocast_type_registry";  // NOLINT(runtime/string)
+// Tmpfs root for the type registry. Defaults to `/dev/shm/` because that
+// path is world-writable (1777) on Linux so any user process can create
+// entries without elevation; the daemon and CLI mirror the same default.
+//
+// Hardened container deployments where `/dev/shm` is absent, capped,
+// or remounted with restrictive perms can override the parent directory
+// via the `AGNOCAST_TMPFS_DIR` environment variable. The writer
+// appends `/agnocast_type_registry` to whatever the user supplies, so
+// `AGNOCAST_TMPFS_DIR=/run/myapp` yields
+// `/run/myapp/agnocast_type_registry/<ns_inode>/<pid>.txt`.
+//
+// **Size requirement**: each registered Publisher/Subscription appends
+// roughly 80–256 bytes. A typical Autoware deployment (~100 processes
+// × ~10 endpoints) fits in well under 1 MiB; the writer never deletes
+// entries during a process's lifetime so the tmpfs must accommodate
+// the peak. Allocate at least 4 MiB if you tune `/dev/shm` size.
+//
+// Overridable for tests via `set_base_dir_for_test()`.
+std::string g_base_dir = []() {
+  const char * env = std::getenv("AGNOCAST_TMPFS_DIR");
+  std::string root = (env != nullptr && env[0] != '\0') ? env : "/dev/shm";
+  return root + "/agnocast_type_registry";
+}();  // NOLINT(runtime/string)
 
 bool ensure_dir(const std::string & path, mode_t mode)
 {
@@ -75,22 +94,31 @@ void TypeRegistryWriter::ensure_open_locked()
     return;
   }
 
-  // Best-effort mkdir of base + ns directory. Both `0755` so the daemon
-  // can read; the per-process file is `0644` (set via open mode below).
+  // Both directories are `0755` so the daemon can read; the per-process
+  // file is `0644` (set via open mode below). The cross-namespace bridge
+  // and observability features rely on this tmpfs being writable, so any
+  // failure here is logged as an ERROR (not a transient warning).
   if (!ensure_dir(g_base_dir, 0755)) {
-    RCLCPP_WARN(
+    RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
-      "TypeRegistryWriter: mkdir '%s' failed: %s. Cross-namespace observability and bridge "
-      "auto-generation will not work in this process.",
+      "TypeRegistryWriter: mkdir '%s' failed: %s. Cross-IPC-namespace bridge "
+      "auto-generation and observability will silently NOT work in this "
+      "process. Check that the parent directory exists and is writable; "
+      "override the root with the AGNOCAST_TMPFS_DIR environment variable "
+      "if /dev/shm is unavailable (e.g. inside a hardened container).",
       g_base_dir.c_str(), std::strerror(errno));
     open_failed_warned_ = true;
     return;
   }
   const std::string ns_dir = g_base_dir + "/" + std::to_string(ns_inode);
   if (!ensure_dir(ns_dir, 0755)) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("Agnocast"), "TypeRegistryWriter: mkdir '%s' failed: %s.", ns_dir.c_str(),
-      std::strerror(errno));
+    RCLCPP_ERROR(
+      rclcpp::get_logger("Agnocast"),
+      "TypeRegistryWriter: mkdir '%s' failed: %s. Verify the tmpfs has free "
+      "space — typical deployments need at most a few MiB, but a tightly "
+      "capped /dev/shm (e.g. Docker's 64 MiB default) shared with other "
+      "tmpfs users can run out.",
+      ns_dir.c_str(), std::strerror(errno));
     open_failed_warned_ = true;
     return;
   }
@@ -99,9 +127,11 @@ void TypeRegistryWriter::ensure_open_locked()
   fd_ =
     ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);  // NOLINT(runtime/int)
   if (fd_ == -1) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("Agnocast"), "TypeRegistryWriter: open('%s') failed: %s.", path_.c_str(),
-      std::strerror(errno));
+    RCLCPP_ERROR(
+      rclcpp::get_logger("Agnocast"),
+      "TypeRegistryWriter: open('%s') failed: %s. Check the parent directory "
+      "permissions and the tmpfs free space.",
+      path_.c_str(), std::strerror(errno));
     open_failed_warned_ = true;
     return;
   }
