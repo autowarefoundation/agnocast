@@ -57,3 +57,12 @@ def test_check_daemon_process_self_ns_no_match():
     assert isinstance(ok, bool)
     assert isinstance(detail, str)
     assert detail
+
+
+def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):
+    """`AGNOCAST_TMPFS_DIR` overrides the `/dev/shm` default consistently with the writer."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
+    assert ds._type_registry_base() == '/run/custom/agnocast_type_registry'
+
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    assert ds._type_registry_base() == '/dev/shm/agnocast_type_registry'

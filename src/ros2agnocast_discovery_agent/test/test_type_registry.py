@@ -140,3 +140,18 @@ def test_rebuild_skips_non_numeric_filenames():
         reader.rebuild()
         # File ignored because its name doesn't parse as int.
         assert reader.table == {}
+
+
+def test_default_base_dir_honors_agnocast_tmpfs_dir(monkeypatch):
+    """`AGNOCAST_TMPFS_DIR` overrides the `/dev/shm` default for the registry root."""
+    from ros2agnocast_discovery_agent import type_registry
+
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
+    assert type_registry._default_base_dir() == '/run/custom/agnocast_type_registry'
+
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    assert type_registry._default_base_dir() == '/dev/shm/agnocast_type_registry'
+
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '')
+    # Empty string is treated as unset (falsy) and the default applies.
+    assert type_registry._default_base_dir() == '/dev/shm/agnocast_type_registry'

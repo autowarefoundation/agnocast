@@ -25,7 +25,19 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-BASE_DIR = '/run/agnocast'
+def _default_base_dir() -> str:
+    """Return the tmpfs root the writer agreed on.
+
+    Mirrors `agnocastlib::internal::TypeRegistryWriter`: read
+    ``AGNOCAST_TMPFS_DIR`` if set (for hardened containers where
+    ``/dev/shm`` is unavailable or too small) and append the
+    ``agnocast_type_registry`` suffix.
+    """
+    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
+    return os.path.join(root, 'agnocast_type_registry')
+
+
+BASE_DIR = _default_base_dir()
 
 
 @dataclass(frozen=True)

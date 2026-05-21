@@ -36,7 +36,15 @@ from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
 
 
 _GOSSIP_TOPIC = '/_agnocast_discovery'
-_TYPE_REGISTRY_BASE = '/run/agnocast'
+
+
+def _type_registry_base() -> str:
+    """Resolve the tmpfs root, honoring `AGNOCAST_TMPFS_DIR` like the writer."""
+    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
+    return os.path.join(root, 'agnocast_type_registry')
+
+
+_TYPE_REGISTRY_BASE = _type_registry_base()
 
 
 def _self_ipc_ns_inode():
