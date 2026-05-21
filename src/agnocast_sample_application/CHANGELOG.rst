@@ -2,8 +2,8 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * fix(sample_application): add agnocast\_ prefix to sample app and thread_configurator (`#1319 <https://github.com/autowarefoundation/agnocast/issues/1319>`_)
 * chore: remove @veqcc from maintainers (`#1296 <https://github.com/autowarefoundation/agnocast/issues/1296>`_)
 * fix(sample_application): use dedicated callback groups (`#1273 <https://github.com/autowarefoundation/agnocast/issues/1273>`_)

@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * fix(bridge): suppress bridge plugin compilation warning (`#1347 <https://github.com/autowarefoundation/agnocast/issues/1347>`_)
 * fix: ubuntu24.04/jazzy compilation warnings (`#1339 <https://github.com/autowarefoundation/agnocast/issues/1339>`_)
 * perf(bridge-plugins): make bridge nodes use generic publisher and subscriber (`#1337 <https://github.com/autowarefoundation/agnocast/issues/1337>`_)

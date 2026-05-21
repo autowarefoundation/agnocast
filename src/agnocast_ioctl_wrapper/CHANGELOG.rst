@@ -2,8 +2,8 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * refactor(ros2agnocast): typo, memory handle (`#1305 <https://github.com/autowarefoundation/agnocast/issues/1305>`_)
 * refactor(ros2agnocast): use context manager for ctypes topic arrays (`#1293 <https://github.com/autowarefoundation/agnocast/issues/1293>`_)
 * chore: remove @veqcc from maintainers (`#1296 <https://github.com/autowarefoundation/agnocast/issues/1296>`_)

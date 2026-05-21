@@ -2,8 +2,8 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * fix: ubuntu24.04/jazzy compilation warnings (`#1339 <https://github.com/autowarefoundation/agnocast/issues/1339>`_)
 * fix(sample_application): add agnocast\_ prefix to sample app and thread_configurator (`#1319 <https://github.com/autowarefoundation/agnocast/issues/1319>`_)
 * feat(cie_thread_configurator): add ~/reapply_config service for runtime YAML reload (`#1303 <https://github.com/autowarefoundation/agnocast/issues/1303>`_)

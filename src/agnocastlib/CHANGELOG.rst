@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * fix(AgnocastOnlyExecutor): add `cancel_requested\_` to separate the state (`#1346 <https://github.com/autowarefoundation/agnocast/issues/1346>`_)
 * fix(agnocastlib): pass `use_global_arguments` to `NodeParameters` (`#1345 <https://github.com/autowarefoundation/agnocast/issues/1345>`_)
 * fix(agnocastlib): pass `use_clock_thread` to Node constructor (`#1343 <https://github.com/autowarefoundation/agnocast/issues/1343>`_)

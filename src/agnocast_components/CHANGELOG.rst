@@ -2,8 +2,8 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.4 (2026-05-21)
+------------------
 * fix(cie): fix cancel_executor race condition (`#1278 <https://github.com/autowarefoundation/agnocast/issues/1278>`_)
 * refactor(agnocast_components): use rclcpp_components_register_nodes for resource index registration (`#1238 <https://github.com/autowarefoundation/agnocast/issues/1238>`_)
 * fix(agnocast_components): allow agnocast_components_register_node to coexist with rclcpp_components_register_node (`#1230 <https://github.com/autowarefoundation/agnocast/issues/1230>`_)
