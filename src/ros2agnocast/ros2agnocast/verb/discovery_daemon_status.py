@@ -44,9 +44,6 @@ def _type_registry_base() -> str:
     return os.path.join(root, 'agnocast_type_registry')
 
 
-_TYPE_REGISTRY_BASE = _type_registry_base()
-
-
 def _self_ipc_ns_inode():
     return os.stat('/proc/self/ns/ipc').st_ino
 
@@ -58,13 +55,8 @@ def _check_daemon_process(my_ns_inode):
         if not pid_str.isdigit():
             continue
         pid = int(pid_str)
-        try:
-            with open(f'/proc/{pid}/comm') as fp:
-                comm = fp.read().strip()
-        except (FileNotFoundError, PermissionError):
-            continue
-        # The discovery agent runs as a python script; its `comm` is the
-        # python interpreter. We check cmdline for the agent's module name.
+        # The discovery agent runs as a python script — its ``comm`` is the
+        # python interpreter — so match on cmdline instead.
         try:
             with open(f'/proc/{pid}/cmdline', 'rb') as fp:
                 cmdline = fp.read().replace(b'\0', b' ').decode('utf-8', errors='replace')
@@ -124,7 +116,7 @@ def _check_gossip(timeout_sec=2.0):
 
 def _check_type_registry(my_ns_inode):
     """Return (ok, detail) for the tmpfs type registry check."""
-    ns_dir = os.path.join(_TYPE_REGISTRY_BASE, str(my_ns_inode))
+    ns_dir = os.path.join(_type_registry_base(), str(my_ns_inode))
     if not os.path.isdir(ns_dir):
         return False, f'directory missing: {ns_dir}'
     files = [f for f in os.listdir(ns_dir) if f.endswith('.txt')]

@@ -17,8 +17,9 @@ Forward-compatibility rules (parser contract):
   ``topic``, ``type``, ``role``, ``node_name`` — and any extra fields
   are ignored, so the writer can extend the format additively without
   the daemon needing a lockstep update.
-* Lines with fewer than four fields are skipped and a single ``WARN``
-  is logged per rebuild (corrupt file or future-incompatible writer).
+* Lines with fewer than four fields are skipped; a ``WARN`` is logged
+  the first time each malformed file is seen (across the reader's
+  lifetime, not per rebuild) — corrupt files don't re-spam the log.
 """
 
 import os
@@ -52,12 +53,16 @@ RegistryTable = Dict[Tuple[str, str, str], RegistryEntry]
 
 
 class TypeRegistryReader:
-    """Scan ``/run/agnocast/<ns_inode>/`` and build an in-memory lookup table.
+    """Scan ``${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ns_inode>/``
+    and build an in-memory lookup table.
 
-    The reader is stateless across ticks; each ``rebuild()`` call replaces
-    the table from scratch. This intentionally lets the table forget
-    entries whose source process died and whose file was removed by either
-    the writer's ``atexit`` cleanup or our own ``cleanup_dead_pids()``.
+    The reader's *table* is stateless across ticks; each ``rebuild()`` call
+    replaces it from scratch so entries whose source process died (and
+    whose file was removed by either the writer's ``atexit`` cleanup or
+    our own ``cleanup_dead_pids()``) are forgotten naturally. The
+    ``_warned_malformed_files`` set, however, persists across rebuilds —
+    a corrupt file logs a single WARN the first time it is observed and
+    stays quiet afterwards.
     """
 
     def __init__(self, ipc_ns_inode: int, base_dir: str = BASE_DIR, logger=None):

@@ -13,7 +13,7 @@ from ros2agnocast.verb import discovery_daemon_status as ds
 
 def test_check_type_registry_missing_dir_returns_ng():
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(ds, '_TYPE_REGISTRY_BASE', tmpdir):
+        with patch.object(ds, '_type_registry_base', return_value=tmpdir):
             ok, detail = ds._check_type_registry(999999)
         assert ok is False
         assert 'missing' in detail
@@ -23,7 +23,7 @@ def test_check_type_registry_empty_dir_returns_ng():
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 12345
         os.makedirs(os.path.join(tmpdir, str(ns_inode)))
-        with patch.object(ds, '_TYPE_REGISTRY_BASE', tmpdir):
+        with patch.object(ds, '_type_registry_base', return_value=tmpdir):
             ok, detail = ds._check_type_registry(ns_inode)
         assert ok is False
         assert 'no <pid>.txt' in detail
@@ -36,7 +36,7 @@ def test_check_type_registry_with_files_returns_ok():
         os.makedirs(ns_dir)
         with open(os.path.join(ns_dir, '4242.txt'), 'w') as fp:
             fp.write('/topic\ttype\tpub\t/node\n')
-        with patch.object(ds, '_TYPE_REGISTRY_BASE', tmpdir):
+        with patch.object(ds, '_type_registry_base', return_value=tmpdir):
             ok, detail = ds._check_type_registry(ns_inode)
         assert ok is True
         assert '1' in detail

@@ -7,7 +7,6 @@ a temporary directory as the base — no kmod, no rclpy.
 
 import os
 import tempfile
-import textwrap
 
 from ros2agnocast_discovery_agent.type_registry import (
     RegistryEntry,

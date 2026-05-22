@@ -219,11 +219,16 @@ def _singleton_lock_path(ipc_ns_inode: int) -> str:
 def _try_acquire_singleton_lock(ipc_ns_inode: int):
     """Acquire an exclusive ``flock(2)`` on the per-IPC-namespace lock file.
 
-    Returns the open file (caller must keep the reference for the lock to
-    persist) or ``None`` if another agent holds it. ``flock(2)`` releases
-    on process exit, so a crashed or killed holder never blocks the next
-    agent. Filesystem errors also return ``None`` — err on the side of
-    not double-spawning.
+    Returns:
+      * the open file on success (caller keeps the reference so the lock
+        persists for the process lifetime),
+      * ``'held'`` if another agent in the same NS already holds the lock
+        — caller should idle and not exit, so launch supervisors keep
+        running,
+      * ``'error'`` if the lock file could not even be opened (e.g.
+        ``AGNOCAST_TMPFS_DIR`` unwritable) — caller should propagate a
+        non-zero exit code so the failure isn't silently masked as
+        "another instance running".
     """
     lock_path = _singleton_lock_path(ipc_ns_inode)
     try:
@@ -231,13 +236,13 @@ def _try_acquire_singleton_lock(ipc_ns_inode: int):
     except OSError as e:
         sys.stderr.write(
             f'agnocast_discovery_agent: cannot open singleton lock {lock_path}: {e}\n')
-        return None
+        return 'error'
     lock_file = os.fdopen(fd, 'r+')
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (BlockingIOError, OSError):
         lock_file.close()
-        return None
+        return 'held'
     return lock_file
 
 
@@ -368,7 +373,7 @@ def main(argv=None) -> int:
     # of its parent launch.
     ipc_ns_inode = _read_ipc_ns_inode()
     singleton_lock = _try_acquire_singleton_lock(ipc_ns_inode)
-    if singleton_lock is None:
+    if singleton_lock == 'held':
         sys.stderr.write(
             f'agnocast_discovery_agent: another instance is already running in this '
             f'IPC namespace (inode={ipc_ns_inode}); staying idle.\n')
@@ -378,6 +383,10 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             pass
         return 0
+    if singleton_lock == 'error':
+        # Don't masquerade as "already running" — propagate failure so
+        # supervisors can detect it.
+        return 1
 
     rclpy.init(args=argv)
     node = DiscoveryAgent()
