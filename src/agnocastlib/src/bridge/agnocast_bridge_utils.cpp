@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
@@ -275,6 +276,8 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...
 int BridgeRequestMsgBuilder::checked_snprintf(
   const std::string & member, char * buffer, size_t size, const char * format, ...)
 {
+  if (failed_) return -1;
+
   va_list args;
   va_start(args, format);
   int n = vsnprintf(buffer, size, format, args);
@@ -433,10 +436,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_shadow_node_identity(
 
 std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_message() &&
 {
-  if (!std::holds_alternative<MqMsgBridge>(msg_)) {
-    fail("Cannot build a standard bridge message from a performance builder");
-    return {MqMsgBridge{}, std::move(reason_)};
-  }
+  assert(std::holds_alternative<MqMsgBridge>(msg_));
 
   auto msg = std::get<MqMsgBridge>(std::move(msg_));
   return {std::move(msg), failed_ ? std::move(reason_) : std::string{}};
@@ -445,10 +445,7 @@ std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_mess
 std::pair<MqMsgPerformanceBridge, std::string>
 BridgeRequestMsgBuilder::build_performance_message() &&
 {
-  if (!std::holds_alternative<MqMsgPerformanceBridge>(msg_)) {
-    fail("Cannot build a performance bridge message from a standard builder");
-    return {MqMsgPerformanceBridge{}, std::move(reason_)};
-  }
+  assert(std::holds_alternative<MqMsgPerformanceBridge>(msg_));
 
   auto msg = std::get<MqMsgPerformanceBridge>(std::move(msg_));
   return {std::move(msg), failed_ ? std::move(reason_) : std::string{}};
