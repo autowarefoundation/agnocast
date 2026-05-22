@@ -5,12 +5,15 @@ Reads the local Agnocast state via the existing NS-scoped ioctl wrapper
 ``/_agnocast_discovery`` so other namespaces and ECUs running ros2agnocast
 tooling can observe and make bridge generation decisions.
 
-One daemon process is intended to run per IPC namespace. Lifecycle is the
-user's responsibility (systemd unit, ros2 launch include, container
-entrypoint, etc.).
+One daemon process is intended to run per IPC namespace. To make duplicate
+launches (e.g. one node spawning the agent and another ``ros2 launch``
+session also trying to spawn one) safe, the agent acquires an
+``flock(2)``-based singleton lock on a per-IPC-namespace file before
+starting; subsequent instances detect the held lock and exit cleanly.
 """
 
 import ctypes
+import fcntl
 import importlib.metadata
 import logging
 import os
@@ -202,6 +205,53 @@ def _read_ipc_ns_inode() -> int:
     return os.stat(SELF_IPC_NS_PATH).st_ino
 
 
+def _singleton_lock_path(ipc_ns_inode: int) -> str:
+    """Return the path to the singleton lock file for this IPC namespace.
+
+    Honors ``AGNOCAST_TMPFS_DIR`` for consistency with the type registry,
+    so containers that route Agnocast tmpfs elsewhere (e.g. when ``/dev/shm``
+    is restricted) keep the lock co-located with the rest of Agnocast's
+    runtime state.
+    """
+    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
+    return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}.lock')
+
+
+def _try_acquire_singleton_lock(ipc_ns_inode: int):
+    """Acquire an exclusive ``flock(2)`` on the per-IPC-namespace lock file.
+
+    Returns the open file object on success — the caller must keep the
+    reference for the lifetime of the process so the lock persists. Returns
+    ``None`` if another agent in the same IPC namespace already holds the
+    lock (= duplicate launch), in which case the caller should exit cleanly.
+
+    ``flock(2)`` releases automatically when the holder's process exits, so
+    a crashed or killed agent does not block subsequent startups.
+
+    Best-effort on filesystem errors (the lock file's directory not writable,
+    etc.): logs to stderr and returns ``None`` to err on the side of not
+    starting a duplicate. Operators who hit this should set
+    ``AGNOCAST_TMPFS_DIR`` to a writable path.
+    """
+    lock_path = _singleton_lock_path(ipc_ns_inode)
+    try:
+        # Open without O_TRUNC: keep file contents (empty) intact across
+        # restarts so we never race on truncation between owner death and
+        # the next agent's open.
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
+    except OSError as e:
+        sys.stderr.write(
+            f'agnocast_discovery_agent: cannot open singleton lock {lock_path}: {e}\n')
+        return None
+    lock_file = os.fdopen(fd, 'r+')
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        lock_file.close()
+        return None
+    return lock_file
+
+
 def _gossip_qos() -> QoSProfile:
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
@@ -318,6 +368,19 @@ class DiscoveryAgent(Node):
 
 
 def main(argv=None) -> int:
+    # Enforce 1 agent per IPC namespace before bringing up DDS / ioctl state,
+    # so duplicate launches (e.g. multiple Autoware nodes each indirectly
+    # spawning the agent, or an operator running another launch in parallel)
+    # exit immediately without polluting the gossip topic with duplicate
+    # publishers or hammering the kmod with redundant ioctls.
+    ipc_ns_inode = _read_ipc_ns_inode()
+    singleton_lock = _try_acquire_singleton_lock(ipc_ns_inode)
+    if singleton_lock is None:
+        sys.stderr.write(
+            f'agnocast_discovery_agent: another instance is already running in this '
+            f'IPC namespace (inode={ipc_ns_inode}); exiting cleanly.\n')
+        return 0
+
     rclpy.init(args=argv)
     node = DiscoveryAgent()
     try:
@@ -328,6 +391,11 @@ def main(argv=None) -> int:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        # Keep ``singleton_lock`` alive through shutdown by referencing it
+        # here; closing it explicitly is unnecessary because process exit
+        # releases the flock automatically, but the reference prevents an
+        # over-eager linter from flagging it as unused.
+        del singleton_lock
     return 0
 
 

@@ -179,3 +179,63 @@ def test_read_host_uuid_returns_uuid_string():
     # fallback; both should parse as UUIDs.
     import uuid
     uuid.UUID(host_uuid)
+
+
+# ---------------------------------------------------------------------------
+# Singleton lock
+# ---------------------------------------------------------------------------
+
+
+def test_singleton_lock_path_honors_tmpfs_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
+    assert _singleton_lock_path(42) == str(tmp_path / 'agnocast_discovery_agent_42.lock')
+
+
+def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
+    assert _singleton_lock_path(42) == '/dev/shm/agnocast_discovery_agent_42.lock'
+
+
+def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    lock = _try_acquire_singleton_lock(123)
+    assert lock is not None
+    lock.close()
+
+
+def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
+    """A second acquire in the same process must fail while the first is held."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    first = _try_acquire_singleton_lock(456)
+    assert first is not None
+    second = _try_acquire_singleton_lock(456)
+    assert second is None
+    first.close()
+    # After releasing, a new acquire succeeds.
+    third = _try_acquire_singleton_lock(456)
+    assert third is not None
+    third.close()
+
+
+def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
+    """Different IPC NS inodes get independent locks."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    lock_a = _try_acquire_singleton_lock(111)
+    lock_b = _try_acquire_singleton_lock(222)
+    assert lock_a is not None
+    assert lock_b is not None
+    lock_a.close()
+    lock_b.close()
+
+
+def test_acquire_singleton_lock_returns_none_on_unwritable_dir(monkeypatch):
+    """When the lock-file directory is not writable we err on the side of
+    not starting a duplicate."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
+    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    assert _try_acquire_singleton_lock(789) is None
