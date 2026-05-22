@@ -17,6 +17,7 @@ import fcntl
 import importlib.metadata
 import logging
 import os
+import signal
 import socket
 import sys
 import uuid
@@ -356,14 +357,26 @@ class DiscoveryAgent(Node):
 
 
 def main(argv=None) -> int:
-    # Singleton check before DDS / ioctl bring-up so duplicate launches exit
-    # without polluting the gossip topic or hammering the kmod.
+    # Singleton check before DDS / ioctl bring-up so duplicate launches stay
+    # passive instead of polluting the gossip topic or hammering the kmod.
+    #
+    # Duplicates DO NOT exit early: launch supervisors (especially
+    # `launch_test` running parallel sample-app tests) treat a Node exit as a
+    # process-died event and propagate teardown to the rest of the launch
+    # tree. So when the lock is held, we sit idle on `signal.pause()` —
+    # SIGINT / SIGTERM still tears the duplicate down cleanly with the rest
+    # of its parent launch.
     ipc_ns_inode = _read_ipc_ns_inode()
     singleton_lock = _try_acquire_singleton_lock(ipc_ns_inode)
     if singleton_lock is None:
         sys.stderr.write(
             f'agnocast_discovery_agent: another instance is already running in this '
-            f'IPC namespace (inode={ipc_ns_inode}); exiting cleanly.\n')
+            f'IPC namespace (inode={ipc_ns_inode}); staying idle.\n')
+        try:
+            while True:
+                signal.pause()
+        except KeyboardInterrupt:
+            pass
         return 0
 
     rclpy.init(args=argv)
