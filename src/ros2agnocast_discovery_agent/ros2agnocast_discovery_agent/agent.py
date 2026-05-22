@@ -206,12 +206,10 @@ def _read_ipc_ns_inode() -> int:
 
 
 def _singleton_lock_path(ipc_ns_inode: int) -> str:
-    """Return the path to the singleton lock file for this IPC namespace.
+    """Return the singleton lock-file path for this IPC namespace.
 
-    Honors ``AGNOCAST_TMPFS_DIR`` for consistency with the type registry,
-    so containers that route Agnocast tmpfs elsewhere (e.g. when ``/dev/shm``
-    is restricted) keep the lock co-located with the rest of Agnocast's
-    runtime state.
+    Co-located with the rest of Agnocast tmpfs state so a container
+    overriding ``AGNOCAST_TMPFS_DIR`` keeps the lock under the same root.
     """
     root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
     return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}.lock')
@@ -220,24 +218,14 @@ def _singleton_lock_path(ipc_ns_inode: int) -> str:
 def _try_acquire_singleton_lock(ipc_ns_inode: int):
     """Acquire an exclusive ``flock(2)`` on the per-IPC-namespace lock file.
 
-    Returns the open file object on success — the caller must keep the
-    reference for the lifetime of the process so the lock persists. Returns
-    ``None`` if another agent in the same IPC namespace already holds the
-    lock (= duplicate launch), in which case the caller should exit cleanly.
-
-    ``flock(2)`` releases automatically when the holder's process exits, so
-    a crashed or killed agent does not block subsequent startups.
-
-    Best-effort on filesystem errors (the lock file's directory not writable,
-    etc.): logs to stderr and returns ``None`` to err on the side of not
-    starting a duplicate. Operators who hit this should set
-    ``AGNOCAST_TMPFS_DIR`` to a writable path.
+    Returns the open file (caller must keep the reference for the lock to
+    persist) or ``None`` if another agent holds it. ``flock(2)`` releases
+    on process exit, so a crashed or killed holder never blocks the next
+    agent. Filesystem errors also return ``None`` — err on the side of
+    not double-spawning.
     """
     lock_path = _singleton_lock_path(ipc_ns_inode)
     try:
-        # Open without O_TRUNC: keep file contents (empty) intact across
-        # restarts so we never race on truncation between owner death and
-        # the next agent's open.
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
     except OSError as e:
         sys.stderr.write(
@@ -368,11 +356,8 @@ class DiscoveryAgent(Node):
 
 
 def main(argv=None) -> int:
-    # Enforce 1 agent per IPC namespace before bringing up DDS / ioctl state,
-    # so duplicate launches (e.g. multiple Autoware nodes each indirectly
-    # spawning the agent, or an operator running another launch in parallel)
-    # exit immediately without polluting the gossip topic with duplicate
-    # publishers or hammering the kmod with redundant ioctls.
+    # Singleton check before DDS / ioctl bring-up so duplicate launches exit
+    # without polluting the gossip topic or hammering the kmod.
     ipc_ns_inode = _read_ipc_ns_inode()
     singleton_lock = _try_acquire_singleton_lock(ipc_ns_inode)
     if singleton_lock is None:
@@ -391,10 +376,8 @@ def main(argv=None) -> int:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-        # Keep ``singleton_lock`` alive through shutdown by referencing it
-        # here; closing it explicitly is unnecessary because process exit
-        # releases the flock automatically, but the reference prevents an
-        # over-eager linter from flagging it as unused.
+        # Keep `singleton_lock` referenced through shutdown so the flock
+        # outlives the spin() loop.
         del singleton_lock
     return 0
 
