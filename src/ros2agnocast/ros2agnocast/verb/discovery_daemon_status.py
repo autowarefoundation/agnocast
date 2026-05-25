@@ -62,7 +62,12 @@ def _check_daemon_process(my_ns_inode):
                 cmdline = fp.read().replace(b'\0', b' ').decode('utf-8', errors='replace')
         except (FileNotFoundError, PermissionError):
             continue
-        if 'ros2agnocast_discovery_agent' not in cmdline:
+        # Match the actual agent binary path so we don't also pick up
+        # ``ros2 run ros2agnocast_discovery_agent discovery_agent``
+        # wrapper processes (whose cmdline contains the same package name
+        # as an argv slot rather than as the executable path).
+        if '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/discovery_agent' \
+                not in cmdline:
             continue
         # Must be in the same IPC namespace as the caller.
         try:
@@ -81,37 +86,32 @@ def _check_daemon_process(my_ns_inode):
 
 
 def _check_gossip(timeout_sec=2.0):
-    """Return (ok, detail) for the gossip-subscription check."""
-    rclpy_was_initialized = rclpy.ok()
-    if not rclpy_was_initialized:
-        rclpy.init()
-    try:
-        with NodeStrategy(None) as node:
-            from ros2agnocast.discovery import gossip_qos
-            received = []
+    """Return (ok, detail) for the gossip-subscription check.
 
-            def cb(msg: AgnocastDaemonState) -> None:
-                received.append(msg)
+    ``NodeStrategy`` initializes rclpy itself; do not call ``rclpy.init``
+    here or the second call raises ``Context.init() must only be called once``.
+    """
+    with NodeStrategy(None) as node:
+        from ros2agnocast.discovery import gossip_qos
+        received = []
 
-            sub = node.create_subscription(
-                AgnocastDaemonState, _GOSSIP_TOPIC, cb, gossip_qos())
-            try:
-                deadline = time.monotonic() + timeout_sec
-                while time.monotonic() < deadline and not received:
-                    rclpy.spin_once(node, timeout_sec=0.05)
-            finally:
-                node.destroy_subscription(sub)
+        def cb(msg: AgnocastDaemonState) -> None:
+            received.append(msg)
 
-            if not received:
-                return False, (
-                    f'no AgnocastDaemonState received on {_GOSSIP_TOPIC} within '
-                    f'{timeout_sec}s')
-            return True, f'received {len(received)} snapshot(s) on {_GOSSIP_TOPIC}'
-    finally:
-        # Only shutdown rclpy if we initialized it here. Otherwise leave
-        # the caller's context intact.
-        if not rclpy_was_initialized and rclpy.ok():
-            rclpy.shutdown()
+        sub = node.create_subscription(
+            AgnocastDaemonState, _GOSSIP_TOPIC, cb, gossip_qos())
+        try:
+            deadline = time.monotonic() + timeout_sec
+            while time.monotonic() < deadline and not received:
+                rclpy.spin_once(node, timeout_sec=0.05)
+        finally:
+            node.destroy_subscription(sub)
+
+        if not received:
+            return False, (
+                f'no AgnocastDaemonState received on {_GOSSIP_TOPIC} within '
+                f'{timeout_sec}s')
+        return True, f'received {len(received)} snapshot(s) on {_GOSSIP_TOPIC}'
 
 
 def _check_type_registry(my_ns_inode):

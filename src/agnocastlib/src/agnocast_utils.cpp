@@ -101,7 +101,6 @@ uint64_t get_self_ipc_ns_inode()
   return static_cast<uint64_t>(st.st_ino);
 }
 
-
 std::string create_shm_name(const pid_t pid)
 {
   return "/agnocast@" + std::to_string(pid);
