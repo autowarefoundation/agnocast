@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="agnocast_sample_application" exec="no_rclcpp_string_listener" name="no_rclcpp_string_listener_node" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+</launch>
