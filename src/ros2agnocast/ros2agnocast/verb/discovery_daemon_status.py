@@ -1,11 +1,9 @@
 """Check that the per-IPC-namespace Agnocast discovery agent is alive.
 
-The agent is responsible for (a) publishing the local Agnocast state on
-``/_agnocast_discovery`` for cross-namespace observability and (b)
-dispatching `MqMsgDaemonBridge` requests so that cross-IPC-NS bridges
-are auto-generated. If the daemon is not running (or running in a
-different IPC namespace), both features silently stop working — this
-verb gives the operator a single place to confirm liveness.
+The agent publishes the local Agnocast state on ``/_agnocast_discovery``
+for cross-namespace observability. If the agent is not running (or
+running in a different IPC namespace), that observability silently stops
+working — this verb gives the operator a single place to confirm liveness.
 
 Checks performed (each prints OK / NG with detail):
 
@@ -15,8 +13,9 @@ Checks performed (each prints OK / NG with detail):
     on the current `ROS_DOMAIN_ID` and a snapshot is received within
     the timeout.
   * **type_registry** — the tmpfs directory
-    `/run/agnocast/<ipc_ns_inode>/` exists and contains at least one
-    `<pid>.txt` (proves at least one Agnocast process has registered).
+    `/dev/shm/agnocast_type_registry/<ipc_ns_inode>/` exists and contains
+    at least one ``<pid>.txt`` (proves at least one Agnocast process has
+    registered).
 
 Exit code:
 

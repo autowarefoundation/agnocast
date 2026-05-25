@@ -271,9 +271,9 @@ def _read_agent_version() -> str:
 class DiscoveryAgent(Node):
     """rclpy Node that publishes the local Agnocast state every PUBLISH_INTERVAL_SEC.
 
-    Also subscribes to its own gossip topic so the bridge decider can observe
-    remote namespace state; the callback records the latest snapshot keyed by
-    ``(host_uuid, ipc_ns_inode)``.
+    Also subscribes to its own gossip topic and caches the latest snapshot per
+    ``(host_uuid, ipc_ns_inode)`` — exposed through ``remote_states`` for
+    future consumers (e.g. cross-NS decision logic added in a follow-up PR).
     """
 
     def __init__(self, registry: TypeRegistryReader = None):

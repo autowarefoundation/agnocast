@@ -43,13 +43,14 @@ public:
   // per-pid file. `role` must be either `"pub"` or `"sub"`. Idempotent
   // from the caller's view: the daemon dedupes identical triples on
   // ingest. Errors are logged once and then silently swallowed so a
-  // missing `/run/agnocast` directory does not break user processes.
+  // missing tmpfs directory does not break user processes.
   void register_type(
     const std::string & topic_name, const std::string & type_name, const std::string & role,
     const std::string & node_name);
 
-  // Test seam: override the tmpfs base directory (default `/run/agnocast`).
-  // Must be called before the first `register_type`.
+  // Test seam: override the tmpfs base directory (default
+  // `/dev/shm/agnocast_type_registry`). Must be called before the first
+  // `register_type`.
   static void set_base_dir_for_test(const std::string & dir);
 
   // Test seam: return the on-disk path this writer will use, given the

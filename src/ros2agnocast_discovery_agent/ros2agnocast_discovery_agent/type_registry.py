@@ -1,8 +1,8 @@
 """Read agnocastlib's per-process tmpfs type announcements.
 
 Each Agnocast process appends `<topic>\\t<type>\\t<role>\\t<node>\\n` lines to
-``/run/agnocast/<ipc_ns_inode>/<pid>.txt`` on each ``Publisher<T>`` /
-``Subscription<T>`` construction (see
+``/dev/shm/agnocast_type_registry/<ipc_ns_inode>/<pid>.txt`` on each
+``Publisher<T>`` / ``Subscription<T>`` construction (see
 ``agnocastlib::internal::TypeRegistryWriter``). The daemon walks the per-NS
 directory once per tick and joins the discovered ``(topic, role,
 node_name)`` triples with the kmod's endpoint list (which has node_name

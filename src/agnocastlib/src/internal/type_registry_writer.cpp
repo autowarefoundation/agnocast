@@ -22,24 +22,9 @@ namespace agnocast::internal
 
 namespace
 {
-// Tmpfs root for the type registry. Defaults to `/dev/shm/` because that
-// path is world-writable (1777) on Linux so any user process can create
-// entries without elevation; the daemon and CLI mirror the same default.
-//
-// Hardened container deployments where `/dev/shm` is absent, capped,
-// or remounted with restrictive perms can override the parent directory
-// via the `AGNOCAST_TMPFS_DIR` environment variable. The writer
-// appends `/agnocast_type_registry` to whatever the user supplies, so
-// `AGNOCAST_TMPFS_DIR=/run/myapp` yields
-// `/run/myapp/agnocast_type_registry/<ns_inode>/<pid>.txt`.
-//
-// **Size requirement**: each registered Publisher/Subscription appends
-// roughly 80–256 bytes. A typical Autoware deployment (~100 processes
-// × ~10 endpoints) fits in well under 1 MiB; the writer never deletes
-// entries during a process's lifetime so the tmpfs must accommodate
-// the peak. Allocate at least 4 MiB if you tune `/dev/shm` size.
-//
-// Overridable for tests via `set_base_dir_for_test()`.
+// Tmpfs root. Default `/dev/shm` is world-writable (1777) so unelevated
+// user processes can create entries; override via `AGNOCAST_TMPFS_DIR`
+// for hardened containers. Test seam: `set_base_dir_for_test()`.
 std::string g_base_dir = []() {
   const char * env = std::getenv("AGNOCAST_TMPFS_DIR");
   std::string root = (env != nullptr && env[0] != '\0') ? env : "/dev/shm";
@@ -94,18 +79,15 @@ void TypeRegistryWriter::ensure_open_locked()
     return;
   }
 
-  // Both directories are `0755` so the daemon can read; the per-process
-  // file is `0644` (set via open mode below). The cross-namespace bridge
-  // and observability features rely on this tmpfs being writable, so any
-  // failure here is logged as an ERROR (not a transient warning).
+  // Directories are 0755 (daemon reads); the per-process file is 0644.
+  // Any failure here means cross-NS observability silently breaks for
+  // this process, so log as ERROR (not a transient warning).
   if (!ensure_dir(g_base_dir, 0755)) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
-      "TypeRegistryWriter: mkdir '%s' failed: %s. Cross-IPC-namespace bridge "
-      "auto-generation and observability will silently NOT work in this "
-      "process. Check that the parent directory exists and is writable; "
-      "override the root with the AGNOCAST_TMPFS_DIR environment variable "
-      "if /dev/shm is unavailable (e.g. inside a hardened container).",
+      "TypeRegistryWriter: mkdir '%s' failed: %s. Cross-NS observability will "
+      "silently NOT work in this process. Override the root with "
+      "AGNOCAST_TMPFS_DIR if /dev/shm is unavailable.",
       g_base_dir.c_str(), std::strerror(errno));
     open_failed_warned_ = true;
     return;
@@ -114,10 +96,7 @@ void TypeRegistryWriter::ensure_open_locked()
   if (!ensure_dir(ns_dir, 0755)) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
-      "TypeRegistryWriter: mkdir '%s' failed: %s. Verify the tmpfs has free "
-      "space — typical deployments need at most a few MiB, but a tightly "
-      "capped /dev/shm (e.g. Docker's 64 MiB default) shared with other "
-      "tmpfs users can run out.",
+      "TypeRegistryWriter: mkdir '%s' failed: %s. Check tmpfs free space.",
       ns_dir.c_str(), std::strerror(errno));
     open_failed_warned_ = true;
     return;
