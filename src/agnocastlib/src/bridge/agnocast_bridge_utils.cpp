@@ -237,7 +237,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 }
 
 BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger)
-: logger_(logger), failed_(false), reason_()
+: logger_(logger), failed_(false)
 {
   if (mode == Mode::Standard) {
     msg_ = MqMsgBridge{};
