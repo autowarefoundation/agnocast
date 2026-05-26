@@ -353,13 +353,13 @@ void send_standard_pubsub_bridge_request(
   auto fn_r2a = reinterpret_cast<uintptr_t>(&start_r2a_pubsub_node<MessageT>);
   auto fn_a2r = reinterpret_cast<uintptr_t>(&start_a2r_pubsub_node<MessageT>);
 
-  auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
-                   .set_direction(direction)
-                   .set_is_service(false)
-                   .set_pubsub_target_id(id)
-                   .set_topic_name(topic_name.c_str())
-                   .set_factory(fn_r2a, fn_a2r);
-  auto [msg, reason] = std::move(builder).build_standard_message();
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
+                         .set_direction(direction)
+                         .set_is_service(false)
+                         .set_pubsub_target_id(id)
+                         .set_topic_name(topic_name.c_str())
+                         .set_factory(fn_r2a, fn_a2r)
+                         .build_standard_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(logger, "Failed to build standard pubsub bridge request: %s", reason.c_str());
     close(agnocast_fd);
@@ -382,13 +382,13 @@ void send_standard_service_bridge_request(
   // Service bridges currently support only the ROS2 -> Agnocast direction.
   auto fn_a2r = fn_r2a;  // dummy value
 
-  auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
-                   .set_direction(direction)
-                   .set_is_service(true)
-                   .set_service_name(service_name.c_str())
-                   .set_shadow_node_identity(shadow_node_identity)
-                   .set_factory(fn_r2a, fn_a2r);
-  auto [msg, reason] = std::move(builder).build_standard_message();
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
+                         .set_direction(direction)
+                         .set_is_service(true)
+                         .set_service_name(service_name.c_str())
+                         .set_shadow_node_identity(shadow_node_identity)
+                         .set_factory(fn_r2a, fn_a2r)
+                         .build_standard_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(logger, "Failed to build standard service bridge request: %s", reason.c_str());
     close(agnocast_fd);
@@ -407,13 +407,13 @@ void send_performance_pubsub_bridge_request(
 
   const std::string message_type_name = rosidl_generator_traits::name<MessageT>();
 
-  auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
-                   .set_direction(direction)
-                   .set_is_service(false)
-                   .set_message_type(message_type_name.c_str())
-                   .set_topic_name(topic_name.c_str())
-                   .set_pubsub_target_id(id);
-  auto [msg, reason] = std::move(builder).build_performance_message();
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
+                         .set_direction(direction)
+                         .set_is_service(false)
+                         .set_message_type(message_type_name.c_str())
+                         .set_topic_name(topic_name.c_str())
+                         .set_pubsub_target_id(id)
+                         .build_performance_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(logger, "Failed to build performance pubsub bridge request: %s", reason.c_str());
     close(agnocast_fd);
@@ -433,13 +433,13 @@ void send_performance_service_bridge_request(
 
   const std::string service_type_name = rosidl_generator_traits::name<ServiceT>();
 
-  auto builder = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
-                   .set_direction(direction)
-                   .set_is_service(true)
-                   .set_service_type(service_type_name.c_str())
-                   .set_service_name(service_name.c_str())
-                   .set_shadow_node_identity(shadow_node_identity);
-  auto [msg, reason] = std::move(builder).build_performance_message();
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
+                         .set_direction(direction)
+                         .set_is_service(true)
+                         .set_service_type(service_type_name.c_str())
+                         .set_service_name(service_name.c_str())
+                         .set_shadow_node_identity(shadow_node_identity)
+                         .build_performance_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(logger, "Failed to build performance service bridge request: %s", reason.c_str());
     close(agnocast_fd);

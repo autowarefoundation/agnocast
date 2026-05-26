@@ -237,7 +237,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 }
 
 BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger)
-: logger_(logger), failed_(false), reason_("")
+: logger_(logger), failed_(false), reason_()
 {
   if (mode == Mode::Standard) {
     msg_ = MqMsgBridge{};
@@ -434,21 +434,20 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_shadow_node_identity(
   return *this;
 }
 
-std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_message() &&
+std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_message()
 {
   assert(std::holds_alternative<MqMsgBridge>(msg_));
 
-  auto msg = std::get<MqMsgBridge>(std::move(msg_));
-  return {std::move(msg), failed_ ? std::move(reason_) : std::string{}};
+  auto & msg = std::get<MqMsgBridge>(msg_);
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
 }
 
-std::pair<MqMsgPerformanceBridge, std::string>
-BridgeRequestMsgBuilder::build_performance_message() &&
+std::pair<MqMsgPerformanceBridge, std::string> BridgeRequestMsgBuilder::build_performance_message()
 {
   assert(std::holds_alternative<MqMsgPerformanceBridge>(msg_));
 
-  auto msg = std::get<MqMsgPerformanceBridge>(std::move(msg_));
-  return {std::move(msg), failed_ ? std::move(reason_) : std::string{}};
+  auto & msg = std::get<MqMsgPerformanceBridge>(msg_);
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
 }
 
 }  // namespace agnocast

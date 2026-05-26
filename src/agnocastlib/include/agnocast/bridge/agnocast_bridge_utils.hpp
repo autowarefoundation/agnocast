@@ -105,8 +105,8 @@ public:
   BridgeRequestMsgBuilder & set_shadow_node_identity(
     const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
-  std::pair<MqMsgBridge, std::string> build_standard_message() &&;
-  std::pair<MqMsgPerformanceBridge, std::string> build_performance_message() &&;
+  std::pair<MqMsgBridge, std::string> build_standard_message();
+  std::pair<MqMsgPerformanceBridge, std::string> build_performance_message();
 };
 
 template <typename MapT>
