@@ -24,13 +24,23 @@ using WeakCallbackGroupsToNodesMap = std::map<
 struct AgnocastExecutable;
 class Node;
 
-/** @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
- * agnocast::Node. */
+/**
+ * @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
+ * agnocast::Node.
+ *
+ * One-shot: once cancel() is called, spin() will not run again on the same instance -- create a
+ * new executor instead. All current uses (clock executor, CIE child executors) are recreated.
+ * TODO: to support re-spin, replace the spinning_ / cancel_requested_ flags with one atomic state
+ * enum (Idle / Spinning / Cancelled) so spin() can re-arm to Idle on exit.
+ */
 AGNOCAST_PUBLIC
 class AgnocastOnlyExecutor
 {
 protected:
-  std::atomic_bool spinning_;
+  std::atomic_bool spinning_{false};
+  // Sticky cancel flag: set by cancel(), never cleared, so a cancel() before spin() is not lost
+  // when spin() does spinning_.exchange(true). Never cleared -> the executor is one-shot.
+  std::atomic_bool cancel_requested_{false};
   std::unique_ptr<EpollManager> epoll_manager_;
   int shutdown_event_fd_;
   pid_t my_pid_;
@@ -66,10 +76,13 @@ public:
   virtual ~AgnocastOnlyExecutor();
 
   /// Block the calling thread and process Agnocast callbacks in a loop until cancel() is called.
+  /// One-shot: if cancel() was already called, spin() returns at once (see class comment).
   AGNOCAST_PUBLIC
   virtual void spin() = 0;
 
-  /// Request the executor to stop spinning. Causes the current or next spin() call to return.
+  /// Request the executor to stop spinning. Causes the current spin() call to return.
+  /// One-shot: once called, the executor is permanently stopped -- every subsequent spin()
+  /// returns immediately. Create a new instance to spin again.
   AGNOCAST_PUBLIC
   virtual void cancel();
 

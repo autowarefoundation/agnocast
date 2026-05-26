@@ -2,6 +2,15 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.4 (2026-05-21)
+------------------
+* fix(cie): fix cancel_executor race condition (`#1278 <https://github.com/autowarefoundation/agnocast/issues/1278>`_)
+* refactor(agnocast_components): use rclcpp_components_register_nodes for resource index registration (`#1238 <https://github.com/autowarefoundation/agnocast/issues/1238>`_)
+* fix(agnocast_components): allow agnocast_components_register_node to coexist with rclcpp_components_register_node (`#1230 <https://github.com/autowarefoundation/agnocast/issues/1230>`_)
+* refactor(e2e_test): move CIE component container test to agnocast_e2e_test (`#1228 <https://github.com/autowarefoundation/agnocast/issues/1228>`_)
+* fix(test): filter out bridge node from callback info count in CIE test (`#1226 <https://github.com/autowarefoundation/agnocast/issues/1226>`_)
+* refactor(test): replace assertSequentialStdout with direct proc_output access (`#1225 <https://github.com/autowarefoundation/agnocast/issues/1225>`_)
+
 2.3.3 (2026-04-02)
 ------------------
 * feat(agnocastlib): enable file logging for `agnocast::Node` (`#1204 <https://github.com/autowarefoundation/agnocast/issues/1204>`_)

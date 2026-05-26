@@ -71,12 +71,10 @@ std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::strin
   return result;
 }
 
-std::vector<std::string> PerformanceBridgeLoader::generate_library_paths(
-  const std::string & snake_type, bool is_service)
+std::vector<std::string> PerformanceBridgeLoader::generate_library_paths()
 {
   std::vector<std::string> paths;
-  const std::string lib_name =
-    (is_service ? "libservice_bridge_plugin_" : "libpubsub_bridge_plugin_") + snake_type + ".so";
+  const std::string lib_name = "libagnocast_bridge_plugins.so";
 
   // 1. Check environment variable AGNOCAST_BRIDGE_PLUGINS_PATH (colon-separated)
   const char * env_path = std::getenv("AGNOCAST_BRIDGE_PLUGINS_PATH");
@@ -140,16 +138,18 @@ void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::s
 }
 
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
-  const std::string & type_name, const std::string & symbol_name, bool is_service)
+  const std::string & type_name, const std::string & symbol_name_prefix, bool is_service)
 {
   const char * type_label = is_service ? "service" : "message";
   std::string snake_type = convert_type_to_snake_case(type_name);
-  std::vector<std::string> lib_paths = generate_library_paths(snake_type, is_service);
+  std::vector<std::string> lib_paths = generate_library_paths();
 
   void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
     return nullptr;
   }
+
+  const std::string symbol_name = symbol_name_prefix + "_" + snake_type;
 
   dlerror();
   void * symbol = dlsym(handle, symbol_name.c_str());

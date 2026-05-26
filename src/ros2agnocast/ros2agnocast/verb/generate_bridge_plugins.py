@@ -2,6 +2,7 @@ import argparse
 from enum import Enum, auto
 import os
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -131,6 +132,8 @@ class GenerateBridgePluginsVerb(VerbExtension):
         for srv_type in service_types:
             package_names.add(srv_type.split('/')[0])
 
+        self._generate_generic_sources(src_dir)
+
         templates_pkg = files('ros2agnocast.templates')
 
         # Generate C++ source files
@@ -144,6 +147,13 @@ class GenerateBridgePluginsVerb(VerbExtension):
 
         # Generate package.xml
         self._generate_package_xml(output_dir, package_names, templates_pkg)
+
+    def _generate_generic_sources(self, src_dir):
+        """Copy shared generic bridge helper sources."""
+        static_sources_pkg = files('ros2agnocast.static_sources')
+        for name in ('generic_functions.hpp', 'generic_functions.cpp'):
+            src_file = static_sources_pkg.joinpath(name)
+            shutil.copy(str(src_file), os.path.join(src_dir, name))
 
     def _generate_plugin_source(self, src_dir, typ, interface_type, templates_pkg):
         """Generate a single plugin C++ source file."""
@@ -164,6 +174,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
                 'msg_type': typ,
                 'cpp_type': cpp_type,
                 'header_path': header_path,
+                'snake_type_name': flat_type,
             }
             template_file = templates_pkg.joinpath('pubsub_bridge_plugin.cpp.em')
         else:
@@ -171,6 +182,7 @@ class GenerateBridgePluginsVerb(VerbExtension):
                 'srv_type': typ,
                 'cpp_type': cpp_type,
                 'header_path': header_path,
+                'snake_type_name': flat_type,
             }
             template_file = templates_pkg.joinpath('service_bridge_plugin.cpp.em')
 

@@ -36,4 +36,14 @@ std::chrono::nanoseconds TimerBase::time_until_trigger()
   const int64_t next_ns = timer_info->next_call_time_ns.load();
   return std::chrono::nanoseconds(next_ns - now_ns);
 }
+
+void TimerBase::set_period(std::chrono::nanoseconds period)
+{
+  auto timer_info = timer_info_.lock();
+  if (!timer_info) {
+    throw std::runtime_error("set_period called on an invalidated timer (timer_info expired)");
+  }
+  timer_info->set_period(period);
+}
+
 }  // namespace agnocast

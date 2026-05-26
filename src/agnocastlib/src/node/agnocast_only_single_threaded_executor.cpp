@@ -31,7 +31,7 @@ void AgnocastOnlySingleThreadedExecutor::spin()
 
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
 
-  while (spinning_.load() && agnocast::ok()) {
+  while (spinning_.load() && !cancel_requested_.load() && agnocast::ok()) {
     if (epoll_update_tracker_.take_update_request()) {
       add_callback_groups_from_nodes_associated_to_executor();
       epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {

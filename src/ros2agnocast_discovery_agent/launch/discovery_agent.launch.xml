@@ -1,0 +1,14 @@
+<launch>
+  <!--
+    Spawn the per-IPC-namespace Agnocast discovery agent. Include this from
+    any top-level launch that runs inside an IPC namespace where Agnocast
+    observability and bridge generation are desired. Exactly one daemon
+    should run per IPC namespace.
+  -->
+  <!-- No `name=` attribute: the agent picks a unique node name itself
+       (`agnocast_discovery_agent_<host8hex>_<ipc_ns_inode>`). Setting
+       `name=` here would remap and break the per-NS uniqueness. -->
+  <node pkg="ros2agnocast_discovery_agent"
+        exec="discovery_agent"
+        output="screen"/>
+</launch>
