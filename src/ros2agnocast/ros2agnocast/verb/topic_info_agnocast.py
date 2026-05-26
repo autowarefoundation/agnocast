@@ -182,9 +182,9 @@ class TopicInfoAgnocastVerb(VerbExtension):
             warn_if_gossip_timeout_overridden(args)
 
             # Merge endpoints visible only via gossip (other IPC NSes / ECUs).
-            snapshots = collect_announcements(
+            snapshots, saw_local = collect_announcements(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_no_announcements(node, snapshots, args.gossip_timeout)
+            warn_if_no_announcements(node, snapshots, saw_local, args.gossip_timeout)
             gossip_pubs, gossip_subs = topic_endpoints(snapshots, topic_name)
             # collect_announcements() drops the local NS from gossip, so
             # ioctl-side and gossip-side endpoint sets are disjoint by

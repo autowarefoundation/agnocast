@@ -207,8 +207,9 @@ class NodeInfoAgnocastVerb(VerbExtension):
             agnocast_subscribers, agnocast_publishers, agnocast_servers, agnocast_clients = get_agnocast_node_topics(node_name_bytes)
 
             # Merge gossip-only topics for this node (other IPC NSes / ECUs).
-            snapshots = collect_announcements(node, timeout_sec=args.gossip_timeout)
-            warn_if_no_announcements(node, snapshots, args.gossip_timeout)
+            snapshots, saw_local = collect_announcements(
+                node, timeout_sec=args.gossip_timeout)
+            warn_if_no_announcements(node, snapshots, saw_local, args.gossip_timeout)
             gossip_pubs, gossip_subs = topics_of_node(snapshots, node_name)
             # Remember each topic's type_name from gossip so Agnocast-only
             # topics (not visible to DDS, so absent from ros2_topic_dir) can

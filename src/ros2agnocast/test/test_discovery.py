@@ -142,17 +142,18 @@ def _plain_node(publishers=None):
 
 def test_warn_if_no_announcements_silent_when_snapshots_present(capsys):
     snap = _state('a', 1)
-    warn_if_no_announcements(_plain_node(), [snap], timeout_sec=2.0)
+    warn_if_no_announcements(_plain_node(), [snap], saw_local=False, timeout_sec=2.0)
     assert capsys.readouterr().err == ''
 
 
 def test_warn_if_no_announcements_silent_when_timeout_zero(capsys):
-    warn_if_no_announcements(_plain_node(), [], timeout_sec=0)
+    warn_if_no_announcements(_plain_node(), [], saw_local=False, timeout_sec=0)
     assert capsys.readouterr().err == ''
 
 
 def test_warn_if_no_announcements_says_no_publisher_when_dds_sees_none(capsys):
-    warn_if_no_announcements(_plain_node(publishers=[]), [], timeout_sec=2.0)
+    warn_if_no_announcements(
+        _plain_node(publishers=[]), [], saw_local=False, timeout_sec=2.0)
     err = capsys.readouterr().err
     assert 'WARNING' in err
     assert 'no /_agnocast_discovery publisher visible' in err
@@ -160,7 +161,21 @@ def test_warn_if_no_announcements_says_no_publisher_when_dds_sees_none(capsys):
 
 
 def test_warn_if_no_announcements_says_qos_or_pythonpath_when_publisher_visible(capsys):
-    warn_if_no_announcements(_plain_node(publishers=[MagicMock()]), [], timeout_sec=2.0)
+    warn_if_no_announcements(
+        _plain_node(publishers=[MagicMock()]), [], saw_local=False, timeout_sec=2.0)
     err = capsys.readouterr().err
     assert 'WARNING' in err
     assert 'publisher(s) visible but no snapshot' in err
+
+
+def test_warn_if_no_announcements_silent_when_only_local_publisher_visible(capsys):
+    """Single-NS steady state: local agent publishes, no remote gossip exists.
+
+    `collect_announcements` drops the local snapshot, so the caller sees
+    publishers > 0 but zero remote snapshots. Without `saw_local=True`
+    this would emit a misleading "publisher visible but no snapshot"
+    warning on every CLI invocation in the common single-host setup.
+    """
+    warn_if_no_announcements(
+        _plain_node(publishers=[MagicMock()]), [], saw_local=True, timeout_sec=2.0)
+    assert capsys.readouterr().err == ''

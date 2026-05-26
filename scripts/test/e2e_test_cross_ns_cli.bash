@@ -10,10 +10,14 @@
 #
 #   * Each verb accepts `--gossip-timeout`.
 #   * Each verb finishes without raising when the daemon is publishing.
-#   * `topic list_agnocast` surfaces an Agnocast topic via gossip even
-#     when the caller's own ioctl path is the only source (single-NS
-#     baseline; cross-NS visibility is exercised by manual unshare-based
-#     tests).
+#   * Local Agnocast endpoints continue to surface (the ioctl path,
+#     unchanged by this PR's gossip wiring).
+#
+# `collect_announcements()` deliberately drops the caller's own NS from
+# gossip, so in this single-NS setup the gossip-derived snapshot list is
+# always empty and the topic/node/endpoint info you see below comes from
+# the ioctl path. Cross-NS gossip visibility is exercised by separate
+# manual unshare-based tests.
 #
 # Requires:
 #   * agnocast kernel module loaded

@@ -133,9 +133,9 @@ class ListAgnocastVerb(VerbExtension):
             agnocast_topics = remove_service_topic(agnocast_topics)
 
             # Merge topics visible only via gossip (other IPC NSes / ECUs).
-            snapshots = collect_announcements(
+            snapshots, saw_local = collect_announcements(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_no_announcements(node, snapshots, args.gossip_timeout)
+            warn_if_no_announcements(node, snapshots, saw_local, args.gossip_timeout)
             agnocast_topics.extend(remove_service_topic(all_topic_names(snapshots)))
 
             # Get ros2 topics

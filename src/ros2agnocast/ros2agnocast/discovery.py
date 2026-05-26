@@ -82,14 +82,27 @@ def _local_ipc_ns_inode() -> int:
 def collect_announcements(
     node,
     timeout_sec: float = DEFAULT_COLLECT_TIMEOUT_SEC,
-) -> list:
-    """Collect one latest snapshot per remote ``(host_uuid, ipc_ns_inode)``."""
+) -> tuple:
+    """Collect remote gossip snapshots.
+
+    Returns ``(remote_snapshots, saw_local)``:
+
+    * ``remote_snapshots`` is one latest message per remote ``(host_uuid,
+      ipc_ns_inode)``.
+    * ``saw_local`` is ``True`` if a snapshot from the caller's own NS was
+      received during the wait — used by :func:`warn_if_no_announcements`
+      to distinguish "remote agents are silent" from "we are the only
+      agent in the domain" (a valid single-NS steady state).
+    """
     snapshots = {}
+    saw_local = False
     local_host_uuid = _local_host_uuid()
     local_ipc_ns_inode = _local_ipc_ns_inode()
 
     def on_msg(msg: AgnocastDaemonState) -> None:
+        nonlocal saw_local
         if msg.host_uuid == local_host_uuid and msg.ipc_ns_inode == local_ipc_ns_inode:
+            saw_local = True
             return
         snapshots[(msg.host_uuid, msg.ipc_ns_inode)] = msg
 
@@ -103,7 +116,7 @@ def collect_announcements(
     finally:
         spin_node.destroy_subscription(sub)
 
-    return list(snapshots.values())
+    return list(snapshots.values()), saw_local
 
 
 def _resolve_spin_node(node):
@@ -118,8 +131,16 @@ def _resolve_spin_node(node):
     return getattr(direct, 'node', direct)
 
 
-def warn_if_no_announcements(node, snapshots: list, timeout_sec: float) -> None:
-    """Best-effort stderr hint when no gossip arrived; does not change exit code."""
+def warn_if_no_announcements(
+    node, snapshots: list, saw_local: bool, timeout_sec: float,
+) -> None:
+    """Best-effort stderr hint when no gossip arrived; does not change exit code.
+
+    ``saw_local`` (from :func:`collect_announcements`) suppresses the
+    "publisher visible but no snapshot" branch when the only visible
+    publisher is the caller's own NS agent — that is the expected
+    steady state on a host running a single discovery agent.
+    """
     if timeout_sec <= 0:
         return
     if snapshots:
@@ -142,16 +163,21 @@ def warn_if_no_announcements(node, snapshots: list, timeout_sec: float) -> None:
             '(2) RMW mismatch between agent and CLI. Pass '
             '`--gossip-timeout 0` to skip this check.',
             file=sys.stderr)
-    else:
-        print(
-            f'WARNING: /_agnocast_discovery has {len(publishers)} publisher(s) '
-            f'visible but no snapshot was received in {timeout_sec:.1f}s. Common '
-            'causes: (1) the ros2 daemon was started before `install/setup.bash` '
-            'was sourced and is missing the discovery msg package on its '
-            'PYTHONPATH (try `ros2 daemon stop && ros2 daemon start`); '
-            '(2) QoS / type mismatch on the publisher side. Pass '
-            '`--gossip-timeout 0` to skip this check.',
-            file=sys.stderr)
+        return
+
+    if saw_local:
+        # Only the local agent is gossiping; no remote agents to report on.
+        return
+
+    print(
+        f'WARNING: /_agnocast_discovery has {len(publishers)} publisher(s) '
+        f'visible but no snapshot was received in {timeout_sec:.1f}s. Common '
+        'causes: (1) the ros2 daemon was started before `install/setup.bash` '
+        'was sourced and is missing the discovery msg package on its '
+        'PYTHONPATH (try `ros2 daemon stop && ros2 daemon start`); '
+        '(2) QoS / type mismatch on the publisher side. Pass '
+        '`--gossip-timeout 0` to skip this check.',
+        file=sys.stderr)
 
 
 def all_topic_names(snapshots: list) -> set:

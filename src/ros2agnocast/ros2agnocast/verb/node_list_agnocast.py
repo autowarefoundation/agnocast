@@ -98,8 +98,9 @@ class ListAgnocastVerb(VerbExtension):
                 agnocast_node_name = agnocast_node_name | get_node_name_set(topic)
 
             # Merge nodes visible only via gossip (other IPC NSes / ECUs).
-            snapshots = collect_announcements(node, timeout_sec=args.gossip_timeout)
-            warn_if_no_announcements(node, snapshots, args.gossip_timeout)
+            snapshots, saw_local = collect_announcements(
+                node, timeout_sec=args.gossip_timeout)
+            warn_if_no_announcements(node, snapshots, saw_local, args.gossip_timeout)
             agnocast_node_name |= all_nodes(snapshots)
 
             # TODO(bdm-k): The current impl determines shadow nodes in a heuristic way. We need to
