@@ -15,6 +15,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
+    tests_require=['pytest'],
     maintainer='Keita Morisaki, Takahiro Ishikawa-Aso, Koichi Imai, Takumi Jin',
     maintainer_email=(
         'keita.morisaki@tier4.jp, sykwer@gmail.com, '
