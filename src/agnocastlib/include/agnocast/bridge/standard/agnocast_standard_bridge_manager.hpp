@@ -6,11 +6,11 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <atomic>
-#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 namespace agnocast
@@ -91,10 +91,10 @@ private:
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
 
-  std::map<std::string, std::shared_ptr<PubsubBridgeBase>> active_pubsub_bridges_;
-  std::map<std::string, ManagedPubsubBridgeEntry> managed_pubsub_bridges_;
+  std::unordered_map<std::string, std::shared_ptr<PubsubBridgeBase>> active_pubsub_bridges_;
+  std::unordered_map<std::string, ManagedPubsubBridgeEntry> managed_pubsub_bridges_;
 
-  std::map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
+  std::unordered_map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
 
   void start_ros_execution();
 
