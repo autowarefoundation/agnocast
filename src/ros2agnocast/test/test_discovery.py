@@ -151,13 +151,21 @@ def test_warn_if_no_announcements_says_qos_or_pythonpath_when_publisher_visible(
 
 
 def test_warn_if_no_announcements_silent_when_only_local_publisher_visible(capsys):
-    """Single-NS steady state: local agent publishes, no remote gossip exists.
-
-    `collect_announcements` drops the local snapshot, so the caller sees
-    publishers > 0 but zero remote snapshots. Without `saw_local=True`
-    this would emit a misleading "publisher visible but no snapshot"
-    warning on every CLI invocation in the common single-host setup.
-    """
+    """Single-NS steady state: 1 publisher visible and it is our own."""
     warn_if_no_announcements(
         _plain_node(publishers=[MagicMock()]), [], saw_local=True, timeout_sec=2.0)
     assert capsys.readouterr().err == ''
+
+
+def test_warn_if_no_announcements_warns_when_remote_publisher_is_silent(capsys):
+    """Cross-NS / cross-ECU: more publishers visible than the local one we received.
+
+    Even if `saw_local=True`, the second publisher must be remote and
+    failed to deliver — operators want to hear about that.
+    """
+    warn_if_no_announcements(
+        _plain_node(publishers=[MagicMock(), MagicMock()]),
+        [], saw_local=True, timeout_sec=2.0)
+    err = capsys.readouterr().err
+    assert 'WARNING' in err
+    assert 'publisher(s) visible but no snapshot' in err

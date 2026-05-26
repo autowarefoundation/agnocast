@@ -136,10 +136,12 @@ def warn_if_no_announcements(
 ) -> None:
     """Best-effort stderr hint when no gossip arrived; does not change exit code.
 
-    ``saw_local`` (from :func:`collect_announcements`) suppresses the
-    "publisher visible but no snapshot" branch when the only visible
-    publisher is the caller's own NS agent — that is the expected
-    steady state on a host running a single discovery agent.
+    ``saw_local`` (from :func:`collect_announcements`) plus the visible
+    publisher count let us suppress only the genuinely benign case: exactly
+    one publisher is visible and we received its snapshot — i.e. our own
+    local agent is the only one in the domain. With 2+ visible publishers
+    and no remote snapshot, at least one remote agent is silent, which is
+    still worth warning about.
     """
     if timeout_sec <= 0:
         return
@@ -165,8 +167,9 @@ def warn_if_no_announcements(
             file=sys.stderr)
         return
 
-    if saw_local:
-        # Only the local agent is gossiping; no remote agents to report on.
+    if saw_local and len(publishers) == 1:
+        # The single visible publisher is our own NS agent; no remote
+        # agents exist to report on. Expected single-NS steady state.
         return
 
     print(
