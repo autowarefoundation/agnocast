@@ -44,6 +44,7 @@ Agnocast is based on the following papers and the [corresponding prototype](http
 </details>
 
 Talks:
+
 - ROSCon 2025, Singapore: "Agnocast: A ROS 2-Compatible Middleware Enabling True Zero-Copy IPC for Unsized Message Types" by Takahiro Ishikawa-Aso ([video](https://vimeo.com/1136159023))
 - ROSCon JP 2025, Nagoya: "CallbackIsolatedExecutor: 二重スケジューリングを不要にする新しいExecutorとスケジューリング理論" by Takahiro Ishikawa-Aso ([video](https://vimeo.com/1122709186), in Japanese; an English summary is available on the [TIER IV tech blog](https://medium.com/tier-iv-tech-blog/callbackisolatedexecutor-a-novel-executor-that-eliminates-nested-scheduling-in-scheduling-theory-400b0131ed75))
 
