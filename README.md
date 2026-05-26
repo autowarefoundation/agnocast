@@ -4,7 +4,7 @@ An rclcpp-compatible true zero-copy IPC middleware that supports all ROS message
 
 Agnocast is based on the following papers and the [corresponding prototype](https://github.com/sykwer/agnocast). It also integrates [CallbackIsolatedExecutor](https://github.com/autowarefoundation/callback_isolated_executor).
 
-- T. Ishikawa–Aso, A. Yano, T. Azumi, and S. Kato, "Work in Progress: Middleware-Transparent Callback Enforcement in Commoditized Component-Oriented Real-time Systems," in *Proc. IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)*, 2025, pp. 78–81. [IEEE Xplore](https://ieeexplore.ieee.org/document/11018762) ([pdf](https://arxiv.org/pdf/2505.06546)).
+- T. Ishikawa-Aso, A. Yano, T. Azumi, and S. Kato, "Work in Progress: Middleware-Transparent Callback Enforcement in Commoditized Component-Oriented Real-time Systems," in *Proc. IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)*, 2025, pp. 78–81. [IEEE Xplore](https://ieeexplore.ieee.org/document/11018762) ([pdf](https://arxiv.org/pdf/2505.06546)).
 - T. Ishikawa–Aso and S. Kato, "ROS 2 Agnocast: Supporting Unsized Message Types for True Zero-Copy Publish/Subscribe IPC," in *Proc. 28th Int. Symp. Real-Time Distributed Computing (ISORC)*, 2025, pp. 1–10. [IEEE Xplore](https://ieeexplore.ieee.org/document/11173025) ([pdf](https://www.arxiv.org/pdf/2506.16882)).
 - T. Ishikawa–Aso, A. Yano, K. Imai, T. Azumi, and S. Kato, "ipc_shared_ptr: A Publish/Subscribe-Aware Smart Pointer for Cross-Process Object Lifetime Management," in *Proc. 29th Int. Symp. Real-Time Distributed Computing (ISORC)*, 2026 (to appear). [arXiv:2605.04226](https://arxiv.org/abs/2605.04226) ([pdf](https://arxiv.org/pdf/2605.04226)).
 
@@ -14,7 +14,7 @@ Agnocast is based on the following papers and the [corresponding prototype](http
 ```bibtex
 @inproceedings{ishikawa2025cie,
   title={Work in Progress: Middleware-Transparent Callback Enforcement in Commoditized Component-Oriented Real-time Systems},
-  author={Ishikawa--Aso, Takahiro and Yano, Atsushi and Azumi, Takuya and Kato, Shinpei},
+  author={Ishikawa-Aso, Takahiro and Yano, Atsushi and Azumi, Takuya and Kato, Shinpei},
   booktitle={2025 IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)},
   pages={78--81},
   year={2025},
@@ -23,7 +23,7 @@ Agnocast is based on the following papers and the [corresponding prototype](http
 
 @inproceedings{ishikawa2025agnocast,
   title={ROS 2 Agnocast: Supporting Unsized Message Types for True Zero-Copy Publish/Subscribe IPC},
-  author={Ishikawa--Aso, Takahiro and Kato, Shinpei},
+  author={Ishikawa-Aso, Takahiro and Kato, Shinpei},
   booktitle={2025 28th International Symposium on Real-Time Distributed Computing (ISORC)},
   pages={01--10},
   year={2025},
@@ -32,7 +32,7 @@ Agnocast is based on the following papers and the [corresponding prototype](http
 
 @inproceedings{ishikawa2026agnocast,
   title={ipc\_shared\_ptr: A Publish/Subscribe-Aware Smart Pointer for Cross-Process Object Lifetime Management},
-  author={Ishikawa--Aso, Takahiro and Yano, Atsushi and Imai, Koichi and Azumi, Takuya and Kato, Shinpei},
+  author={Ishikawa-Aso, Takahiro and Yano, Atsushi and Imai, Koichi and Azumi, Takuya and Kato, Shinpei},
   booktitle={2026 29th International Symposium on Real-Time Distributed Computing (ISORC)},
   year={2026},
   note={to appear},
