@@ -20,6 +20,7 @@ setup(
             '*.cpp',
         ],
     },
+    extras_require={'test': ['pytest']},
     entry_points={
         'ros2cli.command': [
             'agnocast = ros2agnocast.command.agnocast:AgnocastCommand',
