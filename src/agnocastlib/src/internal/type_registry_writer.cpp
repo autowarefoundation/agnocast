@@ -96,8 +96,8 @@ void TypeRegistryWriter::ensure_open_locked()
   if (!ensure_dir(ns_dir, 0755)) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
-      "TypeRegistryWriter: mkdir '%s' failed: %s. Check tmpfs free space.",
-      ns_dir.c_str(), std::strerror(errno));
+      "TypeRegistryWriter: mkdir '%s' failed: %s. Check tmpfs free space.", ns_dir.c_str(),
+      std::strerror(errno));
     open_failed_warned_ = true;
     return;
   }
