@@ -8,7 +8,6 @@ Agnocast is based on the following papers and the [corresponding prototype](http
 - T. Ishikawa–Aso and S. Kato, "ROS 2 Agnocast: Supporting Unsized Message Types for True Zero-Copy Publish/Subscribe IPC," in *Proc. 28th Int. Symp. Real-Time Distributed Computing (ISORC)*, 2025, pp. 1–10. [IEEE Xplore](https://ieeexplore.ieee.org/document/11173025) ([pdf](https://www.arxiv.org/pdf/2506.16882)).
 - T. Ishikawa–Aso, A. Yano, K. Imai, T. Azumi, and S. Kato, "ipc_shared_ptr: A Publish/Subscribe-Aware Smart Pointer for Cross-Process Object Lifetime Management," in *Proc. 29th Int. Symp. Real-Time Distributed Computing (ISORC)*, 2026 (to appear). [arXiv:2605.04226](https://arxiv.org/abs/2605.04226) ([pdf](https://arxiv.org/pdf/2605.04226)).
 
-
 <details>
 <summary>BibTeX</summary>
 
