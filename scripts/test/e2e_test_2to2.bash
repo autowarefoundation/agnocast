@@ -7,7 +7,7 @@ if ! grep -q "^agnocast " /proc/modules; then
 fi
 
 # Parsing arguments
-OPTIONS=$(getopt -o hsc --long help,single,continue -- "$@")
+OPTIONS=$(getopt -o hscb: --long help,single,continue,bridge-only: -- "$@")
 if [ $? -ne 0 ]; then
     echo "Invalid options provided"
     exit 1
@@ -20,11 +20,15 @@ usage() {
     echo "  -h, --help      Show this help message"
     echo "  -s, --single    Run only one test case (Native mode, current config)"
     echo "  -c, --continue  Continue running tests even if one fails"
+    echo "  -b, --bridge-only MODE"
+    echo "                  Run only bridge tests (ros2agno, agno2ros)"
+    echo "                  MODE: standard | performance"
     exit 0
 }
 
 RUN_SINGLE=false
 CONTINUE_ON_FAILURE=false
+BRIDGE_ONLY=false
 while true; do
     case "$1" in
     -h | --help)
@@ -37,6 +41,24 @@ while true; do
     -c | --continue)
         CONTINUE_ON_FAILURE=true
         shift
+        ;;
+    -b | --bridge-only)
+        BRIDGE_ONLY=true
+        LOWER_BRIDGE_ONLY_MODE=$(echo "$2" | tr '[:upper:]' '[:lower:]')
+        case "$LOWER_BRIDGE_ONLY_MODE" in
+        standard | 1)
+            export AGNOCAST_BRIDGE_MODE=standard
+            ;;
+        performance | 2)
+            export AGNOCAST_BRIDGE_MODE=performance
+            ;;
+        *)
+            echo "Invalid --bridge-only mode: $2"
+            echo "Expected: standard,1, performance, or 2"
+            exit 1
+            ;;
+        esac
+        shift 2
         ;;
     --)
         shift
@@ -57,6 +79,46 @@ source install/setup.bash
 LOWER_BRIDGE_MODE=$(echo "$AGNOCAST_BRIDGE_MODE" | tr '[:upper:]' '[:lower:]')
 CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
+
+if [ "$LOWER_BRIDGE_MODE" = "performance" ] || [ "$LOWER_BRIDGE_MODE" = "2" ]; then
+    if [ -d "agnocast_bridge_plugins" ]; then
+        echo "Skip generating bridge plugins: agnocast_bridge_plugins directory already exists" | sudo tee /dev/kmsg
+    else
+        ros2 agnocast generate-bridge-plugins --all
+    fi
+    if ! colcon build --packages-select agnocast_bridge_plugins; then
+        echo "ERROR: colcon build failed for agnocast_bridge_plugins" | sudo tee /dev/kmsg
+        exit 1
+    fi
+    source install/setup.bash
+
+    echo "Performance mode cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
+    # Kill stale performance bridge processes directly by PID.
+    mapfile -t AGNO_PBR_PIDS < <(ps -eo pid=,comm= | awk '$2 ~ /^agno_pbr_/ {print $1}')
+    if [ "${#AGNO_PBR_PIDS[@]}" -gt 0 ]; then
+        KILL_FAILED=false
+        for pid in "${AGNO_PBR_PIDS[@]}"; do
+            if kill "$pid" 2>/dev/null; then
+                echo "Killed process: $pid" | sudo tee /dev/kmsg
+            elif kill -0 "$pid" 2>/dev/null; then
+                echo "ERROR: failed to kill process: $pid" | sudo tee /dev/kmsg
+                KILL_FAILED=true
+            else
+                echo "Process already exited before kill: $pid" | sudo tee /dev/kmsg
+            fi
+        done
+        if [ "$KILL_FAILED" = true ]; then
+            exit 1
+        fi
+    fi
+
+    sleep 1
+    # Verify stale bridge manager mqueue does not remain.
+    if [ -e "/dev/mqueue/agnocast_bridge_manager@-1" ]; then
+        echo "ERROR: stale mqueue exists: /dev/mqueue/agnocast_bridge_manager@-1" | sudo tee /dev/kmsg
+        exit 1
+    fi
+fi
 
 # Run test
 CONFIG_FILE=src/agnocast_e2e_test/test/config_test_2to2.yaml
@@ -81,6 +143,9 @@ else
     TEST_MODES=("agno2agno" "ros2agno" "agno2ros")
     if [ "$LOWER_BRIDGE_MODE" = "0" ] || [ "$LOWER_BRIDGE_MODE" = "off" ]; then
         TEST_MODES=("agno2agno")
+    fi
+    if [ "$BRIDGE_ONLY" = true ]; then
+        TEST_MODES=("ros2agno" "agno2ros")
     fi
     CONTAINER_LAYOUT=("PPSS" "PP|SS" "P|PSS" "PPS|S" "P|P|SS" "P|PS|S" "PP|S|S" "P|P|S|S")
 

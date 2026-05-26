@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Console-script wrapper so `ros2 run ros2agnocast_discovery_agent discovery_agent` works.
+
+ament_python's `entry_points` would normally produce a binary in `bin/`, but
+`ros2 run` looks in `lib/<pkg>/`. The setup.py installs this file to
+`lib/<pkg>/discovery_agent` so the standard ros2 run discovery rule finds it.
+"""
+import sys
+
+from ros2agnocast_discovery_agent.agent import main
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

@@ -2,6 +2,24 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.4 (2026-05-21)
+------------------
+* fix(bridge): suppress bridge plugin compilation warning (`#1347 <https://github.com/autowarefoundation/agnocast/issues/1347>`_)
+* fix: ubuntu24.04/jazzy compilation warnings (`#1339 <https://github.com/autowarefoundation/agnocast/issues/1339>`_)
+* perf(bridge-plugins): make bridge nodes use generic publisher and subscriber (`#1337 <https://github.com/autowarefoundation/agnocast/issues/1337>`_)
+* refactor(bridge-plugins): consolidate .so and enable unity/lld build (`#1336 <https://github.com/autowarefoundation/agnocast/issues/1336>`_)
+* feat(bridge): introduce shadow node to Agnocast bridge (`#1300 <https://github.com/autowarefoundation/agnocast/issues/1300>`_)
+* enhance(ros2agnocas): use `get_agnocast_node_topics` in `node info_agnocast` (`#1237 <https://github.com/autowarefoundation/agnocast/issues/1237>`_)
+* feat(bridge): add standard-mode R2A service bridge support (`#1289 <https://github.com/autowarefoundation/agnocast/issues/1289>`_)
+* enhance(ros2agnocast): avoid unnecessary `get_topic_names_and_types` in `topic info_agnocast` (`#1236 <https://github.com/autowarefoundation/agnocast/issues/1236>`_)
+* refactor(ros2agnocast): typo, memory handle (`#1305 <https://github.com/autowarefoundation/agnocast/issues/1305>`_)
+* refactor(ros2agnocast): use context manager for ctypes topic arrays (`#1293 <https://github.com/autowarefoundation/agnocast/issues/1293>`_)
+* feat(bridge): add e2e support for R2A service bridges in performance mode (`#1274 <https://github.com/autowarefoundation/agnocast/issues/1274>`_)
+* enhance(ros2agnocast): avoid unnecessary `get_publishers/subscriptions_info_by_topic` calls in `topic list_agnocast` (`#1235 <https://github.com/autowarefoundation/agnocast/issues/1235>`_)
+* fix(bridge): inherit version of ros2agnocast for agnocast bridge plugins (`#1219 <https://github.com/autowarefoundation/agnocast/issues/1219>`_)
+* feat:add version check command (`#1224 <https://github.com/autowarefoundation/agnocast/issues/1224>`_)
+* feat(ros2agnocast): add R2A service plugin template (`#1144 <https://github.com/autowarefoundation/agnocast/issues/1144>`_)
+
 2.3.3 (2026-04-02)
 ------------------
 * fix: topic list_agnocast warning (`#1208 <https://github.com/autowarefoundation/agnocast/issues/1208>`_)

@@ -18,8 +18,7 @@ namespace agnocast
 {
 
 AgnocastOnlyExecutor::AgnocastOnlyExecutor()
-: spinning_(false),
-  shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
+: shutdown_event_fd_(eventfd(0, EFD_NONBLOCK)),
   my_pid_(getpid()),
   epoll_update_tracker_(EpollUpdateDispatcher::get_instance().register_tracker())
 {
@@ -143,6 +142,7 @@ void AgnocastOnlyExecutor::execute_agnocast_executable(AgnocastExecutable & agno
 
 void AgnocastOnlyExecutor::cancel()
 {
+  cancel_requested_.store(true);
   spinning_.store(false);
   uint64_t val = 1;
   if (write(shutdown_event_fd_, &val, sizeof(val)) == -1) {

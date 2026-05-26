@@ -2,6 +2,15 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.4 (2026-05-21)
+------------------
+* fix(sample_application): add agnocast\_ prefix to sample app and thread_configurator (`#1319 <https://github.com/autowarefoundation/agnocast/issues/1319>`_)
+* chore: remove @veqcc from maintainers (`#1296 <https://github.com/autowarefoundation/agnocast/issues/1296>`_)
+* fix(sample_application): use dedicated callback groups (`#1273 <https://github.com/autowarefoundation/agnocast/issues/1273>`_)
+* fix(doc): refer to autowarefoundation.github.io (`#1261 <https://github.com/autowarefoundation/agnocast/issues/1261>`_)
+* fix(sample_application): rename multi_domain_cie_tailer to talker (`#1220 <https://github.com/autowarefoundation/agnocast/issues/1220>`_)
+* refactor(agnocastlib): hide message types used in service/client communication (`#862 <https://github.com/autowarefoundation/agnocast/issues/862>`_)
+
 2.3.3 (2026-04-02)
 ------------------
 * feat(agnocastlib): enable file logging for `agnocast::Node` (`#1204 <https://github.com/autowarefoundation/agnocast/issues/1204>`_)

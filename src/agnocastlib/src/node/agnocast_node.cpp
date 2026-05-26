@@ -25,9 +25,11 @@ Node::Node(
   node_topics_(std::make_shared<node_interfaces::NodeTopics>(node_base_)),
   node_services_(std::make_shared<node_interfaces::NodeServices>(node_base_)),
   node_parameters_(std::make_shared<node_interfaces::NodeParameters>(
-    node_base_, options.parameter_overrides(), local_args_.get())),
+    node_base_, options.parameter_overrides(), local_args_.get(), options.use_global_arguments(),
+    options.allow_undeclared_parameters())),
   node_clock_(std::make_shared<node_interfaces::NodeClock>(RCL_ROS_TIME)),
-  node_time_source_(std::make_shared<node_interfaces::NodeTimeSource>(node_clock_, this)),
+  node_time_source_(std::make_shared<node_interfaces::NodeTimeSource>(
+    node_clock_, this, options.clock_qos(), options.use_clock_thread())),
   node_logging_(std::make_shared<node_interfaces::NodeLogging>(logger_))
 {
   if (options.start_parameter_services()) {

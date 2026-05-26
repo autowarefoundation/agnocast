@@ -66,7 +66,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM / mqueue loads. |
 | `test/test_rmmod_refcount.bash` | Verify `rmmod agnocast` is refused while `/dev/agnocast` is open and succeeds once the fd is closed. |
 | `test/switch_kmod.bats` | [bats](https://github.com/bats-core/bats-core) test suite for `switch_kmod.bash` (9 cases). **Destructive** — swaps installed `agnocast-kmod-v*` packages and load/unloads the module. Requires `apt install bats` and a prior run of `switch_kmod_canonical_setup.bash`. Run: `sudo bats scripts/test/switch_kmod.bats`. |
-| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.3.3}` and caches the `.deb` for teardown recovery. |
+| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.3.4}` and caches the `.deb` for teardown recovery. |
 
 ### releases/ — maintainer-only
 
