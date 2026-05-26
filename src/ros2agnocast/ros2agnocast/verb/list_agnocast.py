@@ -1,35 +1,25 @@
-import ctypes
 from enum import Enum
-from contextlib import contextmanager
-from ros2cli.node.strategy import NodeStrategy
-from ros2topic.api import get_topic_names_and_types
-from ros2topic.verb import VerbExtension
 
 from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
     all_topic_names,
-    collect_announcements,
-    gossip_has_bridge_endpoint,
+    collect_announcements_with_fallback,
     warn_if_gossip_timeout_overridden,
-    warn_if_no_announcements,
+    warn_if_using_fallback,
 )
+
+from ros2cli.node.strategy import NodeStrategy
+from ros2topic.api import get_topic_names_and_types
+from ros2topic.verb import VerbExtension
+
 
 class BridgeStatus(Enum):
     NONE = 0
     ROS2_TO_AGNOCAST = 1
-    AGNOCAST_TO_ROS2= 2
+    AGNOCAST_TO_ROS2 = 2
     BIDIRECTION = 3
 
-class TopicInfoRet(ctypes.Structure):
-    _fields_ = [
-        ("node_name", ctypes.c_char * 256),
-        ("qos_depth", ctypes.c_uint32),
-        ("qos_is_transient_local", ctypes.c_bool),
-        # Agnocast does not natively support reliability configuration,
-        # but this field is required to pass the QoS profile to the ROS 2 bridge.
-        ("qos_is_reliable", ctypes.c_bool),
-        ("is_bridge", ctypes.c_bool),
-    ]
+
 class ListAgnocastVerb(VerbExtension):
     "Output a list of available topics including Agnocast"
 
@@ -39,56 +29,27 @@ class ListAgnocastVerb(VerbExtension):
     def main(self, *, args):
         warn_if_gossip_timeout_overridden(args)
         with NodeStrategy(None) as node:
-            lib = ctypes.CDLL("libagnocast_ioctl_wrapper.so")
-            lib.get_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.c_int)]
-            lib.get_agnocast_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
-            lib.free_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
-            lib.free_agnocast_topics.restype = None
+            snapshots, used_fallback = collect_announcements_with_fallback(
+                node, timeout_sec=args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
 
-            # For bridge detection, we need to get nodes by topic
-            lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
-            lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(TopicInfoRet)
-            lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
-            lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
-            lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
-            lib.free_agnocast_topic_info_ret.restype = None
-
-            @contextmanager
-            def agnocast_info_array(lib_func, topic_name_bytes):
-                count = ctypes.c_int()
-                array = lib_func(topic_name_bytes, ctypes.byref(count))
-                try:
-                    yield array[:count.value] if array else []
-                finally:
-                    if array:
-                        lib.free_agnocast_topic_info_ret(array)
-
-            def get_bridge_status(topic_name, snapshots):
-                name_b = topic_name.encode('utf-8')
-
-                has_sub_bridge = False
-                has_pub_bridge = False
-                has_agnocast_sub = False
-                has_agnocast_pub = False
-
-                with agnocast_info_array(lib.get_agnocast_sub_nodes, name_b) as nodes:
-                    for n in nodes:
-                        if n.is_bridge:
-                            has_sub_bridge = True
-                        else:
-                            has_agnocast_sub = True
-                with agnocast_info_array(lib.get_agnocast_pub_nodes, name_b) as nodes:
-                    for n in nodes:
-                        if n.is_bridge:
-                            has_pub_bridge = True
-                        else:
-                            has_agnocast_pub = True
-
-                # ioctl can't see bridge endpoints in other IPC NSes.
-                gossip_pub_bridge, gossip_sub_bridge = gossip_has_bridge_endpoint(
-                    snapshots, topic_name)
-                has_pub_bridge = has_pub_bridge or gossip_pub_bridge
-                has_sub_bridge = has_sub_bridge or gossip_sub_bridge
+            def get_bridge_status(topic_name):
+                has_pub_bridge = has_sub_bridge = False
+                has_agnocast_pub = has_agnocast_sub = False
+                for snap in snapshots:
+                    for t in snap.topics:
+                        if t.topic_name != topic_name:
+                            continue
+                        for ep in t.publishers:
+                            if ep.is_bridge:
+                                has_pub_bridge = True
+                            else:
+                                has_agnocast_pub = True
+                        for ep in t.subscribers:
+                            if ep.is_bridge:
+                                has_sub_bridge = True
+                            else:
+                                has_agnocast_sub = True
 
                 mapping = {
                     (True, True):   BridgeStatus.BIDIRECTION,
@@ -96,9 +57,9 @@ class ListAgnocastVerb(VerbExtension):
                     (False, True):  BridgeStatus.ROS2_TO_AGNOCAST,
                     (False, False): BridgeStatus.NONE,
                 }
+                return (mapping[(has_sub_bridge, has_pub_bridge)],
+                        has_agnocast_pub, has_agnocast_sub)
 
-                return mapping[(has_sub_bridge, has_pub_bridge)], has_agnocast_pub, has_agnocast_sub
-            
             def divide_ros2_topic_into_pubsub(topic_names):
                 pub_topics = []
                 sub_topics = []
@@ -107,80 +68,69 @@ class ListAgnocastVerb(VerbExtension):
                     subs_info = node.get_subscriptions_info_by_topic(name)
 
                     # Remove Agnocast bridge nodes from the list
-                    pubs_info = [info for info in pubs_info if not info.node_name.startswith("agnocast_bridge_node_")]
-                    subs_info = [info for info in subs_info if not info.node_name.startswith("agnocast_bridge_node_")]
+                    pubs_info = [
+                        info for info in pubs_info
+                        if not info.node_name.startswith('agnocast_bridge_node_')]
+                    subs_info = [
+                        info for info in subs_info
+                        if not info.node_name.startswith('agnocast_bridge_node_')]
 
                     if pubs_info:
                         pub_topics.append(name)
                     if subs_info:
                         sub_topics.append(name)
                 return pub_topics, sub_topics
-            
+
             def remove_service_topic(topic_names):
                 return [name for name in topic_names if not name.startswith('/AGNOCAST_SRV_')]
-            
-            # Get Agnocast topics
-            topic_count = ctypes.c_int()
-            agnocast_topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count))
-            agnocast_topics = []
-            for i in range(topic_count.value):
-                topic_ptr = ctypes.cast(agnocast_topic_array[i], ctypes.c_char_p)
-                topic_name = topic_ptr.value.decode('utf-8')
-                agnocast_topics.append(topic_name)
-            if topic_count.value != 0:
-                lib.free_agnocast_topics(agnocast_topic_array, topic_count)
 
-            agnocast_topics = remove_service_topic(agnocast_topics)
-
-            # Merge topics visible only via gossip (other IPC NSes / ECUs).
-            snapshots, saw_local = collect_announcements(
-                node, timeout_sec=args.gossip_timeout)
-            warn_if_no_announcements(node, snapshots, saw_local, args.gossip_timeout)
-            agnocast_topics.extend(remove_service_topic(all_topic_names(snapshots)))
+            agnocast_topics_set = set(remove_service_topic(all_topic_names(snapshots)))
 
             # Get ros2 topics
             ros2_topics_data = get_topic_names_and_types(node=node)
-            ros2_all_topics = set(name for name, _ in ros2_topics_data)
+            ros2_all_topics = {name for name, _ in ros2_topics_data}
 
             ########################################################################
             # Print topic list
             ########################################################################
-            agnocast_topics_set = set(agnocast_topics)
-
             # Non-agnocast ROS2 topics cannot have bridge nodes, so no filtering needed.
             ros2_only_topics = ros2_all_topics - agnocast_topics_set
             # Only query pub/sub breakdown for topics in both sets (expensive ROS2 API calls).
             overlapping_candidates = list(agnocast_topics_set & ros2_all_topics)
-            ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(overlapping_candidates)
+            ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(
+                overlapping_candidates)
             ros2_pub_topics_set = set(ros2_pub_topics)
             ros2_sub_topics_set = set(ros2_sub_topics)
             ros2_topics_set = ros2_only_topics | ros2_pub_topics_set | ros2_sub_topics_set
 
             for topic in sorted(agnocast_topics_set | ros2_topics_set):
                 if topic in agnocast_topics_set and topic not in ros2_topics_set:
-                    suffix = " (Agnocast enabled)"
+                    suffix = ' (Agnocast enabled)'
                 elif topic in ros2_topics_set and topic not in agnocast_topics_set:
-                    suffix = ""
+                    suffix = ''
                 else:
-                    bridge_status, has_agnocast_pub, has_agnocast_sub = get_bridge_status(topic, snapshots)
+                    bridge_status, has_agnocast_pub, has_agnocast_sub = get_bridge_status(topic)
                     needs_r2a = has_agnocast_sub and topic in ros2_pub_topics_set
                     needs_a2r = has_agnocast_pub and topic in ros2_sub_topics_set
                     match bridge_status:
                         case BridgeStatus.BIDIRECTION:
-                            suffix = " (Agnocast enabled, bridged)"
+                            suffix = ' (Agnocast enabled, bridged)'
                         case BridgeStatus.ROS2_TO_AGNOCAST:
                             if needs_a2r:
-                                suffix = " (WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
+                                suffix = (' (WARN: Agnocast and ROS2 endpoints exist '
+                                          'but bridge is not active)')
                             else:
-                                suffix = " (Agnocast enabled, bridged)"
+                                suffix = ' (Agnocast enabled, bridged)'
                         case BridgeStatus.AGNOCAST_TO_ROS2:
                             if needs_r2a:
-                                suffix = " (WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
+                                suffix = (' (WARN: Agnocast and ROS2 endpoints exist '
+                                          'but bridge is not active)')
                             else:
-                                suffix = " (Agnocast enabled, bridged)"
+                                suffix = ' (Agnocast enabled, bridged)'
                         case BridgeStatus.NONE:
                             if needs_r2a or needs_a2r:
-                                suffix = " (WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
+                                suffix = (' (WARN: Agnocast and ROS2 endpoints exist '
+                                          'but bridge is not active)')
                             else:
-                                suffix = " (Agnocast enabled)"
-                print(f"{topic}{suffix}")
+                                suffix = ' (Agnocast enabled)'
+                print(f'{topic}{suffix}')

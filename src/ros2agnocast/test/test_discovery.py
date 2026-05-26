@@ -4,22 +4,23 @@ These tests do not require DDS; they exercise the projection helpers with
 hand-built AgnocastDaemonState messages.
 """
 
-from unittest.mock import MagicMock
-
-from ros2agnocast_discovery_msgs.msg import (
-    AgnocastDaemonState,
-    AgnocastEndpoint,
-    AgnocastTopic,
-)
+from unittest.mock import MagicMock, patch
 
 from ros2agnocast.discovery import (
     _resolve_spin_node,
     all_nodes,
     all_topic_names,
+    collect_announcements_with_fallback,
     gossip_has_bridge_endpoint,
     topic_endpoints,
     topics_of_node,
-    warn_if_no_announcements,
+    warn_if_using_fallback,
+)
+
+from ros2agnocast_discovery_msgs.msg import (
+    AgnocastDaemonState,
+    AgnocastEndpoint,
+    AgnocastTopic,
 )
 
 
@@ -77,7 +78,6 @@ def test_topic_endpoints_filters_by_topic_name():
     pubs, subs = topic_endpoints([snap_a, snap_b], '/foo')
     assert [p.node_name for p in pubs] == ['/talker_a']
     assert [s.node_name for s in subs] == ['/listener']
-    # Unknown topic returns empty tuples (not None) so callers can extend(...).
     assert topic_endpoints([snap_a, snap_b], '/missing') == ([], [])
 
 
@@ -122,50 +122,55 @@ def _plain_node(publishers=None):
     return node
 
 
-def test_warn_if_no_announcements_silent_when_snapshots_present(capsys):
-    snap = _state('a', 1)
-    warn_if_no_announcements(_plain_node(), [snap], saw_local=False, timeout_sec=2.0)
+def test_warn_if_using_fallback_silent_when_no_fallback_or_timeout_zero(capsys):
+    warn_if_using_fallback(_plain_node(), used_fallback=False, timeout_sec=2.0)
+    warn_if_using_fallback(_plain_node(), used_fallback=True, timeout_sec=0)
     assert capsys.readouterr().err == ''
 
 
-def test_warn_if_no_announcements_silent_when_timeout_zero(capsys):
-    warn_if_no_announcements(_plain_node(), [], saw_local=False, timeout_sec=0)
-    assert capsys.readouterr().err == ''
+def test_warn_if_using_fallback_says_no_agent_when_dds_sees_no_publisher(capsys):
+    warn_if_using_fallback(
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0)
+    err = capsys.readouterr().err
+    assert 'NOTE' in err
+    assert 'no /_agnocast_discovery agent visible' in err
 
 
-def test_warn_if_no_announcements_says_no_publisher_when_dds_sees_none(capsys):
-    warn_if_no_announcements(
-        _plain_node(publishers=[]), [], saw_local=False, timeout_sec=2.0)
+def test_warn_if_using_fallback_says_qos_or_pythonpath_when_publisher_visible(capsys):
+    warn_if_using_fallback(
+        _plain_node(publishers=[MagicMock()]), used_fallback=True, timeout_sec=2.0)
     err = capsys.readouterr().err
     assert 'WARNING' in err
-    assert 'no /_agnocast_discovery publisher visible' in err
-    assert 'ROS_DOMAIN_ID' in err
+    assert 'falling back to ioctl' in err
 
 
-def test_warn_if_no_announcements_says_qos_or_pythonpath_when_publisher_visible(capsys):
-    warn_if_no_announcements(
-        _plain_node(publishers=[MagicMock()]), [], saw_local=False, timeout_sec=2.0)
-    err = capsys.readouterr().err
-    assert 'WARNING' in err
-    assert 'publisher(s) visible but no snapshot' in err
+def test_collect_announcements_with_fallback_uses_ioctl_when_gossip_empty():
+    """When `collect_announcements` returns nothing, fall back to the synthetic snapshot."""
+    fake_state = _state('host-x', 999, topics=[_topic('/local_topic')])
+    with patch('ros2agnocast.discovery.collect_announcements', return_value=[]), \
+         patch('ros2agnocast.discovery.self_ns_snapshot', return_value=fake_state):
+        snapshots, used_fallback = collect_announcements_with_fallback(
+            _plain_node(), timeout_sec=1.0)
+    assert used_fallback is True
+    assert len(snapshots) == 1
+    assert snapshots[0].ipc_ns_inode == 999
 
 
-def test_warn_if_no_announcements_silent_when_only_local_publisher_visible(capsys):
-    """Single-NS steady state: 1 publisher visible and it is our own."""
-    warn_if_no_announcements(
-        _plain_node(publishers=[MagicMock()]), [], saw_local=True, timeout_sec=2.0)
-    assert capsys.readouterr().err == ''
+def test_collect_announcements_with_fallback_returns_gossip_when_present():
+    snap = _state('host-y', 1, topics=[_topic('/x')])
+    with patch('ros2agnocast.discovery.collect_announcements', return_value=[snap]), \
+         patch('ros2agnocast.discovery.self_ns_snapshot') as fallback_mock:
+        snapshots, used_fallback = collect_announcements_with_fallback(
+            _plain_node(), timeout_sec=1.0)
+    assert used_fallback is False
+    assert snapshots == [snap]
+    fallback_mock.assert_not_called()
 
 
-def test_warn_if_no_announcements_warns_when_remote_publisher_is_silent(capsys):
-    """Cross-NS / cross-ECU: more publishers visible than the local one we received.
-
-    Even if `saw_local=True`, the second publisher must be remote and
-    failed to deliver — operators want to hear about that.
-    """
-    warn_if_no_announcements(
-        _plain_node(publishers=[MagicMock(), MagicMock()]),
-        [], saw_local=True, timeout_sec=2.0)
-    err = capsys.readouterr().err
-    assert 'WARNING' in err
-    assert 'publisher(s) visible but no snapshot' in err
+def test_collect_announcements_with_fallback_empty_when_ioctl_unavailable():
+    with patch('ros2agnocast.discovery.collect_announcements', return_value=[]), \
+         patch('ros2agnocast.discovery.self_ns_snapshot', return_value=None):
+        snapshots, used_fallback = collect_announcements_with_fallback(
+            _plain_node(), timeout_sec=1.0)
+    assert used_fallback is True
+    assert snapshots == []
