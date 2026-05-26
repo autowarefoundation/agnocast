@@ -108,8 +108,7 @@ bool AgnocastOnlyExecutor::get_next_agnocast_executable(
 bool AgnocastOnlyExecutor::get_next_agnocast_executable(
   AgnocastExecutable & agnocast_executable, const int timeout_ms)
 {
-  return get_next_agnocast_executable(
-    agnocast_executable, std::chrono::nanoseconds{timeout_ms * 1000});
+  return get_next_agnocast_executable(agnocast_executable, std::chrono::milliseconds{timeout_ms});
 }
 
 bool AgnocastOnlyExecutor::get_next_ready_agnocast_executable(
@@ -443,13 +442,6 @@ rclcpp::FutureReturnCode AgnocastOnlyExecutor::spin_until_future_complete_impl(
 
 void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
 {
-  if (epoll_update_tracker_.take_update_request()) {
-    add_callback_groups_from_nodes_associated_to_executor();
-    epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
-      return is_callback_group_associated(group);
-    });
-  }
-
   AgnocastExecutable agnocast_exec;
   if (get_next_agnocast_executable(agnocast_exec, timeout)) {
     execute_agnocast_executable(agnocast_exec);
@@ -472,6 +464,13 @@ bool AgnocastOnlyExecutor::is_spinning()
 
 void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
 {
+  if (epoll_update_tracker_.take_update_request()) {
+    add_callback_groups_from_nodes_associated_to_executor();
+    epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
+      return is_callback_group_associated(group);
+    });
+  }
+
   int timeout_ms;
   if (timeout < std::chrono::nanoseconds::zero()) {
     timeout_ms = -1;
