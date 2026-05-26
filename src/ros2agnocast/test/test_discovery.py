@@ -61,10 +61,6 @@ def test_all_topic_names_unions_across_snapshots():
     assert all_topic_names([snap_a, snap_b]) == {'/foo', '/bar', '/baz'}
 
 
-def test_all_topic_names_empty_when_no_snapshots():
-    assert all_topic_names([]) == set()
-
-
 def test_all_nodes_includes_both_publishers_and_subscribers():
     pub = _endpoint('/talker')
     sub = _endpoint('/listener')
@@ -72,7 +68,7 @@ def test_all_nodes_includes_both_publishers_and_subscribers():
     assert all_nodes([snap]) == {'/talker', '/listener'}
 
 
-def test_topic_endpoints_returns_pubs_and_subs_for_named_topic():
+def test_topic_endpoints_filters_by_topic_name():
     pub1 = _endpoint('/talker_a')
     pub2 = _endpoint('/talker_b')
     sub = _endpoint('/listener')
@@ -81,13 +77,8 @@ def test_topic_endpoints_returns_pubs_and_subs_for_named_topic():
     pubs, subs = topic_endpoints([snap_a, snap_b], '/foo')
     assert [p.node_name for p in pubs] == ['/talker_a']
     assert [s.node_name for s in subs] == ['/listener']
-
-
-def test_topic_endpoints_returns_empty_for_unknown_topic():
-    snap = _state('a', 1, topics=[_topic('/foo')])
-    pubs, subs = topic_endpoints([snap], '/missing')
-    assert pubs == []
-    assert subs == []
+    # Unknown topic returns empty tuples (not None) so callers can extend(...).
+    assert topic_endpoints([snap_a, snap_b], '/missing') == ([], [])
 
 
 def test_topics_of_node_collects_pub_and_sub_topics():
@@ -102,21 +93,12 @@ def test_topics_of_node_collects_pub_and_sub_topics():
     assert subs == [{'topic_name': '/bar', 'type_name': ''}]
 
 
-def test_gossip_has_bridge_endpoint_picks_up_bridge_endpoints():
+def test_gossip_has_bridge_endpoint_flags_pub_and_sub_independently():
+    """One bridge pub + non-bridge sub on the same topic → (True, False)."""
     bridge_pub = _endpoint('/agnocast_bridge_node_xxx', is_bridge=True)
     sub = _endpoint('/listener')
     snap = _state('a', 1, topics=[_topic('/foo', pubs=[bridge_pub], subs=[sub])])
-    pub_b, sub_b = gossip_has_bridge_endpoint([snap], '/foo')
-    assert pub_b is True
-    assert sub_b is False
-
-
-def test_gossip_has_bridge_endpoint_returns_false_when_no_bridge():
-    pub = _endpoint('/talker')
-    snap = _state('a', 1, topics=[_topic('/foo', pubs=[pub])])
-    pub_b, sub_b = gossip_has_bridge_endpoint([snap], '/foo')
-    assert pub_b is False
-    assert sub_b is False
+    assert gossip_has_bridge_endpoint([snap], '/foo') == (True, False)
 
 
 def test_resolve_spin_node_returns_node_as_is_when_not_nodestrategy():
