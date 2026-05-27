@@ -24,20 +24,18 @@ class BridgeStatus(Enum):
     BIDIRECTION = 3
 
 
-SERVICE_REQUEST_PREFIX = '/AGNOCAST_SRV_REQUEST'
-SERVICE_RESPONSE_PREFIX = '/AGNOCAST_SRV_RESPONSE'
-
-
 def service_name_from_request_topic(topic_name):
-    if not topic_name.startswith(SERVICE_REQUEST_PREFIX):
+    prefix = '/AGNOCAST_SRV_REQUEST'
+    if not topic_name.startswith(prefix):
         return None
-    return topic_name[len(SERVICE_REQUEST_PREFIX):]
+    return topic_name[len(prefix):]
 
 
 def service_name_from_response_topic(topic_name):
-    if not topic_name.startswith(SERVICE_RESPONSE_PREFIX):
+    prefix = '/AGNOCAST_SRV_RESPONSE'
+    if not topic_name.startswith(prefix):
         return None
-    return topic_name[len(SERVICE_RESPONSE_PREFIX):].split('_SEP_')[0]
+    return topic_name[len(prefix):].split('_SEP_')[0]
 
 
 def _classify_node_topics(snapshots, node_name):
