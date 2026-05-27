@@ -1,3 +1,8 @@
+from ros2cli.node.strategy import add_arguments as add_strategy_node_arguments
+from ros2cli.node.strategy import NodeStrategy
+from ros2topic.api import TopicNameCompleter
+from ros2node.verb import VerbExtension
+
 from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
     collect_announcements_with_fallback,
@@ -5,12 +10,6 @@ from ros2agnocast.discovery import (
     warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
-
-from ros2cli.node.strategy import add_arguments as add_strategy_node_arguments
-from ros2cli.node.strategy import NodeStrategy
-from ros2node.verb import VerbExtension
-from ros2topic.api import TopicNameCompleter
-
 
 class TopicInfoAgnocastVerb(VerbExtension):
     """Print information about a topic including Agnocast."""
@@ -38,15 +37,16 @@ class TopicInfoAgnocastVerb(VerbExtension):
             include_hidden_topics_key='include_hidden_topics')
 
     def split_full_node_name(self, full_node_name):
-        full_node_name = full_node_name.rstrip('/') if full_node_name != '/' else full_node_name
-        namespace, _, node_name = full_node_name.rpartition('/')
-        namespace = namespace if namespace else '/'
+        full_node_name = full_node_name.rstrip("/") if full_node_name != "/" else full_node_name
+        namespace, _, node_name = full_node_name.rpartition("/")
+        namespace = namespace if namespace else "/"
         return namespace, node_name
 
-    def print_publishers_info(self, ros2_pub_infos, topic_types, pub_endpoints, args, line_end):
+    def print_publishers_info(self, ros2_pub_infos, topic_types, pub_topic_info_rets, args, line_end):
+        # Filter out bridge nodes unless debug mode
         if not args.debug:
-            pub_endpoints = [p for p in pub_endpoints if not p.is_bridge]
-        agnocast_pub_count = len(pub_endpoints)
+            pub_topic_info_rets = [p for p in pub_topic_info_rets if not p['is_bridge']]
+        agnocast_pub_count = len(pub_topic_info_rets)
         ros2_pub_count = len(ros2_pub_infos)
 
         print('ROS 2 Publisher count: %d' % ros2_pub_count)
@@ -62,34 +62,33 @@ class TopicInfoAgnocastVerb(VerbExtension):
                     print('GID: %s' % '.'.join(format(b, '02x') for b in info.endpoint_gid))
                     print('QoS profile:')
                     print('  Reliability: %s' % info.qos_profile.reliability.name)
-                    print('  History (Depth): %s (%d)' % (
-                        info.qos_profile.history.name, info.qos_profile.depth))
+                    print('  History (Depth): %s (%d)' % (info.qos_profile.history.name, info.qos_profile.depth))
                     print('  Durability: %s' % info.qos_profile.durability.name)
                     print('  Lifespan: %s' % info.qos_profile.lifespan)
                     print('  Deadline: %s' % info.qos_profile.deadline)
                     print('  Liveliness: %s' % info.qos_profile.liveliness.name)
-                    print('  Liveliness lease duration: %s'
-                          % info.qos_profile.liveliness_lease_duration, end=line_end)
+                    print('  Liveliness lease duration: %s' % info.qos_profile.liveliness_lease_duration, end=line_end)
 
-                for ep in pub_endpoints:
-                    namespace, node_name = self.split_full_node_name(ep.node_name)
+                for info in pub_topic_info_rets:
+                    nodespace, node_name = self.split_full_node_name(info['node_name'])
                     print('Node name: %s' % node_name)
-                    print('Node namespace: %s' % namespace)
+                    print('Node namespace: %s' % nodespace)
                     print('Topic type: %s' % topic_types)
                     print('Endpoint type: PUBLISHER (Agnocast enabled)')
                     print('QoS profile:')
-                    print('  History (Depth): KEEP_LAST (%d)' % ep.qos_depth)
-                    if ep.qos_is_transient_local:
+                    print('  History (Depth): KEEP_LAST (%d)' % info['qos_depth'])
+                    if info['qos_is_transient_local']:
                         print('  Durability: TRANSIENT_LOCAL', end=line_end)
                     else:
                         print('  Durability: VOLATILE', end=line_end)
             except NotImplementedError as e:
                 return str(e)
 
-    def print_subscribers_info(self, ros2_sub_infos, topic_types, sub_endpoints, args, line_end):
+    def print_subscribers_info(self, ros2_sub_infos, topic_types, sub_topic_info_rets, args, line_end):
+        # Filter out bridge nodes unless debug mode
         if not args.debug:
-            sub_endpoints = [s for s in sub_endpoints if not s.is_bridge]
-        agnocast_sub_count = len(sub_endpoints)
+            sub_topic_info_rets = [s for s in sub_topic_info_rets if not s['is_bridge']]
+        agnocast_sub_count = len(sub_topic_info_rets)
         ros2_sub_count = len(ros2_sub_infos)
 
         print('ROS 2 Subscription count: %d' % ros2_sub_count)
@@ -105,24 +104,22 @@ class TopicInfoAgnocastVerb(VerbExtension):
                     print('GID: %s' % '.'.join(format(b, '02x') for b in info.endpoint_gid))
                     print('QoS profile:')
                     print('  Reliability: %s' % info.qos_profile.reliability.name)
-                    print('  History (Depth): %s (%d)' % (
-                        info.qos_profile.history.name, info.qos_profile.depth))
+                    print('  History (Depth): %s (%d)' % (info.qos_profile.history.name, info.qos_profile.depth))
                     print('  Durability: %s' % info.qos_profile.durability.name)
                     print('  Lifespan: %s' % info.qos_profile.lifespan)
                     print('  Deadline: %s' % info.qos_profile.deadline)
                     print('  Liveliness: %s' % info.qos_profile.liveliness.name)
-                    print('  Liveliness lease duration: %s'
-                          % info.qos_profile.liveliness_lease_duration, end=line_end)
+                    print('  Liveliness lease duration: %s' % info.qos_profile.liveliness_lease_duration, end=line_end)
 
-                for ep in sub_endpoints:
-                    namespace, node_name = self.split_full_node_name(ep.node_name)
+                for info in sub_topic_info_rets:
+                    nodespace, node_name = self.split_full_node_name(info['node_name'])
                     print('Node name: %s' % node_name)
-                    print('Node namespace: %s' % namespace)
+                    print('Node namespace: %s' % nodespace)
                     print('Topic type: %s' % topic_types)
                     print('Endpoint type: SUBSCRIPTION (Agnocast enabled)')
                     print('QoS profile:')
-                    print('  History (Depth): KEEP_LAST (%d)' % ep.qos_depth)
-                    if ep.qos_is_transient_local:
+                    print('  History (Depth): KEEP_LAST (%d)' % info['qos_depth'])
+                    if info['qos_is_transient_local']:
                         print('  Durability: TRANSIENT_LOCAL', end=line_end)
                     else:
                         print('  Durability: VOLATILE', end=line_end)
@@ -139,6 +136,16 @@ class TopicInfoAgnocastVerb(VerbExtension):
             warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
             pub_endpoints, sub_endpoints = topic_endpoints(snapshots, topic_name)
 
+            def to_info_ret(ep):
+                return {
+                    "node_name": ep.node_name,
+                    "qos_depth": ep.qos_depth,
+                    "qos_is_transient_local": ep.qos_is_transient_local,
+                    "is_bridge": ep.is_bridge,
+                }
+            sub_topic_info_rets = [to_info_ret(ep) for ep in sub_endpoints]
+            pub_topic_info_rets = [to_info_ret(ep) for ep in pub_endpoints]
+
             # Resolve type from gossip when DDS does not provide one.
             gossip_type_name = next(
                 (topic.type_name for snap in snapshots
@@ -146,13 +153,14 @@ class TopicInfoAgnocastVerb(VerbExtension):
                  if topic.topic_name == topic_name and topic.type_name),
                 '')
 
-            # get bridge node names so we can filter them out of the ROS 2 view too
+            # get bridge node names
             bridge_node_names = set()
-            for ep in sub_endpoints + pub_endpoints:
-                if ep.is_bridge:
-                    _, name = self.split_full_node_name(ep.node_name)
+            for info in sub_topic_info_rets + pub_topic_info_rets:
+                if info['is_bridge']:
+                    _, name = self.split_full_node_name(info['node_name'])
                     bridge_node_names.add(name)
 
+            # get ROS 2 pub/sub info for this topic
             ros2_pub_infos_all = []
             ros2_sub_infos_all = []
             try:
@@ -173,15 +181,15 @@ class TopicInfoAgnocastVerb(VerbExtension):
                 ros2_pub_infos = ros2_pub_infos_all
                 ros2_sub_infos = ros2_sub_infos_all
             else:
-                ros2_pub_infos = [
-                    i for i in ros2_pub_infos_all if i.node_name not in bridge_node_names]
-                ros2_sub_infos = [
-                    i for i in ros2_sub_infos_all if i.node_name not in bridge_node_names]
+                ros2_pub_infos = [i for i in ros2_pub_infos_all if i.node_name not in bridge_node_names]
+                ros2_sub_infos = [i for i in ros2_sub_infos_all if i.node_name not in bridge_node_names]
 
+            # check if topic exists
             if not topic_types:
-                if not pub_endpoints and not sub_endpoints:
+                if not pub_topic_info_rets and not sub_topic_info_rets:
                     return 'Unknown topic: %s' % topic_name
-                topic_types = [gossip_type_name] if gossip_type_name else ['<UNKNOWN>']
+                else:
+                    topic_types = [gossip_type_name] if gossip_type_name else ['<UNKNOWN>']
 
             ########################################################################
             # print topic info
@@ -192,11 +200,10 @@ class TopicInfoAgnocastVerb(VerbExtension):
             type_str = topic_types[0] if len(topic_types) == 1 else topic_types
             print('Type: %s' % type_str, end=line_end)
 
-            print_publishers_info_ret = self.print_publishers_info(
-                ros2_pub_infos, type_str, pub_endpoints, args, line_end)
+            print_publishers_info_ret = self.print_publishers_info(ros2_pub_infos, type_str, pub_topic_info_rets, args, line_end)
             if print_publishers_info_ret:
                 return print_publishers_info_ret
-            print_subscribers_info_ret = self.print_subscribers_info(
-                ros2_sub_infos, type_str, sub_endpoints, args, line_end)
+            print_subscribers_info_ret = self.print_subscribers_info(ros2_sub_infos, type_str, sub_topic_info_rets, args, line_end)
             if print_subscribers_info_ret:
                 return print_subscribers_info_ret
+            ########################################################################
