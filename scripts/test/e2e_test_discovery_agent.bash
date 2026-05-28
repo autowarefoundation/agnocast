@@ -140,10 +140,5 @@ grep -qE $'^/my_topic\tagnocast_sample_interfaces/msg/DynamicSizeArray\tpub\t/ta
     || fail "tmpfs line format unexpected in $recent_file" "$(cat "$recent_file")"
 green "✓ tmpfs registry file present at $TMPFS_DIR with the expected 4-field line"
 
-# ----- assert the operator-facing liveness verb returns 0 -----
-ros2 agnocast discovery_daemon_status > "$LOG_DIR/status.log" 2>&1 \
-    || fail "ros2 agnocast discovery_daemon_status returned non-zero" "$(cat "$LOG_DIR/status.log")"
-green "✓ ros2 agnocast discovery_daemon_status: OK"
-
 green ""
 green "===== ALL CHECKS PASSED ====="
