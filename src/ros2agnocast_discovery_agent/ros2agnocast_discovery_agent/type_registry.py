@@ -147,6 +147,10 @@ class TypeRegistryReader:
             entries = list(os.scandir(self._ns_dir))
         except FileNotFoundError:
             return
+        except PermissionError as exc:
+            if self._logger is not None:
+                self._logger.warn(f'type_registry: cannot list {self._ns_dir} for cleanup: {exc}')
+            return
 
         for entry in entries:
             if not entry.is_file() or not entry.name.endswith('.txt'):

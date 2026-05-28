@@ -36,7 +36,17 @@ bool ensure_dir(const std::string & path, mode_t mode)
   if (mkdir(path.c_str(), mode) == 0) {
     return true;
   }
-  return errno == EEXIST;
+  if (errno != EEXIST) {
+    return false;
+  }
+  // The path exists but might be a regular file (or a symlink to one).
+  // Confirm it's actually a directory so later operations don't fail with
+  // a misleading errno.
+  struct stat st = {};
+  if (::stat(path.c_str(), &st) != 0) {
+    return false;
+  }
+  return S_ISDIR(st.st_mode);
 }
 }  // namespace
 
@@ -140,8 +150,9 @@ void TypeRegistryWriter::register_type(
   line.append(node_name).push_back('\n');
 
   // One file per process plus the mutex above keeps writers from interleaving.
-  // We retry on EINTR but ignore short writes (a partial line ends without
-  // `\n` and the daemon's parser skips unterminated tails).
+  // We loop to drain short writes and retry on EINTR. A partial line is only
+  // possible if a later `write()` fails outright (e.g. ENOSPC), in which case
+  // the daemon's parser skips the unterminated tail.
   const char * data = line.data();
   size_t remaining = line.size();
   while (remaining > 0) {

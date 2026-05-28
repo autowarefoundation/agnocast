@@ -5,6 +5,7 @@
 
 #include <sys/stat.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <system_error>

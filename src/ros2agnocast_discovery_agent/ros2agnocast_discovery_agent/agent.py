@@ -250,9 +250,17 @@ def _try_acquire_singleton_lock(ipc_ns_inode: int) -> SingletonLockAttempt:
     lock_file = os.fdopen(fd, 'r+')
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, OSError):
+    except BlockingIOError:
+        # Contention: another agent in this NS holds the lock.
         lock_file.close()
         return SingletonLockAttempt(LockStatus.HELD)
+    except OSError as e:
+        # Real failure (permission denied, ENOTSUP on the FS, etc.) — surface
+        # it rather than masking it as "already running".
+        sys.stderr.write(
+            f'agnocast_discovery_agent: flock({lock_path}) failed: {e}\n')
+        lock_file.close()
+        return SingletonLockAttempt(LockStatus.ERROR)
     return SingletonLockAttempt(LockStatus.ACQUIRED, file=lock_file)
 
 
