@@ -200,41 +200,41 @@ def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
 
 def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
-    lock = _try_acquire_singleton_lock(123)
-    assert lock not in ('held', 'error')
-    lock.close()
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    attempt = _try_acquire_singleton_lock(123)
+    assert attempt.status == LockStatus.ACQUIRED
+    attempt.file.close()
 
 
 def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
-    """A second acquire in the same process reports 'held' while the first is alive."""
+    """A second acquire in the same process reports HELD while the first is alive."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
     first = _try_acquire_singleton_lock(456)
-    assert first not in ('held', 'error')
-    assert _try_acquire_singleton_lock(456) == 'held'
-    first.close()
+    assert first.status == LockStatus.ACQUIRED
+    assert _try_acquire_singleton_lock(456).status == LockStatus.HELD
+    first.file.close()
     # After releasing, a new acquire succeeds.
     third = _try_acquire_singleton_lock(456)
-    assert third not in ('held', 'error')
-    third.close()
+    assert third.status == LockStatus.ACQUIRED
+    third.file.close()
 
 
 def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
     """Different IPC NS inodes get independent locks."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
     lock_a = _try_acquire_singleton_lock(111)
     lock_b = _try_acquire_singleton_lock(222)
-    assert lock_a not in ('held', 'error')
-    assert lock_b not in ('held', 'error')
-    lock_a.close()
-    lock_b.close()
+    assert lock_a.status == LockStatus.ACQUIRED
+    assert lock_b.status == LockStatus.ACQUIRED
+    lock_a.file.close()
+    lock_b.file.close()
 
 
 def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
-    """When the lock-file directory is not writable we report 'error' (distinct
-    from 'held') so the caller can surface a non-zero exit code."""
+    """When the lock-file directory is not writable we report ERROR (distinct
+    from HELD) so the caller can surface a non-zero exit code."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
-    from ros2agnocast_discovery_agent.agent import _try_acquire_singleton_lock
-    assert _try_acquire_singleton_lock(789) == 'error'
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    assert _try_acquire_singleton_lock(789).status == LockStatus.ERROR

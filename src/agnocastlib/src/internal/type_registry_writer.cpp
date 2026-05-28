@@ -36,10 +36,7 @@ bool ensure_dir(const std::string & path, mode_t mode)
   if (mkdir(path.c_str(), mode) == 0) {
     return true;
   }
-  if (errno == EEXIST) {
-    return true;
-  }
-  return false;
+  return errno == EEXIST;
 }
 }  // namespace
 

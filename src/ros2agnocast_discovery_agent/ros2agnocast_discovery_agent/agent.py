@@ -15,6 +15,8 @@ tree they belong to.
 """
 
 import ctypes
+from dataclasses import dataclass
+from enum import Enum
 import fcntl
 import importlib.metadata
 import logging
@@ -22,6 +24,7 @@ import os
 import signal
 import socket
 import sys
+from typing import IO
 import uuid
 
 import rclpy
@@ -96,7 +99,7 @@ def _load_ioctl_wrapper():
 
 def _ioctl_to_endpoint(
         info: TopicInfoRet, topic_name: str, role: str,
-        registry: 'TypeRegistryReader' = None) -> AgnocastEndpoint:
+        registry: TypeRegistryReader | None = None) -> AgnocastEndpoint:
     """Convert one ``topic_info_ret`` row to an AgnocastEndpoint msg.
 
     ``pid`` is looked up from the tmpfs type registry (written by agnocastlib
@@ -119,7 +122,7 @@ def _ioctl_to_endpoint(
     return ep
 
 
-def read_local_topics(lib, registry: 'TypeRegistryReader' = None) -> list:
+def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
     """Snapshot the current namespace's Agnocast topics via the ioctl wrapper.
 
     Returns a list of AgnocastTopic msgs. The ioctl returns only the caller's
@@ -161,7 +164,7 @@ def read_local_topics(lib, registry: 'TypeRegistryReader' = None) -> list:
 
 
 def _resolve_topic_type(
-        agnocast_topic: AgnocastTopic, registry: 'TypeRegistryReader') -> str:
+        agnocast_topic: AgnocastTopic, registry: TypeRegistryReader) -> str:
     for ep in agnocast_topic.publishers:
         entry = registry.lookup(agnocast_topic.topic_name, 'pub', ep.node_name)
         if entry is not None and entry.type_name:
@@ -175,7 +178,7 @@ def _resolve_topic_type(
 
 def _collect_endpoints(
         getter, lib, topic_name_b: bytes, topic_name: str, role: str,
-        registry: 'TypeRegistryReader' = None) -> list:
+        registry: TypeRegistryReader | None = None) -> list:
     count = ctypes.c_int()
     array = getter(topic_name_b, ctypes.byref(count))
     endpoints = []
@@ -218,34 +221,39 @@ def _singleton_lock_path(ipc_ns_inode: int) -> str:
     return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}.lock')
 
 
-def _try_acquire_singleton_lock(ipc_ns_inode: int):
-    """Acquire an exclusive ``flock(2)`` on the per-IPC-namespace lock file.
+class LockStatus(Enum):
+    ACQUIRED = 'acquired'   # we got the lock
+    HELD = 'held'           # another agent in this NS holds it — caller should idle
+    ERROR = 'error'         # could not even open the lock file — caller should exit non-zero
 
-    Returns:
-      * the open file on success (caller keeps the reference so the lock
-        persists for the process lifetime),
-      * ``'held'`` if another agent in the same NS already holds the lock
-        — caller should idle and not exit, so launch supervisors keep
-        running,
-      * ``'error'`` if the lock file could not even be opened (e.g.
-        ``AGNOCAST_TMPFS_DIR`` unwritable) — caller should propagate a
-        non-zero exit code so the failure isn't silently masked as
-        "another instance running".
+
+@dataclass
+class SingletonLockAttempt:
+    """Result of trying to acquire the per-NS singleton lock.
+
+    ``file`` is set only when ``status == ACQUIRED`` — the caller keeps the
+    reference alive so the ``flock(2)`` outlives the spin loop.
     """
+    status: LockStatus
+    file: IO | None = None
+
+
+def _try_acquire_singleton_lock(ipc_ns_inode: int) -> SingletonLockAttempt:
+    """Try to take an exclusive ``flock(2)`` on the per-IPC-namespace lock file."""
     lock_path = _singleton_lock_path(ipc_ns_inode)
     try:
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
     except OSError as e:
         sys.stderr.write(
             f'agnocast_discovery_agent: cannot open singleton lock {lock_path}: {e}\n')
-        return 'error'
+        return SingletonLockAttempt(LockStatus.ERROR)
     lock_file = os.fdopen(fd, 'r+')
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (BlockingIOError, OSError):
         lock_file.close()
-        return 'held'
-    return lock_file
+        return SingletonLockAttempt(LockStatus.HELD)
+    return SingletonLockAttempt(LockStatus.ACQUIRED, file=lock_file)
 
 
 def _gossip_qos() -> QoSProfile:
@@ -278,7 +286,7 @@ class DiscoveryAgent(Node):
     future consumers (e.g. cross-NS decision logic added in a follow-up PR).
     """
 
-    def __init__(self, registry: TypeRegistryReader = None):
+    def __init__(self, registry: TypeRegistryReader | None = None):
         self._host_uuid = _read_host_uuid()
         self._host_hostname = socket.gethostname()
         self._ipc_ns_inode = _read_ipc_ns_inode()
@@ -374,8 +382,8 @@ def main(argv=None) -> int:
     # SIGINT / SIGTERM still tears the duplicate down cleanly with the rest
     # of its parent launch.
     ipc_ns_inode = _read_ipc_ns_inode()
-    singleton_lock = _try_acquire_singleton_lock(ipc_ns_inode)
-    if singleton_lock == 'held':
+    lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode)
+    if lock_attempt.status == LockStatus.HELD:
         sys.stderr.write(
             f'agnocast_discovery_agent: another instance is already running in this '
             f'IPC namespace (inode={ipc_ns_inode}); staying idle.\n')
@@ -385,7 +393,7 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             pass
         return 0
-    if singleton_lock == 'error':
+    if lock_attempt.status == LockStatus.ERROR:
         # Don't masquerade as "already running" — propagate failure so
         # supervisors can detect it.
         return 1
@@ -400,9 +408,9 @@ def main(argv=None) -> int:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-        # Keep `singleton_lock` referenced through shutdown so the flock
+        # Keep `lock_attempt` referenced through shutdown so the flock
         # outlives the spin() loop.
-        del singleton_lock
+        del lock_attempt
     return 0
 
 
