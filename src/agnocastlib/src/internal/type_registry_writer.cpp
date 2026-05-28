@@ -22,12 +22,17 @@ namespace agnocast::internal
 
 namespace
 {
+// Directories are world-readable so the daemon (possibly another user) can
+// scan them; the per-process file is 0644.
+constexpr mode_t kRegistryDirMode = 0755;
+constexpr mode_t kRegistryFileMode = 0644;
+
 // Tmpfs root. Default `/dev/shm` is world-writable (1777) so unelevated
 // user processes can create entries; override via `AGNOCAST_TMPFS_DIR`
 // for hardened containers. Test seam: `set_base_dir_for_test()`.
 std::string g_base_dir = []() {
   const char * env = std::getenv("AGNOCAST_TMPFS_DIR");
-  std::string root = (env != nullptr && env[0] != '\0') ? env : "/dev/shm";
+  std::string root = (env != nullptr && *env != '\0') ? env : "/dev/shm";
   return root + "/agnocast_type_registry";
 }();  // NOLINT(runtime/string)
 
@@ -86,10 +91,9 @@ void TypeRegistryWriter::ensure_open_locked()
     return;
   }
 
-  // Directories are 0755 (daemon reads); the per-process file is 0644.
   // Any failure here means cross-NS observability silently breaks for
   // this process, so log as ERROR (not a transient warning).
-  if (!ensure_dir(g_base_dir, 0755)) {
+  if (!ensure_dir(g_base_dir, kRegistryDirMode)) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
       "TypeRegistryWriter: mkdir '%s' failed: %s. Cross-NS observability will "
@@ -100,7 +104,7 @@ void TypeRegistryWriter::ensure_open_locked()
     return;
   }
   const std::string ns_dir = g_base_dir + "/" + std::to_string(ns_inode);
-  if (!ensure_dir(ns_dir, 0755)) {
+  if (!ensure_dir(ns_dir, kRegistryDirMode)) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
       "TypeRegistryWriter: mkdir '%s' failed: %s. Check tmpfs free space.", ns_dir.c_str(),
@@ -110,8 +114,9 @@ void TypeRegistryWriter::ensure_open_locked()
   }
 
   path_ = ns_dir + "/" + std::to_string(getpid()) + ".txt";
-  fd_ =
-    ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);  // NOLINT(runtime/int)
+  fd_ = ::open(
+    path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+    kRegistryFileMode);  // NOLINT(runtime/int)
   if (fd_ == -1) {
     RCLCPP_ERROR(
       rclcpp::get_logger("Agnocast"),
@@ -124,10 +129,9 @@ void TypeRegistryWriter::ensure_open_locked()
 
   // Register a one-shot atexit handler the first time we open the file
   // successfully. SIGKILL bypasses this; the daemon's `/proc/<pid>` sweep
-  // handles those stale files.
+  // handles those stale files (and also any case where registration fails).
   static bool atexit_registered = false;
-  if (!atexit_registered) {
-    std::atexit(&TypeRegistryWriter::on_process_exit);
+  if (!atexit_registered && std::atexit(&TypeRegistryWriter::on_process_exit) == 0) {
     atexit_registered = true;
   }
 }
@@ -158,7 +162,7 @@ void TypeRegistryWriter::register_type(
   while (remaining > 0) {
     const ssize_t n = ::write(fd_, data, remaining);
     if (n > 0) {
-      data += n;
+      data += n;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
       remaining -= static_cast<size_t>(n);
       continue;
     }
