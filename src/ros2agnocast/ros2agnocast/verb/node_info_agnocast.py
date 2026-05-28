@@ -49,10 +49,9 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):
                 """Get the appropriate label for an Agnocast-enabled topic."""
-                ros2_has_endpoint = (
-                    topic_name in ros2_sub_topics or topic_name in ros2_pub_topics)
                 status = bridge_label_from_roles(
-                    bridge_roles.get(topic_name, []), ros2_has_endpoint)
+                    bridge_roles.get(topic_name, []),
+                    topic_name in ros2_pub_topics, topic_name in ros2_sub_topics)
                 return f"({BRIDGE_LABEL_TEXT[status]})"
 
             def get_agnocast_node_topics(target_node_name):

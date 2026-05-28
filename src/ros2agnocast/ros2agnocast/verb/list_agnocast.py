@@ -64,12 +64,14 @@ class ListAgnocastVerb(VerbExtension):
             # Only query pub/sub breakdown for topics in both sets (expensive ROS2 API calls).
             overlapping_candidates = list(agnocast_topics_set & ros2_all_topics)
             ros2_pub_topics, ros2_sub_topics = divide_ros2_topic_into_pubsub(overlapping_candidates)
-            ros2_topics_set = ros2_only_topics | set(ros2_pub_topics) | set(ros2_sub_topics)
+            ros2_pub_set = set(ros2_pub_topics)
+            ros2_sub_set = set(ros2_sub_topics)
+            ros2_topics_set = ros2_only_topics | ros2_pub_set | ros2_sub_set
 
             for topic in sorted(agnocast_topics_set | ros2_topics_set):
                 if topic in agnocast_topics_set:
                     status = bridge_label_from_roles(
-                        bridge_roles.get(topic, []), topic in ros2_topics_set)
+                        bridge_roles.get(topic, []), topic in ros2_pub_set, topic in ros2_sub_set)
                     suffix = f" ({BRIDGE_LABEL_TEXT[status]})"
                 else:
                     suffix = ""

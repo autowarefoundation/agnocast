@@ -98,37 +98,47 @@ def test_topics_of_node_collects_pub_and_sub_topics():
 
 
 # Role tuples are (real_pub, real_sub, inbound_bridge, outbound_bridge), one per NS.
+# A bridge is only "expected" where a producer and consumer sit on opposite
+# sides of a boundary, so signatures take ros2_has_pub / ros2_has_sub.
 
 def test_bridge_label_from_roles_enabled_single_ns_no_ros2():
     """Talker + listener in one NS, no ROS 2: nothing to bridge."""
     assert bridge_label_from_roles(
-        [(True, True, False, False)], ros2_has_endpoint=False) == BRIDGE_ENABLED
+        [(True, True, False, False)], ros2_has_pub=False, ros2_has_sub=False) == BRIDGE_ENABLED
 
 
 def test_bridge_label_from_roles_warn_cross_ns_without_bridges():
     """Talker in NS-A, listener in NS-B, no bridges: TetsuKawa's case → WARN."""
     ns_roles = [(True, False, False, False), (False, True, False, False)]
-    assert bridge_label_from_roles(ns_roles, ros2_has_endpoint=False) == BRIDGE_WARN
+    assert bridge_label_from_roles(
+        ns_roles, ros2_has_pub=False, ros2_has_sub=False) == BRIDGE_WARN
 
 
 def test_bridge_label_from_roles_bridged_cross_ns_with_both_bridges():
     """NS-A talker + outbound bridge, NS-B listener + inbound bridge → bridged."""
     ns_roles = [(True, False, False, True), (False, True, True, False)]
-    assert bridge_label_from_roles(ns_roles, ros2_has_endpoint=False) == BRIDGE_BRIDGED
+    assert bridge_label_from_roles(
+        ns_roles, ros2_has_pub=False, ros2_has_sub=False) == BRIDGE_BRIDGED
 
 
 def test_bridge_label_from_roles_warn_when_one_ns_missing_its_bridge():
     """NS-A is bridged but NS-B's listener lacks an inbound bridge → WARN."""
     ns_roles = [(True, False, False, True), (False, True, False, False)]
-    assert bridge_label_from_roles(ns_roles, ros2_has_endpoint=False) == BRIDGE_WARN
+    assert bridge_label_from_roles(
+        ns_roles, ros2_has_pub=False, ros2_has_sub=False) == BRIDGE_WARN
 
 
-def test_bridge_label_from_roles_single_ns_plus_ros2_requires_bridge():
-    """One NS with a real talker + a ROS 2 endpoint: needs an outbound bridge."""
+def test_bridge_label_from_roles_pub_needs_outbound_only_if_consumer_exists():
+    """A talker + a ROS 2 subscriber needs an outbound bridge; a ROS 2 publisher does not."""
+    # Consumer on ROS 2 → outbound bridge expected, missing → WARN.
     assert bridge_label_from_roles(
-        [(True, False, False, False)], ros2_has_endpoint=True) == BRIDGE_WARN
+        [(True, False, False, False)], ros2_has_pub=False, ros2_has_sub=True) == BRIDGE_WARN
+    # Only a ROS 2 publisher (no consumer anywhere) → no bridge expected → enabled.
     assert bridge_label_from_roles(
-        [(True, False, False, True)], ros2_has_endpoint=True) == BRIDGE_BRIDGED
+        [(True, False, False, False)], ros2_has_pub=True, ros2_has_sub=False) == BRIDGE_ENABLED
+    # Outbound bridge present for the consumer case → bridged.
+    assert bridge_label_from_roles(
+        [(True, False, False, True)], ros2_has_pub=False, ros2_has_sub=True) == BRIDGE_BRIDGED
 
 
 def test_collect_bridge_roles_extracts_real_and_bridge_roles_per_ns():

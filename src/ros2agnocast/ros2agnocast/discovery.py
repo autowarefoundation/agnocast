@@ -223,28 +223,40 @@ def collect_bridge_roles(snapshots: list) -> dict:
     return roles
 
 
-def bridge_label_from_roles(ns_roles: list, ros2_has_endpoint: bool) -> str:
+def bridge_label_from_roles(ns_roles: list, ros2_has_pub: bool, ros2_has_sub: bool) -> str:
     """Classify a topic's bridge status from its per-NS roles.
 
-    Returns ``BRIDGE_ENABLED`` / ``BRIDGE_BRIDGED`` / ``BRIDGE_WARN``.
-    Bridging is required once the topic crosses a boundary (real endpoints in
-    2+ NSes, or 1 NS plus a ROS 2 endpoint). When required, each NS must hold
-    the bridge its own real endpoints need — a real subscriber needs an inbound
-    bridge, a real publisher needs an outbound bridge. A NS missing one means
-    data does not actually flow (e.g. a talker and listener in different NSes
-    with no bridges) -> WARN.
+    Returns ``BRIDGE_ENABLED`` / ``BRIDGE_BRIDGED`` / ``BRIDGE_WARN``. A bridge
+    is *expected* only where data must actually cross a boundary: a real
+    publisher needs an outbound bridge only if a consumer exists elsewhere
+    (another NS or ROS 2), and a real subscriber needs an inbound bridge only
+    if a producer exists elsewhere. So WARN fires only when such a bridge is
+    expected but missing (e.g. a talker and listener in different NSes with no
+    bridges); BRIDGED means every expected bridge is present; ENABLED means no
+    bridging is expected (a lone endpoint, or producer/consumer in the same NS).
 
     ``ns_roles`` comes from :func:`collect_bridge_roles` (empty if the topic has
-    no real Agnocast endpoint). ``ros2_has_endpoint`` is whether the topic also
-    has a ROS 2 (DDS) endpoint in the caller's NS — the only NS whose DDS view
-    the CLI can see.
+    no real Agnocast endpoint). ``ros2_has_pub`` / ``ros2_has_sub`` are whether
+    the topic has a ROS 2 (DDS) publisher / subscriber in the caller's NS — the
+    only NS whose DDS view the CLI can see.
     """
-    required = len(ns_roles) >= 2 or (len(ns_roles) >= 1 and ros2_has_endpoint)
-    if not required:
-        return BRIDGE_ENABLED
+    real_pub_nses = sum(1 for r in ns_roles if r[0])
+    real_sub_nses = sum(1 for r in ns_roles if r[1])
+
+    bridge_expected = False
+    bridge_missing = False
     for real_pub, real_sub, inbound_bridge, outbound_bridge in ns_roles:
-        if real_sub and not inbound_bridge:
-            return BRIDGE_WARN
-        if real_pub and not outbound_bridge:
-            return BRIDGE_WARN
-    return BRIDGE_BRIDGED
+        # "elsewhere" excludes this NS — an intra-NS producer/consumer pair
+        # talks directly without a bridge.
+        consumer_elsewhere = ros2_has_sub or real_sub_nses - (1 if real_sub else 0) > 0
+        producer_elsewhere = ros2_has_pub or real_pub_nses - (1 if real_pub else 0) > 0
+        if real_pub and consumer_elsewhere:
+            bridge_expected = True
+            bridge_missing |= not outbound_bridge
+        if real_sub and producer_elsewhere:
+            bridge_expected = True
+            bridge_missing |= not inbound_bridge
+
+    if not bridge_expected:
+        return BRIDGE_ENABLED
+    return BRIDGE_WARN if bridge_missing else BRIDGE_BRIDGED
