@@ -26,7 +26,8 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   // the registry line is in place whenever a later snapshot sees the
   // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
   if (!type_name.empty()) {
-    internal::TypeRegistryWriter::instance().register_type(topic_name_, type_name, "sub", node_name);
+    internal::TypeRegistryWriter::instance().register_type(
+      topic_name_, type_name, "sub", node_name);
   }
 
   union ioctl_add_subscriber_args add_subscriber_args = {};
