@@ -10,8 +10,11 @@ from ros2agnocast.discovery import (
     _resolve_spin_node,
     all_nodes,
     all_topic_names,
+    BRIDGE_BRIDGED,
+    BRIDGE_ENABLED,
+    BRIDGE_WARN,
     collect_announcements_with_fallback,
-    gossip_has_bridge_endpoint,
+    evaluate_bridge_label,
     topic_endpoints,
     topics_of_node,
     warn_if_using_fallback,
@@ -93,12 +96,52 @@ def test_topics_of_node_collects_pub_and_sub_topics():
     assert subs == [{'topic_name': '/bar', 'type_name': ''}]
 
 
-def test_gossip_has_bridge_endpoint_flags_pub_and_sub_independently():
-    """One bridge pub + non-bridge sub on the same topic → (True, False)."""
-    bridge_pub = _endpoint('/agnocast_bridge_node_xxx', is_bridge=True)
-    sub = _endpoint('/listener')
-    snap = _state('a', 1, topics=[_topic('/foo', pubs=[bridge_pub], subs=[sub])])
-    assert gossip_has_bridge_endpoint([snap], '/foo') == (True, False)
+def test_evaluate_bridge_label_enabled_single_ns_no_ros2():
+    """Talker + listener in one NS, no ROS 2: nothing to bridge."""
+    snap = _state('a', 1, topics=[
+        _topic('/foo', pubs=[_endpoint('/talker')], subs=[_endpoint('/listener')])])
+    assert evaluate_bridge_label([snap], '/foo', ros2_has_endpoint=False) == BRIDGE_ENABLED
+
+
+def test_evaluate_bridge_label_warn_cross_ns_without_bridges():
+    """Talker in NS-A, listener in NS-B, no bridges: TetsuKawa's case → WARN."""
+    snap_a = _state('a', 1, topics=[_topic('/foo', pubs=[_endpoint('/talker')])])
+    snap_b = _state('b', 2, topics=[_topic('/foo', subs=[_endpoint('/listener')])])
+    assert evaluate_bridge_label(
+        [snap_a, snap_b], '/foo', ros2_has_endpoint=False) == BRIDGE_WARN
+
+
+def test_evaluate_bridge_label_bridged_cross_ns_with_both_bridges():
+    """NS-A talker + outbound bridge, NS-B listener + inbound bridge → bridged."""
+    outbound = _endpoint('/agnocast_bridge_node_a', is_bridge=True)  # A2R
+    inbound = _endpoint('/agnocast_bridge_node_b', is_bridge=True)   # R2A
+    snap_a = _state('a', 1, topics=[
+        _topic('/foo', pubs=[_endpoint('/talker')], subs=[outbound])])
+    snap_b = _state('b', 2, topics=[
+        _topic('/foo', pubs=[inbound], subs=[_endpoint('/listener')])])
+    assert evaluate_bridge_label(
+        [snap_a, snap_b], '/foo', ros2_has_endpoint=False) == BRIDGE_BRIDGED
+
+
+def test_evaluate_bridge_label_warn_when_one_ns_missing_its_bridge():
+    """NS-A is bridged but NS-B's listener lacks an inbound bridge → WARN."""
+    outbound = _endpoint('/agnocast_bridge_node_a', is_bridge=True)
+    snap_a = _state('a', 1, topics=[
+        _topic('/foo', pubs=[_endpoint('/talker')], subs=[outbound])])
+    snap_b = _state('b', 2, topics=[_topic('/foo', subs=[_endpoint('/listener')])])
+    assert evaluate_bridge_label(
+        [snap_a, snap_b], '/foo', ros2_has_endpoint=False) == BRIDGE_WARN
+
+
+def test_evaluate_bridge_label_single_ns_plus_ros2_requires_bridge():
+    """One NS with a real talker + a ROS 2 endpoint: needs an outbound bridge."""
+    snap = _state('a', 1, topics=[_topic('/foo', pubs=[_endpoint('/talker')])])
+    assert evaluate_bridge_label([snap], '/foo', ros2_has_endpoint=True) == BRIDGE_WARN
+    outbound = _endpoint('/agnocast_bridge_node_a', is_bridge=True)
+    snap_bridged = _state('a', 1, topics=[
+        _topic('/foo', pubs=[_endpoint('/talker')], subs=[outbound])])
+    assert evaluate_bridge_label(
+        [snap_bridged], '/foo', ros2_has_endpoint=True) == BRIDGE_BRIDGED
 
 
 def test_resolve_spin_node_returns_node_as_is_when_not_nodestrategy():

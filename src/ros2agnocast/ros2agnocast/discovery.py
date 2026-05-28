@@ -185,18 +185,55 @@ def topics_of_node(snapshots: list, node_name: str) -> tuple:
     return pubs, subs
 
 
-def gossip_has_bridge_endpoint(snapshots: list, topic_name: str) -> tuple:
-    """Return (has_pub_bridge, has_sub_bridge) across all snapshots."""
-    has_pub_bridge = False
-    has_sub_bridge = False
+# Bridge-label states for the CLI verbs. Wording is shared so list/info stay
+# consistent.
+BRIDGE_ENABLED = 'enabled'
+BRIDGE_BRIDGED = 'bridged'
+BRIDGE_WARN = 'warn'
+BRIDGE_LABEL_TEXT = {
+    BRIDGE_ENABLED: 'Agnocast enabled',
+    BRIDGE_BRIDGED: 'Agnocast enabled, bridged',
+    BRIDGE_WARN: 'WARN: one or more necessary bridges are not running',
+}
+
+
+def evaluate_bridge_label(snapshots: list, topic_name: str, ros2_has_endpoint: bool) -> str:
+    """Return ``BRIDGE_ENABLED`` / ``BRIDGE_BRIDGED`` / ``BRIDGE_WARN`` per-NS.
+
+    Bridging is required once a topic crosses a boundary (endpoints in 2+
+    NSes, or 1 NS plus a ROS 2 endpoint). When required, each NS must hold
+    the bridge its own real endpoints need; a NS that lacks one means data
+    does not actually flow (e.g. a talker and listener in different NSes
+    with no bridges) -> WARN.
+
+    A bridge endpoint is directional: an inbound bridge (ROS 2 -> Agnocast)
+    is a bridge *publisher* and feeds a real subscriber; an outbound bridge
+    (Agnocast -> ROS 2) is a bridge *subscriber* and drains a real publisher.
+
+    ``ros2_has_endpoint``: the caller's own NS is the only one whose ROS 2
+    (DDS) view the CLI can see.
+    """
+    # One entry per NS that has a real (non-bridge) endpoint on the topic.
+    ns_roles = []
     for snap in snapshots:
         for topic in snap.topics:
             if topic.topic_name != topic_name:
                 continue
-            for endpoint in topic.publishers:
-                if endpoint.is_bridge:
-                    has_pub_bridge = True
-            for endpoint in topic.subscribers:
-                if endpoint.is_bridge:
-                    has_sub_bridge = True
-    return has_pub_bridge, has_sub_bridge
+            real_pub = any(not ep.is_bridge for ep in topic.publishers)
+            real_sub = any(not ep.is_bridge for ep in topic.subscribers)
+            if not (real_pub or real_sub):
+                continue
+            inbound_bridge = any(ep.is_bridge for ep in topic.publishers)
+            outbound_bridge = any(ep.is_bridge for ep in topic.subscribers)
+            ns_roles.append((real_pub, real_sub, inbound_bridge, outbound_bridge))
+
+    required = len(ns_roles) >= 2 or (len(ns_roles) >= 1 and ros2_has_endpoint)
+    if not required:
+        return BRIDGE_ENABLED
+
+    for real_pub, real_sub, inbound_bridge, outbound_bridge in ns_roles:
+        if real_sub and not inbound_bridge:
+            return BRIDGE_WARN
+        if real_pub and not outbound_bridge:
+            return BRIDGE_WARN
+    return BRIDGE_BRIDGED

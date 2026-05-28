@@ -1,4 +1,3 @@
-from enum import Enum
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import (
     get_action_client_info, get_action_server_info, get_node_names,
@@ -9,17 +8,12 @@ from ros2node.verb import VerbExtension
 
 from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
+    BRIDGE_LABEL_TEXT,
     collect_announcements_with_fallback,
-    gossip_has_bridge_endpoint,
+    evaluate_bridge_label,
     warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
-
-class BridgeStatus(Enum):
-    NONE = 0
-    ROS2_TO_AGNOCAST = 1
-    AGNOCAST_TO_ROS2= 2
-    BIDIRECTION = 3
 
 def service_name_from_request_topic(topic_name):
     prefix = '/AGNOCAST_SRV_REQUEST'
@@ -51,37 +45,12 @@ class NodeInfoAgnocastVerb(VerbExtension):
                 node, timeout_sec=args.gossip_timeout)
             warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
 
-            def get_bridge_status(topic_name):
-                has_pub_bridge, has_sub_bridge = gossip_has_bridge_endpoint(snapshots, topic_name)
-
-                mapping = {
-                    (True, True):   BridgeStatus.BIDIRECTION,
-                    (True, False):  BridgeStatus.AGNOCAST_TO_ROS2,
-                    (False, True):  BridgeStatus.ROS2_TO_AGNOCAST,
-                    (False, False): BridgeStatus.NONE,
-                }
-
-                return mapping[(has_sub_bridge, has_pub_bridge)]
-
             def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):
                 """Get the appropriate label for an Agnocast-enabled topic."""
-
-                suffix = "(Agnocast enabled)"
-                if topic_name not in ros2_sub_topics and topic_name not in ros2_pub_topics:
-                    return suffix  # No bridge info if only one endpoint exists
-
-                match get_bridge_status(topic_name):
-                    case BridgeStatus.BIDIRECTION:
-                        suffix = "(Agnocast enabled, bridged)"
-                    case BridgeStatus.ROS2_TO_AGNOCAST:
-                        if topic_name in ros2_pub_topics:
-                            suffix = "(Agnocast enabled, bridged)"
-                    case BridgeStatus.AGNOCAST_TO_ROS2:
-                        if topic_name in ros2_sub_topics:
-                            suffix = "(Agnocast enabled, bridged)"
-                    case BridgeStatus.NONE:
-                        suffix = "(WARN: Agnocast and ROS2 endpoints exist but bridge is not active)"
-                return suffix
+                ros2_has_endpoint = (
+                    topic_name in ros2_sub_topics or topic_name in ros2_pub_topics)
+                status = evaluate_bridge_label(snapshots, topic_name, ros2_has_endpoint)
+                return f"({BRIDGE_LABEL_TEXT[status]})"
 
             def get_agnocast_node_topics(target_node_name):
                 sub_topic_list = []
