@@ -154,6 +154,31 @@ def test_read_local_topics_resolves_type_from_registry():
     assert topics[0].publishers[0].pid == 99
 
 
+def test_read_local_topics_falls_back_to_subscriber_type_when_pub_missing():
+    """If the registry only knows the subscriber side, `type_name` still resolves.
+
+    Mirrors the case where the publisher process exited (or was on another NS
+    and its registry file isn't local) but a local subscriber is still active.
+    """
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    pub_info = _make_info('/talker_node')
+    sub_info = _make_info('/listener_node')
+    lib = _make_mock_lib({'/chatter': {'pub': [pub_info], 'sub': [sub_info]}})
+
+    class SubOnlyRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'sub', '/listener_node'):
+                return RegistryEntry(pid=77, type_name='std_msgs/msg/Int32')
+            return None
+
+    topics = read_local_topics(lib, SubOnlyRegistry())
+    assert len(topics) == 1
+    assert topics[0].type_name == 'std_msgs/msg/Int32'
+    assert topics[0].subscribers[0].pid == 77
+    assert topics[0].publishers[0].pid == 0  # publisher unknown to the registry
+
+
 def test_read_local_topics_returns_empty_when_no_topics():
     lib = _make_mock_lib({})
     assert read_local_topics(lib) == []

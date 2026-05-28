@@ -110,6 +110,34 @@ def test_rebuild_skips_lines_with_unknown_role():
         assert reader.lookup('/topic', 'pub', '/node_a') is None
 
 
+def test_rebuild_records_each_endpoint_independently_for_same_topic():
+    """Two endpoints on the same topic with conflicting `type_name` are both stored.
+
+    Agnocast enforces the one-message-type-per-topic invariant at the kmod
+    layer (see https://autowarefoundation.github.io/agnocast_doc/#one-message-type-per-topic);
+    the registry deliberately does not deduplicate — it reports exactly what
+    each writer announced so the discovery agent can surface a mismatch
+    rather than silently masking it.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        reader = _make_reader(tmpdir)
+        # Two processes registering the same topic with conflicting types.
+        _write(
+            os.path.join(reader.ns_dir, '1.txt'),
+            '/conflict_topic\tstd_msgs/msg/Int32\tpub\t/node_a\n')
+        _write(
+            os.path.join(reader.ns_dir, '2.txt'),
+            '/conflict_topic\tstd_msgs/msg/String\tpub\t/node_b\n')
+        reader.rebuild()
+
+        # Each endpoint keeps its own announced type — keyed by node_name,
+        # the table is per-endpoint, not per-topic.
+        assert reader.lookup('/conflict_topic', 'pub', '/node_a') == RegistryEntry(
+            pid=1, type_name='std_msgs/msg/Int32')
+        assert reader.lookup('/conflict_topic', 'pub', '/node_b') == RegistryEntry(
+            pid=2, type_name='std_msgs/msg/String')
+
+
 def test_cleanup_dead_pids_removes_files_for_dead_pids():
     with tempfile.TemporaryDirectory() as tmpdir:
         reader = _make_reader(tmpdir)
