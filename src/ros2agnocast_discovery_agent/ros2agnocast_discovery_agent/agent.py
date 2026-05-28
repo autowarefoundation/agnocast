@@ -9,7 +9,9 @@ One daemon process is intended to run per IPC namespace. To make duplicate
 launches (e.g. one node spawning the agent and another ``ros2 launch``
 session also trying to spawn one) safe, the agent acquires an
 ``flock(2)``-based singleton lock on a per-IPC-namespace file before
-starting; subsequent instances detect the held lock and exit cleanly.
+starting; subsequent instances detect the held lock and stay idle on
+``signal.pause()`` until terminated, so they don't disturb the launch
+tree they belong to.
 """
 
 import ctypes

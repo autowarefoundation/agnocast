@@ -1,4 +1,4 @@
-// Copyright 2025
+// Copyright 2026
 // SPDX-License-Identifier: Apache-2.0
 
 #include "agnocast/internal/type_registry_writer.hpp"
@@ -142,10 +142,9 @@ void TypeRegistryWriter::register_type(
   line.append(role).push_back('\t');
   line.append(node_name).push_back('\n');
 
-  // `write` is atomic up to PIPE_BUF for regular files on Linux; lines are
-  // well under that. We retry on EINTR but ignore short writes (a partial
-  // line ends without `\n` and the daemon's parser skips unterminated
-  // tails).
+  // One file per process plus the mutex above keeps writers from interleaving.
+  // We retry on EINTR but ignore short writes (a partial line ends without
+  // `\n` and the daemon's parser skips unterminated tails).
   const char * data = line.data();
   size_t remaining = line.size();
   while (remaining > 0) {

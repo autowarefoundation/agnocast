@@ -27,7 +27,6 @@ import os
 import time
 
 import rclpy
-from rclpy.node import Node
 from ros2cli.node.strategy import NodeStrategy
 from ros2cli.verb import VerbExtension
 
