@@ -197,40 +197,51 @@ BRIDGE_LABEL_TEXT = {
 }
 
 
-def evaluate_bridge_label(snapshots: list, topic_name: str, ros2_has_endpoint: bool) -> str:
-    """Return ``BRIDGE_ENABLED`` / ``BRIDGE_BRIDGED`` / ``BRIDGE_WARN`` per-NS.
+def collect_bridge_roles(snapshots: list) -> dict:
+    """Map ``topic_name -> per-NS bridge roles`` in a single pass over snapshots.
 
-    Bridging is required once a topic crosses a boundary (endpoints in 2+
-    NSes, or 1 NS plus a ROS 2 endpoint). When required, each NS must hold
-    the bridge its own real endpoints need; a NS that lacks one means data
-    does not actually flow (e.g. a talker and listener in different NSes
-    with no bridges) -> WARN.
+    Each value is a list with one entry per NS that has a real (non-bridge)
+    endpoint on that topic: ``(real_pub, real_sub, inbound_bridge,
+    outbound_bridge)``. A bridge endpoint is directional: an inbound bridge
+    (ROS 2 -> Agnocast) is a bridge publisher; an outbound bridge
+    (Agnocast -> ROS 2) is a bridge subscriber.
 
-    A bridge endpoint is directional: an inbound bridge (ROS 2 -> Agnocast)
-    is a bridge *publisher* and feeds a real subscriber; an outbound bridge
-    (Agnocast -> ROS 2) is a bridge *subscriber* and drains a real publisher.
-
-    ``ros2_has_endpoint``: the caller's own NS is the only one whose ROS 2
-    (DDS) view the CLI can see.
+    Building this once lets the verbs label every topic with an O(1) lookup
+    instead of re-scanning the snapshots per topic.
     """
-    # One entry per NS that has a real (non-bridge) endpoint on the topic.
-    ns_roles = []
+    roles = {}
     for snap in snapshots:
         for topic in snap.topics:
-            if topic.topic_name != topic_name:
-                continue
             real_pub = any(not ep.is_bridge for ep in topic.publishers)
             real_sub = any(not ep.is_bridge for ep in topic.subscribers)
             if not (real_pub or real_sub):
                 continue
             inbound_bridge = any(ep.is_bridge for ep in topic.publishers)
             outbound_bridge = any(ep.is_bridge for ep in topic.subscribers)
-            ns_roles.append((real_pub, real_sub, inbound_bridge, outbound_bridge))
+            roles.setdefault(topic.topic_name, []).append(
+                (real_pub, real_sub, inbound_bridge, outbound_bridge))
+    return roles
 
+
+def bridge_label_from_roles(ns_roles: list, ros2_has_endpoint: bool) -> str:
+    """Classify a topic's bridge status from its per-NS roles.
+
+    Returns ``BRIDGE_ENABLED`` / ``BRIDGE_BRIDGED`` / ``BRIDGE_WARN``.
+    Bridging is required once the topic crosses a boundary (real endpoints in
+    2+ NSes, or 1 NS plus a ROS 2 endpoint). When required, each NS must hold
+    the bridge its own real endpoints need — a real subscriber needs an inbound
+    bridge, a real publisher needs an outbound bridge. A NS missing one means
+    data does not actually flow (e.g. a talker and listener in different NSes
+    with no bridges) -> WARN.
+
+    ``ns_roles`` comes from :func:`collect_bridge_roles` (empty if the topic has
+    no real Agnocast endpoint). ``ros2_has_endpoint`` is whether the topic also
+    has a ROS 2 (DDS) endpoint in the caller's NS — the only NS whose DDS view
+    the CLI can see.
+    """
     required = len(ns_roles) >= 2 or (len(ns_roles) >= 1 and ros2_has_endpoint)
     if not required:
         return BRIDGE_ENABLED
-
     for real_pub, real_sub, inbound_bridge, outbound_bridge in ns_roles:
         if real_sub and not inbound_bridge:
             return BRIDGE_WARN

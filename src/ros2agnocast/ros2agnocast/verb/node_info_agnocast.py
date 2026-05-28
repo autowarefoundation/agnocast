@@ -8,9 +8,10 @@ from ros2node.verb import VerbExtension
 
 from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
+    bridge_label_from_roles,
     BRIDGE_LABEL_TEXT,
     collect_announcements_with_fallback,
-    evaluate_bridge_label,
+    collect_bridge_roles,
     warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
@@ -44,12 +45,14 @@ class NodeInfoAgnocastVerb(VerbExtension):
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
             warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            bridge_roles = collect_bridge_roles(snapshots)
 
             def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):
                 """Get the appropriate label for an Agnocast-enabled topic."""
                 ros2_has_endpoint = (
                     topic_name in ros2_sub_topics or topic_name in ros2_pub_topics)
-                status = evaluate_bridge_label(snapshots, topic_name, ros2_has_endpoint)
+                status = bridge_label_from_roles(
+                    bridge_roles.get(topic_name, []), ros2_has_endpoint)
                 return f"({BRIDGE_LABEL_TEXT[status]})"
 
             def get_agnocast_node_topics(target_node_name):

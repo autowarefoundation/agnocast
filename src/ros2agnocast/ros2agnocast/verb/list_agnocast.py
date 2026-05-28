@@ -5,9 +5,10 @@ from ros2topic.verb import VerbExtension
 from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
     all_topic_names,
+    bridge_label_from_roles,
     BRIDGE_LABEL_TEXT,
     collect_announcements_with_fallback,
-    evaluate_bridge_label,
+    collect_bridge_roles,
     warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
@@ -24,6 +25,7 @@ class ListAgnocastVerb(VerbExtension):
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
             warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            bridge_roles = collect_bridge_roles(snapshots)
 
             def divide_ros2_topic_into_pubsub(topic_names):
                 pub_topics = []
@@ -66,8 +68,8 @@ class ListAgnocastVerb(VerbExtension):
 
             for topic in sorted(agnocast_topics_set | ros2_topics_set):
                 if topic in agnocast_topics_set:
-                    ros2_has_endpoint = topic in ros2_topics_set
-                    status = evaluate_bridge_label(snapshots, topic, ros2_has_endpoint)
+                    status = bridge_label_from_roles(
+                        bridge_roles.get(topic, []), topic in ros2_topics_set)
                     suffix = f" ({BRIDGE_LABEL_TEXT[status]})"
                 else:
                     suffix = ""
