@@ -69,7 +69,8 @@ void decrement_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string & topic_name, const std::string &, const rclcpp::QoS & qos, const bool)
+  const std::string & topic_name, const std::string &, const rclcpp::QoS & qos, const bool,
+  const std::string &)
 {
   initialize_publisher_call_count++;
   last_initialized_topic_name = topic_name;

@@ -171,8 +171,7 @@ jobs:
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
-        # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
-        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -LE "requires_kernel_module|requires_heaphook"
+        colcon test --merge-install --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -LE "requires_kernel_module|requires_heaphook"
 
     - name: Generate coverage report
       if: github.event_name == 'pull_request' && steps.check_diff.outputs.cpp_changed == 'true'
@@ -258,8 +257,7 @@ jobs:
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
-        # --packages-skip ros2agnocast: skip Python package with no tests (pytest fails on empty test suite)
-        colcon test --merge-install --packages-skip ros2agnocast --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
+        colcon test --merge-install --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
 
   # Summary job that provides a single status check for branch protection rules.
   # Matrix jobs report status as "job-name (matrix-value)", but branch protection

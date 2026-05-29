@@ -40,7 +40,7 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string &, const std::string &, const rclcpp::QoS &, const bool)
+  const std::string &, const std::string &, const rclcpp::QoS &, const bool, const std::string &)
 {
   return 0;  // Dummy value
 }

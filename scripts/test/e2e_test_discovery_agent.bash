@@ -49,7 +49,11 @@ green "✓ kmod loaded and workspace sourced"
 # ----- start daemon -----
 LOG_DIR=$(mktemp -d)
 cleanup() {
+    # pkill -P only reaches direct children; ros2 launch spawns its
+    # talker / agent as grandchildren, so also match by binary path.
     pkill -P $$ 2>/dev/null || true
+    pkill -KILL -f '/agnocast_sample_application/lib/.*/talker' 2>/dev/null || true
+    pkill -KILL -f '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/discovery_agent' 2>/dev/null || true
     sleep 1
     rm -rf "$LOG_DIR"
 }
@@ -111,6 +115,30 @@ msg_with_topic=$(timeout "$ECHO_TIMEOUT_SEC" ros2 topic echo --once /_agnocast_d
 grep -q 'topic_name: /my_topic'      <<<"$msg_with_topic" || fail "talker's /my_topic not seen in snapshot" "$msg_with_topic"
 grep -q 'node_name: /talker_node'    <<<"$msg_with_topic" || fail "talker_node not seen in snapshot" "$msg_with_topic"
 green "✓ talker's /my_topic + /talker_node appear in the snapshot"
+
+# ----- assert gossip carries the ROS 2 message type from the tmpfs registry -----
+# The agent reads the per-process tmpfs file written by agnocastlib's
+# Publisher<T> ctor and joins (topic, role, node_name) onto the kmod's ioctl
+# output so the gossip publication has type_name + pid filled in.
+grep -q 'type_name: agnocast_sample_interfaces/msg/DynamicSizeArray' <<<"$msg_with_topic" \
+    || fail "gossip type_name not populated from the tmpfs registry" "$msg_with_topic"
+# At least one AgnocastEndpoint.pid should be non-zero (the talker's pid the
+# registry pinned to /talker_node).
+grep -qE '^[[:space:]]+pid: [1-9][0-9]*' <<<"$msg_with_topic" \
+    || fail "no AgnocastEndpoint.pid > 0 in snapshot (registry → gossip join failed)" "$msg_with_topic"
+green "✓ gossip carries type_name + non-zero pid from the tmpfs type registry"
+
+# ----- assert the tmpfs file the agent reads from is actually there -----
+NS_INODE=$(stat -L -c '%i' /proc/self/ns/ipc)
+TMPFS_DIR="${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/$NS_INODE"
+[ -d "$TMPFS_DIR" ] || fail "tmpfs registry dir missing: $TMPFS_DIR"
+# Pick the most recent <pid>.txt (the talker just spawned) and verify the
+# format. Format is per-process: <topic>\t<type>\t<role>\t<node>\n.
+recent_file=$(ls -t "$TMPFS_DIR"/*.txt 2>/dev/null | head -1)
+[ -n "$recent_file" ] || fail "no <pid>.txt in $TMPFS_DIR" "$(ls -la "$TMPFS_DIR" 2>&1)"
+grep -qE $'^/my_topic\tagnocast_sample_interfaces/msg/DynamicSizeArray\tpub\t/talker_node$' "$recent_file" \
+    || fail "tmpfs line format unexpected in $recent_file" "$(cat "$recent_file")"
+green "✓ tmpfs registry file present at $TMPFS_DIR with the expected 4-field line"
 
 green ""
 green "===== ALL CHECKS PASSED ====="

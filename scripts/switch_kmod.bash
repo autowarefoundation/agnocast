@@ -172,21 +172,18 @@ sudo apt-get install -y "${target_package}"
 
 echo "[5/5] Load agnocast and verify"
 
-# Snapshot dmesg line count so we can isolate messages emitted by THIS
-# modprobe (avoids mistaking a stale 'Agnocast installed!' line from an
-# earlier load for the current one).
-dmesg_before=$(sudo dmesg | wc -l)
-
 sudo modprobe agnocast
 echo "  Loaded."
 
-new_dmesg=$(sudo dmesg | tail -n +$((dmesg_before + 1)))
-install_line=$(echo "$new_dmesg" | grep -E "Agnocast installed! v" | tail -n 1 || true)
+# Steps 1–4 unloaded the old module, purged every agnocast-kmod-v* package,
+# and installed exactly one target package, so the last 'Agnocast installed!'
+# line in dmesg corresponds to the modprobe we just ran.
+install_line=$(sudo dmesg | grep -E "Agnocast installed! v" | tail -n 1 || true)
 
 if [ -z "$install_line" ]; then
-	echo "  Error: did not see 'Agnocast installed! v...' in dmesg after modprobe."
+	echo "  Error: no 'Agnocast installed! v...' line found in dmesg."
 	echo "  Recent agnocast-related kernel messages:"
-	echo "$new_dmesg" | grep -i agnocast || true
+	sudo dmesg | grep -i agnocast | tail -n 20 || true
 	exit 1
 fi
 
