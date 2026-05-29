@@ -8,12 +8,12 @@ name: kunit
 # insmods it, which CI runners block via kernel lockdown
 # (actions/runner-images#8623). kunit.py links the suite in instead.
 #
-# Why --arch=x86_64 (not the default UML): Agnocast needs CONFIG_IPC_NS and
-# kernel tracepoints (the sched_process_exit hook), which a UML defconfig
-# cannot provide. See .github/kunit/kunitconfig.
+# Why --arch=x86_64 and not kunit.py's default UML: the suite needs
+# CONFIG_IPC_NS and kernel tracepoints (the sched_process_exit hook), which a
+# UML build can't provide. The tests run in QEMU. See .github/kunit/kunitconfig.
 #
-# Future: --arch=arm64 (cross-compiled, qemu-system-aarch64) could be added as
-# a matrix axis if we ever need to catch arch-specific regressions.
+# Future: an --arch=arm64 matrix axis (qemu-system-aarch64) could be added to
+# catch arch-specific regressions.
 
 on:
   pull_request:
@@ -78,12 +78,9 @@ jobs:
           set -euo pipefail
           git clone --depth 1 --branch "${LINUX_REF}" "${LINUX_REPO}" linux
 
-      # Cache kunit.py's build dir. It lives OUTSIDE the kernel source tree
-      # (kunit-build/, not linux/.kunit) so that the source-tree cache above
-      # does not absorb build artifacts. The exact key pins the build to the
-      # inputs that affect what gets compiled; restore-keys lets a previous
-      # build dir be reused so kbuild only recompiles the changed Agnocast
-      # objects instead of the whole kernel.
+      # Cache kunit.py's build dir, kept outside the source tree so the cache
+      # above doesn't absorb build artifacts. restore-keys reuses a previous
+      # build dir, so only the changed Agnocast objects recompile.
       - name: Cache KUnit build dir
         id: kunit-build-cache
         uses: actions/cache@v4
@@ -119,9 +116,7 @@ jobs:
             echo 'obj-$(CONFIG_KUNIT) += agnocast/' >> linux/drivers/Makefile
           fi
 
-      # Build the suite into a kernel, boot it under QEMU, run the tests. The
-      # build dir is kept outside the source tree so the source cache above does
-      # not absorb build artifacts.
+      # Build the suite into a kernel, boot it under QEMU, run the tests.
       - name: Run Agnocast KUnit suite under QEMU
         working-directory: linux
         run: |

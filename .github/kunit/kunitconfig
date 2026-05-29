@@ -1,12 +1,6 @@
-# Kernel config fragment consumed by .github/workflows/kunit.yaml.
-# kunit.py merges this into a defconfig before building the test kernel.
-#
-# Every option here MUST survive `make olddefconfig` (kunit.py treats a
-# dropped option as a hard error). That is why the dependency-providing
-# symbols are listed explicitly alongside the ones Agnocast actually needs:
-#   * CONFIG_SYSVIPC      -> required to enable CONFIG_IPC_NS
-#   * CONFIG_FTRACE       -> exposes the "Tracers" menu that hosts
-#                            CONFIG_ENABLE_DEFAULT_TRACERS
+# Kernel config fragment for kunit.py (see .github/workflows/kunit.yaml).
+# Each option must survive `make olddefconfig`, so the dependency-providing
+# symbols (SYSVIPC, FTRACE) are listed alongside the ones the suite needs.
 CONFIG_KUNIT=y
 CONFIG_KUNIT_DEBUGFS=y
 
@@ -15,8 +9,7 @@ CONFIG_SYSVIPC=y
 CONFIG_NAMESPACES=y
 CONFIG_IPC_NS=y
 
-# agnocast_init_exit_hook() looks up the `sched_process_exit` tracepoint via
-# for_each_kernel_tracepoint(); without tracepoints the suite init returns
-# -ENOENT and the whole suite fails to start.
+# The exit hook looks up the sched_process_exit tracepoint; without tracepoints
+# the suite fails to start (-ENOENT). FTRACE gates ENABLE_DEFAULT_TRACERS.
 CONFIG_FTRACE=y
 CONFIG_ENABLE_DEFAULT_TRACERS=y
