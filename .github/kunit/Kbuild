@@ -1,16 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #
-# In-tree kbuild file used ONLY by the UML/QEMU CI in
-# .github/workflows/kunit.yaml. The workflow copies the Agnocast kernel
-# sources into the kernel tree and drops this file in as their Makefile so
-# that the KUnit suite is linked into the test kernel (built-in, not a
-# loadable module — hosted CI runners cannot insmod unsigned modules).
+# In-tree kbuild file used only by the CI in .github/workflows/kunit.yaml, which
+# copies the Agnocast sources into the kernel tree and drops this in as their
+# Makefile so the KUnit suite is built into the kernel (built-in, not a module).
 #
-# Gated on CONFIG_KUNIT so it only compiles when the kunitconfig enables
-# KUnit. The object list mirrors the `KUNIT_BUILD=y` branch of
-# agnocast_kmod/Makefile; the 26 test objects are shared verbatim via
-# agnocast_kunit/Makefile.inc, so only this short core list must be kept in
-# sync if a new top-level source file is added.
+# The core object list mirrors the KUNIT_BUILD=y branch of agnocast_kmod/Makefile;
+# the test objects are shared via agnocast_kunit/Makefile.inc, so only this list
+# needs syncing when a new top-level source file is added.
 obj-$(CONFIG_KUNIT) += agnocast_kunit.o
 
 agnocast_kunit-objs := \
