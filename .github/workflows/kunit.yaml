@@ -8,9 +8,10 @@ name: kunit
 # insmods it, which CI runners block via kernel lockdown
 # (actions/runner-images#8623). kunit.py links the suite in instead.
 #
-# Why --arch=x86_64 and not kunit.py's default UML: the suite needs
-# CONFIG_IPC_NS and kernel tracepoints (the sched_process_exit hook), which a
-# UML build can't provide. The tests run in QEMU. See .github/kunit/kunitconfig.
+# Why --arch=x86_64 and not kunit.py's default UML: several tests call
+# copy_to_user, which UML can't service from the no-userspace KUnit context
+# (it panics with "Segfault with no mm"). x86_64 under QEMU runs the whole
+# suite. (IPC_NS and tracepoints, the suite's other needs, do work under UML.)
 #
 # Future: an --arch=arm64 matrix axis (qemu-system-aarch64) could be added to
 # catch arch-specific regressions.
