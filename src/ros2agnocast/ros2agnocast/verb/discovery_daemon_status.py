@@ -5,17 +5,20 @@ for cross-namespace observability. If the agent is not running (or
 running in a different IPC namespace), that observability silently stops
 working — this verb gives the operator a single place to confirm liveness.
 
+This command only inspects the **current** IPC namespace (the one the
+command itself runs in); run it inside the namespace you want to check.
+
 Checks performed (each prints OK / NG with detail):
 
-  * **process** — any `ros2agnocast_discovery_agent` process is running
-    in **this** IPC namespace (matched by `/proc/<pid>/ns/ipc`).
-  * **gossip** — `/_agnocast_discovery` has at least one DDS publisher
-    on the current `ROS_DOMAIN_ID` and a snapshot is received within
-    the timeout.
+  * **process** — any ``ros2agnocast_discovery_agent`` process is running
+    in **this** IPC namespace (matched by ``/proc/<pid>/ns/ipc``).
+  * **gossip** — a snapshot from **this** IPC namespace is received on
+    ``/_agnocast_discovery`` within the timeout (snapshots from other
+    namespaces sharing the topic don't count).
   * **type_registry** — the tmpfs directory
-    `/dev/shm/agnocast_type_registry/<ipc_ns_inode>/` exists and contains
-    at least one ``<pid>.txt`` (proves at least one Agnocast process has
-    registered).
+    ``${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/``
+    holds at least one ``<pid>.txt`` whose process is still alive (proves
+    a live Agnocast process has registered).
 
 Exit code:
 
@@ -24,20 +27,20 @@ Exit code:
 """
 
 import os
-import time
 
-import rclpy
 from ros2cli.node.strategy import NodeStrategy
 from ros2cli.verb import VerbExtension
 
-from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
-
-
-_GOSSIP_TOPIC = '/_agnocast_discovery'
+from ros2agnocast.discovery import (
+    add_gossip_timeout_arg,
+    collect_announcements,
+    GOSSIP_TOPIC,
+    warn_if_gossip_timeout_overridden,
+)
 
 
 def _type_registry_base() -> str:
-    """Resolve the tmpfs root, honoring `AGNOCAST_TMPFS_DIR` like the writer."""
+    """Resolve the tmpfs root, honoring ``AGNOCAST_TMPFS_DIR`` like the writer."""
     root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
     return os.path.join(root, 'agnocast_type_registry')
 
@@ -52,6 +55,7 @@ def _check_daemon_process(my_ns_inode):
     for pid_str in os.listdir('/proc'):
         if not pid_str.isdigit():
             continue
+
         pid = int(pid_str)
         # The discovery agent runs as a python script — its ``comm`` is the
         # python interpreter — so match on cmdline instead.
@@ -60,6 +64,7 @@ def _check_daemon_process(my_ns_inode):
                 cmdline = fp.read().replace(b'\0', b' ').decode('utf-8', errors='replace')
         except (FileNotFoundError, PermissionError):
             continue
+
         # Match the actual agent binary path so we don't also pick up
         # ``ros2 run ros2agnocast_discovery_agent discovery_agent``
         # wrapper processes (whose cmdline contains the same package name
@@ -67,78 +72,104 @@ def _check_daemon_process(my_ns_inode):
         if '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/discovery_agent' \
                 not in cmdline:
             continue
+
         # Must be in the same IPC namespace as the caller.
         try:
-            their_ns = os.stat(f'/proc/{pid}/ns/ipc').st_ino
+            their_ns_inode = os.stat(f'/proc/{pid}/ns/ipc').st_ino
         except (FileNotFoundError, PermissionError):
             continue
-        if their_ns != my_ns_inode:
+
+        if their_ns_inode != my_ns_inode:
             continue
+
         found_pids.append(pid)
 
     if not found_pids:
         return False, 'no discovery_agent process found in this IPC namespace'
+
     if len(found_pids) > 1:
         return True, f'pid(s)={found_pids} (warning: multiple daemons running in this NS)'
+
     return True, f'pid={found_pids[0]}'
 
 
-def _check_gossip(timeout_sec=2.0):
+def _check_gossip(my_ns_inode, timeout_sec):
     """Return (ok, detail) for the gossip-subscription check.
 
-    ``NodeStrategy`` initializes rclpy itself; do not call ``rclpy.init``
-    here or the second call raises ``Context.init() must only be called once``.
+    ``collect_announcements`` aggregates every namespace publishing on the
+    shared gossip topic, so we filter for a snapshot tagged with our own
+    ``ipc_ns_inode`` — a snapshot from another namespace must not pass this
+    check. ``NodeStrategy`` initializes rclpy itself; do not call
+    ``rclpy.init`` here or the second call raises ``Context.init() must
+    only be called once``.
     """
     with NodeStrategy(None) as node:
-        from ros2agnocast.discovery import gossip_qos
-        received = []
+        snapshots = collect_announcements(node, timeout_sec)
 
-        def cb(msg: AgnocastDaemonState) -> None:
-            received.append(msg)
+    seen_my_ns = any(s.ipc_ns_inode == my_ns_inode for s in snapshots)
+    if seen_my_ns:
+        return True, f'received a snapshot from this IPC namespace on {GOSSIP_TOPIC}'
 
-        sub = node.create_subscription(
-            AgnocastDaemonState, _GOSSIP_TOPIC, cb, gossip_qos())
-        try:
-            deadline = time.monotonic() + timeout_sec
-            while time.monotonic() < deadline and not received:
-                rclpy.spin_once(node, timeout_sec=0.05)
-        finally:
-            node.destroy_subscription(sub)
+    if snapshots:
+        return False, (
+            f'no snapshot from this IPC namespace (inode={my_ns_inode}) within '
+            f'{timeout_sec}s; saw {len(snapshots)} from other namespace(s)')
 
-        if not received:
-            return False, (
-                f'no AgnocastDaemonState received on {_GOSSIP_TOPIC} within '
-                f'{timeout_sec}s')
-        return True, f'received {len(received)} snapshot(s) on {_GOSSIP_TOPIC}'
+    return False, f'no AgnocastDaemonState received on {GOSSIP_TOPIC} within {timeout_sec}s'
 
 
 def _check_type_registry(my_ns_inode):
-    """Return (ok, detail) for the tmpfs type registry check."""
+    """Return (ok, detail) for the tmpfs type registry check.
+
+    A ``<pid>.txt`` file alone isn't enough — a process that died without
+    cleaning up leaves a stale file. We require at least one file whose
+    name is a PID with a live ``/proc/<pid>`` entry, matching the writer's
+    "one live process has registered" contract.
+    """
     ns_dir = os.path.join(_type_registry_base(), str(my_ns_inode))
     if not os.path.isdir(ns_dir):
         return False, f'directory missing: {ns_dir}'
-    files = [f for f in os.listdir(ns_dir) if f.endswith('.txt')]
-    if not files:
-        return False, f'{ns_dir} contains no <pid>.txt registrations'
-    return True, f'{ns_dir} has {len(files)} registration file(s)'
+
+    live = 0
+    stale = 0
+    for name in os.listdir(ns_dir):
+        if not name.endswith('.txt'):
+            continue
+
+        pid_str = name[:-len('.txt')]
+        if not pid_str.isdigit():
+            continue
+
+        if os.path.exists(f'/proc/{pid_str}'):
+            live += 1
+        else:
+            stale += 1
+
+    if live:
+        return True, f'{ns_dir} has {live} live registration file(s)'
+
+    detail = f'{ns_dir} has no registration from a live process'
+    if stale:
+        detail += f' ({stale} stale <pid>.txt awaiting daemon cleanup)'
+    return False, detail
 
 
 class DiscoveryDaemonStatusVerb(VerbExtension):
-    """Check the per-IPC-namespace Agnocast discovery agent's liveness."""
+    """Check the current IPC namespace's Agnocast discovery agent liveness."""
 
     def add_arguments(self, parser, cli_name):
-        parser.add_argument(
-            '--gossip-timeout', type=float, default=2.0,
-            help='Seconds to wait for a /_agnocast_discovery snapshot (default: 2.0)')
+        add_gossip_timeout_arg(parser)
 
     def main(self, *, args):
+        warn_if_gossip_timeout_overridden(args)
+
         my_ns_inode = _self_ipc_ns_inode()
         print(f'IPC namespace inode: {my_ns_inode}')
 
         any_ng = False
         for name, fn in [
             ('process       ', lambda: _check_daemon_process(my_ns_inode)),
-            ('gossip        ', lambda: _check_gossip(args.gossip_timeout)),
+            ('gossip        ', lambda: _check_gossip(my_ns_inode, args.gossip_timeout)),
             ('type_registry ', lambda: _check_type_registry(my_ns_inode)),
         ]:
             ok, detail = fn()

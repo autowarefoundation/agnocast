@@ -1,7 +1,7 @@
 """Pure-logic tests for the discovery_daemon_status verb.
 
 The verb itself talks to /proc and DDS, but the small helpers are
-exercised here with a tmp directory in place of `/run/agnocast`.
+exercised here with a tmp directory in place of `/dev/shm/agnocast_type_registry`.
 """
 
 import os
@@ -26,20 +26,36 @@ def test_check_type_registry_empty_dir_returns_ng():
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
             ok, detail = ds._check_type_registry(ns_inode)
         assert ok is False
-        assert 'no <pid>.txt' in detail
+        assert 'no registration from a live process' in detail
 
 
-def test_check_type_registry_with_files_returns_ok():
+def test_check_type_registry_with_live_pid_returns_ok():
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 12345
         ns_dir = os.path.join(tmpdir, str(ns_inode))
         os.makedirs(ns_dir)
-        with open(os.path.join(ns_dir, '4242.txt'), 'w') as fp:
+        # Name the file after our own PID so /proc/<pid> is guaranteed live.
+        with open(os.path.join(ns_dir, f'{os.getpid()}.txt'), 'w') as fp:
             fp.write('/topic\ttype\tpub\t/node\n')
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
             ok, detail = ds._check_type_registry(ns_inode)
         assert ok is True
-        assert '1' in detail
+        assert '1 live registration' in detail
+
+
+def test_check_type_registry_stale_pid_returns_ng():
+    """A <pid>.txt whose process is gone must not pass the check."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ns_inode = 12345
+        ns_dir = os.path.join(tmpdir, str(ns_inode))
+        os.makedirs(ns_dir)
+        # PID 999999999 is unlikely to be alive.
+        with open(os.path.join(ns_dir, '999999999.txt'), 'w') as fp:
+            fp.write('/topic\ttype\tpub\t/node\n')
+        with patch.object(ds, '_type_registry_base', return_value=tmpdir):
+            ok, detail = ds._check_type_registry(ns_inode)
+        assert ok is False
+        assert 'stale' in detail
 
 
 def test_check_daemon_process_self_ns_no_match():
