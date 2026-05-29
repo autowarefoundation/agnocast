@@ -128,15 +128,20 @@ jobs:
           while IFS= read -r f; do
             cp "${f}" "${f#${share}/gcov}"
           done < <(find "${share}/gcov${build}" -name '*.gcda')
-          lcov --capture --quiet --directory "${build}/drivers/agnocast" -o coverage.info
+          # geninfo_unexecuted_blocks=1 keeps gcov/gcc version skew from
+          # mis-counting (the "unexecuted block ... non-zero hit count" warning).
+          lcov --capture --quiet --rc geninfo_unexecuted_blocks=1 \
+            --directory "${build}/drivers/agnocast" -o coverage.info
           # Keep only Agnocast production .c (drop the KUnit test code).
           lcov --quiet --extract coverage.info '*/drivers/agnocast/*.c' -o coverage.info
           lcov --quiet --remove coverage.info '*/agnocast_kunit/*' '*/agnocast_kunit_main.c' -o coverage.info
           genhtml --quiet coverage.info --output-directory coverage-html
+          # Emit the same table to the log (debuggable) and the job summary.
+          lcov --list coverage.info | tee coverage-list.txt
           {
             echo '## Agnocast kmod KUnit coverage'
             echo '```'
-            lcov --list coverage.info
+            cat coverage-list.txt
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
