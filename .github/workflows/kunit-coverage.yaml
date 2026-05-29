@@ -135,14 +135,16 @@ jobs:
           # Keep only Agnocast production .c (drop the KUnit test code).
           lcov --quiet --extract coverage.info '*/drivers/agnocast/*.c' -o coverage.info
           lcov --quiet --remove coverage.info '*/agnocast_kunit/*' '*/agnocast_kunit_main.c' -o coverage.info
-          genhtml --quiet coverage.info --output-directory coverage-html
-          # Emit the same table to the log (debuggable) and the job summary.
-          lcov --list coverage.info | tee coverage-list.txt
+          # Use genhtml's own summary for the report: it matches the uploaded
+          # HTML, whereas `lcov --list` mis-renders the rates under lcov 2.x
+          # (shows ~0% functions). The per-file breakdown is in the artifact.
+          genhtml coverage.info --output-directory coverage-html | tee genhtml.log
           {
-            echo '## Agnocast kmod KUnit coverage'
+            echo '## Agnocast kmod KUnit coverage (production .c only)'
             echo '```'
-            cat coverage-list.txt
+            grep -A2 'Overall coverage rate' genhtml.log
             echo '```'
+            echo '_Per-file breakdown: download the `agnocast-kunit-coverage` HTML artifact._'
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload HTML coverage report
