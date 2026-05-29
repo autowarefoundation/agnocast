@@ -66,6 +66,7 @@ class BasicPublisher
   topic_local_id_t id_ = -1;
   std::string topic_name_;
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
+  std::mutex opened_mqs_mtx_;
   rmw_gid_t gid_;
 
   void generate_gid()
@@ -222,8 +223,11 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    const union ioctl_publish_msg_args publish_msg_args =
-      publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
+    union ioctl_publish_msg_args publish_msg_args;
+    {
+      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+      publish_msg_args = publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
+    }
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
