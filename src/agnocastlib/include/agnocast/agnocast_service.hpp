@@ -128,7 +128,7 @@ public:
   {
     static_assert(
       is_basic_cb<Func>::value || is_deferred_cb<Func>::value,
-      "Callback must be callable with on of the following argument pairs:\n"
+      "Callback must be callable with one of the following argument pairs:\n"
       "1. basic: (ipc_shared_ptr<ServiceT::Request>, ipc_shared_ptr<ServiceT::Response>)\n"
       "2. deferred: (std::shared_ptr<Service>, ipc_shared_ptr<ServiceT::Request>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
@@ -173,9 +173,9 @@ public:
    */
   // AGNOCAST_PUBLIC
   ipc_shared_ptr<typename ServiceT::Response> borrow_loaned_response(
-    ipc_shared_ptr<typename ServiceT::Request> request)
+    const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
-    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
     auto publisher = get_or_create_publisher_for(internal_request->_node_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
     response->_sequence_number = internal_request->_sequence_number;
