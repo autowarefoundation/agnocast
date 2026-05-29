@@ -135,16 +135,33 @@ jobs:
           # Keep only Agnocast production .c (drop the KUnit test code).
           lcov --quiet --extract coverage.info '*/drivers/agnocast/*.c' -o coverage.info
           lcov --quiet --remove coverage.info '*/agnocast_kunit/*' '*/agnocast_kunit_main.c' -o coverage.info
-          # Use genhtml's own summary for the report: it matches the uploaded
-          # HTML, whereas `lcov --list` mis-renders the rates under lcov 2.x
-          # (shows ~0% functions). The per-file breakdown is in the artifact.
-          genhtml coverage.info --output-directory coverage-html | tee genhtml.log
+          genhtml --quiet coverage.info --output-directory coverage-html
+          # Build the per-file table straight from the lcov tracefile
+          # (LH/LF lines, FNH/FNF functions) rather than `lcov --list`, which
+          # mis-renders the rates under lcov 2.x (shows ~0% functions). These
+          # numbers are the same ones genhtml puts in the uploaded HTML report.
+          table=$(awk '
+            /^SF:/  { sf = $0; sub(/.*\//, "", sf) }
+            /^LF:/  { lf = substr($0, 4) }
+            /^LH:/  { lh = substr($0, 4) }
+            /^FNF:/ { ff = substr($0, 5) }
+            /^FNH:/ { fh = substr($0, 5) }
+            /^end_of_record/ {
+              printf "| %s | %.1f%% (%d/%d) | %.1f%% (%d/%d) |\n", \
+                sf, (lf ? 100*lh/lf : 0), lh, lf, (ff ? 100*fh/ff : 0), fh, ff
+              TLF += lf; TLH += lh; TFF += ff; TFH += fh
+            }
+            END {
+              printf "| **Total** | **%.1f%% (%d/%d)** | **%.1f%% (%d/%d)** |\n", \
+                (TLF ? 100*TLH/TLF : 0), TLH, TLF, (TFF ? 100*TFH/TFF : 0), TFH, TFF
+            }' coverage.info)
+          echo "${table}"
           {
             echo '## Agnocast kmod KUnit coverage (production .c only)'
-            echo '```'
-            grep -A2 'Overall coverage rate' genhtml.log
-            echo '```'
-            echo '_Per-file breakdown: download the `agnocast-kunit-coverage` HTML artifact._'
+            echo ''
+            echo '| File | Lines | Functions |'
+            echo '|---|---|---|'
+            echo "${table}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload HTML coverage report
