@@ -16,6 +16,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -348,25 +349,21 @@ void send_standard_pubsub_bridge_request(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   static const auto logger = rclcpp::get_logger("agnocast_bridge_requester");
-  // We capture 'fn_reverse' because bridge_manager is responsible for managing both directions
-  // independently. Storing the reverse factory allows us to instantiate the return path on-demand
-  // within the same process.
-  auto fn_current = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_r2a_pubsub_node<MessageT>
-                                                     : &start_a2r_pubsub_node<MessageT>);
-  auto fn_reverse = reinterpret_cast<uintptr_t>(
-    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? &start_a2r_pubsub_node<MessageT>
-                                                     : &start_r2a_pubsub_node<MessageT>);
 
-  MqMsgBridge msg = {};
-  msg.direction = direction;
-  msg.is_service = false;
-  msg.pubsub_target.target_id = id;
-  snprintf(
-    static_cast<char *>(msg.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
-    topic_name.c_str());
-  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
-    return;
+  auto fn_r2a = reinterpret_cast<uintptr_t>(&start_r2a_pubsub_node<MessageT>);
+  auto fn_a2r = reinterpret_cast<uintptr_t>(&start_a2r_pubsub_node<MessageT>);
+
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
+                         .set_direction(direction)
+                         .set_is_service(false)
+                         .set_pubsub_target_id(id)
+                         .set_topic_name(topic_name.c_str())
+                         .set_factory(fn_r2a, fn_a2r)
+                         .build_standard_message();
+  if (!reason.empty()) {
+    RCLCPP_ERROR(logger, "Failed to build standard pubsub bridge request: %s", reason.c_str());
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   std::string mq_name = create_mq_name_for_bridge(standard_bridge_manager_pid);
@@ -380,26 +377,22 @@ void send_standard_service_bridge_request(
 {
   static const auto logger = rclcpp::get_logger("agnocast_service_bridge_requester");
 
-  // TODO(bdm-k): Branch depending on `direction` and specify `start_a2r_service_node` once it's
-  // implemented. Service bridges currently support only the ROS2 -> Agnocast direction.
-  auto fn_current = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
-  auto fn_reverse = fn_current;  // dummy value
+  auto fn_r2a = reinterpret_cast<uintptr_t>(&start_r2a_service_node<ServiceT>);
+  // TODO(bdm-k): Specify `start_a2r_service_node` once it's implemented.
+  // Service bridges currently support only the ROS2 -> Agnocast direction.
+  auto fn_a2r = fn_r2a;  // dummy value
 
-  MqMsgBridge msg = {};
-  msg.direction = direction;
-  msg.is_service = true;
-  snprintf(
-    static_cast<char *>(msg.srv_target.service_name), SERVICE_NAME_BUFFER_SIZE, "%s",
-    service_name.c_str());
-  msg.srv_target.create_shadow_node = shadow_node_identity.has_value();
-  snprintf(
-    static_cast<char *>(msg.srv_target.shadow_node_namespace), NODE_NAME_BUFFER_SIZE, "%s",
-    shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "");
-  snprintf(
-    static_cast<char *>(msg.srv_target.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
-    shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "");
-  if (!build_bridge_factory_info(msg.factory, fn_current, fn_reverse, logger)) {
-    return;
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger)
+                         .set_direction(direction)
+                         .set_is_service(true)
+                         .set_service_name(service_name.c_str())
+                         .set_shadow_node_identity(shadow_node_identity)
+                         .set_factory(fn_r2a, fn_a2r)
+                         .build_standard_message();
+  if (!reason.empty()) {
+    RCLCPP_ERROR(logger, "Failed to build standard service bridge request: %s", reason.c_str());
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
   }
 
   std::string mq_name = create_mq_name_for_bridge(standard_bridge_manager_pid);
@@ -414,13 +407,18 @@ void send_performance_pubsub_bridge_request(
 
   const std::string message_type_name = rosidl_generator_traits::name<MessageT>();
 
-  MqMsgPerformanceBridge msg = {};
-  snprintf(
-    msg.pubsub_target.message_type, MESSAGE_TYPE_BUFFER_SIZE, "%s", message_type_name.c_str());
-  snprintf(msg.pubsub_target.topic_name, TOPIC_NAME_BUFFER_SIZE, "%s", topic_name.c_str());
-  msg.pubsub_target.target_id = id;
-  msg.direction = direction;
-  msg.is_service = false;
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
+                         .set_direction(direction)
+                         .set_is_service(false)
+                         .set_message_type(message_type_name.c_str())
+                         .set_topic_name(topic_name.c_str())
+                         .set_pubsub_target_id(id)
+                         .build_performance_message();
+  if (!reason.empty()) {
+    RCLCPP_ERROR(logger, "Failed to build performance pubsub bridge request: %s", reason.c_str());
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
 
   std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
   send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);
@@ -435,18 +433,18 @@ void send_performance_service_bridge_request(
 
   const std::string service_type_name = rosidl_generator_traits::name<ServiceT>();
 
-  MqMsgPerformanceBridge msg = {};
-  snprintf(msg.srv_target.service_type, SERVICE_TYPE_BUFFER_SIZE, "%s", service_type_name.c_str());
-  snprintf(msg.srv_target.service_name, SERVICE_NAME_BUFFER_SIZE, "%s", service_name.c_str());
-  msg.srv_target.create_shadow_node = shadow_node_identity.has_value();
-  snprintf(
-    static_cast<char *>(msg.srv_target.shadow_node_namespace), NODE_NAME_BUFFER_SIZE, "%s",
-    shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "");
-  snprintf(
-    static_cast<char *>(msg.srv_target.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
-    shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "");
-  msg.direction = direction;
-  msg.is_service = true;
+  auto [msg, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Performance, logger)
+                         .set_direction(direction)
+                         .set_is_service(true)
+                         .set_service_type(service_type_name.c_str())
+                         .set_service_name(service_name.c_str())
+                         .set_shadow_node_identity(shadow_node_identity)
+                         .build_performance_message();
+  if (!reason.empty()) {
+    RCLCPP_ERROR(logger, "Failed to build performance service bridge request: %s", reason.c_str());
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
 
   std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
   send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);

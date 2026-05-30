@@ -8,11 +8,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <cstdarg>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace agnocast
 {
@@ -232,64 +236,218 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
   }
 }
 
-bool build_bridge_factory_info(
-  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
-  const rclcpp::Logger & logger)
+BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger)
+: logger_(logger), failed_(false)
 {
+  if (mode == Mode::Standard) {
+    msg_ = MqMsgBridge{};
+  } else {
+    msg_ = MqMsgPerformanceBridge{};
+  }
+}
+
+// NOLINTBEGIN(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(nullptr, 0, format, args);
+  va_end(args);
+
+  if (n < 0) {
+    failed_ = true;
+    reason_ = "Failed to format error message";
+    return *this;
+  }
+
+  std::string buf(n + 1, '\0');
+  va_start(args, format);
+  vsnprintf(buf.data(), n + 1, format, args);
+  va_end(args);
+  // Drop the trailing null terminator.
+  buf.resize(n);
+
+  failed_ = true;
+  reason_ = std::move(buf);
+  return *this;
+}
+
+int BridgeRequestMsgBuilder::checked_snprintf(
+  const std::string & member, char * buffer, size_t size, const char * format, ...)
+{
+  if (failed_) return -1;
+
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(buffer, size, format, args);
+  va_end(args);
+
+  if (n < 0) {
+    fail("snprintf() for '%s' returned a negative value", member.c_str());
+  } else if (static_cast<size_t>(n) >= size) {
+    fail(
+      "snprintf() for '%s' failed; length must be %zu characters or fewer", member.c_str(),
+      size - 1);
+  }
+
+  return n;
+}
+// NOLINTEND(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_direction(BridgeDirection direction)
+{
+  std::visit([direction](auto && msg) { msg.direction = direction; }, msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_is_service(bool is_service)
+{
+  std::visit([is_service](auto && msg) { msg.is_service = is_service; }, msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r)
+{
+  if (!std::holds_alternative<MqMsgBridge>(msg_)) {
+    return fail("'factory' is only for standard bridges");
+  }
+  auto & standard_msg = std::get<MqMsgBridge>(msg_);
+
   Dl_info info = {};
-  if (dladdr(reinterpret_cast<void *>(fn_current), &info) == 0 || info.dli_fname == nullptr) {
-    RCLCPP_ERROR(logger, "dladdr failed or filename NULL.");
-    return false;
+  if (dladdr(reinterpret_cast<void *>(fn_r2a), &info) == 0 || info.dli_fname == nullptr) {
+    return fail("dladdr failed or filename NULL");
   }
 
   std::error_code ec;
   auto self_path = std::filesystem::read_symlink("/proc/self/exe", ec);
 
   bool is_self_executable = false;
-  if (!ec) {
+  if (ec) {
+    RCLCPP_WARN(logger_, "Failed to read symlink '/proc/self/exe': %s", ec.message().c_str());
+  } else {
     std::filesystem::path factory_lib_path(info.dli_fname);
     if (std::filesystem::equivalent(factory_lib_path, self_path, ec)) {
       is_self_executable = true;
     } else if (ec) {
       RCLCPP_WARN(
-        logger, "Filesystem check error for '%s' vs '%s': %s", info.dli_fname, self_path.c_str(),
+        logger_, "Filesystem check error for '%s' vs '%s': %s", info.dli_fname, self_path.c_str(),
         ec.message().c_str());
     }
   }
 
-  const char * symbol_to_send = MAIN_EXECUTABLE_SYMBOL;
-  if (!is_self_executable && info.dli_sname != nullptr) {
-    symbol_to_send = info.dli_sname;
-  }
-
-  int shared_lib_path_len = snprintf(
-    static_cast<char *>(factory.shared_lib_path), SHARED_LIB_PATH_BUFFER_SIZE, "%s",
-    info.dli_fname);
-  if (
-    shared_lib_path_len < 0 ||
-    shared_lib_path_len >= static_cast<int>(SHARED_LIB_PATH_BUFFER_SIZE)) {
-    RCLCPP_ERROR(
-      logger,
-      "snprintf failed for shared library path '%s'; length must be %ld characters or fewer",
-      info.dli_fname, SHARED_LIB_PATH_BUFFER_SIZE - 1);
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-  int symbol_name_len = snprintf(
-    static_cast<char *>(factory.symbol_name), SYMBOL_NAME_BUFFER_SIZE, "%s", symbol_to_send);
-  if (symbol_name_len < 0 || symbol_name_len >= static_cast<int>(SYMBOL_NAME_BUFFER_SIZE)) {
-    RCLCPP_ERROR(
-      logger, "snprintf failed for symbol name '%s'; length must be %ld characters or fewer",
-      symbol_to_send, SYMBOL_NAME_BUFFER_SIZE - 1);
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
+  checked_snprintf(
+    "shared_lib_path", static_cast<char *>(standard_msg.factory.shared_lib_path),
+    SHARED_LIB_PATH_BUFFER_SIZE, "%s", info.dli_fname);
+  standard_msg.factory.in_main_executable = is_self_executable;
 
   auto base_addr = reinterpret_cast<uintptr_t>(info.dli_fbase);
-  factory.fn_offset = fn_current - base_addr;
-  factory.fn_offset_reverse = fn_reverse - base_addr;
+  standard_msg.factory.fn_offset_r2a = fn_r2a - base_addr;
+  standard_msg.factory.fn_offset_a2r = fn_a2r - base_addr;
 
-  return true;
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_message_type(const char * message_type)
+{
+  std::visit(
+    [this, message_type](auto && msg) {
+      if constexpr (std::is_same_v<std::decay_t<decltype(msg)>, MqMsgPerformanceBridge>) {
+        this->checked_snprintf(
+          "message_type", static_cast<char *>(msg.pubsub_target.message_type),
+          MESSAGE_TYPE_BUFFER_SIZE, "%s", message_type);
+      } else {
+        this->fail("'message_type' is only for performance bridges");
+      }
+    },
+    msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_topic_name(const char * topic_name)
+{
+  std::visit(
+    [this, topic_name](auto && msg) {
+      this->checked_snprintf(
+        "topic_name", static_cast<char *>(msg.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE,
+        "%s", topic_name);
+    },
+    msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_pubsub_target_id(topic_local_id_t target_id)
+{
+  std::visit([target_id](auto && msg) { msg.pubsub_target.target_id = target_id; }, msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_type(const char * service_type)
+{
+  std::visit(
+    [this, service_type](auto && msg) {
+      if constexpr (std::is_same_v<std::decay_t<decltype(msg)>, MqMsgPerformanceBridge>) {
+        this->checked_snprintf(
+          "service_type", static_cast<char *>(msg.srv_target.service_type),
+          SERVICE_TYPE_BUFFER_SIZE, "%s", service_type);
+      } else {
+        this->fail("'service_type' is only for performance service bridges");
+      }
+    },
+    msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_name(const char * service_name)
+{
+  std::visit(
+    [this, service_name](auto && msg) {
+      this->checked_snprintf(
+        "service_name", static_cast<char *>(msg.srv_target.service_name), SERVICE_NAME_BUFFER_SIZE,
+        "%s", service_name);
+    },
+    msg_);
+  return *this;
+}
+
+BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_shadow_node_identity(
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
+{
+  std::visit(
+    [this, &shadow_node_identity](auto && msg) {
+      msg.srv_target.create_shadow_node = shadow_node_identity.has_value();
+
+      const char * shadow_node_namespace =
+        shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "";
+      const char * shadow_node_name =
+        shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "";
+
+      this->checked_snprintf(
+        "shadow_node_namespace", static_cast<char *>(msg.srv_target.shadow_node_namespace),
+        NODE_NAME_BUFFER_SIZE, "%s", shadow_node_namespace);
+      this->checked_snprintf(
+        "shadow_node_name", static_cast<char *>(msg.srv_target.shadow_node_name),
+        NODE_NAME_BUFFER_SIZE, "%s", shadow_node_name);
+    },
+    msg_);
+  return *this;
+}
+
+std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_message()
+{
+  assert(std::holds_alternative<MqMsgBridge>(msg_));
+
+  auto & msg = std::get<MqMsgBridge>(msg_);
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
+}
+
+std::pair<MqMsgPerformanceBridge, std::string> BridgeRequestMsgBuilder::build_performance_message()
+{
+  assert(std::holds_alternative<MqMsgPerformanceBridge>(msg_));
+
+  auto & msg = std::get<MqMsgPerformanceBridge>(msg_);
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
 }
 
 }  // namespace agnocast

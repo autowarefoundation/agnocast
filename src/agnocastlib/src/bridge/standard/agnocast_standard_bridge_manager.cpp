@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace agnocast
 {
@@ -161,24 +162,20 @@ void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)
 
     auto & entry = managed_pubsub_bridges_[topic_name];
 
-    if (
-      std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) ==
-      0) {
+    if (req.factory.in_main_executable) {
       entry.factory_spec.shared_lib_path = std::nullopt;
     } else {
       entry.factory_spec.shared_lib_path =
         std::string(static_cast<const char *>(req.factory.shared_lib_path));
     }
+    entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_r2a;
+    entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_a2r;
 
     if (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
-      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset;
-      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
       entry.target_id_r2a = req.pubsub_target.target_id;
       entry.is_requested_r2a = true;
       entry.reset_a2r();
     } else {
-      entry.factory_spec.fn_offset_r2a = req.factory.fn_offset_reverse;
-      entry.factory_spec.fn_offset_a2r = req.factory.fn_offset;
       entry.target_id_a2r = req.pubsub_target.target_id;
       entry.is_requested_a2r = true;
       entry.reset_r2a();
@@ -299,20 +296,21 @@ void StandardBridgeManager::send_pubsub_delegation(
   }
 
   /* --- Construct request --- */
-  MqMsgBridge req{};
-  req.direction = direction;
-  req.is_service = false;
-  req.pubsub_target.target_id =
+  const topic_local_id_t target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
-  int topic_name_len = snprintf(
-    static_cast<char *>(req.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
-    topic_name.c_str());
+
+  auto [req, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger_)
+                         .set_direction(direction)
+                         .set_is_service(false)
+                         .set_topic_name(topic_name.c_str())
+                         .set_pubsub_target_id(target_id)
+                         .build_standard_message();
   // req.factory can be left zeroed because it is not going to be used.
 
-  if (topic_name_len < 0 || topic_name_len >= TOPIC_NAME_BUFFER_SIZE) {
+  if (!reason.empty()) {
     RCLCPP_ERROR(
-      logger_, "snprintf failed for topic name '%s'; length must be %d characters or fewer",
-      topic_name.c_str(), TOPIC_NAME_BUFFER_SIZE - 1);
+      logger_, "Failed to build delegation request for topic '%s': %s", topic_name.c_str(),
+      reason.c_str());
     if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
       RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
     }
@@ -430,15 +428,14 @@ void StandardBridgeManager::create_service_bridge_if_needed(const MqMsgBridge & 
 
   // Build the bridge factory spec.
   BridgeFactorySpec factory_spec;
-  if (
-    std::strcmp(static_cast<const char *>(req.factory.symbol_name), MAIN_EXECUTABLE_SYMBOL) == 0) {
+  if (req.factory.in_main_executable) {
     factory_spec.shared_lib_path = std::nullopt;
   } else {
     factory_spec.shared_lib_path =
       std::string(static_cast<const char *>(req.factory.shared_lib_path));
   }
-  factory_spec.fn_offset_r2a = req.factory.fn_offset;
-  factory_spec.fn_offset_a2r = req.factory.fn_offset_reverse;
+  factory_spec.fn_offset_r2a = req.factory.fn_offset_r2a;
+  factory_spec.fn_offset_a2r = req.factory.fn_offset_a2r;
 
   try {
     // Check that the target service does not already exist in ROS 2.

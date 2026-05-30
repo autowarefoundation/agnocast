@@ -7,10 +7,12 @@
 
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 namespace agnocast
 {
@@ -67,11 +69,45 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
 rclcpp::QoS get_service_qos(const std::string & service_name);
 bool is_agnocast_service_alive(const std::string & service_name, std::string & reason);
 
-/// @brief Build `BridgeFactoryInfo` for standard bridge requests.
-/// @return true when the bridge factory is successfully built, false otherwise.
-bool build_bridge_factory_info(
-  BridgeFactoryInfo & factory, uintptr_t fn_current, uintptr_t fn_reverse,
-  const rclcpp::Logger & logger);
+/// @brief A builder class for creating bridge request messages.
+///
+/// It handles errors such as setting non-existent fields or invalid values for each field, and the
+/// `build_*` member functions return an error reason. However, it does not check whether the
+/// computed message as a whole is valid. It's the caller's responsibility to invoke a correct
+/// set of setters to build a valid message.
+class BridgeRequestMsgBuilder
+{
+  std::variant<MqMsgBridge, MqMsgPerformanceBridge> msg_;
+  rclcpp::Logger logger_;
+  bool failed_;
+  std::string reason_;
+
+  BridgeRequestMsgBuilder & fail(const char * format, ...);
+  int checked_snprintf(
+    const std::string & member, char * buffer, size_t size, const char * format, ...);
+
+public:
+  enum class Mode {
+    Standard,
+    Performance,
+  };
+
+  explicit BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger);
+
+  BridgeRequestMsgBuilder & set_direction(BridgeDirection direction);
+  BridgeRequestMsgBuilder & set_is_service(bool is_service);
+  BridgeRequestMsgBuilder & set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r);
+  BridgeRequestMsgBuilder & set_message_type(const char * message_type);
+  BridgeRequestMsgBuilder & set_topic_name(const char * topic_name);
+  BridgeRequestMsgBuilder & set_pubsub_target_id(topic_local_id_t target_id);
+  BridgeRequestMsgBuilder & set_service_type(const char * service_type);
+  BridgeRequestMsgBuilder & set_service_name(const char * service_name);
+  BridgeRequestMsgBuilder & set_shadow_node_identity(
+    const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
+
+  std::pair<MqMsgBridge, std::string> build_standard_message();
+  std::pair<MqMsgPerformanceBridge, std::string> build_performance_message();
+};
 
 template <typename MapT>
 std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
