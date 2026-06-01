@@ -13,7 +13,6 @@
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -249,7 +248,9 @@ inline void IpcEventLoopBase::setup_epoll()
 
   add_fd_to_epoll(mq_fd_, "MQ");
   add_fd_to_epoll(signal_fd_, "Signal");
-  add_fd_to_epoll(socket_fd_, "Socket");
+  if (socket_fd_ != -1) {
+    add_fd_to_epoll(socket_fd_, "Socket");
+  }
 }
 
 // Sets up a Unix domain socket for debug use.
@@ -269,40 +270,55 @@ inline void IpcEventLoopBase::setup_socket()
   const std::string root_dir =
     std::string(env != nullptr && *env != '\0' ? env : "/dev/shm") + "/agnocast_bridge_control";
   if (mkdir(root_dir.c_str(), 0755) == -1 && errno != EEXIST) {
-    throw std::system_error(errno, std::generic_category(), "mkdir failed: " + root_dir);
+    RCLCPP_WARN(
+      logger_, "setup_socket: mkdir failed for '%s': %s (socket disabled)", root_dir.c_str(),
+      strerror(errno));
+    return;
   }
 
   const std::string base_dir = root_dir + "/" + std::to_string(get_self_ipc_ns_inode());
   if (mkdir(base_dir.c_str(), 0755) == -1 && errno != EEXIST) {
-    throw std::system_error(errno, std::generic_category(), "mkdir failed: " + base_dir);
+    RCLCPP_WARN(
+      logger_, "setup_socket: mkdir failed for '%s': %s (socket disabled)", base_dir.c_str(),
+      strerror(errno));
+    return;
   }
 
   socket_path_ = base_dir + "/" + std::to_string(getpid()) + ".sock";
 
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd == -1) {
-    throw std::system_error(errno, std::generic_category(), "socket failed");
+    RCLCPP_WARN(logger_, "setup_socket: socket() failed: %s (socket disabled)", strerror(errno));
+    return;
   }
-  socket_fd_ = fd;
 
   struct sockaddr_un addr
   {
   };
   addr.sun_family = AF_UNIX;
   if (socket_path_.size() >= sizeof(addr.sun_path)) {
-    throw std::runtime_error("Socket path too long: " + socket_path_);
+    RCLCPP_WARN(
+      logger_, "setup_socket: path too long: '%s' (socket disabled)", socket_path_.c_str());
+    close(fd);
+    return;
   }
   memcpy(addr.sun_path, socket_path_.c_str(), socket_path_.size() + 1);
 
   unlink(socket_path_.c_str());  // remove stale file if any
 
-  if (bind(socket_fd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == -1) {
-    throw std::system_error(errno, std::generic_category(), "socket bind failed");
+  if (bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == -1) {
+    RCLCPP_WARN(logger_, "setup_socket: bind() failed: %s (socket disabled)", strerror(errno));
+    close(fd);
+    return;
   }
 
-  if (listen(socket_fd_, 4) == -1) {
-    throw std::system_error(errno, std::generic_category(), "socket listen failed");
+  if (listen(fd, 4) == -1) {
+    RCLCPP_WARN(logger_, "setup_socket: listen() failed: %s (socket disabled)", strerror(errno));
+    close(fd);
+    return;
   }
+
+  socket_fd_ = fd;
 }
 
 inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const

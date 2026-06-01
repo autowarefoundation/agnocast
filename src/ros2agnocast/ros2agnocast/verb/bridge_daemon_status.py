@@ -80,7 +80,8 @@ class BridgeControlSocket:
                 if not chunk:
                     break
                 chunks.append(chunk)
-        except Exception:
+        except OSError:
+             # Treat any connect/recv error as a liveness failure.
             pass
         finally:
             sock.close()
@@ -243,7 +244,7 @@ class BridgeDaemonStatusVerb(VerbExtension):
         stale_paths = [_sock_path_for_pid(ipc_inode, pid) for pid in stale_pids]
 
         summary, is_ng = _build_summary(results)
-        
+
         # output
         if verbose:
             print(f'IPC namespace inode: {ipc_inode}')
