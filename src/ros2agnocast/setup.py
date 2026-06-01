@@ -33,6 +33,9 @@ setup(
         'ros2topic.verb': [
             'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.topic_info_agnocast:TopicInfoAgnocastVerb',
+            'hz_agnocast = ros2agnocast.verb.topic_hz_agnocast:TopicHzAgnocastVerb',
+            'echo_agnocast = ros2agnocast.verb.topic_echo_agnocast:TopicEchoAgnocastVerb',
+            'delay_agnocast = ros2agnocast.verb.topic_delay_agnocast:TopicDelayAgnocastVerb',
         ],
         'ros2node.verb': [
             'list_agnocast = ros2agnocast.verb.node_list_agnocast:ListAgnocastVerb',
