@@ -69,6 +69,7 @@ void StandardBridgeManager::run()
 
   event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
+  event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
 
   while (!shutdown_requested_) {
     if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
@@ -132,6 +133,12 @@ void StandardBridgeManager::on_signal()
   if (executor_) {
     executor_->cancel();
   }
+}
+
+std::string StandardBridgeManager::on_socket_request()
+{
+  return "{\"type\":\"standard\",\"ipc_ns\":" + std::to_string(get_self_ipc_ns_inode()) +
+         ",\"pid\":" + std::to_string(getpid()) + "}";
 }
 
 void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)

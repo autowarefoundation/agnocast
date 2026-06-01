@@ -11,12 +11,16 @@
 #include <mqueue.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <array>
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -33,6 +37,7 @@ class IpcEventLoopBase
 public:
   using EventCallback = std::function<void(int)>;
   using SignalCallback = std::function<void()>;
+  using SocketCallback = std::function<std::string()>;
 
   IpcEventLoopBase(
     const rclcpp::Logger & logger, const std::string & mq_name, long mq_msg_size,
@@ -47,6 +52,7 @@ public:
 
   void set_mq_handler(EventCallback cb);
   void set_signal_handler(SignalCallback cb);
+  void set_socket_handler(SocketCallback cb);
 
   const std::string & get_mq_name() const { return mq_name_; }
 
@@ -58,6 +64,9 @@ private:
   int epoll_fd_ = -1;
   int signal_fd_ = -1;
 
+  int socket_fd_ = -1;
+  std::string socket_path_;
+
   mqd_t mq_fd_ = (mqd_t)-1;
   std::string mq_name_;
 
@@ -65,15 +74,18 @@ private:
 
   EventCallback mq_cb_;
   SignalCallback signal_cb_;
+  SocketCallback socket_cb_;
 
   void setup_mq();
   void setup_signals(
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
   void setup_epoll();
+  void setup_socket();
   void cleanup_resources();
 
   mqd_t create_and_open_mq(const std::string & name) const;
   void add_fd_to_epoll(int fd, const std::string & label) const;
+  void handle_socket(int client_fd);
 
   static void ignore_signals_impl(const std::vector<int> & signals);
   static sigset_t block_signals_impl(const std::vector<int> & signals);
@@ -87,6 +99,7 @@ inline IpcEventLoopBase::IpcEventLoopBase(
   try {
     setup_mq();
     setup_signals(signals_to_block, signals_to_ignore);
+    setup_socket();
     setup_epoll();
   } catch (...) {
     cleanup_resources();
@@ -129,6 +142,14 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
       if (s == sizeof(struct signalfd_siginfo)) {
         handle_signal();
       }
+    } else if (fd == socket_fd_) {
+      int client_fd = accept4(socket_fd_, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+      if (client_fd == -1) {
+        RCLCPP_WARN(logger_, "accept4 on socket failed: %s", strerror(errno));
+      } else {
+        handle_socket(client_fd);
+        close(client_fd);
+      }
     }
   }
   return true;
@@ -139,6 +160,57 @@ inline void IpcEventLoopBase::handle_signal()
   if (signal_cb_) {
     signal_cb_();
   }
+}
+
+inline void IpcEventLoopBase::handle_socket(int client_fd)
+{
+  if (!socket_cb_) {
+    return;
+  }
+
+  const std::string response = socket_cb_();
+  if (response.empty()) {
+    return;
+  }
+
+  // This socket is used for debug purposes only and must not block the main IpcEventLoop
+  // processing. The client fd is non-blocking (SOCK_NONBLOCK), so send() may return EAGAIN if the
+  // send buffer is temporarily full. In that case, we retry up to MAX_RETRIES consecutive times. If
+  // partial progress is made between retries, the retry counter is reset so that only consecutive
+  // EAGAIN failures count toward the limit. EINTR is retried transparently and does not increment
+  // the retry counter. For any other error (e.g. EPIPE), or when the retry limit is reached, a
+  // warning is logged and the send is abandoned without affecting the main processing.
+  constexpr int MAX_RETRIES = 3;
+  size_t sent = 0;
+  int retries = 0;
+
+  while (sent < response.size() && retries < MAX_RETRIES) {
+    ssize_t n = send(client_fd, response.data() + sent, response.size() - sent, MSG_NOSIGNAL);
+    if (n > 0) {
+      sent += static_cast<size_t>(n);
+      retries = 0;  // reset on progress; retries counts only consecutive EAGAIN failures
+    } else if (n == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        ++retries;
+      } else if (errno == EINTR) {
+        // EINTR is harmless; retry without counting it as a failure
+      } else {
+        RCLCPP_WARN(logger_, "send on socket failed: %s", strerror(errno));
+        return;
+      }
+    }
+  }
+
+  if (sent < response.size()) {
+    RCLCPP_WARN(
+      logger_, "send on socket incomplete after retries: sent %zu of %zu bytes", sent,
+      response.size());
+  }
+}
+
+inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
+{
+  socket_cb_ = std::move(cb);
 }
 
 inline void IpcEventLoopBase::set_mq_handler(EventCallback cb)
@@ -177,6 +249,60 @@ inline void IpcEventLoopBase::setup_epoll()
 
   add_fd_to_epoll(mq_fd_, "MQ");
   add_fd_to_epoll(signal_fd_, "Signal");
+  add_fd_to_epoll(socket_fd_, "Socket");
+}
+
+// Sets up a Unix domain socket for debug use.
+//
+// Communication is one-way (Bridge process -> CLI): when a client connects, the
+// string returned by socket_cb_ is immediately sent to the client and the
+// connection is closed. The server never reads from the client; the act of
+// connecting is itself the trigger.
+//
+// Currently this socket is used for liveness checks: the CLI connects to
+// confirm the Bridge process is running and receives a status string in
+// response. Because no request payload is expected, recv()/read() is
+// intentionally absent from handle_socket().
+inline void IpcEventLoopBase::setup_socket()
+{
+  const char * env = std::getenv("AGNOCAST_TMPFS_DIR");
+  const std::string root_dir =
+    std::string(env != nullptr && *env != '\0' ? env : "/dev/shm") + "/agnocast_bridge_control";
+  if (mkdir(root_dir.c_str(), 0755) == -1 && errno != EEXIST) {
+    throw std::system_error(errno, std::generic_category(), "mkdir failed: " + root_dir);
+  }
+
+  const std::string base_dir = root_dir + "/" + std::to_string(get_self_ipc_ns_inode());
+  if (mkdir(base_dir.c_str(), 0755) == -1 && errno != EEXIST) {
+    throw std::system_error(errno, std::generic_category(), "mkdir failed: " + base_dir);
+  }
+
+  socket_path_ = base_dir + "/" + std::to_string(getpid()) + ".sock";
+
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  if (fd == -1) {
+    throw std::system_error(errno, std::generic_category(), "socket failed");
+  }
+  socket_fd_ = fd;
+
+  struct sockaddr_un addr
+  {
+  };
+  addr.sun_family = AF_UNIX;
+  if (socket_path_.size() >= sizeof(addr.sun_path)) {
+    throw std::runtime_error("Socket path too long: " + socket_path_);
+  }
+  memcpy(addr.sun_path, socket_path_.c_str(), socket_path_.size() + 1);
+
+  unlink(socket_path_.c_str());  // remove stale file if any
+
+  if (bind(socket_fd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == -1) {
+    throw std::system_error(errno, std::generic_category(), "socket bind failed");
+  }
+
+  if (listen(socket_fd_, 4) == -1) {
+    throw std::system_error(errno, std::generic_category(), "socket listen failed");
+  }
 }
 
 inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const
@@ -248,6 +374,20 @@ inline void IpcEventLoopBase::cleanup_resources()
       RCLCPP_WARN(logger_, "Failed to close epoll_fd: %s", strerror(errno));
     }
     epoll_fd_ = -1;
+  }
+
+  if (socket_fd_ != -1) {
+    if (close(socket_fd_) == -1) {
+      RCLCPP_WARN(logger_, "Failed to close socket_fd: %s", strerror(errno));
+    }
+    socket_fd_ = -1;
+  }
+
+  if (!socket_path_.empty()) {
+    if (unlink(socket_path_.c_str()) == -1 && errno != ENOENT) {
+      RCLCPP_WARN(
+        logger_, "Failed to unlink socket '%s': %s", socket_path_.c_str(), strerror(errno));
+    }
   }
 
   if (signal_fd_ != -1) {
