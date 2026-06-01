@@ -1,9 +1,10 @@
 """Pure-logic tests for the discovery_daemon_status verb.
 
-The verb itself talks to /proc and DDS, but the small helpers are
-exercised here with a tmp directory in place of `/dev/shm/agnocast_type_registry`.
+The verb itself talks to /proc and DDS, but the small helpers are exercised
+here with a tmp directory in place of `/dev/shm`.
 """
 
+import fcntl
 import os
 import tempfile
 from unittest.mock import patch
@@ -11,25 +12,25 @@ from unittest.mock import patch
 from ros2agnocast.verb import discovery_daemon_status as ds
 
 
-def test_check_type_registry_missing_dir_returns_ng():
+# --- type_registry: informational description (no OK/NG) --------------------
+
+def test_describe_type_registry_missing_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
-            ok, detail = ds._check_type_registry(999999)
-        assert ok is False
-        assert 'missing' in detail
+            detail = ds._describe_type_registry(999999)
+        assert 'no Agnocast process has registered yet' in detail
 
 
-def test_check_type_registry_empty_dir_returns_ng():
+def test_describe_type_registry_empty_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 12345
         os.makedirs(os.path.join(tmpdir, str(ns_inode)))
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
-            ok, detail = ds._check_type_registry(ns_inode)
-        assert ok is False
-        assert 'no registration from a live process' in detail
+            detail = ds._describe_type_registry(ns_inode)
+        assert 'no Agnocast process has registered yet' in detail
 
 
-def test_check_type_registry_with_live_pid_returns_ok():
+def test_describe_type_registry_with_live_pid_reports_count():
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 12345
         ns_dir = os.path.join(tmpdir, str(ns_inode))
@@ -38,13 +39,12 @@ def test_check_type_registry_with_live_pid_returns_ok():
         with open(os.path.join(ns_dir, f'{os.getpid()}.txt'), 'w') as fp:
             fp.write('/topic\ttype\tpub\t/node\n')
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
-            ok, detail = ds._check_type_registry(ns_inode)
-        assert ok is True
+            detail = ds._describe_type_registry(ns_inode)
         assert '1 live registration' in detail
 
 
-def test_check_type_registry_stale_pid_returns_ng():
-    """A <pid>.txt whose process is gone must not pass the check."""
+def test_describe_type_registry_stale_pid_noted():
+    """A <pid>.txt whose process is gone is noted as stale, not live."""
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 12345
         ns_dir = os.path.join(tmpdir, str(ns_inode))
@@ -53,26 +53,54 @@ def test_check_type_registry_stale_pid_returns_ng():
         with open(os.path.join(ns_dir, '999999999.txt'), 'w') as fp:
             fp.write('/topic\ttype\tpub\t/node\n')
         with patch.object(ds, '_type_registry_base', return_value=tmpdir):
-            ok, detail = ds._check_type_registry(ns_inode)
-        assert ok is False
+            detail = ds._describe_type_registry(ns_inode)
         assert 'stale' in detail
+        assert 'no Agnocast process has registered yet' in detail
 
 
-def test_check_daemon_process_self_ns_no_match():
-    """When no discovery_agent is running in this NS, returns NG.
+# --- daemon process: probe the agent's singleton flock ----------------------
 
-    This test runs in the pytest process's own IPC NS, where no
-    discovery_agent should be present unless the test runner happens to
-    overlap with one — extremely unlikely under normal CI.
-    """
-    my_ns_inode = ds._self_ipc_ns_inode()
-    ok, detail = ds._check_daemon_process(my_ns_inode)
-    # Either no daemon (most cases) or one is genuinely running. Both
-    # are valid outputs; we just assert the function returns the
-    # expected tuple shape and detail string is non-empty.
-    assert isinstance(ok, bool)
-    assert isinstance(detail, str)
-    assert detail
+def test_check_daemon_process_missing_lock_is_ng():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
+            ok, detail = ds._check_daemon_process(424242)
+        assert ok is False
+        assert 'no agent lock' in detail
+
+
+def test_check_daemon_process_free_lock_is_ng():
+    """Lock file exists but nobody holds it -> no live agent."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ns_inode = 424242
+        open(os.path.join(tmpdir, f'agnocast_discovery_agent_{ns_inode}.lock'), 'w').close()
+        with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
+            ok, detail = ds._check_daemon_process(ns_inode)
+        assert ok is False
+        assert 'free' in detail
+
+
+def test_check_daemon_process_held_lock_is_ok():
+    """A held flock (as the real agent holds it) -> OK."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ns_inode = 424242
+        lock_path = os.path.join(tmpdir, f'agnocast_discovery_agent_{ns_inode}.lock')
+        holder = open(lock_path, 'w')
+        try:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
+                ok, detail = ds._check_daemon_process(ns_inode)
+            assert ok is True
+            assert 'holds the singleton lock' in detail
+        finally:
+            holder.close()
+
+
+def test_singleton_lock_path_honors_agnocast_tmpfs_dir(monkeypatch):
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
+    assert ds._singleton_lock_path(7) == '/run/custom/agnocast_discovery_agent_7.lock'
+
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    assert ds._singleton_lock_path(7) == '/dev/shm/agnocast_discovery_agent_7.lock'
 
 
 def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):

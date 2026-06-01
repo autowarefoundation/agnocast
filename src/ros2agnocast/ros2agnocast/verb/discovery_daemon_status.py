@@ -10,15 +10,19 @@ command itself runs in); run it inside the namespace you want to check.
 
 Checks performed (each prints OK / NG with detail):
 
-  * **process** — any ``ros2agnocast_discovery_agent`` process is running
-    in **this** IPC namespace (matched by ``/proc/<pid>/ns/ipc``).
+  * **process** — the discovery agent for **this** IPC namespace is alive,
+    detected by probing the exclusive ``flock(2)`` it holds on its per-NS
+    singleton lock file for its whole lifetime. The lock path already encodes
+    the IPC namespace, so this needs no executable-path matching. (NG if the
+    lock is free or its file is absent.)
   * **gossip** — a snapshot from **this** IPC namespace is received on
     ``/_agnocast_discovery`` within the timeout (snapshots from other
     namespaces sharing the topic don't count).
-  * **type_registry** — the tmpfs directory
-    ``${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/``
-    holds at least one ``<pid>.txt`` whose process is still alive (proves
-    a live Agnocast process has registered).
+  * **type_registry** — *informational only.* Reports how many live Agnocast
+    processes have registered in this namespace under
+    ``${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/``.
+    An empty or absent registry just means nothing has registered yet, so this
+    never counts as NG.
 
 Exit code:
 
@@ -26,6 +30,7 @@ Exit code:
   * 1 — at least one NG (operator should investigate)
 """
 
+import fcntl
 import os
 
 from ros2cli.node.strategy import NodeStrategy
@@ -49,48 +54,47 @@ def _self_ipc_ns_inode():
     return os.stat('/proc/self/ns/ipc').st_ino
 
 
+def _singleton_lock_path(my_ns_inode) -> str:
+    """Path of the agent's per-IPC-namespace singleton lock.
+
+    Must match ``_singleton_lock_path`` in
+    ``ros2agnocast_discovery_agent.agent``, including the ``AGNOCAST_TMPFS_DIR``
+    override, so this verb probes the same file the agent locks.
+    """
+    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
+    return os.path.join(root, f'agnocast_discovery_agent_{my_ns_inode}.lock')
+
+
 def _check_daemon_process(my_ns_inode):
-    """Return (ok, detail) for the daemon-process check."""
-    found_pids = []
-    for pid_str in os.listdir('/proc'):
-        if not pid_str.isdigit():
-            continue
+    """Return (ok, detail) for the daemon-liveness check.
 
-        pid = int(pid_str)
-        # The discovery agent runs as a python script — its ``comm`` is the
-        # python interpreter — so match on cmdline instead.
-        try:
-            with open(f'/proc/{pid}/cmdline', 'rb') as fp:
-                cmdline = fp.read().replace(b'\0', b' ').decode('utf-8', errors='replace')
-        except (FileNotFoundError, PermissionError):
-            continue
+    The agent holds an exclusive ``flock(2)`` on its per-NS lock file for its
+    whole lifetime. We probe that lock with a non-blocking ``LOCK_EX``: if we
+    cannot take it, a live agent in this namespace is holding it. This is more
+    robust than matching the agent's executable path, and the lock path already
+    encodes the IPC namespace. (Closing our fd drops any lock we did take, so a
+    successful probe leaves no lock behind.)
+    """
+    lock_path = _singleton_lock_path(my_ns_inode)
+    if not os.path.exists(lock_path):
+        return False, f'no agent lock at {lock_path}; agent never started in this NS'
 
-        # Match the actual agent binary path so we don't also pick up
-        # ``ros2 run ros2agnocast_discovery_agent discovery_agent``
-        # wrapper processes (whose cmdline contains the same package name
-        # as an argv slot rather than as the executable path).
-        if '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/discovery_agent' \
-                not in cmdline:
-            continue
+    try:
+        fd = os.open(lock_path, os.O_RDONLY | os.O_CLOEXEC)
+    except OSError as e:
+        return False, f'cannot open agent lock {lock_path}: {e}'
 
-        # Must be in the same IPC namespace as the caller.
-        try:
-            their_ns_inode = os.stat(f'/proc/{pid}/ns/ipc').st_ino
-        except (FileNotFoundError, PermissionError):
-            continue
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True, f'agent holds the singleton lock ({lock_path})'
+    except OSError as e:
+        return False, f'cannot probe agent lock {lock_path}: {e}'
+    finally:
+        os.close(fd)
 
-        if their_ns_inode != my_ns_inode:
-            continue
-
-        found_pids.append(pid)
-
-    if not found_pids:
-        return False, 'no discovery_agent process found in this IPC namespace'
-
-    if len(found_pids) > 1:
-        return True, f'pid(s)={found_pids} (warning: multiple daemons running in this NS)'
-
-    return True, f'pid={found_pids[0]}'
+    # We acquired (and, via close above, released) the lock — nobody held it.
+    return False, f'agent lock is free ({lock_path}); no live agent in this NS'
 
 
 def _check_gossip(my_ns_inode, timeout_sec):
@@ -118,17 +122,19 @@ def _check_gossip(my_ns_inode, timeout_sec):
     return False, f'no AgnocastDaemonState received on {GOSSIP_TOPIC} within {timeout_sec}s'
 
 
-def _check_type_registry(my_ns_inode):
-    """Return (ok, detail) for the tmpfs type registry check.
+def _describe_type_registry(my_ns_inode) -> str:
+    """Return a one-line description of the tmpfs type registry.
 
-    A ``<pid>.txt`` file alone isn't enough — a process that died without
-    cleaning up leaves a stale file. We require at least one file whose
-    name is a PID with a live ``/proc/<pid>`` entry, matching the writer's
-    "one live process has registered" contract.
+    This is *informational*, not a liveness signal: an empty or absent
+    registry just means no Agnocast publisher/subscriber has registered in
+    this namespace yet, which is normal and not an agent fault. So it returns
+    a plain description (no OK/NG) of how many live registrations exist. Stale
+    ``<pid>.txt`` files (process gone) are counted separately and don't count
+    as live.
     """
     ns_dir = os.path.join(_type_registry_base(), str(my_ns_inode))
     if not os.path.isdir(ns_dir):
-        return False, f'directory missing: {ns_dir}'
+        return f'no Agnocast process has registered yet ({ns_dir} absent)'
 
     live = 0
     stale = 0
@@ -146,12 +152,12 @@ def _check_type_registry(my_ns_inode):
             stale += 1
 
     if live:
-        return True, f'{ns_dir} has {live} live registration file(s)'
-
-    detail = f'{ns_dir} has no registration from a live process'
+        detail = f'{live} live registration(s) in {ns_dir}'
+    else:
+        detail = f'no Agnocast process has registered yet in {ns_dir}'
     if stale:
         detail += f' ({stale} stale <pid>.txt awaiting daemon cleanup)'
-    return False, detail
+    return detail
 
 
 class DiscoveryDaemonStatusVerb(VerbExtension):
@@ -168,14 +174,16 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
 
         any_ng = False
         for name, fn in [
-            ('process       ', lambda: _check_daemon_process(my_ns_inode)),
-            ('gossip        ', lambda: _check_gossip(my_ns_inode, args.gossip_timeout)),
-            ('type_registry ', lambda: _check_type_registry(my_ns_inode)),
+            ('process', lambda: _check_daemon_process(my_ns_inode)),
+            ('gossip', lambda: _check_gossip(my_ns_inode, args.gossip_timeout)),
         ]:
             ok, detail = fn()
             status = 'OK' if ok else 'NG'
-            print(f'  {name}{status}: {detail}')
+            print(f'  {name:<14}{status}: {detail}')
             if not ok:
                 any_ng = True
+
+        # Informational only — does not affect the exit code.
+        print(f'  {"type_registry":<14}INFO: {_describe_type_registry(my_ns_inode)}')
 
         return 1 if any_ng else 0
