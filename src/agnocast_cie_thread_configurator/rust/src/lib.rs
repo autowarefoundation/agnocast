@@ -3,6 +3,14 @@
 //! Announces a thread's TID and logical name to the configurator daemon over an
 //! abstract Unix datagram socket so the daemon can manage its scheduling. Rust
 //! counterpart of C++ `spawn_non_ros2_thread` / `send_non_ros_thread_info`.
+//!
+//! **Linux only.** Uses abstract Unix domain sockets and `SYS_gettid`, both
+//! Linux-specific; building on other targets fails at compile time.
+
+#[cfg(not(target_os = "linux"))]
+compile_error!(
+    "agnocast_cie_thread_configurator is Linux-only (uses abstract Unix sockets and SYS_gettid)"
+);
 
 mod wire;
 
@@ -16,6 +24,9 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Spawn a thread whose scheduling policy can be managed through
 /// cie_thread_configurator. `thread_name` must be unique among managed threads.
+///
+/// The announcement is best-effort: IPC failures are logged via `log::warn!`
+/// and never propagated, so `f` always runs even if the daemon is unreachable.
 pub fn spawn_non_ros2_thread<F, T>(thread_name: &str, f: F) -> JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -30,6 +41,9 @@ where
 
 /// Announce the calling thread to cie_thread_configurator. Use this for threads
 /// not created via `spawn_non_ros2_thread` (e.g. the main thread).
+///
+/// `thread_name` must be unique among all threads managed by
+/// cie_thread_configurator (same constraint as `spawn_non_ros2_thread`).
 ///
 /// Best-effort: IPC failures are logged via `log::warn!` and never propagated,
 /// so the caller always proceeds.

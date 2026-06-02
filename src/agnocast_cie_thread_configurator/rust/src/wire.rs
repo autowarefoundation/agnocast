@@ -7,6 +7,14 @@
 /// Abstract socket name (without the leading NUL; std adds the abstract prefix).
 pub const SOCKET_NAME: &str = "agnocast_cie_thread_configurator/non_ros_thread_info";
 
+// Mirrors the C++ `static_assert` in non_ros_thread_ipc.hpp: the abstract path
+// (leading NUL byte + name bytes) must fit in `sockaddr_un.sun_path`
+// (108 on Linux), so the name length budget is 107.
+const _: () = assert!(
+    SOCKET_NAME.len() < 108,
+    "abstract socket path too long for sockaddr_un"
+);
+
 const TID_SIZE: usize = 8;
 const NAMELEN_SIZE: usize = 2;
 pub const HEADER_SIZE: usize = TID_SIZE + NAMELEN_SIZE;
