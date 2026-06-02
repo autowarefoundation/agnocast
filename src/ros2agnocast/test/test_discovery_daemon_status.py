@@ -1,12 +1,13 @@
 """Pure-logic tests for the discovery_daemon_status verb.
 
-The verb itself talks to /proc and DDS, but the small helpers are exercised
-here with a tmp directory in place of `/dev/shm`.
+The verb itself talks to /proc and DDS, but the small helpers and the verdict
+logic are exercised here with tmp dirs and patched checks.
 """
 
 import fcntl
 import os
 import tempfile
+from argparse import Namespace
 from unittest.mock import patch
 
 from ros2agnocast.verb import discovery_daemon_status as ds
@@ -63,9 +64,9 @@ def test_describe_type_registry_stale_pid_noted():
 def test_check_daemon_process_missing_lock_is_ng():
     with tempfile.TemporaryDirectory() as tmpdir:
         with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, detail = ds._check_daemon_process(424242)
+            ok, reason = ds._check_daemon_process(424242)
         assert ok is False
-        assert 'no agent lock' in detail
+        assert 'no singleton lock file' in reason
 
 
 def test_check_daemon_process_free_lock_is_ng():
@@ -74,9 +75,9 @@ def test_check_daemon_process_free_lock_is_ng():
         ns_inode = 424242
         open(os.path.join(tmpdir, f'agnocast_discovery_agent_{ns_inode}.lock'), 'w').close()
         with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, detail = ds._check_daemon_process(ns_inode)
+            ok, reason = ds._check_daemon_process(ns_inode)
         assert ok is False
-        assert 'free' in detail
+        assert 'free' in reason
 
 
 def test_check_daemon_process_held_lock_is_ok():
@@ -88,12 +89,14 @@ def test_check_daemon_process_held_lock_is_ok():
         try:
             fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-                ok, detail = ds._check_daemon_process(ns_inode)
+                ok, reason = ds._check_daemon_process(ns_inode)
             assert ok is True
-            assert 'holds the singleton lock' in detail
+            assert 'holds the singleton lock' in reason
         finally:
             holder.close()
 
+
+# --- path helpers -----------------------------------------------------------
 
 def test_singleton_lock_path_honors_agnocast_tmpfs_dir(monkeypatch):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
@@ -110,3 +113,69 @@ def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):
 
     monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
     assert ds._type_registry_base() == '/dev/shm/agnocast_type_registry'
+
+
+# --- verdict (main) ---------------------------------------------------------
+
+def _run_main(proc, gossip, verbose=False):
+    """Run the verb's main() with the checks patched. ``gossip=None`` asserts
+    the gossip check is never invoked (process down)."""
+    verb = ds.DiscoveryDaemonStatusVerb()
+    args = Namespace(gossip_timeout=3.0, verbose=verbose)
+    with patch.object(ds, 'warn_if_gossip_timeout_overridden', lambda a: None), \
+            patch.object(ds, '_self_ipc_ns_inode', return_value=4026531839), \
+            patch.object(ds, '_check_daemon_process', return_value=proc), \
+            patch.object(ds, '_describe_type_registry', return_value='2 live registration(s) in /x'):
+        if gossip is None:
+            with patch.object(ds, '_check_gossip') as gossip_mock:
+                rc = verb.main(args=args)
+                gossip_mock.assert_not_called()
+        else:
+            with patch.object(ds, '_check_gossip', return_value=gossip):
+                rc = verb.main(args=args)
+    return rc
+
+
+def test_verdict_running(capsys):
+    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+                   gossip=(True, 'snapshot received on /_agnocast_discovery'))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert 'OK. The discovery agent is running.' in out
+
+
+def test_verdict_not_running_skips_gossip(capsys):
+    rc = _run_main(proc=(False, 'singleton lock is free (/x.lock)'), gossip=None)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert 'NG. The discovery agent is not running.' in out
+    # The per-check reason is diagnostic detail, not shown by default.
+    assert 'singleton lock is free' not in out
+
+
+def test_verdict_running_but_not_publishing(capsys):
+    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+                   gossip=(False, 'no snapshot on /_agnocast_discovery within 3.0s'))
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert 'running but not publishing' in out
+    assert 'no snapshot' not in out  # reason is --verbose only
+
+
+def test_default_output_is_verdict_only(capsys):
+    """Default output carries no inode header, type_registry, or per-check reason."""
+    _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+              gossip=(True, 'snapshot received on /_agnocast_discovery'))
+    out = capsys.readouterr().out
+    assert out.strip() == 'OK. The discovery agent is running.'
+
+
+def test_verbose_shows_inode_checks_and_type_registry(capsys):
+    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+                   gossip=(True, 'snapshot received on /_agnocast_discovery'), verbose=True)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert 'IPC namespace inode: 4026531839' in out
+    assert 'type_registry: 2 live registration(s)' in out
+    assert 'holds the singleton lock' in out  # per-check reason shown in --verbose
+    assert 'OK. The discovery agent is running.' in out

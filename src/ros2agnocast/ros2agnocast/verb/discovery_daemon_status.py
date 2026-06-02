@@ -8,26 +8,32 @@ working — this verb gives the operator a single place to confirm liveness.
 This command only inspects the **current** IPC namespace (the one the
 command itself runs in); run it inside the namespace you want to check.
 
-Checks performed (each prints OK / NG with detail):
+Default output is a single one-line verdict — nothing else:
 
-  * **process** — the discovery agent for **this** IPC namespace is alive,
-    detected by probing the exclusive ``flock(2)`` it holds on its per-NS
-    singleton lock file for its whole lifetime. The lock path already encodes
-    the IPC namespace, so this needs no executable-path matching. (NG if the
-    lock is free or its file is absent.)
-  * **gossip** — a snapshot from **this** IPC namespace is received on
-    ``/_agnocast_discovery`` within the timeout (snapshots from other
-    namespaces sharing the topic don't count).
-  * **type_registry** — *informational only.* Reports how many live Agnocast
-    processes have registered in this namespace under
-    ``${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/``.
-    An empty or absent registry just means nothing has registered yet, so this
-    never counts as NG.
+  * ``OK. The discovery agent is running.``
+  * ``NG. The discovery agent is not running.``
+  * ``NG. The discovery agent is running but not publishing.``
 
-Exit code:
+(``--verbose`` adds the reason behind the verdict; see below.)
 
-  * 0 — all OK
-  * 1 — at least one NG (operator should investigate)
+The verdict is driven by two internal checks:
+
+  * **process** — the agent holds an exclusive ``flock(2)`` on its per-NS
+    singleton lock file for its whole lifetime, so we probe that lock. The
+    lock path encodes the IPC namespace, so this needs no executable-path
+    matching.
+  * **gossip** — a snapshot from this IPC namespace is received on
+    ``/_agnocast_discovery`` within the timeout. ``gossip`` OK implies
+    ``process`` OK (an agent that publishes is alive), so it is the primary,
+    end-to-end signal; ``process`` only distinguishes "not running" from
+    "running but not publishing" when ``gossip`` is NG.
+
+``--verbose`` additionally prints the IPC namespace inode, each check's
+result, and a ``type_registry`` line (how many live Agnocast processes have
+registered). None of those affect the exit code — they are context, not part
+of the verdict.
+
+Exit code: 0 when the agent is running (gossip OK), 1 otherwise.
 """
 
 import fcntl
@@ -66,39 +72,40 @@ def _singleton_lock_path(my_ns_inode) -> str:
 
 
 def _check_daemon_process(my_ns_inode):
-    """Return (ok, detail) for the daemon-liveness check.
+    """Return (ok, reason) for the daemon-liveness check.
 
     The agent holds an exclusive ``flock(2)`` on its per-NS lock file for its
     whole lifetime. We probe that lock with a non-blocking ``LOCK_EX``: if we
-    cannot take it, a live agent in this namespace is holding it. This is more
-    robust than matching the agent's executable path, and the lock path already
-    encodes the IPC namespace. (Closing our fd drops any lock we did take, so a
-    successful probe leaves no lock behind.)
+    cannot take it, a live agent in this namespace is holding it. The kernel
+    releases the lock when the holder dies, so a lock we *can* take (or a
+    missing file) means no live agent. ``reason`` is a short phrase for the
+    verdict breakdown, not a full sentence.
     """
     lock_path = _singleton_lock_path(my_ns_inode)
     if not os.path.exists(lock_path):
-        return False, f'no agent lock at {lock_path}; agent never started in this NS'
+        return False, f'no singleton lock file ({lock_path})'
 
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_CLOEXEC)
     except OSError as e:
-        return False, f'cannot open agent lock {lock_path}: {e}'
+        return False, f'cannot open lock {lock_path}: {e}'
 
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        return True, f'agent holds the singleton lock ({lock_path})'
+        # Could NOT take the lock -> a live agent is holding it.
+        return True, f'holds the singleton lock ({lock_path})'
     except OSError as e:
-        return False, f'cannot probe agent lock {lock_path}: {e}'
+        return False, f'cannot probe lock {lock_path}: {e}'
     finally:
         os.close(fd)
 
-    # We acquired (and, via close above, released) the lock — nobody held it.
-    return False, f'agent lock is free ({lock_path}); no live agent in this NS'
+    # We took the lock (closing the fd above released it) -> nobody held it.
+    return False, f'singleton lock is free ({lock_path})'
 
 
 def _check_gossip(my_ns_inode, timeout_sec):
-    """Return (ok, detail) for the gossip-subscription check.
+    """Return (ok, reason) for the gossip-subscription check.
 
     ``collect_announcements`` aggregates every namespace publishing on the
     shared gossip topic, so we filter for a snapshot tagged with our own
@@ -112,14 +119,14 @@ def _check_gossip(my_ns_inode, timeout_sec):
 
     seen_my_ns = any(s.ipc_ns_inode == my_ns_inode for s in snapshots)
     if seen_my_ns:
-        return True, f'received a snapshot from this IPC namespace on {GOSSIP_TOPIC}'
+        return True, f'snapshot received on {GOSSIP_TOPIC}'
 
     if snapshots:
         return False, (
-            f'no snapshot from this IPC namespace (inode={my_ns_inode}) within '
-            f'{timeout_sec}s; saw {len(snapshots)} from other namespace(s)')
+            f'no snapshot from this namespace within {timeout_sec}s '
+            f'({len(snapshots)} from other namespace(s))')
 
-    return False, f'no AgnocastDaemonState received on {GOSSIP_TOPIC} within {timeout_sec}s'
+    return False, f'no snapshot on {GOSSIP_TOPIC} within {timeout_sec}s'
 
 
 def _describe_type_registry(my_ns_inode) -> str:
@@ -165,25 +172,43 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
 
     def add_arguments(self, parser, cli_name):
         add_gossip_timeout_arg(parser)
+        parser.add_argument(
+            '-v', '--verbose', action='store_true',
+            help='also print the IPC namespace inode, each internal check, and '
+                 'the type_registry info line (none affect the exit code)')
 
     def main(self, *, args):
         warn_if_gossip_timeout_overridden(args)
 
         my_ns_inode = _self_ipc_ns_inode()
-        print(f'IPC namespace inode: {my_ns_inode}')
 
-        any_ng = False
-        for name, fn in [
-            ('process', lambda: _check_daemon_process(my_ns_inode)),
-            ('gossip', lambda: _check_gossip(my_ns_inode, args.gossip_timeout)),
-        ]:
-            ok, detail = fn()
-            status = 'OK' if ok else 'NG'
-            print(f'  {name:<14}{status}: {detail}')
-            if not ok:
-                any_ng = True
+        proc_ok, proc_reason = _check_daemon_process(my_ns_inode)
+        # gossip is the end-to-end signal, but it only matters if a process is
+        # up; skip its timeout wait when the agent clearly isn't running.
+        if proc_ok:
+            gossip_ok, gossip_reason = _check_gossip(my_ns_inode, args.gossip_timeout)
+        else:
+            gossip_ok, gossip_reason = None, None
 
-        # Informational only — does not affect the exit code.
-        print(f'  {"type_registry":<14}INFO: {_describe_type_registry(my_ns_inode)}')
+        if args.verbose:
+            print(f'IPC namespace inode: {my_ns_inode}')
+            print(f'  process:       {"OK" if proc_ok else "NG"} ({proc_reason})')
+            if gossip_ok is None:
+                print('  gossip:        skipped (agent not running)')
+            else:
+                print(f'  gossip:        {"OK" if gossip_ok else "NG"} ({gossip_reason})')
+            print(f'  type_registry: {_describe_type_registry(my_ns_inode)}')
+            print('')
 
-        return 1 if any_ng else 0
+        # Default output is the verdict only — the per-check reasons are
+        # diagnostic detail, available via --verbose above.
+        if proc_ok and gossip_ok:
+            print('OK. The discovery agent is running.')
+            return 0
+
+        if not proc_ok:
+            print('NG. The discovery agent is not running.')
+            return 1
+
+        print('NG. The discovery agent is running but not publishing.')
+        return 1
