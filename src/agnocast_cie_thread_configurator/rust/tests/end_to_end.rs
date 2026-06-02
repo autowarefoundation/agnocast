@@ -6,16 +6,31 @@ use agnocast_cie_thread_configurator::{report_current_thread, spawn_non_ros2_thr
 
 const SOCKET_NAME: &str = "agnocast_cie_thread_configurator/non_ros_thread_info";
 
-// Bind the well-known abstract name to receive announcements. Returns None if
-// it is already bound (e.g. a real daemon is running) so the test can skip.
+// Bind the well-known abstract name to receive announcements. Returns None only
+// when the name is already bound (e.g. a real daemon is running) so the test can
+// skip; any other bind/address error fails the test rather than masking it.
 fn bind_listener_or_skip() -> Option<UnixDatagram> {
-    let addr = SocketAddr::from_abstract_name(SOCKET_NAME).ok()?;
-    UnixDatagram::bind_addr(&addr).ok()
+    let addr = SocketAddr::from_abstract_name(SOCKET_NAME).expect("build abstract socket address");
+    match UnixDatagram::bind_addr(&addr) {
+        Ok(sock) => Some(sock),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => None,
+        Err(e) => panic!("failed to bind abstract socket: {e}"),
+    }
 }
 
 fn decode(buf: &[u8]) -> (i64, Vec<u8>) {
+    assert!(
+        buf.len() >= 10,
+        "datagram too short for header: {} bytes",
+        buf.len()
+    );
     let tid = i64::from_ne_bytes(buf[0..8].try_into().unwrap());
     let name_len = u16::from_ne_bytes(buf[8..10].try_into().unwrap()) as usize;
+    assert_eq!(
+        buf.len(),
+        10 + name_len,
+        "datagram length disagrees with declared name_len {name_len}"
+    );
     (tid, buf[10..10 + name_len].to_vec())
 }
 
