@@ -77,10 +77,19 @@ def collect_announcements(
     sub = spin_node.create_subscription(
         AgnocastDaemonState, GOSSIP_TOPIC, on_msg, gossip_qos())
     try:
-        # TODO: break early once each visible publisher has reported.
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
             rclpy.spin_once(spin_node, timeout_sec=0.05)
+            try:
+                publishers = spin_node.get_publishers_info_by_topic(GOSSIP_TOPIC)
+            except Exception:
+                publishers = []
+            # Return as soon as every visible publisher has reported, rather
+            # than waiting out timeout_sec (now just an upper bound).
+            # One agent = one publisher = one (host_uuid, ipc_ns_inode) snapshot,
+            # so the publisher count is how many snapshots to expect.
+            if publishers and len(snapshots) >= len(publishers):
+                break
     finally:
         spin_node.destroy_subscription(sub)
 
