@@ -72,6 +72,25 @@ TEST(NonRosThreadIpcEncode, RejectsOversizeName)
   EXPECT_FALSE(acie::encode_non_ros_thread_info({0, name}, buf.data(), buf.size(), buf_len));
 }
 
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+TEST(NonRosThreadIpcEncode, GoldenVectorMatchesRust)
+{
+  // Byte-for-byte cross-language contract. The identical vector is asserted in
+  // the Rust crate (rust/src/wire.rs, golden_vector_le); either side drifting
+  // fails CI. Native-endian wire format, so little-endian hosts only.
+  std::array<uint8_t, acie::k_non_ros_thread_info_max_wire_size> buf{};
+  size_t buf_len = 0;
+  ASSERT_TRUE(acie::encode_non_ros_thread_info(
+    {123456789, "worker_thread"}, buf.data(), buf.size(), buf_len));
+  const uint8_t expected[] = {
+    0x15, 0xCD, 0x5B, 0x07, 0x00, 0x00, 0x00, 0x00,  // tid = 123456789 (i64 LE)
+    0x0D, 0x00,                                      // name_len = 13 (u16 LE)
+    'w',  'o',  'r',  'k',  'e',  'r',  '_',  't',  'h', 'r', 'e', 'a', 'd'};
+  ASSERT_EQ(buf_len, sizeof(expected));
+  EXPECT_EQ(std::memcmp(buf.data(), expected, sizeof(expected)), 0);
+}
+#endif
+
 TEST(NonRosThreadIpcEncode, RejectsBufferTooSmall)
 {
   std::array<uint8_t, 9> tiny{};
