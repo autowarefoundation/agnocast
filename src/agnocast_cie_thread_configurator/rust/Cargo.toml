@@ -4,10 +4,7 @@ version = "2.3.4"
 edition = "2021"
 rust-version = "1.70"
 license = "Apache-2.0"
-authors = [
-    "Takahiro Ishikawa-Aso <sykwer@gmail.com>",
-    "Atsushi Yano <atsushi.yano.2@tier4.jp>",
-]
+authors = ["Atsushi Yano <atsushi.yano.2@tier4.jp>"]
 description = "Pure-Rust client for the cie_thread_configurator non-ROS thread notification protocol"
 
 [dependencies]
