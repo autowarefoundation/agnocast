@@ -471,11 +471,14 @@ void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
     });
   }
 
+  using IntMs = std::chrono::duration<int, std::milli>;
   int timeout_ms;
   if (timeout < std::chrono::nanoseconds::zero()) {
     timeout_ms = -1;
+  } else if (timeout > IntMs::max()) {
+    timeout_ms = IntMs::max().count();
   } else {
-    timeout_ms = std::chrono::ceil<std::chrono::milliseconds>(timeout).count();
+    timeout_ms = std::chrono::ceil<IntMs>(timeout).count();
   }
   epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
 }
