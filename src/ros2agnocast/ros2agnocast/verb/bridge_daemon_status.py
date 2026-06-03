@@ -81,7 +81,7 @@ class BridgeControlSocket:
                     break
                 chunks.append(chunk)
         except OSError:
-             # Treat any connect/recv error as a liveness failure.
+            # Treat any connect/recv error as a liveness failure.
             pass
         finally:
             sock.close()
