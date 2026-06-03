@@ -41,5 +41,8 @@ setup(
             'list_agnocast = ros2agnocast.verb.node_list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.node_info_agnocast:NodeInfoAgnocastVerb',
         ],
+        'ros2bag.verb': [
+            'record_agnocast = ros2agnocast.verb.bag_record_agnocast:BagRecordAgnocastVerb',
+        ],
     },
 )
