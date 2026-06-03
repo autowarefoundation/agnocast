@@ -81,6 +81,11 @@ std::string create_mq_name_for_agnocast_publish(
   const std::string & topic_name, const topic_local_id_t id);
 std::string create_mq_name_for_bridge(const pid_t pid);
 std::string create_shm_name(const pid_t pid);
+// Return the inode number of the calling process's IPC namespace
+// (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the
+// per-namespace key for the tmpfs directory
+// `${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/`.
+uint64_t get_self_ipc_ns_inode();
 std::string create_service_request_topic_name(const std::string & service_name);
 std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name);

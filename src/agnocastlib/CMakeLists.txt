@@ -46,6 +46,7 @@ add_library(agnocast SHARED
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
   src/cie_client_utils.cpp
+  src/internal/type_registry_writer.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp
   src/bridge/standard/agnocast_standard_bridge_ipc_event_loop.cpp src/bridge/standard/agnocast_standard_bridge_loader.cpp src/bridge/standard/agnocast_standard_bridge_manager.cpp src/bridge/agnocast_bridge_utils.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
@@ -148,7 +149,8 @@ if(BUILD_TESTING)
     test/unit/test_node_base.cpp
     test/unit/test_cie_client_utils.cpp
     test/unit/test_agnocast_context.cpp
-    test/unit/test_diagnostic_updater.cpp)
+    test/unit/test_diagnostic_updater.cpp
+    test/unit/test_type_registry_writer.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater)

@@ -40,9 +40,10 @@ def test_ioctl_to_endpoint_copies_all_fields():
         qos_is_reliable=False,
         is_bridge=True,
     )
-    ep = _ioctl_to_endpoint(info)
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub')
     assert ep.node_name == '/talker_node'
-    assert ep.pid == 0  # best-effort empty
+    # No registry provided => pid stays 0.
+    assert ep.pid == 0
     assert ep.qos_depth == 7
     assert ep.qos_is_transient_local is True
     assert ep.qos_is_reliable is False
@@ -51,8 +52,23 @@ def test_ioctl_to_endpoint_copies_all_fields():
 
 def test_ioctl_to_endpoint_handles_short_name():
     info = _make_info('/x')
-    ep = _ioctl_to_endpoint(info)
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub')
     assert ep.node_name == '/x'
+
+
+def test_ioctl_to_endpoint_fills_pid_from_registry():
+    """When a registry entry matches (topic, role, node), the pid is filled."""
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    class FakeRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'pub', '/talker_node'):
+                return RegistryEntry(pid=4242, type_name='std_msgs/msg/Int32')
+            return None
+
+    info = _make_info('/talker_node')
+    ep = _ioctl_to_endpoint(info, '/chatter', 'pub', FakeRegistry())
+    assert ep.pid == 4242
 
 
 def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
@@ -109,13 +125,58 @@ def test_read_local_topics_combines_pub_and_sub():
     assert len(topics) == 1
     topic = topics[0]
     assert topic.topic_name == '/chatter'
-    assert topic.type_name == ''  # best-effort empty
+    # No registry passed => type stays empty.
+    assert topic.type_name == ''
     assert topic.domain_id == 0
     assert len(topic.publishers) == 1
     assert topic.publishers[0].node_name == '/talker_node'
     assert topic.publishers[0].qos_depth == 3
     assert len(topic.subscribers) == 1
     assert topic.subscribers[0].node_name == '/listener_node'
+
+
+def test_read_local_topics_resolves_type_from_registry():
+    """A registry entry for any endpoint on the topic populates `type_name`."""
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    pub_info = _make_info('/talker_node')
+    lib = _make_mock_lib({'/chatter': {'pub': [pub_info], 'sub': []}})
+
+    class FakeRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'pub', '/talker_node'):
+                return RegistryEntry(pid=99, type_name='std_msgs/msg/Int32')
+            return None
+
+    topics = read_local_topics(lib, FakeRegistry())
+    assert len(topics) == 1
+    assert topics[0].type_name == 'std_msgs/msg/Int32'
+    assert topics[0].publishers[0].pid == 99
+
+
+def test_read_local_topics_falls_back_to_subscriber_type_when_pub_missing():
+    """If the registry only knows the subscriber side, `type_name` still resolves.
+
+    Mirrors the case where the publisher process exited (or was on another NS
+    and its registry file isn't local) but a local subscriber is still active.
+    """
+    from ros2agnocast_discovery_agent.type_registry import RegistryEntry
+
+    pub_info = _make_info('/talker_node')
+    sub_info = _make_info('/listener_node')
+    lib = _make_mock_lib({'/chatter': {'pub': [pub_info], 'sub': [sub_info]}})
+
+    class SubOnlyRegistry:
+        def lookup(self, topic, role, node):
+            if (topic, role, node) == ('/chatter', 'sub', '/listener_node'):
+                return RegistryEntry(pid=77, type_name='std_msgs/msg/Int32')
+            return None
+
+    topics = read_local_topics(lib, SubOnlyRegistry())
+    assert len(topics) == 1
+    assert topics[0].type_name == 'std_msgs/msg/Int32'
+    assert topics[0].subscribers[0].pid == 77
+    assert topics[0].publishers[0].pid == 0  # publisher unknown to the registry
 
 
 def test_read_local_topics_returns_empty_when_no_topics():
@@ -143,3 +204,62 @@ def test_read_host_uuid_returns_uuid_string():
     # fallback; both should parse as UUIDs.
     import uuid
     uuid.UUID(host_uuid)
+
+
+# ---------------------------------------------------------------------------
+# Singleton lock
+# ---------------------------------------------------------------------------
+
+
+def test_singleton_lock_path_honors_tmpfs_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
+    assert _singleton_lock_path(42) == str(tmp_path / 'agnocast_discovery_agent_42.lock')
+
+
+def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
+    assert _singleton_lock_path(42) == '/dev/shm/agnocast_discovery_agent_42.lock'
+
+
+def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    attempt = _try_acquire_singleton_lock(123)
+    assert attempt.status == LockStatus.ACQUIRED
+    attempt.file.close()
+
+
+def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
+    """A second acquire in the same process reports HELD while the first is alive."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    first = _try_acquire_singleton_lock(456)
+    assert first.status == LockStatus.ACQUIRED
+    assert _try_acquire_singleton_lock(456).status == LockStatus.HELD
+    first.file.close()
+    # After releasing, a new acquire succeeds.
+    third = _try_acquire_singleton_lock(456)
+    assert third.status == LockStatus.ACQUIRED
+    third.file.close()
+
+
+def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
+    """Different IPC NS inodes get independent locks."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    lock_a = _try_acquire_singleton_lock(111)
+    lock_b = _try_acquire_singleton_lock(222)
+    assert lock_a.status == LockStatus.ACQUIRED
+    assert lock_b.status == LockStatus.ACQUIRED
+    lock_a.file.close()
+    lock_b.file.close()
+
+
+def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
+    """When the lock-file directory is not writable we report ERROR (distinct
+    from HELD) so the caller can surface a non-zero exit code."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    assert _try_acquire_singleton_lock(789).status == LockStatus.ERROR

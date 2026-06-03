@@ -20,6 +20,7 @@ setup(
             '*.cpp',
         ],
     },
+    extras_require={'test': ['pytest']},
     entry_points={
         'ros2cli.command': [
             'agnocast = ros2agnocast.command.agnocast:AgnocastCommand',
@@ -27,10 +28,14 @@ setup(
         'ros2agnocast.verb': [
             'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
             'version = ros2agnocast.verb.version:VersionVerb',
+            'discovery-daemon-status = ros2agnocast.verb.discovery_daemon_status:DiscoveryDaemonStatusVerb',
         ],
         'ros2topic.verb': [
             'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.topic_info_agnocast:TopicInfoAgnocastVerb',
+            'hz_agnocast = ros2agnocast.verb.topic_hz_agnocast:TopicHzAgnocastVerb',
+            'echo_agnocast = ros2agnocast.verb.topic_echo_agnocast:TopicEchoAgnocastVerb',
+            'delay_agnocast = ros2agnocast.verb.topic_delay_agnocast:TopicDelayAgnocastVerb',
         ],
         'ros2node.verb': [
             'list_agnocast = ros2agnocast.verb.node_list_agnocast:ListAgnocastVerb',
