@@ -1,5 +1,5 @@
 [package]
-name = "agnocast_cie_thread_configurator"
+name = "agnocast_cie_thread_configurator_client"
 version = "2.3.4"
 edition = "2021"
 rust-version = "1.70"

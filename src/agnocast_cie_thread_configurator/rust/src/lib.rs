@@ -9,7 +9,7 @@
 
 #[cfg(not(target_os = "linux"))]
 compile_error!(
-    "agnocast_cie_thread_configurator is Linux-only (uses abstract Unix sockets and SYS_gettid)"
+    "agnocast_cie_thread_configurator_client is Linux-only (uses abstract Unix sockets and SYS_gettid)"
 );
 
 mod wire;

@@ -2,7 +2,7 @@ use std::os::linux::net::SocketAddrExt;
 use std::os::unix::net::{SocketAddr, UnixDatagram};
 use std::time::Duration;
 
-use agnocast_cie_thread_configurator::{report_current_thread, spawn_non_ros2_thread};
+use agnocast_cie_thread_configurator_client::{report_current_thread, spawn_non_ros2_thread};
 
 const SOCKET_NAME: &str = "agnocast_cie_thread_configurator/non_ros_thread_info";
 
