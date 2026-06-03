@@ -12,17 +12,14 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include <array>
 #include <cerrno>
 #include <csignal>
-#include <cstdlib>
 #include <cstring>
 #include <functional>
-#include <initializer_list>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -64,7 +61,6 @@ private:
   int signal_fd_ = -1;
 
   int socket_fd_ = -1;
-  std::string socket_path_;
 
   mqd_t mq_fd_ = (mqd_t)-1;
   std::string mq_name_;
@@ -253,7 +249,7 @@ inline void IpcEventLoopBase::setup_epoll()
   }
 }
 
-// Sets up a Unix domain socket for debug use.
+// Sets up a Unix domain socket in the abstract namespace for debug use.
 //
 // Communication is one-way (Bridge process -> CLI): when a client connects, the
 // string returned by socket_cb_ is immediately sent to the client and the
@@ -264,27 +260,17 @@ inline void IpcEventLoopBase::setup_epoll()
 // confirm the Bridge process is running and receives a status string in
 // response. Because no request payload is expected, recv()/read() is
 // intentionally absent from handle_socket().
+//
+// The abstract namespace (sun_path[0] == '\0') is used instead of filesystem
+// paths so that the socket is automatically released by the OS when the process
+// terminates, eliminating stale socket files left by abnormal process exits.
+// Abstract socket names are scoped to the network namespace.
+//
+// Name format: "\0agnocast_bridge/{ipc_ns_inode}/{pid}"
 inline void IpcEventLoopBase::setup_socket()
 {
-  const char * env = std::getenv("AGNOCAST_TMPFS_DIR");
-  const std::string root_dir =
-    std::string(env != nullptr && *env != '\0' ? env : "/dev/shm") + "/agnocast_bridge_control";
-  if (mkdir(root_dir.c_str(), 0755) == -1 && errno != EEXIST) {
-    RCLCPP_WARN(
-      logger_, "setup_socket: mkdir failed for '%s': %s (socket disabled)", root_dir.c_str(),
-      strerror(errno));
-    return;
-  }
-
-  const std::string base_dir = root_dir + "/" + std::to_string(get_self_ipc_ns_inode());
-  if (mkdir(base_dir.c_str(), 0755) == -1 && errno != EEXIST) {
-    RCLCPP_WARN(
-      logger_, "setup_socket: mkdir failed for '%s': %s (socket disabled)", base_dir.c_str(),
-      strerror(errno));
-    return;
-  }
-
-  socket_path_ = base_dir + "/" + std::to_string(getpid()) + ".sock";
+  const std::string name =
+    "agnocast_bridge/" + std::to_string(get_self_ipc_ns_inode()) + "/" + std::to_string(getpid());
 
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd == -1) {
@@ -296,17 +282,20 @@ inline void IpcEventLoopBase::setup_socket()
   {
   };
   addr.sun_family = AF_UNIX;
-  if (socket_path_.size() >= sizeof(addr.sun_path)) {
+  // Abstract namespace: sun_path[0] == '\0', name follows without null terminator.
+  // addrlen must cover exactly the '\0' prefix + name bytes (no null terminator).
+  if (name.size() + 1 > sizeof(addr.sun_path)) {
     RCLCPP_WARN(
-      logger_, "setup_socket: path too long: '%s' (socket disabled)", socket_path_.c_str());
+      logger_, "setup_socket: abstract name too long: '%s' (socket disabled)", name.c_str());
     close(fd);
     return;
   }
-  memcpy(addr.sun_path, socket_path_.c_str(), socket_path_.size() + 1);
+  addr.sun_path[0] = '\0';
+  memcpy(addr.sun_path + 1, name.c_str(), name.size());
+  const socklen_t addrlen =
+    static_cast<socklen_t>(offsetof(struct sockaddr_un, sun_path) + 1 + name.size());
 
-  unlink(socket_path_.c_str());  // remove stale file if any
-
-  if (bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == -1) {
+  if (bind(fd, reinterpret_cast<struct sockaddr *>(&addr), addrlen) == -1) {
     RCLCPP_WARN(logger_, "setup_socket: bind() failed: %s (socket disabled)", strerror(errno));
     close(fd);
     return;
@@ -397,13 +386,6 @@ inline void IpcEventLoopBase::cleanup_resources()
       RCLCPP_WARN(logger_, "Failed to close socket_fd: %s", strerror(errno));
     }
     socket_fd_ = -1;
-  }
-
-  if (!socket_path_.empty()) {
-    if (unlink(socket_path_.c_str()) == -1 && errno != ENOENT) {
-      RCLCPP_WARN(
-        logger_, "Failed to unlink socket '%s': %s", socket_path_.c_str(), strerror(errno));
-    }
   }
 
   if (signal_fd_ != -1) {

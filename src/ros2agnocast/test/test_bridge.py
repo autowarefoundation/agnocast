@@ -1,22 +1,21 @@
 """Pure-logic tests for the bridge verb.
 
 The verb itself talks to /proc and Unix domain sockets, but the helpers are
-exercised here with a tmp directory in place of CONTROL_SOCKET_BASE_DIR and
-in-process socket servers in place of the real bridge daemon.
+exercised here with mocked /proc/net/unix content and in-process abstract
+socket servers in place of the real bridge daemon.
 """
 
 import os
 import socket
-import tempfile
 import threading
-from unittest.mock import patch
+from io import StringIO
+from unittest.mock import mock_open, patch
 
 from ros2agnocast.verb import bridge_daemon_status as br
 from ros2agnocast.verb.bridge_daemon_status import (
     _BridgeResult,
     _build_summary,
     _find_bridge_pids,
-    _partition_pids,
     BridgeControlSocket,
     BridgeDaemonStatusVerb,
     RecvMsgFailed,
@@ -26,69 +25,56 @@ from ros2agnocast.verb.bridge_daemon_status import (
 
 
 # ---------------------------------------------------------------------------
-# _find_bridge_pids
+# _find_bridge_pids  (parses /proc/net/unix)
 # ---------------------------------------------------------------------------
 
-def test_find_bridge_pids_empty_when_no_sock_files():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ns_inode = 12345
-        os.makedirs(os.path.join(tmpdir, str(ns_inode)))
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            pids = _find_bridge_pids(ns_inode)
+_PROC_UNIX_HEADER = 'Num       RefCount Protocol Flags    Type St Inode Path\n'
+
+
+def _make_proc_unix(*entries: str) -> str:
+    """Build a fake /proc/net/unix content with the given Path entries."""
+    lines = [_PROC_UNIX_HEADER]
+    for path in entries:
+        lines.append(f'0000000000000000: 00000002 00000000 00010000 0001 01 12345 {path}\n')
+    return ''.join(lines)
+
+
+def test_find_bridge_pids_empty_when_no_matching_entries():
+    ns_inode = 12345
+    content = _make_proc_unix('@other/12345/100', '@agnocast_bridge/99999/200')
+    with patch('builtins.open', mock_open(read_data=content)):
+        pids = _find_bridge_pids(ns_inode)
     assert pids == []
 
 
 def test_find_bridge_pids_returns_sorted_pids():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ns_inode = 12345
-        ns_dir = os.path.join(tmpdir, str(ns_inode))
-        os.makedirs(ns_dir)
-        for pid in (300, 100, 200):
-            open(os.path.join(ns_dir, f'{pid}.sock'), 'w').close()
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            pids = _find_bridge_pids(ns_inode)
+    ns_inode = 12345
+    content = _make_proc_unix(
+        f'@agnocast_bridge/{ns_inode}/300',
+        f'@agnocast_bridge/{ns_inode}/100',
+        f'@agnocast_bridge/{ns_inode}/200',
+    )
+    with patch('builtins.open', mock_open(read_data=content)):
+        pids = _find_bridge_pids(ns_inode)
     assert pids == [100, 200, 300]
 
 
-def test_find_bridge_pids_skips_non_numeric_filenames():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ns_inode = 12345
-        ns_dir = os.path.join(tmpdir, str(ns_inode))
-        os.makedirs(ns_dir)
-        open(os.path.join(ns_dir, '123.sock'), 'w').close()
-        open(os.path.join(ns_dir, 'abc.sock'), 'w').close()
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            pids = _find_bridge_pids(ns_inode)
+def test_find_bridge_pids_skips_non_numeric_pid_suffix():
+    ns_inode = 12345
+    content = _make_proc_unix(
+        f'@agnocast_bridge/{ns_inode}/123',
+        f'@agnocast_bridge/{ns_inode}/abc',
+    )
+    with patch('builtins.open', mock_open(read_data=content)):
+        pids = _find_bridge_pids(ns_inode)
     assert pids == [123]
 
 
-def test_find_bridge_pids_empty_when_ns_dir_missing():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            pids = _find_bridge_pids(99999)
+def test_find_bridge_pids_empty_on_oserror():
+    ns_inode = 12345
+    with patch('builtins.open', side_effect=OSError):
+        pids = _find_bridge_pids(ns_inode)
     assert pids == []
-
-
-# ---------------------------------------------------------------------------
-# _partition_pids
-# ---------------------------------------------------------------------------
-
-def test_partition_pids_self_pid_is_alive():
-    alive, stale = _partition_pids([os.getpid()])
-    assert alive == [os.getpid()]
-    assert stale == []
-
-
-def test_partition_pids_non_existent_pid_is_stale():
-    alive, stale = _partition_pids([999999999])
-    assert alive == []
-    assert stale == [999999999]
-
-
-def test_partition_pids_mixed():
-    alive, stale = _partition_pids([os.getpid(), 999999999])
-    assert alive == [os.getpid()]
-    assert stale == [999999999]
 
 
 # ---------------------------------------------------------------------------
@@ -168,13 +154,13 @@ def test_build_summary_unknown_type_ng():
 # BridgeControlSocket.recv_msg  (real UNIX socket)
 # ---------------------------------------------------------------------------
 
-def _start_server(sock_path: str, payload: bytes | None) -> threading.Thread:
-    """Start a minimal one-shot server that accepts one connection, sends payload, closes."""
+def _start_server(abstract_addr: str, payload: bytes | None) -> threading.Thread:
+    """Start a minimal one-shot server on an abstract socket that accepts one connection."""
     ready = threading.Event()
 
     def _run() -> None:
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        srv.bind(sock_path)
+        srv.bind(abstract_addr)
         srv.listen(1)
         ready.set()
         conn, _ = srv.accept()
@@ -189,13 +175,17 @@ def _start_server(sock_path: str, payload: bytes | None) -> threading.Thread:
     return t
 
 
+def _unique_abstract_addr(suffix: str = '') -> str:
+    """Return a unique abstract socket address for testing."""
+    return f'\x00agnocast_bridge_test_{os.getpid()}_{threading.get_ident()}{suffix}'
+
+
 def test_recv_msg_returns_ok_for_valid_standard_json():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'test.sock')
-        payload = b'{"type":"standard","ipc_ns":42,"pid":123}'
-        t = _start_server(sock_path, payload)
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=2.0)
-        t.join(timeout=2.0)
+    addr = _unique_abstract_addr('_std')
+    payload = b'{"type":"standard","ipc_ns":42,"pid":123}'
+    t = _start_server(addr, payload)
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
+    t.join(timeout=2.0)
     assert isinstance(result, RecvMsgOk)
     assert result.type == 'standard'
     assert result.ipc_ns == 42
@@ -203,12 +193,11 @@ def test_recv_msg_returns_ok_for_valid_standard_json():
 
 
 def test_recv_msg_returns_ok_for_valid_performance_json():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'test.sock')
-        payload = b'{"type":"performance","ipc_ns":99,"pid":456}'
-        t = _start_server(sock_path, payload)
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=2.0)
-        t.join(timeout=2.0)
+    addr = _unique_abstract_addr('_perf')
+    payload = b'{"type":"performance","ipc_ns":99,"pid":456}'
+    t = _start_server(addr, payload)
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
+    t.join(timeout=2.0)
     assert isinstance(result, RecvMsgOk)
     assert result.type == 'performance'
     assert result.ipc_ns == 99
@@ -216,36 +205,32 @@ def test_recv_msg_returns_ok_for_valid_performance_json():
 
 
 def test_recv_msg_returns_failed_when_no_server():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'nonexistent.sock')
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=0.1)
+    addr = _unique_abstract_addr('_noserver')
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=0.1)
     assert isinstance(result, RecvMsgFailed)
 
 
 def test_recv_msg_returns_failed_when_server_sends_nothing():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'test.sock')
-        t = _start_server(sock_path, payload=None)
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=2.0)
-        t.join(timeout=2.0)
+    addr = _unique_abstract_addr('_empty')
+    t = _start_server(addr, payload=None)
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
+    t.join(timeout=2.0)
     assert isinstance(result, RecvMsgFailed)
 
 
 def test_recv_msg_returns_parse_error_for_invalid_json():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'test.sock')
-        t = _start_server(sock_path, payload=b'not-json')
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=2.0)
-        t.join(timeout=2.0)
+    addr = _unique_abstract_addr('_badjson')
+    t = _start_server(addr, payload=b'not-json')
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
+    t.join(timeout=2.0)
     assert isinstance(result, RecvMsgParseError)
 
 
 def test_recv_msg_returns_parse_error_for_missing_fields():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sock_path = os.path.join(tmpdir, 'test.sock')
-        t = _start_server(sock_path, payload=b'{"type":"standard"}')
-        result = BridgeControlSocket(sock_path).recv_msg(timeout_sec=2.0)
-        t.join(timeout=2.0)
+    addr = _unique_abstract_addr('_missingfields')
+    t = _start_server(addr, payload=b'{"type":"standard"}')
+    result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
+    t.join(timeout=2.0)
     assert isinstance(result, RecvMsgParseError)
 
 
@@ -254,10 +239,10 @@ def test_recv_msg_returns_parse_error_for_missing_fields():
 # ---------------------------------------------------------------------------
 
 def _make_verb(result_map: dict) -> BridgeDaemonStatusVerb:
-    """Build a verb whose _socket_class returns pre-set recv results keyed by sock_path."""
+    """Build a verb whose _socket_class returns pre-set recv results keyed by abstract addr."""
     class _MockSocketClass:
-        def __init__(self, sock_path: str) -> None:
-            self._result = result_map[sock_path]
+        def __init__(self, sock_addr: str) -> None:
+            self._result = result_map[sock_addr]
 
         def recv_msg(self, timeout_sec: float):
             return self._result
@@ -269,11 +254,9 @@ def _make_verb(result_map: dict) -> BridgeDaemonStatusVerb:
 
 def test_collect_bridge_results_ok_standard():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb({sock_path: RecvMsgOk(type='standard', ipc_ns=ipc_inode, pid=pid)})
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgOk(type='standard', ipc_ns=ipc_inode, pid=pid)})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert len(results) == 1
     assert results[0].is_ok is True
     assert results[0].bridge_type == 'standard'
@@ -281,11 +264,9 @@ def test_collect_bridge_results_ok_standard():
 
 def test_collect_bridge_results_ok_performance():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb({sock_path: RecvMsgOk(type='performance', ipc_ns=ipc_inode, pid=pid)})
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgOk(type='performance', ipc_ns=ipc_inode, pid=pid)})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert len(results) == 1
     assert results[0].is_ok is True
     assert results[0].bridge_type == 'performance'
@@ -293,11 +274,9 @@ def test_collect_bridge_results_ok_performance():
 
 def test_collect_bridge_results_recv_failed_gives_unknown_ng():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb({sock_path: RecvMsgFailed()})
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgFailed()})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert results[0].bridge_type == 'unknown'
     assert results[0].ng_message == br._NG_MSG_RECV_FAILED
@@ -305,11 +284,9 @@ def test_collect_bridge_results_recv_failed_gives_unknown_ng():
 
 def test_collect_bridge_results_parse_error_gives_unknown_ng():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb({sock_path: RecvMsgParseError()})
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgParseError()})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert results[0].bridge_type == 'unknown'
     assert results[0].ng_message == br._NG_MSG_PARSE_ERROR
@@ -317,13 +294,9 @@ def test_collect_bridge_results_parse_error_gives_unknown_ng():
 
 def test_collect_bridge_results_unknown_bridge_type_gives_ng():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb(
-                {sock_path: RecvMsgOk(type='future_type', ipc_ns=ipc_inode, pid=pid)}
-            )
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgOk(type='future_type', ipc_ns=ipc_inode, pid=pid)})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert results[0].bridge_type == 'unknown'
     assert results[0].ng_message == br._NG_MSG_UNKNOWN_TYPE
@@ -331,25 +304,17 @@ def test_collect_bridge_results_unknown_bridge_type_gives_ng():
 
 def test_collect_bridge_results_mismatched_pid_gives_ng():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb(
-                {sock_path: RecvMsgOk(type='standard', ipc_ns=ipc_inode, pid=999)}
-            )
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgOk(type='standard', ipc_ns=ipc_inode, pid=999)})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert 'pid=999' in results[0].ng_message
 
 
 def test_collect_bridge_results_mismatched_ipc_ns_gives_ng():
     ipc_inode, pid = 100, 200
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.object(br, 'CONTROL_SOCKET_BASE_DIR', tmpdir):
-            sock_path = br._sock_path_for_pid(ipc_inode, pid)
-            verb = _make_verb(
-                {sock_path: RecvMsgOk(type='standard', ipc_ns=999, pid=pid)}
-            )
-            results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
+    verb = _make_verb({sock_addr: RecvMsgOk(type='standard', ipc_ns=999, pid=pid)})
+    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert 'ipc_ns=999' in results[0].ng_message

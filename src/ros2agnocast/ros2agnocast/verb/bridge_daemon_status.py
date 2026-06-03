@@ -1,15 +1,11 @@
 import json
 import os
 import socket
-import glob
 from dataclasses import dataclass, field
 
 from ros2cli.verb import VerbExtension
 
-CONTROL_SOCKET_BASE_DIR = os.path.join(
-    os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm',
-    'agnocast_bridge_control',
-)
+_ABSTRACT_SOCKET_PREFIX = 'agnocast_bridge'
 DEFAULT_TIMEOUT_SEC = 1.0
 
 
@@ -18,28 +14,39 @@ def _get_self_ipc_namespace_inode() -> int:
 
 
 def _find_bridge_pids(ipc_inode: int) -> list[int]:
-    """Step 1: Find all bridge process PIDs from socket files in the namespace."""
-    pattern = os.path.join(CONTROL_SOCKET_BASE_DIR, str(ipc_inode), '*.sock')
-    pids = []
-    for sock_path in sorted(glob.glob(pattern)):
-        pid_str = os.path.splitext(os.path.basename(sock_path))[0]
-        try:
-            pids.append(int(pid_str))
-        except ValueError:
-            pass
-    return pids
+    """Find all bridge process PIDs via /proc/net/unix.
+
+    Abstract sockets are listed with an '@' prefix in the Path column.
+    Only entries matching our prefix and ipc_inode are considered.
+    Because abstract sockets are released by the OS on process exit,
+    every entry found here belongs to a living process.
+    """
+    target_prefix = f'@{_ABSTRACT_SOCKET_PREFIX}/{ipc_inode}/'
+    pids: list[int] = []
+    try:
+        with open('/proc/net/unix') as f:
+            for line in f:
+                parts = line.split()
+                if not parts:
+                    continue
+                path = parts[-1]
+                if path.startswith(target_prefix):
+                    pid_str = path[len(target_prefix):]
+                    try:
+                        pids.append(int(pid_str))
+                    except ValueError:
+                        pass
+    except OSError:
+        return []
+    return sorted(pids)
 
 
-def _partition_pids(pids: list[int]) -> tuple[list[int], list[int]]:
-    """Step 2: Partition PIDs into (alive_pids, stale_pids)."""
-    alive, stale = [], []
-    for pid in pids:
-        (alive if os.path.isdir(f'/proc/{pid}') else stale).append(pid)
-    return alive, stale
+def _abstract_socket_addr_for_pid(ipc_inode: int, pid: int) -> str:
+    """Return the abstract socket address for a given IPC namespace inode and PID.
 
-
-def _sock_path_for_pid(ipc_inode: int, pid: int) -> str:
-    return os.path.join(CONTROL_SOCKET_BASE_DIR, str(ipc_inode), f'{pid}.sock')
+    Python's socket module treats addresses starting with '\\0' as abstract.
+    """
+    return f'\x00{_ABSTRACT_SOCKET_PREFIX}/{ipc_inode}/{pid}'
 
 
 @dataclass
@@ -177,8 +184,8 @@ class BridgeDaemonStatusVerb(VerbExtension):
     ) -> list[_BridgeResult]:
         results: list[_BridgeResult] = []
         for pid in alive_pids:
-            sock_path = _sock_path_for_pid(ipc_inode, pid)
-            recv_result = self._socket_class(sock_path).recv_msg(timeout_sec)
+            sock_addr = _abstract_socket_addr_for_pid(ipc_inode, pid)
+            recv_result = self._socket_class(sock_addr).recv_msg(timeout_sec)
 
             if isinstance(recv_result, RecvMsgFailed):
                 results.append(_BridgeResult(
@@ -238,10 +245,8 @@ class BridgeDaemonStatusVerb(VerbExtension):
         verbose = args.verbose
 
         bridge_pids = _find_bridge_pids(ipc_inode)
-        alive_pids, stale_pids = _partition_pids(bridge_pids)
 
-        results = self._collect_bridge_results(alive_pids, ipc_inode, timeout_sec)
-        stale_paths = [_sock_path_for_pid(ipc_inode, pid) for pid in stale_pids]
+        results = self._collect_bridge_results(bridge_pids, ipc_inode, timeout_sec)
 
         summary, is_ng = _build_summary(results)
 
@@ -268,12 +273,5 @@ class BridgeDaemonStatusVerb(VerbExtension):
                     print(f'  PID {pid_str} {type_label} OK')
                 else:
                     print(f'  PID {pid_str} {type_label} NG: {r.ng_message}')
-
-        if verbose and stale_paths:
-            print()
-            print('Stale files:')
-            print('  Please delete the following stale files, they are no longer used.')
-            for path in stale_paths:
-                print(f'  $ rm {path}')
 
         return 1 if is_ng else 0
