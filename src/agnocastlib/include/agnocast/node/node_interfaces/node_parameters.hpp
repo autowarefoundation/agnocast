@@ -43,7 +43,7 @@ public:
   explicit NodeParameters(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
     const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
-    bool allow_undeclared_parameters = false);
+    bool use_global_arguments = true, bool allow_undeclared_parameters = false);
 
   virtual ~NodeParameters() = default;
 

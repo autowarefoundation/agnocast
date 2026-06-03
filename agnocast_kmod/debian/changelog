@@ -1,3 +1,25 @@
+agnocast-kmod-v2.3.4 (2.3.4-2) noble; urgency=medium
+
+  * fix(kmod): suppress parameter service log (#1334 <https://github.com/tier4/agnocast/issues/1334>)
+  * fix(kmod): remove redundant zero-initialisation of globals (#1316 <https://github.com/tier4/agnocast/issues/1316>)
+  * fix(kmod): place constants on right side of comparisons (#1315 <https://github.com/tier4/agnocast/issues/1315>)
+  * fix(kmod): use kvcalloc instead of kvzalloc with multiply (#1314 <https://github.com/tier4/agnocast/issues/1314>)
+  * fix(kmod): mark file_operations struct as const (#1313 <https://github.com/tier4/agnocast/issues/1313>)
+  * fix(kmod): add explanatory comments to memory barrier calls (#1309 <https://github.com/tier4/agnocast/issues/1309>)
+  * fix(kmod): remove redundant OOM messages after allocation failures (#1311 <https://github.com/tier4/agnocast/issues/1311>)
+  * fix(kmod): remove needless null checks before kfree calls (#1310 <https://github.com/tier4/agnocast/issues/1310>)
+  * refactor(kmod): split ioctl handlers by command (#1213 <https://github.com/tier4/agnocast/issues/1213>)
+  * fix(kmod): add spdx license for kernel module (#1259 <https://github.com/tier4/agnocast/issues/1259>)
+  * fix(kmod): embedded_function_name for checkpatch (#1252 <https://github.com/tier4/agnocast/issues/1252>)
+  * refactor(agnocast_kmod): replace kmalloc with stack buffers for ioctl name copies (#1257 <https://github.com/tier4/agnocast/issues/1257>)
+  * chore: add sparse check for agnocast-kmod (#1250 <https://github.com/tier4/agnocast/issues/1250>)
+  * refactor(kmod): move `increment_message_entry_rc` in `KUNIT_BUILD` (#1249 <https://github.com/tier4/agnocast/issues/1249>)
+  * refactor(kmod): split agnocast_main.c into init, exit, ioctl (#1177 <https://github.com/tier4/agnocast/issues/1177>)
+  * refactor(agnocast_kmod): extract kunit test object list into Makefile.inc (#1239 <https://github.com/tier4/agnocast/issues/1239>)
+  * feat:add version check command (#1224 <https://github.com/tier4/agnocast/issues/1224>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Thu, 21 May 2026 10:54:00 +0900
+
 agnocast-kmod-v2.3.3 (2.3.3-1) noble; urgency=medium
 
   * fix: postinst to avoid package to be destroyed (#1206 <https://github.com/tier4/agnocast/issues/1206>)

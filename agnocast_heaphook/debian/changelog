@@ -1,3 +1,11 @@
+agnocast-heaphook-v2.3.4 (2.3.4-2) noble; urgency=medium
+
+  * chore: remove @veqcc from maintainers (#1296 <https://github.com/tier4/agnocast/issues/1296>)
+  * fix(heaphook): support glibc < 2.35 (Ubuntu 20.04) (#1215 <https://github.com/tier4/agnocast/issues/1215>)
+  * feat:add version check command (#1224 <https://github.com/tier4/agnocast/issues/1224>)
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Thu, 21 May 2026 10:54:00 +0900
+
 agnocast-heaphook-v2.3.3 (2.3.3-1) noble; urgency=medium
 
  -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Thu, 02 Apr 2026 13:45:00 +0900

@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2agnocast_discovery_msgs</name>
+  <version>2.3.4</version>
+  <description>
+    Messages published by ros2agnocast_discovery_agent to expose per-NS
+    Agnocast topic/endpoint state to ros2agnocast CLI across IPC namespaces
+    and ECUs.
+  </description>
+
+  <maintainer email="keita.morisaki@tier4.jp">Keita Morisaki</maintainer>
+  <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
+  <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
+  <maintainer email="primenumber_2_3_5@yahoo.co.jp">Takumi Jin</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

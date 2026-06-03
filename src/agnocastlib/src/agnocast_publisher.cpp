@@ -1,5 +1,6 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
 #include <sys/types.h>
@@ -43,9 +44,16 @@ void decrement_borrowed_publisher_num()
 
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge)
+  const bool is_bridge, const std::string & type_name)
 {
   validate_ld_preload();
+
+  // Announce to the per-IPC-namespace discovery agent before the kmod call so
+  // the registry line is in place whenever a later snapshot sees the
+  // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
+  if (!type_name.empty()) {
+    internal::TypeRegistryWriter::instance().register_type(topic_name, type_name, "pub", node_name);
+  }
 
   union ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {topic_name.c_str(), topic_name.size()};

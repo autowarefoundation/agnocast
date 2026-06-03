@@ -2,6 +2,21 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.4 (2026-05-21)
+------------------
+* fix: e2e stress workaround (`#1340 <https://github.com/autowarefoundation/agnocast/issues/1340>`_)
+* fix(sample_application): add agnocast\_ prefix to sample app and thread_configurator (`#1319 <https://github.com/autowarefoundation/agnocast/issues/1319>`_)
+* feat(cie_thread_configurator): add ~/reapply_config service for runtime YAML reload (`#1303 <https://github.com/autowarefoundation/agnocast/issues/1303>`_)
+* refactor(cie_thread_configurator): migrate non-ROS thread reporting from rclcpp pub/sub to abstract Unix domain socket (`#1295 <https://github.com/autowarefoundation/agnocast/issues/1295>`_)
+* chore: remove @veqcc from maintainers (`#1296 <https://github.com/autowarefoundation/agnocast/issues/1296>`_)
+* fix(cie_thread_configurator): always re-apply configuration regardless of thread_id (`#1262 <https://github.com/autowarefoundation/agnocast/issues/1262>`_)
+* refactor(thread_configurator): split into separate executables and use ROS parameters (`#1234 <https://github.com/autowarefoundation/agnocast/issues/1234>`_)
+* refactor(e2e_test): move CIE tests from agnocastlib to agnocast_e2e_test (`#1229 <https://github.com/autowarefoundation/agnocast/issues/1229>`_)
+* test(e2e_test): add multi_domain_cie_talker integration test (`#1221 <https://github.com/autowarefoundation/agnocast/issues/1221>`_)
+* fix(agnocast_components): allow agnocast_components_register_node to coexist with rclcpp_components_register_node (`#1230 <https://github.com/autowarefoundation/agnocast/issues/1230>`_)
+* refactor(e2e_test): move CIE component container test to agnocast_e2e_test (`#1228 <https://github.com/autowarefoundation/agnocast/issues/1228>`_)
+* refactor(test): replace assertSequentialStdout with direct proc_output access (`#1225 <https://github.com/autowarefoundation/agnocast/issues/1225>`_)
+
 2.3.3 (2026-04-02)
 ------------------
 

@@ -6,7 +6,7 @@
 #   ./scripts/switch_kmod.bash <version>
 #
 # Example:
-#   ./scripts/switch_kmod.bash 2.3.3
+#   ./scripts/switch_kmod.bash 2.3.4
 #
 # Intended for setups where autoware runs inside a container (so heaphook
 # is switched by swapping containers) and only the host-side kmod needs
@@ -24,15 +24,15 @@ set -euo pipefail
 
 if [ $# -ne 1 ]; then
 	echo "Usage: $0 <version>"
-	echo "Example: $0 2.3.3"
+	echo "Example: $0 2.3.4"
 	exit 1
 fi
 
 target_version="$1"
 
 if ! [[ "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	echo "Error: version must be in full X.Y.Z form (e.g., 2.3.3); got '${target_version}'." >&2
-	echo "       Short forms like '2.3' or 'v2.3.3' are not accepted." >&2
+	echo "Error: version must be in full X.Y.Z form (e.g., 2.3.4); got '${target_version}'." >&2
+	echo "       Short forms like '2.3' or 'v2.3.4' are not accepted." >&2
 	exit 1
 fi
 
@@ -172,21 +172,18 @@ sudo apt-get install -y "${target_package}"
 
 echo "[5/5] Load agnocast and verify"
 
-# Snapshot dmesg line count so we can isolate messages emitted by THIS
-# modprobe (avoids mistaking a stale 'Agnocast installed!' line from an
-# earlier load for the current one).
-dmesg_before=$(sudo dmesg | wc -l)
-
 sudo modprobe agnocast
 echo "  Loaded."
 
-new_dmesg=$(sudo dmesg | tail -n +$((dmesg_before + 1)))
-install_line=$(echo "$new_dmesg" | grep -E "Agnocast installed! v" | tail -n 1 || true)
+# Steps 1–4 unloaded the old module, purged every agnocast-kmod-v* package,
+# and installed exactly one target package, so the last 'Agnocast installed!'
+# line in dmesg corresponds to the modprobe we just ran.
+install_line=$(sudo dmesg | grep -E "Agnocast installed! v" | tail -n 1 || true)
 
 if [ -z "$install_line" ]; then
-	echo "  Error: did not see 'Agnocast installed! v...' in dmesg after modprobe."
+	echo "  Error: no 'Agnocast installed! v...' line found in dmesg."
 	echo "  Recent agnocast-related kernel messages:"
-	echo "$new_dmesg" | grep -i agnocast || true
+	sudo dmesg | grep -i agnocast | tail -n 20 || true
 	exit 1
 fi
 

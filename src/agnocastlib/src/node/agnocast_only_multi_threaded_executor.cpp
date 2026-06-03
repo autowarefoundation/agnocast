@@ -30,6 +30,10 @@ void AgnocastOnlyMultiThreadedExecutor::spin()
 
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
 
+  if (cancel_requested_.load()) {
+    return;
+  }
+
   std::vector<std::thread> threads;
 
   for (size_t i = 0; i < number_of_threads_ - 1; i++) {
@@ -46,7 +50,7 @@ void AgnocastOnlyMultiThreadedExecutor::spin()
 
 void AgnocastOnlyMultiThreadedExecutor::agnocast_spin()
 {
-  while (spinning_.load() && agnocast::ok()) {
+  while (spinning_.load() && !cancel_requested_.load() && agnocast::ok()) {
     if (epoll_update_tracker_.take_update_request()) {
       add_callback_groups_from_nodes_associated_to_executor();
       epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
@@ -56,7 +60,7 @@ void AgnocastOnlyMultiThreadedExecutor::agnocast_spin()
 
     agnocast::AgnocastExecutable agnocast_executable;
 
-    if (!spinning_.load() || !agnocast::ok()) {
+    if (!spinning_.load() || cancel_requested_.load() || !agnocast::ok()) {
       return;
     }
 

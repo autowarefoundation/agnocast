@@ -46,8 +46,8 @@ private:
 
 public:
   explicit NodeForExecutorTest(
-    const int64_t num_agnocast_sub_cbs, const int64_t num_ros2_sub_cbs,
-    const int64_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
+    const size_t num_agnocast_sub_cbs, const size_t num_ros2_sub_cbs,
+    const size_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
     const std::chrono::milliseconds cb_exec_time, const std::string cbg_type = "individual");
 
   ~NodeForExecutorTest();

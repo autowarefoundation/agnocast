@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2agnocast_discovery_agent</name>
+  <version>2.3.4</version>
+  <description>
+    Per-IPC-namespace daemon that reads the local Agnocast state via the
+    existing NS-scoped ioctl and publishes it on /_agnocast_discovery so
+    other namespaces and ECUs running ros2agnocast tooling can build a
+    cross-NS / cross-ECU view and request bridges on demand.
+  </description>
+
+  <maintainer email="keita.morisaki@tier4.jp">Keita Morisaki</maintainer>
+  <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
+  <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
+  <maintainer email="primenumber_2_3_5@yahoo.co.jp">Takumi Jin</maintainer>
+  <license>Apache License 2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ros2agnocast_discovery_msgs</exec_depend>
+  <exec_depend>agnocast_ioctl_wrapper</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

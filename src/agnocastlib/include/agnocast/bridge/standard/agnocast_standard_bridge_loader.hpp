@@ -3,10 +3,10 @@
 #include "agnocast/agnocast_mq.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace agnocast
@@ -49,7 +49,7 @@ private:
   rclcpp::Node::SharedPtr container_node_;
   rclcpp::Logger logger_;
 
-  std::map<std::string, std::pair<uintptr_t, std::shared_ptr<void>>> cached_factories_;
+  std::unordered_map<std::string, std::pair<uintptr_t, std::shared_ptr<void>>> cached_factories_;
 
   template <typename BridgeBaseT, typename BridgeFnT>
   std::shared_ptr<BridgeBaseT> create_bridge_instance(

@@ -34,7 +34,7 @@ const void * get_node_base_address(Node * node);
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge);
+  const bool is_bridge, const std::string & type_name);
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
   const topic_local_id_t publisher_id, const uint64_t msg_virtual_address,
@@ -66,6 +66,7 @@ class BasicPublisher
   topic_local_id_t id_ = -1;
   std::string topic_name_;
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
+  std::mutex opened_mqs_mtx_;
   rmw_gid_t gid_;
 
   void generate_gid()
@@ -116,8 +117,15 @@ class BasicPublisher
 
     validate_publisher_qos(actual_qos);
 
-    id_ =
-      initialize_publisher(topic_name_, node->get_fully_qualified_name(), actual_qos, is_bridge);
+    const std::string node_name = node->get_fully_qualified_name();
+    // Gated to message types only — service types pulled in by
+    // BasicService<ServiceT> have no rosidl message name. The empty string
+    // signals "skip registry" to initialize_publisher.
+    std::string type_name;
+    if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
+      type_name = rosidl_generator_traits::name<MessageT>();
+    }
+    id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
     generate_gid();
     BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
 
@@ -215,8 +223,11 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    const union ioctl_publish_msg_args publish_msg_args =
-      publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
+    union ioctl_publish_msg_args publish_msg_args;
+    {
+      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+      publish_msg_args = publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
+    }
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);

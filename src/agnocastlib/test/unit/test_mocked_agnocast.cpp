@@ -40,7 +40,7 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string &, const std::string &, const rclcpp::QoS &, const bool)
+  const std::string &, const std::string &, const rclcpp::QoS &, const bool, const std::string &)
 {
   return 0;  // Dummy value
 }
@@ -381,7 +381,7 @@ TEST_F(AgnocastSmartPointerTest, move_assignment_self)
 
   // Act
 #pragma GCC diagnostic push
-#ifdef __clang__
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 13)
 #pragma GCC diagnostic ignored "-Wself-move"
 #endif
   sut = std::move(sut);

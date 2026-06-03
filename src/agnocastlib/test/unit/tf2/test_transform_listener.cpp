@@ -63,7 +63,8 @@ void remove_mq(const std::pair<mqd_t, std::string> &)
 }
 
 union ioctl_add_subscriber_args SubscriptionBase::initialize(
-  const rclcpp::QoS & qos, const bool, const bool, const bool, const std::string &)
+  const rclcpp::QoS & qos, const bool, const bool, const bool, const std::string &,
+  const std::string &)
 {
   initialize_subscriber_call_count++;
   initialized_topic_names.push_back(topic_name_);

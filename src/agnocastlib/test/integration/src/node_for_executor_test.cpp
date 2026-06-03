@@ -1,8 +1,8 @@
 #include "node_for_executor_test.hpp"
 
 NodeForExecutorTest::NodeForExecutorTest(
-  const int64_t num_agnocast_sub_cbs, const int64_t num_ros2_sub_cbs,
-  const int64_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
+  const size_t num_agnocast_sub_cbs, const size_t num_ros2_sub_cbs,
+  const size_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
   const std::chrono::milliseconds cb_exec_time, const std::string cbg_type)
 : Node("node_for_executor_test")
 {
@@ -18,7 +18,7 @@ NodeForExecutorTest::NodeForExecutorTest(
   // For Agnocast
   agnocast_timer_ =
     create_wall_timer(pub_period, std::bind(&NodeForExecutorTest::agnocast_timer_cb, this));
-  for (int64_t i = 0; i < num_agnocast_sub_cbs; i++) {
+  for (size_t i = 0; i < num_agnocast_sub_cbs; i++) {
     add_agnocast_sub_cb();
   }
   num_total_agnocast_sub_cbs_ = num_agnocast_sub_cbs + num_agnocast_cbs_to_be_added;
@@ -30,7 +30,7 @@ NodeForExecutorTest::NodeForExecutorTest(
   // For ROS 2
   ros2_pub_ = create_publisher<std_msgs::msg::Bool>(ros2_topic_name_, 1);
   ros2_timer_ = create_wall_timer(pub_period, std::bind(&NodeForExecutorTest::ros2_timer_cb, this));
-  for (int64_t i = 0; i < num_ros2_sub_cbs; i++) {
+  for (size_t i = 0; i < num_ros2_sub_cbs; i++) {
     rclcpp::SubscriptionOptions options;
     if (ros2_common_cbg_) {
       options.callback_group = ros2_common_cbg_;
