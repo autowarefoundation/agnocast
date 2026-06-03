@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <list>
 #include <map>
@@ -156,8 +157,8 @@ public:
   void remove_node(const std::shared_ptr<agnocast::Node> & node, bool notify = true);
 
   /// Collect work once and execute the next available work, optionally within a duration.
-  /// @param timeout timeout The maximum amount of time to spend waiting for work. `-1` is
-  /// potentially block forever waiting for work.
+  /// @param timeout The maximum amount of time to spend waiting for work. `-1` blocks forever
+  /// waiting for work.
   AGNOCAST_PUBLIC
   virtual void spin_once(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
 

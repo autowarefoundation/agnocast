@@ -414,7 +414,7 @@ rclcpp::FutureReturnCode AgnocastOnlyExecutor::spin_until_future_complete_impl(
   }
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
 
-  while (agnocast::ok() && spinning_.load()) {
+  while (spinning_.load() && !cancel_requested_.load() && agnocast::ok()) {
     // Do one item of work.
     spin_once_impl(timeout_left);
 
