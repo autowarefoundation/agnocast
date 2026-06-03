@@ -55,11 +55,11 @@ public:
 protected:
   rclcpp::Logger logger_;
   virtual void handle_signal();
+  virtual void handle_socket(int client_fd);
 
 private:
   int epoll_fd_ = -1;
   int signal_fd_ = -1;
-
   int socket_fd_ = -1;
 
   mqd_t mq_fd_ = (mqd_t)-1;
@@ -74,13 +74,12 @@ private:
   void setup_mq();
   void setup_signals(
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
-  void setup_epoll();
   void setup_socket();
+  void setup_epoll();
   void cleanup_resources();
 
   mqd_t create_and_open_mq(const std::string & name) const;
   void add_fd_to_epoll(int fd, const std::string & label) const;
-  void handle_socket(int client_fd);
 
   static void ignore_signals_impl(const std::vector<int> & signals);
   static sigset_t block_signals_impl(const std::vector<int> & signals);
@@ -203,11 +202,6 @@ inline void IpcEventLoopBase::handle_socket(int client_fd)
   }
 }
 
-inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
-{
-  socket_cb_ = std::move(cb);
-}
-
 inline void IpcEventLoopBase::set_mq_handler(EventCallback cb)
 {
   mq_cb_ = std::move(cb);
@@ -216,6 +210,11 @@ inline void IpcEventLoopBase::set_mq_handler(EventCallback cb)
 inline void IpcEventLoopBase::set_signal_handler(SignalCallback cb)
 {
   signal_cb_ = std::move(cb);
+}
+
+inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
+{
+  socket_cb_ = std::move(cb);
 }
 
 inline void IpcEventLoopBase::setup_mq()
@@ -232,20 +231,6 @@ inline void IpcEventLoopBase::setup_signals(
   signal_fd_ = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
   if (signal_fd_ == -1) {
     throw std::system_error(errno, std::generic_category(), "signalfd failed");
-  }
-}
-
-inline void IpcEventLoopBase::setup_epoll()
-{
-  epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
-  if (epoll_fd_ == -1) {
-    throw std::runtime_error("epoll_create1 failed: " + std::string(strerror(errno)));
-  }
-
-  add_fd_to_epoll(mq_fd_, "MQ");
-  add_fd_to_epoll(signal_fd_, "Signal");
-  if (socket_fd_ != -1) {
-    add_fd_to_epoll(socket_fd_, "Socket");
   }
 }
 
@@ -308,6 +293,20 @@ inline void IpcEventLoopBase::setup_socket()
   }
 
   socket_fd_ = fd;
+}
+
+inline void IpcEventLoopBase::setup_epoll()
+{
+  epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+  if (epoll_fd_ == -1) {
+    throw std::runtime_error("epoll_create1 failed: " + std::string(strerror(errno)));
+  }
+
+  add_fd_to_epoll(mq_fd_, "MQ");
+  add_fd_to_epoll(signal_fd_, "Signal");
+  if (socket_fd_ != -1) {
+    add_fd_to_epoll(socket_fd_, "Socket");
+  }
 }
 
 inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const
