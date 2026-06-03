@@ -8,7 +8,6 @@ socket servers in place of the real bridge daemon.
 import os
 import socket
 import threading
-from io import StringIO
 from unittest.mock import mock_open, patch
 
 from ros2agnocast.verb import bridge_daemon_status as br

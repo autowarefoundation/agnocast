@@ -173,7 +173,7 @@ class BridgeDaemonStatusVerb(VerbExtension):
             '--verbose', '-v',
             action='store_true',
             default=False,
-            help='Print detailed output including bridge status and stale files',
+            help='Print detailed output including bridge status',
         )
 
     def _collect_bridge_results(
