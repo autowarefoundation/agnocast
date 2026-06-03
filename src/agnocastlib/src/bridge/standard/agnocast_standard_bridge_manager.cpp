@@ -20,6 +20,7 @@ namespace agnocast
 StandardBridgeManager::StandardBridgeManager(pid_t target_pid)
 : target_pid_(target_pid),
   logger_(rclcpp::get_logger("agnocast_standard_bridge_manager")),
+  self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_)
 {
   if (rclcpp::ok()) {
@@ -137,7 +138,7 @@ void StandardBridgeManager::on_signal()
 
 std::string StandardBridgeManager::on_socket_request()
 {
-  return "{\"type\":\"standard\",\"ipc_ns\":" + std::to_string(get_self_ipc_ns_inode()) +
+  return "{\"type\":\"standard\",\"ipc_ns\":" + std::to_string(self_ipc_ns_inode_) +
          ",\"pid\":" + std::to_string(getpid()) + "}";
 }
 

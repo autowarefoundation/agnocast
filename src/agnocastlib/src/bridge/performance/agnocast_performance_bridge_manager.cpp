@@ -18,6 +18,7 @@ namespace agnocast
 
 PerformanceBridgeManager::PerformanceBridgeManager()
 : logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
+  self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_),
   loader_(logger_)
 {
@@ -137,7 +138,7 @@ void PerformanceBridgeManager::on_signal()
 
 std::string PerformanceBridgeManager::on_socket_request()
 {
-  return "{\"type\":\"performance\",\"ipc_ns\":" + std::to_string(get_self_ipc_ns_inode()) +
+  return "{\"type\":\"performance\",\"ipc_ns\":" + std::to_string(self_ipc_ns_inode_) +
          ",\"pid\":" + std::to_string(getpid()) + "}";
 }
 

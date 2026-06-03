@@ -80,6 +80,7 @@ private:
 
   const pid_t target_pid_;
   rclcpp::Logger logger_;
+  uint64_t self_ipc_ns_inode_;
 
   StandardBridgeIpcEventLoop event_loop_;
   std::unique_ptr<StandardBridgeLoader> loader_;

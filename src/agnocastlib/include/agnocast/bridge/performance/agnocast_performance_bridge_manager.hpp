@@ -40,6 +40,7 @@ private:
   };
 
   rclcpp::Logger logger_;
+  uint64_t self_ipc_ns_inode_;
   PerformanceBridgeIpcEventLoop event_loop_;
   PerformanceBridgeLoader loader_;
 
