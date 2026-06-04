@@ -9,7 +9,7 @@ from rclpy.logging import LoggingSeverity
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 from ros2agnocast.discovery import GOSSIP_TOPIC, gossip_qos
-from ros2agnocast.verb._bridged_ros2cli import load_msg_class
+from ros2agnocast._bridged_ros2cli import load_msg_class
 from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
 
 

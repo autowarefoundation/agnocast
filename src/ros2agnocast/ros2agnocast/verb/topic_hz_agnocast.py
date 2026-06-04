@@ -1,6 +1,6 @@
 from ros2topic.verb.hz import HzVerb
-from ros2agnocast.verb._bridged_ros2cli import add_bridge_arguments
-from ros2agnocast.verb._bridged_ros2cli import spawn_bridge_and_run
+from ros2agnocast._bridged_ros2cli import add_bridge_arguments
+from ros2agnocast._bridged_ros2cli import spawn_bridge_and_run
 
 
 class TopicHzAgnocastVerb(HzVerb):

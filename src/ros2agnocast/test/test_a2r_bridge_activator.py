@@ -7,7 +7,7 @@ logic under test can be driven in pure Python.
 
 from unittest.mock import MagicMock, patch
 
-from ros2agnocast.verb._a2r_bridge_activator import A2rBridgeActivator
+from ros2agnocast._a2r_bridge_activator import A2rBridgeActivator
 from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState, AgnocastEndpoint, AgnocastTopic
 
 
@@ -60,28 +60,28 @@ def _state(*topics: AgnocastTopic) -> AgnocastDaemonState:
 
 def test_on_discovery_adds_topic_to_awaiting():
     act = _make_activator()
-    with patch('ros2agnocast.verb._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
         act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
     assert '/chatter' in act._awaiting_bridge_topics
 
 
 def test_on_discovery_skips_agnocast_srv_topics():
     act = _make_activator()
-    with patch('ros2agnocast.verb._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
         act._on_discovery(_state(_topic('/AGNOCAST_SRV_foo', pubs=[_endpoint()])))
     assert '/AGNOCAST_SRV_foo' not in act._awaiting_bridge_topics
 
 
 def test_on_discovery_skips_topics_without_publishers():
     act = _make_activator()
-    with patch('ros2agnocast.verb._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
         act._on_discovery(_state(_topic('/chatter', pubs=[])))
     assert '/chatter' not in act._awaiting_bridge_topics
 
 
 def test_on_discovery_does_not_duplicate_subscription():
     act = _make_activator()
-    with patch('ros2agnocast.verb._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
         act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
         act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
     assert act._node.create_subscription.call_count == 1
@@ -89,7 +89,7 @@ def test_on_discovery_does_not_duplicate_subscription():
 
 def test_on_discovery_skips_when_load_msg_class_returns_none():
     act = _make_activator()
-    with patch('ros2agnocast.verb._a2r_bridge_activator.load_msg_class', return_value=None):
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=None):
         act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
     assert '/chatter' not in act._awaiting_bridge_topics
 
@@ -103,7 +103,7 @@ def test_check_bridges_removes_confirmed_topic_silently():
     act._awaiting_bridge_topics['/chatter'] = 0.0  # created long ago
     act._node.count_publishers.return_value = 1
 
-    with patch('ros2agnocast.verb._a2r_bridge_activator.time') as mock_time:
+    with patch('ros2agnocast._a2r_bridge_activator.time') as mock_time:
         mock_time.monotonic.return_value = act.BRIDGE_SPAWN_TIMEOUT + 1.0
         act._check_bridges()
 
@@ -116,7 +116,7 @@ def test_check_bridges_warns_and_removes_timed_out_topic():
     act._awaiting_bridge_topics['/chatter'] = 0.0
     act._node.count_publishers.return_value = 0
 
-    with patch('ros2agnocast.verb._a2r_bridge_activator.time') as mock_time:
+    with patch('ros2agnocast._a2r_bridge_activator.time') as mock_time:
         mock_time.monotonic.return_value = act.BRIDGE_SPAWN_TIMEOUT + 1.0
         act._check_bridges()
 
@@ -131,7 +131,7 @@ def test_check_bridges_does_not_warn_before_timeout():
     act._awaiting_bridge_topics['/chatter'] = 0.0
     act._node.count_publishers.return_value = 0
 
-    with patch('ros2agnocast.verb._a2r_bridge_activator.time') as mock_time:
+    with patch('ros2agnocast._a2r_bridge_activator.time') as mock_time:
         mock_time.monotonic.return_value = act.BRIDGE_SPAWN_TIMEOUT - 1.0
         act._check_bridges()
 
@@ -150,7 +150,7 @@ def test_check_bridges_handles_multiple_topics_independently():
 
     act._node.count_publishers.side_effect = count_publishers
 
-    with patch('ros2agnocast.verb._a2r_bridge_activator.time') as mock_time:
+    with patch('ros2agnocast._a2r_bridge_activator.time') as mock_time:
         mock_time.monotonic.return_value = 1000.0
         act._check_bridges()
 

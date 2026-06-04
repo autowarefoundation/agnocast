@@ -10,8 +10,8 @@ import socket
 import threading
 from unittest.mock import mock_open, patch
 
-from ros2agnocast.verb import bridge_daemon_status as br
-from ros2agnocast.verb.bridge_daemon_status import (
+from ros2agnocast.verb import agnocast_bridge_daemon_status as br
+from ros2agnocast.verb.agnocast_bridge_daemon_status import (
     _BridgeResult,
     _build_summary,
     _find_bridge_pids,
