@@ -13,4 +13,4 @@ class BagRecordAgnocastVerb(RecordVerb):
         #         --all-services, --services, --exclude-services
         # NOTE: Agnocast service is not-supported.
         with A2rBridgeActivator(log_level=args.log_level):
-            return RecordVerb.main(self, args=args)
+            return super().main(args=args)

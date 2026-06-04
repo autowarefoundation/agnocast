@@ -107,19 +107,23 @@ class A2rBridgeActivator:
         """Timer callback: warn if A2R bridge publishers have not appeared within the timeout."""
         now = time.monotonic()
         with self._lock:
-            to_remove = []
-            for topic_name, created_at in self._awaiting_bridge_topics.items():
-                if self._node.count_publishers(topic_name) > 0:
-                    to_remove.append(topic_name)
-                elif now - created_at >= self.BRIDGE_SPAWN_TIMEOUT:
-                    self._node.get_logger().warning(
-                        "A2R bridge has not been created for topic '%s' "
-                        "(%d seconds elapsed since subscription was created)"
-                        % (topic_name, int(now - created_at))
-                    )
-                    to_remove.append(topic_name)
+            candidates = list(self._awaiting_bridge_topics.items())
+
+        to_remove = []
+        for topic_name, created_at in candidates:
+            if self._node.count_publishers(topic_name) > 0:
+                to_remove.append(topic_name)
+            elif now - created_at >= self.BRIDGE_SPAWN_TIMEOUT:
+                self._node.get_logger().warning(
+                    "A2R bridge has not been created for topic '%s' "
+                    "(%d seconds elapsed since subscription was created)"
+                    % (topic_name, int(now - created_at))
+                )
+                to_remove.append(topic_name)
+
+        with self._lock:
             for topic_name in to_remove:
-                del self._awaiting_bridge_topics[topic_name]
+                self._awaiting_bridge_topics.pop(topic_name, None)
 
     def stop(self) -> None:
         """Shut down the gossip spin thread and release resources."""
