@@ -29,6 +29,8 @@ class A2rBridgeActivator:
     """
 
     def __init__(self, log_level: str = 'info') -> None:
+        # TODO: Accept a topic filter (e.g. an explicit list, type filter, or regex) so that
+        #       A2R bridges are only activated for the topics the caller actually needs.
         self._ctx = rclpy.Context()
         self._node = None
         self._thread = None
@@ -75,6 +77,8 @@ class A2rBridgeActivator:
     def _on_discovery(self, msg: AgnocastDaemonState) -> None:
         with self._lock:
             for topic in msg.topics:
+                if topic.topic_name.startswith('/AGNOCAST_SRV_'):
+                    continue
                 if topic.publishers and topic.topic_name not in self._active_subs:
                     self._spawn_subscription(topic.topic_name, topic.type_name)
 
