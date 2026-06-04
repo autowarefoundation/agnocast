@@ -450,6 +450,9 @@ void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
 
 void AgnocastOnlyExecutor::spin_once(std::chrono::nanoseconds timeout)
 {
+  if (cancel_requested_.load()) {
+    return;
+  }
   if (spinning_.exchange(true)) {
     throw std::runtime_error("spin_once() called while already spinning");
   }
