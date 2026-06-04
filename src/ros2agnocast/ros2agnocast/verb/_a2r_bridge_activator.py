@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -28,6 +29,9 @@ class A2rBridgeActivator:
             # ... record or otherwise consume Agnocast topics via ROS2 ...
     """
 
+    BRIDGE_CHECK_INTERVAL = 2.0   # seconds between diagnostic checks
+    BRIDGE_SPAWN_TIMEOUT = 5.0    # seconds to wait before warning about missing bridge
+
     def __init__(self, log_level: str = 'info') -> None:
         # TODO: Accept a topic filter (e.g. an explicit list, type filter, or regex) so that
         #       A2R bridges are only activated for the topics the caller actually needs.
@@ -35,7 +39,8 @@ class A2rBridgeActivator:
         self._node = None
         self._thread = None
         self._lock = threading.Lock()
-        self._active_subs: dict = {}  # topic_name -> Subscription
+        self._active_subs: dict = {}             # topic_name -> Subscription
+        self._awaiting_bridge_topics: dict = {}   # topic_name -> monotonic time, until confirmed or timed out
         self._log_level = log_level
 
     def start(self) -> None:
@@ -53,6 +58,7 @@ class A2rBridgeActivator:
             self._on_discovery,
             gossip_qos(),
         )
+        self._node.create_timer(self.BRIDGE_CHECK_INTERVAL, self._check_bridges)
         self._thread = threading.Thread(
             target=self._spin,
             daemon=True,
@@ -94,7 +100,26 @@ class A2rBridgeActivator:
         )
         sub = self._node.create_subscription(msg_type, topic_name, lambda _msg: None, qos)
         self._active_subs[topic_name] = sub
+        self._awaiting_bridge_topics[topic_name] = time.monotonic()
         self._node.get_logger().debug("A2R bridge activated: '%s' (%s)" % (topic_name, type_name))
+
+    def _check_bridges(self) -> None:
+        """Timer callback: warn if A2R bridge publishers have not appeared within the timeout."""
+        now = time.monotonic()
+        with self._lock:
+            to_remove = []
+            for topic_name, created_at in self._awaiting_bridge_topics.items():
+                if self._node.count_publishers(topic_name) > 0:
+                    to_remove.append(topic_name)
+                elif now - created_at >= self.BRIDGE_SPAWN_TIMEOUT:
+                    self._node.get_logger().warning(
+                        "A2R bridge has not been created for topic '%s' "
+                        "(%d seconds elapsed since subscription was created)"
+                        % (topic_name, int(now - created_at))
+                    )
+                    to_remove.append(topic_name)
+            for topic_name in to_remove:
+                del self._awaiting_bridge_topics[topic_name]
 
     def stop(self) -> None:
         """Shut down the gossip spin thread and release resources."""
