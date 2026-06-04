@@ -136,10 +136,10 @@ void PerformanceBridgeManager::on_signal()
   }
 }
 
-std::string PerformanceBridgeManager::on_socket_request()
+std::string PerformanceBridgeManager::on_socket_request() const
 {
-  return "{\"type\":\"performance\",\"ipc_ns\":" + std::to_string(self_ipc_ns_inode_) +
-         ",\"pid\":" + std::to_string(getpid()) + "}";
+  return R"({"type":"performance","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+         std::to_string(getpid()) + "}";
 }
 
 void PerformanceBridgeManager::check_and_create_pubsub_bridges()

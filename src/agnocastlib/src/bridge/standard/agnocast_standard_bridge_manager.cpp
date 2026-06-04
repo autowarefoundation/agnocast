@@ -136,10 +136,10 @@ void StandardBridgeManager::on_signal()
   }
 }
 
-std::string StandardBridgeManager::on_socket_request()
+std::string StandardBridgeManager::on_socket_request() const
 {
-  return "{\"type\":\"standard\",\"ipc_ns\":" + std::to_string(self_ipc_ns_inode_) +
-         ",\"pid\":" + std::to_string(getpid()) + "}";
+  return R"({"type":"standard","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+         std::to_string(getpid()) + "}";
 }
 
 void StandardBridgeManager::register_pubsub_request(const MqMsgBridge & req)

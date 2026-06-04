@@ -60,7 +60,7 @@ private:
 
   void on_mq_request(int fd);
   void on_signal();
-  std::string on_socket_request();
+  std::string on_socket_request() const;
 
   void check_and_create_pubsub_bridges();
   void check_and_remove_pubsub_bridges();

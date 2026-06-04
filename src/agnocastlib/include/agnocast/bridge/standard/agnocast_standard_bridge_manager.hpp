@@ -101,7 +101,7 @@ private:
 
   void on_mq_request(mqd_t fd);
   void on_signal();
-  std::string on_socket_request();
+  std::string on_socket_request() const;
 
   void register_pubsub_request(const MqMsgBridge & req);
 
