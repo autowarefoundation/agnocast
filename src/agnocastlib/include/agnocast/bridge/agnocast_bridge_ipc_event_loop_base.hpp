@@ -139,7 +139,9 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
     } else if (fd == socket_fd_) {
       int client_fd = accept4(socket_fd_, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
       if (client_fd == -1) {
-        RCLCPP_WARN(logger_, "accept4 on socket failed: %s", strerror(errno));
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+          RCLCPP_WARN(logger_, "accept4 on socket failed: %s", strerror(errno));
+        }
       } else {
         handle_socket(client_fd);
         close(client_fd);
