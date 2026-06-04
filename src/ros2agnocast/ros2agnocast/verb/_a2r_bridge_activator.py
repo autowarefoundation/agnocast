@@ -39,6 +39,8 @@ class A2rBridgeActivator:
         self._node = None
         self._thread = None
         self._lock = threading.Lock()
+        self._gossip_sub = None
+        self._timer = None
         self._active_subs: dict = {}             # topic_name -> Subscription
         self._awaiting_bridge_topics: dict = {}   # topic_name -> monotonic time, until confirmed or timed out
         self._log_level = log_level
@@ -50,15 +52,15 @@ class A2rBridgeActivator:
             '_ros2agnocast_a2r_activator_%d' % os.getpid(),
             context=self._ctx,
         )
-        severity = LoggingSeverity[self._log_level.upper()]
+        severity = getattr(LoggingSeverity, self._log_level.upper(), LoggingSeverity.INFO)
         self._node.get_logger().set_level(severity)
-        self._node.create_subscription(
+        self._gossip_sub = self._node.create_subscription(
             AgnocastDaemonState,
             GOSSIP_TOPIC,
             self._on_discovery,
             gossip_qos(),
         )
-        self._node.create_timer(self.BRIDGE_CHECK_INTERVAL, self._check_bridges)
+        self._timer = self._node.create_timer(self.BRIDGE_CHECK_INTERVAL, self._check_bridges)
         self._thread = threading.Thread(
             target=self._spin,
             daemon=True,
@@ -71,8 +73,10 @@ class A2rBridgeActivator:
         executor.add_node(self._node)
         try:
             executor.spin()
-        except Exception:
-            pass
+        except Exception as e:
+            if rclpy.ok(context=self._ctx):
+                self._node.get_logger().error(
+                    f'A2rBridgeActivator spin thread exited with error: {e}')
         finally:
             executor.remove_node(self._node)
             try:
