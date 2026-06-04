@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 
@@ -38,7 +39,6 @@ class A2rBridgeActivator:
         self._ctx = rclpy.Context()
         self._node = None
         self._thread = None
-        self._lock = threading.Lock()
         self._gossip_sub = None
         self._timer = None
         self._active_subs: dict = {}             # topic_name -> Subscription
@@ -85,15 +85,16 @@ class A2rBridgeActivator:
                 pass
 
     def _on_discovery(self, msg: AgnocastDaemonState) -> None:
-        with self._lock:
-            for topic in msg.topics:
-                if topic.topic_name.startswith('/AGNOCAST_SRV_'):
-                    continue
-                if topic.publishers and topic.topic_name not in self._active_subs:
-                    self._spawn_subscription(topic.topic_name, topic.type_name)
+        # No lock needed: both _on_discovery and _check_bridges are called from the same
+        # SingleThreadedExecutor spin thread, so they never execute concurrently.
+        for topic in msg.topics:
+            if topic.topic_name.startswith('/AGNOCAST_SRV_'):
+                continue
+            if topic.publishers and topic.topic_name not in self._active_subs:
+                self._spawn_subscription(topic.topic_name, topic.type_name)
 
     def _spawn_subscription(self, topic_name: str, type_name: str) -> None:
-        """Create a dummy ROS2 subscription to trigger the A2R bridge. Called with _lock held."""
+        """Create a dummy ROS2 subscription to trigger the A2R bridge."""
         msg_type = load_msg_class(type_name)
         if msg_type is None:
             return
@@ -105,16 +106,13 @@ class A2rBridgeActivator:
         sub = self._node.create_subscription(msg_type, topic_name, lambda _msg: None, qos)
         self._active_subs[topic_name] = sub
         self._awaiting_bridge_topics[topic_name] = time.monotonic()
-        self._node.get_logger().debug("A2R bridge activated: '%s' (%s)" % (topic_name, type_name))
+        self._node.get_logger().debug("A2R bridge requested: '%s' (%s)" % (topic_name, type_name))
 
     def _check_bridges(self) -> None:
         """Timer callback: warn if A2R bridge publishers have not appeared within the timeout."""
         now = time.monotonic()
-        with self._lock:
-            candidates = list(self._awaiting_bridge_topics.items())
-
         to_remove = []
-        for topic_name, created_at in candidates:
+        for topic_name, created_at in self._awaiting_bridge_topics.items():
             if self._node.count_publishers(topic_name) > 0:
                 to_remove.append(topic_name)
             elif now - created_at >= self.BRIDGE_SPAWN_TIMEOUT:
@@ -125,15 +123,19 @@ class A2rBridgeActivator:
                 )
                 to_remove.append(topic_name)
 
-        with self._lock:
-            for topic_name in to_remove:
-                self._awaiting_bridge_topics.pop(topic_name, None)
+        for topic_name in to_remove:
+            self._awaiting_bridge_topics.pop(topic_name, None)
 
     def stop(self) -> None:
         """Shut down the gossip spin thread and release resources."""
         rclpy.try_shutdown(context=self._ctx)
         if self._thread is not None:
             self._thread.join(timeout=5.0)
+            if self._thread.is_alive():
+                print(
+                    '[WARN] [ros2agnocast]: A2rBridgeActivator spin thread did not stop within 5 seconds',
+                    file=sys.stderr,
+                )
 
     def __enter__(self):
         self.start()
