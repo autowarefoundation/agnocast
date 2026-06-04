@@ -18,6 +18,7 @@ namespace agnocast
 
 PerformanceBridgeManager::PerformanceBridgeManager()
 : logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
+  self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_),
   loader_(logger_)
 {
@@ -56,6 +57,7 @@ void PerformanceBridgeManager::run()
 
   event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
+  event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
 
   while (!shutdown_requested_) {
     if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
@@ -132,6 +134,12 @@ void PerformanceBridgeManager::on_signal()
   if (executor_) {
     executor_->cancel();
   }
+}
+
+std::string PerformanceBridgeManager::on_socket_request() const
+{
+  return R"({"type":"performance","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+         std::to_string(getpid()) + "}";
 }
 
 void PerformanceBridgeManager::check_and_create_pubsub_bridges()
