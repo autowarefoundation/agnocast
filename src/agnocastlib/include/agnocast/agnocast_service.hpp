@@ -151,6 +151,11 @@ public:
   /**
    * @brief Sends a response to the client that initiated the service call. This function is
    * expected to be used in deferred response callbacks.
+   *
+   * `response` must be the object returned by `borrow_loaned_response()`. The entire
+   * `borrow_loaned_response()` -> populate -> `send_response()` sequence must run on the same
+   * thread (typically in a single callback).
+   *
    * @param request The request that initiated the service call.
    * @param response The response to send. Must be acquired by calling borrow_loaned_response().
    */
@@ -168,6 +173,10 @@ public:
   /**
    * @brief Allocate a service response message in shared memory. This function is expected to be
    * used in deferred response callbacks.
+   *
+   * This function does not consume `request`. In deferred callbacks, keep `request` and pass it to
+   * `send_response()` after populating the returned response.
+   *
    * @param request The request that initiated the service call.
    * @return Owned pointer to the response message in shared memory.
    */
