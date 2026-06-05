@@ -4,8 +4,8 @@ import time
 from typing import Callable
 
 import rclpy
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from ros2cli.node.strategy import NodeStrategy
+from ros2agnocast.bridge_utils import create_dummy_subscription, load_msg_class
 from ros2agnocast.discovery import (
     DEFAULT_COLLECT_TIMEOUT_SEC,
     add_gossip_timeout_arg,
@@ -94,21 +94,6 @@ def resolve_type_name(topic_name: str, gossip_timeout: float):
     return type_name
 
 
-def load_msg_class(type_name: str):
-    """Load and return the ROS message class for type_name.
-
-    Returns the message class on success, or None if the class cannot be
-    loaded (error is printed to stdout).
-    """
-    try:
-        from rosidl_runtime_py.utilities import get_message
-        return get_message(type_name)
-    except Exception as e:
-        print(
-            "ERROR: Could not load message class for type '%s': %s" % (type_name, e))
-        return None
-
-
 @contextlib.contextmanager
 def _create_dummy_subscription(topic_name: str, msg_type):
     """Context manager that registers a dummy ROS 2 subscriber to trigger the A2R bridge.
@@ -125,12 +110,7 @@ def _create_dummy_subscription(topic_name: str, msg_type):
         node = rclpy.create_node(
             '_ros2agnocast_cli_%d' % os.getpid(),
             context=ctx)
-        qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-        )
-        node.create_subscription(msg_type, topic_name, lambda _msg: None, qos)
+        create_dummy_subscription(node, topic_name, msg_type)
         yield node, ctx
     finally:
         if node is not None:

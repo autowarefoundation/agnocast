@@ -1,5 +1,5 @@
 from ros2bag.verb.record import RecordVerb
-from ros2agnocast.verb._a2r_bridge_activator import A2rBridgeActivator
+from ros2agnocast._a2r_bridge_activator import A2rBridgeActivator
 
 
 class BagRecordAgnocastVerb(RecordVerb):

@@ -6,10 +6,9 @@ import time
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.logging import LoggingSeverity
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
+from ros2agnocast.bridge_utils import create_dummy_subscription, load_msg_class
 from ros2agnocast.discovery import GOSSIP_TOPIC, gossip_qos
-from ros2agnocast.verb._bridged_ros2cli import load_msg_class
 from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
 
 
@@ -98,12 +97,7 @@ class A2rBridgeActivator:
         msg_type = load_msg_class(type_name)
         if msg_type is None:
             return
-        qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-        )
-        sub = self._node.create_subscription(msg_type, topic_name, lambda _msg: None, qos)
+        sub = create_dummy_subscription(self._node, topic_name, msg_type)
         self._active_subs[topic_name] = sub
         self._awaiting_bridge_topics[topic_name] = time.monotonic()
         self._node.get_logger().debug("A2R bridge requested: '%s' (%s)" % (topic_name, type_name))

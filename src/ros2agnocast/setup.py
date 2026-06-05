@@ -26,13 +26,13 @@ setup(
             'agnocast = ros2agnocast.command.agnocast:AgnocastCommand',
         ],
         'ros2agnocast.verb': [
-            'bridge-daemon-status = ros2agnocast.verb.bridge_daemon_status:BridgeDaemonStatusVerb',
-            'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
-            'version = ros2agnocast.verb.version:VersionVerb',
-            'discovery-daemon-status = ros2agnocast.verb.discovery_daemon_status:DiscoveryDaemonStatusVerb',
+            'bridge-daemon-status = ros2agnocast.verb.agnocast_bridge_daemon_status:BridgeDaemonStatusVerb',
+            'generate-bridge-plugins = ros2agnocast.verb.agnocast_generate_bridge_plugins:GenerateBridgePluginsVerb',
+            'version = ros2agnocast.verb.agnocast_version:VersionVerb',
+            'discovery-daemon-status = ros2agnocast.verb.agnocast_discovery_daemon_status:DiscoveryDaemonStatusVerb',
         ],
         'ros2topic.verb': [
-            'list_agnocast = ros2agnocast.verb.list_agnocast:ListAgnocastVerb',
+            'list_agnocast = ros2agnocast.verb.topic_list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.topic_info_agnocast:TopicInfoAgnocastVerb',
             'hz_agnocast = ros2agnocast.verb.topic_hz_agnocast:TopicHzAgnocastVerb',
             'echo_agnocast = ros2agnocast.verb.topic_echo_agnocast:TopicEchoAgnocastVerb',

@@ -10,7 +10,7 @@ import tempfile
 from argparse import Namespace
 from unittest.mock import patch
 
-from ros2agnocast.verb import discovery_daemon_status as ds
+from ros2agnocast.verb import agnocast_discovery_daemon_status as ds
 
 
 # --- type_registry: informational description (no OK/NG) --------------------
