@@ -96,9 +96,15 @@ class A2rBridgeActivator:
         for topic in msg.topics:
             if topic.topic_name.startswith('/AGNOCAST_SRV_'):
                 continue
-            if self._should_activate is not None and \
-                    not self._should_activate(topic.topic_name, topic.type_name):
-                continue
+            if self._should_activate is not None:
+                try:
+                    if not self._should_activate(topic.topic_name, topic.type_name):
+                        continue
+                except Exception as e:
+                    self._node.get_logger().warning(
+                        "should_activate raised an exception for topic '%s' (%s): %s; activating anyway"
+                        % (topic.topic_name, topic.type_name, e)
+                    )
             if topic.publishers and topic.topic_name not in self._active_subs:
                 self._spawn_subscription(topic.topic_name, topic.type_name)
 
