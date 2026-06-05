@@ -1,5 +1,0 @@
-<launch>
-    <node_container pkg="rclcpp_components" exec="component_container" name="pose_listener_container" namespace="" output="screen">
-        <composable_node pkg="agnocast_sample_application" plugin="pose_sample::PoseListener" name="pose_listener_node" namespace=""/>
-    </node_container>
-</launch>

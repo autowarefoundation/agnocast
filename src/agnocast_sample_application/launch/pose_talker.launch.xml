@@ -1,3 +1,0 @@
-<launch>
-    <node pkg="agnocast_sample_application" exec="pose_talker" name="pose_talker_node" output="screen"/>
-</launch>
