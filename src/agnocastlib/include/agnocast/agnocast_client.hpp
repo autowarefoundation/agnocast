@@ -34,11 +34,10 @@ bool wait_for_service_nanoseconds(
 extern int agnocast_fd;
 
 /**
- * @brief Service client for zero-copy Agnocast service communication. The service/client API is
- * experimental and may change in future versions.
+ * @brief Service client for zero-copy Agnocast service communication.
  * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
  */
-// AGNOCAST_PUBLIC
+AGNOCAST_PUBLIC
 template <typename ServiceT>
 class Client
 {
@@ -47,27 +46,27 @@ public:
 
   /// Future that resolves to the service response. Returned by async_send_request() (no-callback
   /// overload).
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   using Future = std::future<ipc_shared_ptr<typename ServiceT::Response>>;
   /// Shared future that resolves to the service response. Passed to the callback in
   /// async_send_request().
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   using SharedFuture = std::shared_future<ipc_shared_ptr<typename ServiceT::Response>>;
 
   /// Return type of async_send_request() (no-callback overload). Contains a Future and the request
   /// ID. Access the future via the `future` member and the request ID via `request_id`.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
   {
     using rclcpp::detail::FutureAndRequestId<Future>::FutureAndRequestId;
     /// Convert to a SharedFutureAndRequestId by sharing the underlying future.
-    // AGNOCAST_PUBLIC
+    AGNOCAST_PUBLIC
     SharedFuture share() noexcept { return this->future.share(); }
   };
   /// Return type of async_send_request() (callback overload). Contains a SharedFuture and the
   /// request ID. Access the shared future via the `future` member and the request ID via
   /// `request_id`.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   struct SharedFutureAndRequestId : rclcpp::detail::FutureAndRequestId<SharedFuture>
   {
     using rclcpp::detail::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
@@ -171,7 +170,7 @@ public:
 
   /** @brief Allocate a request message in shared memory.
    *  @return Owned pointer to the request message in shared memory. */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
     auto request = publisher_->borrow_loaned_message();
@@ -182,18 +181,18 @@ public:
 
   /** @brief Return the resolved service name.
    *  @return Null-terminated service name string. */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   const char * get_service_name() const { return service_name_.c_str(); }
 
   /** @brief Check if the service server is available.
    *  @return True if the service server is available. */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   bool service_is_ready() const { return service_is_ready_core(service_name_); }
 
   /** @brief Block until the service is available or the timeout expires.
    *  @param timeout Maximum duration to wait (-1 = wait forever).
    *  @return True if service became available, false on timeout. */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename RepT, typename RatioT>
   bool wait_for_service(
     std::chrono::duration<RepT, RatioT> timeout = std::chrono::nanoseconds(-1)) const
@@ -209,7 +208,7 @@ public:
    * obtain the response.
    *  @return A SharedFutureAndRequestId containing the shared future (`.future`) and a sequence
    * number (`.request_id`). */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   SharedFutureAndRequestId async_send_request(
     ipc_shared_ptr<typename ServiceT::Request> && request,
     std::function<void(SharedFuture)> callback)
@@ -232,7 +231,7 @@ public:
    *  @param request Request from borrow_loaned_request(). Must be moved in.
    *  @return A FutureAndRequestId containing the future (`.future`) and a sequence number
    * (`.request_id`). Call `.future.get()` to block until the response arrives. */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   FutureAndRequestId async_send_request(ipc_shared_ptr<typename ServiceT::Request> && request)
   {
     Future future;

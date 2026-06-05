@@ -175,7 +175,7 @@ public:
    * @param request The request that initiated the service call.
    * @param response The response to send. Must be acquired by calling borrow_loaned_response().
    */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   void send_response(
     ipc_shared_ptr<typename ServiceT::Request> && request,
     ipc_shared_ptr<typename ServiceT::Response> && response)
@@ -196,7 +196,7 @@ public:
    * @param request The request that initiated the service call.
    * @return Owned pointer to the response message in shared memory.
    */
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   ipc_shared_ptr<typename ServiceT::Response> borrow_loaned_response(
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
@@ -214,10 +214,9 @@ struct RosToAgnocastServiceRequestPolicy;
  * @brief The user-facing Agnocast service server.
  * Alias for `BasicService<ServiceT>`. Use this type (not BasicService directly) when declaring
  * service server variables.
- * The service/client API is experimental and may change in future versions.
  * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
  */
-// AGNOCAST_PUBLIC
+AGNOCAST_PUBLIC
 template <typename ServiceT>
 using Service = BasicService<ServiceT, RosToAgnocastServiceRequestPolicy>;
 

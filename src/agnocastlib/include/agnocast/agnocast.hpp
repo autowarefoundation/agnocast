@@ -198,7 +198,7 @@ typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
 /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
 /// @param group Callback group. Defaults to `nullptr` (default callback group).
 /// @return Shared pointer to the created client.
-// AGNOCAST_PUBLIC
+AGNOCAST_PUBLIC
 template <typename ServiceT, typename NodeT>
 typename Client<ServiceT>::SharedPtr create_client(
   NodeT * node, const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
@@ -207,11 +207,6 @@ typename Client<ServiceT>::SharedPtr create_client(
   static_assert(
     std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
     "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
-  RCLCPP_WARN(
-    node->get_logger(),
-    "Agnocast service/client is not officially supported yet and the API may change in the "
-    "future: %s",
-    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Client<ServiceT>>(node, service_name, qos, group);
 }
 
@@ -226,7 +221,7 @@ typename Client<ServiceT>::SharedPtr create_client(
 /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
 /// @param group Callback group. Defaults to `nullptr` (default callback group).
 /// @return Shared pointer to the created service.
-// AGNOCAST_PUBLIC
+AGNOCAST_PUBLIC
 template <typename ServiceT, typename NodeT, typename Func>
 typename Service<ServiceT>::SharedPtr create_service(
   NodeT * node, const std::string & service_name, Func && callback,
@@ -235,11 +230,6 @@ typename Service<ServiceT>::SharedPtr create_service(
   static_assert(
     std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
     "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
-  RCLCPP_WARN(
-    node->get_logger(),
-    "Agnocast service/client is not officially supported yet and the API may change in the "
-    "future: %s",
-    node->get_node_services_interface()->resolve_service_name(service_name).c_str());
   return std::make_shared<Service<ServiceT>>(
     node, service_name, std::forward<Func>(callback), qos, group);
 }
