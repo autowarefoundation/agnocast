@@ -19,14 +19,18 @@ def _make_should_activate(args):
     """
     # `all` exists in all versions; `all_topics` is Jazzy+ only (not present in Humble).
     all_flag = getattr(args, 'all', False) or getattr(args, 'all_topics', False)
-    # Jazzy stores positional [topics..] in args.topics_positional and --topics in args.topics.
-    # Humble stores positional [topics..] in args.topics (same dest as --topics).
     # Both belong to a mutually exclusive group, so combining them is safe.
-    topics = (
-        list(getattr(args, 'topics', None) or []) +
-        list(getattr(args, 'topics_positional', None) or [])
-    )
+    topics = set(getattr(args, 'topics', None) or []) | set(getattr(args, 'topics_positional', None) or [])
     regex_str = getattr(args, 'regex', None) or ''
+    regex = None
+    if regex_str:
+        try:
+            regex = re.compile(regex_str)
+        except re.error:
+            # Invalid regex: avoid runtime exceptions inside discovery callbacks.
+            # Fall back to the relaxed default behaviour (activate all when no other criteria).
+            regex_str = ''
+            regex = None
 
     def should_activate(topic_name: str, type_name: str) -> bool:
         if all_flag:
@@ -35,7 +39,7 @@ def _make_should_activate(args):
         if topic_name in topics:
             return True
 
-        if regex_str and re.search(regex_str, topic_name):
+        if regex is not None and regex.search(topic_name):
             return True
 
         # No positive criteria at all -> relaxed default
