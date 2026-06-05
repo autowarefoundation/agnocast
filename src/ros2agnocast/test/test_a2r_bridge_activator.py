@@ -94,6 +94,37 @@ def test_on_discovery_skips_when_load_msg_class_returns_none():
     assert '/chatter' not in act._awaiting_bridge_topics
 
 
+def test_on_discovery_skips_topic_when_should_activate_returns_false():
+    act = _make_activator()
+    act._should_activate = lambda topic_name, type_name: False
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+        act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
+    assert '/chatter' not in act._active_subs
+    assert '/chatter' not in act._awaiting_bridge_topics
+
+
+def test_on_discovery_activates_only_matching_topics_based_on_should_activate():
+    """should_activate selectively activates topics: only allowed topics get a subscription."""
+    act = _make_activator()
+    act._should_activate = lambda topic_name, type_name: topic_name == '/allowed'
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+        act._on_discovery(_state(
+            _topic('/allowed', pubs=[_endpoint()]),
+            _topic('/blocked', pubs=[_endpoint()]),
+        ))
+    assert '/allowed' in act._awaiting_bridge_topics
+    assert '/blocked' not in act._awaiting_bridge_topics
+
+
+def test_on_discovery_activates_when_should_activate_raises():
+    act = _make_activator()
+    act._should_activate = MagicMock(side_effect=RuntimeError('oops'))
+    with patch('ros2agnocast._a2r_bridge_activator.load_msg_class', return_value=MagicMock()):
+        act._on_discovery(_state(_topic('/chatter', pubs=[_endpoint()])))
+    act._node.get_logger.return_value.warning.assert_called_once()
+    assert '/chatter' in act._awaiting_bridge_topics
+
+
 # ---------------------------------------------------------------------------
 # _check_bridges tests
 # ---------------------------------------------------------------------------
