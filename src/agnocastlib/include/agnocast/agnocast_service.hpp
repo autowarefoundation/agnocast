@@ -52,8 +52,8 @@ private:
   using ServiceResponsePublisher = BasicPublisher<ResponseT, NoBridgeRequestPolicy>;
   using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRequestPolicy>;
 
-  std::variant<rclcpp::Node *, agnocast::Node *> node_;
-  const std::string service_name_;
+  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
+  std::string service_name_;
   const rclcpp::QoS qos_;
   std::mutex publishers_mtx_;
   std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
@@ -114,17 +114,10 @@ private:
     };
   }
 
-public:
-  using SharedPtr = std::shared_ptr<BasicService<ServiceT, BridgeRequestPolicy>>;
-
   template <typename Func, typename NodeT>
-  BasicService(
-    NodeT * node, const std::string & service_name, Func && callback, const rclcpp::QoS & qos,
+  void constructor_impl(
+    NodeT * node, const std::string & service_name, Func && callback,
     rclcpp::CallbackGroup::SharedPtr group)
-  : node_(node),
-    service_name_(node->get_node_services_interface()->resolve_service_name(service_name)),
-    // TransientLocal durability is not allowed for services.
-    qos_(rclcpp::QoS(qos).durability_volatile())
   {
     static_assert(
       is_basic_cb<Func>::value || is_deferred_cb<Func>::value,
@@ -132,6 +125,8 @@ public:
       "1. basic: (ipc_shared_ptr<ServiceT::Request>, ipc_shared_ptr<ServiceT::Response>)\n"
       "2. deferred: (std::shared_ptr<Service>, ipc_shared_ptr<ServiceT::Request>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
+
+    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
     SubscriptionOptions options{group};
     std::string topic_name = create_service_request_topic_name(service_name_);
@@ -146,6 +141,27 @@ public:
     }
 
     BridgeRequestPolicy::template request_bridge<NodeT, ServiceT>(node, service_name_);
+  }
+
+public:
+  using SharedPtr = std::shared_ptr<BasicService<ServiceT, BridgeRequestPolicy>>;
+
+  template <typename Func>
+  BasicService(
+    rclcpp::Node * node, const std::string & service_name, Func && callback,
+    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group)
+  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile())
+  {
+    constructor_impl(node, service_name, std::forward<Func>(callback), group);
+  }
+
+  template <typename Func>
+  BasicService(
+    agnocast::Node * node, const std::string & service_name, Func && callback,
+    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group)
+  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile())
+  {
+    constructor_impl(node, service_name, std::forward<Func>(callback), group);
   }
 
   /**

@@ -105,28 +105,20 @@ private:
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
-  std::variant<rclcpp::Node *, agnocast::Node *> node_;
-  rclcpp::Logger logger_;
-  const std::string node_name_;
+  std::string node_name_;
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
-  const std::string service_name_;
+  std::string service_name_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
-public:
   template <typename NodeT>
-  Client(
+  void constructor_impl(
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group)
-  : node_(node),
-    logger_(node->get_logger()),
-    node_name_(node->get_fully_qualified_name()),
-    node_base_(node->get_node_base_interface()),
-    service_name_(node->get_node_services_interface()->resolve_service_name(service_name))
   {
-    static_assert(
-      std::is_same_v<NodeT, rclcpp::Node> || std::is_same_v<NodeT, agnocast::Node>,
-      "NodeT must be either rclcpp::Node or agnocast::Node");
+    node_name_ = node->get_fully_qualified_name();
+    node_base_ = node->get_node_base_interface();
+    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -135,14 +127,14 @@ public:
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options);
 
-    auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
+    auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
       // Get the corresponding ResponseCallInfo and remove it from the map
       auto it = seqno2_response_call_info_.find(response->_sequence_number);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(logger_, "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
@@ -158,12 +150,23 @@ public:
 
     SubscriptionOptions options{group};
     std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
-    std::visit(
-      [this, &topic_name, &qos, cb = std::move(subscriber_callback), &options](auto * node) {
-        subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-          node, topic_name, qos, std::move(cb), options);
-      },
-      node_);
+    subscriber_ = std::make_shared<ServiceResponseSubscriber>(
+      node, topic_name, qos, std::move(subscriber_callback), options);
+  }
+
+public:
+  Client(
+    rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
+    rclcpp::CallbackGroup::SharedPtr group)
+  {
+    constructor_impl(node, service_name, qos_arg, group);
+  }
+
+  Client(
+    agnocast::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
+    rclcpp::CallbackGroup::SharedPtr group)
+  {
+    constructor_impl(node, service_name, qos_arg, group);
   }
 
   /** @brief Allocate a request message in shared memory.
