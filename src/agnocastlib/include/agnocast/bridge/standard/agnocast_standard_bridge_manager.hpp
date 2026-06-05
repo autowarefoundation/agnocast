@@ -80,6 +80,7 @@ private:
 
   const pid_t target_pid_;
   rclcpp::Logger logger_;
+  uint64_t self_ipc_ns_inode_;
 
   StandardBridgeIpcEventLoop event_loop_;
   std::unique_ptr<StandardBridgeLoader> loader_;
@@ -100,6 +101,7 @@ private:
 
   void on_mq_request(mqd_t fd);
   void on_signal();
+  std::string on_socket_request() const;
 
   void register_pubsub_request(const MqMsgBridge & req);
 

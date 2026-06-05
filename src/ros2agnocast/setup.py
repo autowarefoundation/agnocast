@@ -26,6 +26,7 @@ setup(
             'agnocast = ros2agnocast.command.agnocast:AgnocastCommand',
         ],
         'ros2agnocast.verb': [
+            'bridge-daemon-status = ros2agnocast.verb.bridge_daemon_status:BridgeDaemonStatusVerb',
             'generate-bridge-plugins = ros2agnocast.verb.generate_bridge_plugins:GenerateBridgePluginsVerb',
             'version = ros2agnocast.verb.version:VersionVerb',
             'discovery-daemon-status = ros2agnocast.verb.discovery_daemon_status:DiscoveryDaemonStatusVerb',
@@ -40,6 +41,9 @@ setup(
         'ros2node.verb': [
             'list_agnocast = ros2agnocast.verb.node_list_agnocast:ListAgnocastVerb',
             'info_agnocast = ros2agnocast.verb.node_info_agnocast:NodeInfoAgnocastVerb',
+        ],
+        'ros2bag.verb': [
+            'record_agnocast = ros2agnocast.verb.bag_record_agnocast:BagRecordAgnocastVerb',
         ],
     },
 )
