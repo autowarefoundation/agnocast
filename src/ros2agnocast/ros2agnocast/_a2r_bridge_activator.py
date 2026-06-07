@@ -2,6 +2,7 @@ import os
 import sys
 import threading
 import time
+from typing import Callable
 
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -32,9 +33,14 @@ class A2rBridgeActivator:
     BRIDGE_CHECK_INTERVAL = 2.0   # seconds between diagnostic checks
     BRIDGE_SPAWN_TIMEOUT = 5.0    # seconds to wait before warning about missing bridge
 
-    def __init__(self, log_level: str = 'info') -> None:
-        # TODO: Accept a topic filter (e.g. an explicit list, type filter, or regex) so that
-        #       A2R bridges are only activated for the topics the caller actually needs.
+    def __init__(
+        self,
+        log_level: str = 'info',
+        should_activate: Callable[[str, str], bool] = lambda topic_name, type_name: True,
+    ) -> None:
+        # should_activate(topic_name, type_name) -> bool
+        # Called for each discovered topic to decide whether to activate its A2R bridge.
+        self._should_activate = should_activate
         self._ctx = rclpy.Context()
         self._node = None
         self._thread = None
@@ -89,6 +95,14 @@ class A2rBridgeActivator:
         for topic in msg.topics:
             if topic.topic_name.startswith('/AGNOCAST_SRV_'):
                 continue
+            try:
+                if not self._should_activate(topic.topic_name, topic.type_name):
+                    continue
+            except Exception as e:
+                self._node.get_logger().warning(
+                    "should_activate raised an exception for topic '%s' (%s): %s; activating anyway"
+                    % (topic.topic_name, topic.type_name, e)
+                )
             if topic.publishers and topic.topic_name not in self._active_subs:
                 self._spawn_subscription(topic.topic_name, topic.type_name)
 
