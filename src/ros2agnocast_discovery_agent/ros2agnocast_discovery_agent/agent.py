@@ -9,9 +9,11 @@ One daemon process is intended to run per IPC namespace. To make duplicate
 launches (e.g. one node spawning the agent and another ``ros2 launch``
 session also trying to spawn one) safe, the agent acquires an
 ``flock(2)``-based singleton lock on a per-IPC-namespace file before
-starting; subsequent instances detect the held lock and stay idle on
-``signal.pause()`` until terminated, so they don't disturb the launch
-tree they belong to.
+starting; subsequent instances detect the held lock and exit cleanly
+(code 0), leaving exactly one live agent per namespace. Emitting a single
+agent per launch tree is the launch side's responsibility; this lock is
+the cross-invocation safety net for when separate launches target the
+same namespace.
 """
 
 import ctypes
@@ -21,7 +23,6 @@ import fcntl
 import importlib.metadata
 import logging
 import os
-import signal
 import socket
 import sys
 from typing import IO
@@ -380,26 +381,19 @@ class DiscoveryAgent(Node):
 
 
 def main(argv=None) -> int:
-    # Singleton check before DDS / ioctl bring-up so duplicate launches stay
-    # passive instead of polluting the gossip topic or hammering the kmod.
+    # Take the per-IPC-namespace singleton lock before any DDS / ioctl work.
+    # If another agent holds it, exit cleanly (0).
     #
-    # Duplicates DO NOT exit early: launch supervisors (especially
-    # `launch_test` running parallel sample-app tests) treat a Node exit as a
-    # process-died event and propagate teardown to the rest of the launch
-    # tree. So when the lock is held, we sit idle on `signal.pause()` —
-    # SIGINT / SIGTERM still tears the duplicate down cleanly with the rest
-    # of its parent launch.
+    # A duplicate that exits early *could* make launch_test treat it as a
+    # crashed node and tear down the launch tree. That's not a risk here: the
+    # launch emits one agent per tree, so a held lock always means a separate
+    # launch/run — never a same-tree sibling — which exiting can't affect.
     ipc_ns_inode = _read_ipc_ns_inode()
     lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode)
     if lock_attempt.status == LockStatus.HELD:
         sys.stderr.write(
-            f'agnocast_discovery_agent: another instance is already running in this '
-            f'IPC namespace (inode={ipc_ns_inode}); staying idle.\n')
-        try:
-            while True:
-                signal.pause()
-        except KeyboardInterrupt:
-            pass
+            'agnocast_discovery_agent: another instance is already running in this '
+            f'IPC namespace (inode={ipc_ns_inode}); exiting.\n')
         return 0
     if lock_attempt.status == LockStatus.ERROR:
         # Don't masquerade as "already running" — propagate failure so

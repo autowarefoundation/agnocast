@@ -5,6 +5,7 @@ helpers directly with a mock ctypes library.
 """
 
 import ctypes
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -263,3 +264,28 @@ def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
     from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
     assert _try_acquire_singleton_lock(789).status == LockStatus.ERROR
+
+
+def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_path):
+    """A duplicate (lock already held) returns 0 promptly instead of idling.
+
+    Runs main() in a thread so a regression to the old ``signal.pause()``
+    (which would block forever here) is caught as a non-returning thread
+    rather than hanging the whole test run. main() returns before any DDS /
+    ioctl bring-up, so this needs neither the kmod nor rclpy.
+    """
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import (
+        LockStatus, _read_ipc_ns_inode, _try_acquire_singleton_lock, main)
+
+    holder = _try_acquire_singleton_lock(_read_ipc_ns_inode())
+    assert holder.status == LockStatus.ACQUIRED
+    try:
+        result = {}
+        t = threading.Thread(target=lambda: result.__setitem__('rc', main(argv=[])))
+        t.start()
+        t.join(timeout=5.0)
+        assert not t.is_alive(), 'main() did not return (regressed to signal.pause()?)'
+        assert result['rc'] == 0
+    finally:
+        holder.file.close()
