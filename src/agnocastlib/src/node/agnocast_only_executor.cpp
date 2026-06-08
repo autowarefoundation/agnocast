@@ -440,6 +440,58 @@ rclcpp::FutureReturnCode AgnocastOnlyExecutor::spin_until_future_complete_impl(
   return rclcpp::FutureReturnCode::INTERRUPTED;
 }
 
+void AgnocastOnlyExecutor::spin_some(std::chrono::nanoseconds max_duration)
+{
+  return this->spin_some_impl(max_duration, false);
+}
+
+void AgnocastOnlyExecutor::spin_all(std::chrono::nanoseconds max_duration)
+{
+  if (max_duration < std::chrono::nanoseconds::zero()) {
+    throw std::invalid_argument("max_duration must be greater than or equal to 0");
+  }
+  return this->spin_some_impl(max_duration, true);
+}
+
+void AgnocastOnlyExecutor::spin_some_impl(std::chrono::nanoseconds max_duration, bool exhaustive)
+{
+  auto start = std::chrono::steady_clock::now();
+  auto max_duration_not_elapsed = [max_duration, start]() {
+    if (std::chrono::nanoseconds(0) == max_duration) {
+      return true;
+    } else if (std::chrono::steady_clock::now() - start < max_duration) {
+      return true;
+    }
+    return false;
+  };
+
+  if (spinning_.exchange(true)) {
+    throw std::runtime_error("spin_some() called while already spinning");
+  }
+  RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
+
+  wait_for_work(std::chrono::milliseconds(0));
+  bool entity_states_fully_polled = true;
+
+  while (agnocast::ok() && spinning_.load() && max_duration_not_elapsed()) {
+    AgnocastExecutable agnocast_exec;
+    if (get_next_ready_agnocast_executable(agnocast_exec)) {
+      execute_agnocast_executable(agnocast_exec);
+      entity_states_fully_polled = false;
+    } else {
+      if (entity_states_fully_polled) {
+        break;
+      }
+      if (exhaustive) {
+        wait_for_work(std::chrono::milliseconds(0));
+        entity_states_fully_polled = true;
+      } else {
+        break;
+      }
+    }
+  }
+}
+
 void AgnocastOnlyExecutor::spin_once_impl(std::chrono::nanoseconds timeout)
 {
   AgnocastExecutable agnocast_exec;
@@ -458,11 +510,6 @@ void AgnocastOnlyExecutor::spin_once(std::chrono::nanoseconds timeout)
   }
   RCPPUTILS_SCOPE_EXIT(this->spinning_.store(false););
   spin_once_impl(timeout);
-}
-
-bool AgnocastOnlyExecutor::is_spinning()
-{
-  return spinning_;
 }
 
 void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
@@ -484,6 +531,11 @@ void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
     timeout_ms = std::chrono::ceil<IntMs>(timeout).count();
   }
   epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
+}
+
+bool AgnocastOnlyExecutor::is_spinning()
+{
+  return spinning_;
 }
 
 }  // namespace agnocast

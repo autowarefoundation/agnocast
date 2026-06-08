@@ -78,10 +78,9 @@ protected:
   virtual rclcpp::FutureReturnCode spin_until_future_complete_impl(
     std::chrono::nanoseconds timeout,
     const std::function<std::future_status(std::chrono::nanoseconds wait_time)> & wait_for_future);
-
-  virtual void spin_once_impl(std::chrono::nanoseconds timeout);
-
+  void spin_some_impl(std::chrono::nanoseconds max_duration, bool exhaustive);
   void wait_for_work(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
+  virtual void spin_once_impl(std::chrono::nanoseconds timeout);
 
 public:
   /// Construct the executor.
@@ -155,6 +154,17 @@ public:
   /// @param notify If true, wake the executor so it picks up the change immediately.
   AGNOCAST_PUBLIC
   void remove_node(const std::shared_ptr<agnocast::Node> & node, bool notify = true);
+
+  /// Collect work once and execute all available work, optionally within a max duration.
+  /// @param max_duration The maximum amount of time to spend executing work, or 0 for no limit.
+  AGNOCAST_PUBLIC
+  virtual void spin_some(std::chrono::nanoseconds max_duration = std::chrono::nanoseconds(0));
+
+  /// Collect and execute work repeatedly within a duration or until no more work is available.
+  /// @param max_duration The maximum amount of time to spend executing work, must be >= 0. `0` is
+  /// potentially block forever until no more work is available.
+  AGNOCAST_PUBLIC
+  virtual void spin_all(std::chrono::nanoseconds max_duration);
 
   /// Collect work once and execute the next available work, optionally within a duration.
   /// @param timeout The maximum amount of time to spend waiting for work. `-1` blocks forever
