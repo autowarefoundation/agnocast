@@ -193,4 +193,54 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
   return get_subscriber_count_args.ret_same_process_subscriber_num;
 }
 
+void PublisherBase::generate_gid()
+{
+  std::memset(gid_.data, 0, RMW_GID_STORAGE_SIZE);
+
+  // [0-1]: Agnocast identifier
+  gid_.data[0] = 'A';
+  gid_.data[1] = 'G';
+
+  // [2-5]: Process ID
+  pid_t pid = getpid();
+  std::memcpy(gid_.data + 2, &pid, sizeof(pid));
+
+  // [6-11]: topic_name hash (upper 6 bytes)
+  size_t topic_hash = std::hash<std::string>{}(topic_name_);
+  std::memcpy(gid_.data + 6, &topic_hash, 6);
+
+  // [12-15]: publisher id
+  std::memcpy(gid_.data + 12, &id_, sizeof(id_));
+
+  // [16-23]: reserved
+
+  gid_.implementation_identifier = "agnocast";
+}
+
+PublisherBase::~PublisherBase()
+{
+  for (auto & [_, t] : opened_mqs_) {
+    mqd_t mq = std::get<0>(t);
+    if (mq_close(mq) == -1) {
+      RCLCPP_ERROR_STREAM(
+        logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
+    }
+  }
+
+  if (id_ >= 0) {
+    // NOTE: When a publisher is destroyed, subscribers should unmap its memory, but this is not yet
+    // implemented. Since multiple publishers in the same process share a mempool, process-level
+    // reference counting in kmod is needed. Leaving memory mapped causes no functional issues, so
+    // this is left as future work.
+    struct ioctl_remove_publisher_args remove_publisher_args
+    {
+    };
+    remove_publisher_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
+    remove_publisher_args.publisher_id = id_;
+    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_PUBLISHER_CMD, &remove_publisher_args) < 0) {
+      RCLCPP_WARN(logger, "Failed to remove publisher (id=%d) from kernel.", id_);
+    }
+  }
+}
+
 }  // namespace agnocast
