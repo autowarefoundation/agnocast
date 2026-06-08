@@ -473,7 +473,8 @@ void AgnocastOnlyExecutor::spin_some_impl(std::chrono::nanoseconds max_duration,
   wait_for_work(std::chrono::milliseconds(0));
   bool entity_states_fully_polled = true;
 
-  while (agnocast::ok() && spinning_.load() && max_duration_not_elapsed()) {
+  while (spinning_.load() && !cancel_requested_.load() && agnocast::ok() &&
+         max_duration_not_elapsed()) {
     AgnocastExecutable agnocast_exec;
     if (get_next_ready_agnocast_executable(agnocast_exec)) {
       execute_agnocast_executable(agnocast_exec);
