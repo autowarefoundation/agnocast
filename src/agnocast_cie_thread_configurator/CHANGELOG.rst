@@ -2,8 +2,8 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.5 (2026-06-09)
+------------------
 * feat(cie_thread_configurator): add pure-Rust non-ROS thread notification client (`#1371 <https://github.com/autowarefoundation/agnocast/issues/1371>`_)
 
 2.3.4 (2026-05-21)

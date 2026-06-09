@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>ros2agnocast_discovery_msgs</name>
-  <version>2.3.4</version>
+  <version>2.3.5</version>
   <description>
     Messages published by ros2agnocast_discovery_agent to expose per-NS
     Agnocast topic/endpoint state to ros2agnocast CLI across IPC namespaces

@@ -2,8 +2,8 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.5 (2026-06-09)
+------------------
 * feat: per-IPC-namespace discovery daemon + AgnocastDaemonState msgs (shared base) (`#1350 <https://github.com/autowarefoundation/agnocast/issues/1350>`_)
 
 2.3.4 (2026-05-21)

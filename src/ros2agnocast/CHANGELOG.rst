@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.5 (2026-06-09)
+------------------
 * Feat/ros2 bag record agnocast/topic filter (`#1377 <https://github.com/autowarefoundation/agnocast/issues/1377>`_)
 * refactor(ros2agnocast): reorganize verb directory and extract common logic (`#1374 <https://github.com/autowarefoundation/agnocast/issues/1374>`_)
 * feat(ros2agnocast): add `ros2 bag record_agnocast` CLI verb (`#1373 <https://github.com/autowarefoundation/agnocast/issues/1373>`_)

@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.5 (2026-06-09)
+------------------
 * fix(agnocastlib): make SignalHandler chain previously registered handlers (`#1379 <https://github.com/autowarefoundation/agnocast/issues/1379>`_)
 * refactor(bridge): fixed performance node name (`#1378 <https://github.com/autowarefoundation/agnocast/issues/1378>`_)
 * chore(agnocastlib): mark service/client API as officially supported (`#1376 <https://github.com/autowarefoundation/agnocast/issues/1376>`_)
