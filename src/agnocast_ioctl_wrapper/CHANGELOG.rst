@@ -2,6 +2,9 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.3.4 (2026-05-21)
 ------------------
 * refactor(ros2agnocast): typo, memory handle (`#1305 <https://github.com/autowarefoundation/agnocast/issues/1305>`_)
