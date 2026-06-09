@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - ros_distro: humble
-            os: ubuntu-24.04
+            os: ubuntu-22.04
           - ros_distro: jazzy
             os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
