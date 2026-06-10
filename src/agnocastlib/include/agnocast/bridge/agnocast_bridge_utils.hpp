@@ -5,6 +5,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -16,6 +17,28 @@ namespace agnocast
 {
 
 enum class BridgeMode { Off, On };
+
+// How long a daemon cross-NS bridge request keeps a bridge forced after the last
+// request. Must exceed the daemon's publish interval (1 s) so a few missed ticks
+// don't tear down a healthy cross-NS bridge, yet stay short so a vanished remote
+// endpoint stops being forced promptly.
+inline constexpr std::chrono::seconds DAEMON_FORCE_TTL{5};
+
+// A daemon-forced lease registered at `now` lasts until `now + DAEMON_FORCE_TTL`,
+// and is active while the current time is strictly before that deadline — i.e. the
+// half-open window [registered, registered + DAEMON_FORCE_TTL). Factored out of the
+// bridge manager so the lease/TTL boundary is unit-testable with an injected clock.
+inline std::chrono::steady_clock::time_point daemon_force_deadline(
+  const std::chrono::steady_clock::time_point now)
+{
+  return now + DAEMON_FORCE_TTL;
+}
+inline bool is_daemon_force_active(
+  const std::chrono::steady_clock::time_point deadline,
+  const std::chrono::steady_clock::time_point now)
+{
+  return now < deadline;
+}
 
 struct SubscriberCountResult
 {
@@ -32,6 +55,10 @@ struct PublisherCountResult
 BridgeMode get_bridge_mode();
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id);
 rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t publisher_id);
+// Rebuild a QoS profile from the fields a daemon cross-NS request carries. The
+// daemon has no local endpoint to query, so reliability / durability / depth are
+// reconstructed from the request rather than from the kernel.
+rclcpp::QoS daemon_request_qos(const MqMsgDaemonBridge & req);
 PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name);
 SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_name);
 bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & topic_name);

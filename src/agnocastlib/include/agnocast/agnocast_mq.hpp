@@ -68,7 +68,11 @@ struct MqMsgDaemonBridge
 };
 
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES = 256;
-constexpr int64_t DAEMON_BRIDGE_MQ_MAX_MESSAGES = 2;
+// The discovery agent bursts one request per (cross-NS topic, direction) each tick,
+// so a shallow queue would throttle startup convergence to a few bridges per second.
+// The bridge_manager already opens the 256-deep performance MQ, so matching it needs
+// no extra fs.mqueue.msg_max headroom.
+constexpr int64_t DAEMON_BRIDGE_MQ_MAX_MESSAGES = 256;
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgPerformanceBridge);
 constexpr int64_t DAEMON_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgDaemonBridge);
 constexpr mode_t BRIDGE_MQ_PERMS = 0600;

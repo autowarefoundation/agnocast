@@ -58,6 +58,10 @@ void PerformanceBridgeManager::run()
   event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
   event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
+  // One bridge manager runs per IPC namespace, so its daemon request MQ is per-NS too.
+  event_loop_.register_aux_mq(
+    create_mq_name_for_daemon_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID), DAEMON_BRIDGE_MQ_MAX_MESSAGES,
+    DAEMON_BRIDGE_MQ_MESSAGE_SIZE, [this](int fd) { this->on_daemon_mq_request(fd); });
 
   while (!shutdown_requested_) {
     if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
@@ -66,6 +70,7 @@ void PerformanceBridgeManager::run()
     }
 
     check_and_create_pubsub_bridges();
+    create_daemon_forced_bridges();
     check_and_remove_pubsub_bridges();
     check_and_remove_service_bridges();
     check_and_remove_request_cache();
@@ -122,6 +127,107 @@ void PerformanceBridgeManager::on_mq_request(int fd)
 
     create_pubsub_bridge_if_needed(
       topic_name, request_cache_[topic_name], message_type, msg.direction);
+  }
+}
+
+void PerformanceBridgeManager::on_daemon_mq_request(int fd)
+{
+  MqMsgDaemonBridge req{};
+  while (!shutdown_requested_) {
+    ssize_t bytes_read = mq_receive(fd, reinterpret_cast<char *>(&req), sizeof(req), nullptr);
+    if (bytes_read < 0) {
+      // EAGAIN just means the queue is drained; anything else is unexpected and
+      // would otherwise silently drop a daemon bridge request.
+      if (errno != EAGAIN) {
+        RCLCPP_WARN_STREAM(
+          logger_, "mq_receive failed for daemon bridge mq (fd=" << fd << "): " << strerror(errno));
+      }
+      break;
+    }
+    register_daemon_pubsub_request(req);
+  }
+}
+
+void PerformanceBridgeManager::register_daemon_pubsub_request(const MqMsgDaemonBridge & req)
+{
+  const std::string topic_name = static_cast<const char *>(req.topic_name);
+  const std::string message_type = static_cast<const char *>(req.type_name);
+
+  const auto forced_until = daemon_force_deadline(std::chrono::steady_clock::now());
+  auto & forced =
+    (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
+  forced.insert_or_assign(
+    topic_name, DaemonForcedRequest{message_type, daemon_request_qos(req), forced_until});
+}
+
+bool PerformanceBridgeManager::is_daemon_forced(
+  const std::string & topic_name, BridgeDirection direction) const
+{
+  const auto & forced =
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
+  const auto it = forced.find(topic_name);
+  return it != forced.end() &&
+         is_daemon_force_active(it->second.forced_until, std::chrono::steady_clock::now());
+}
+
+void PerformanceBridgeManager::create_daemon_forced_bridges()
+{
+  for (const bool is_r2a : {true, false}) {
+    auto & forced = is_r2a ? daemon_forced_r2a_ : daemon_forced_a2r_;
+    for (auto it = forced.begin(); it != forced.end();) {
+      const std::string & topic_name = it->first;
+
+      // Lease expired: drop the force and let the normal on-demand lifecycle resume.
+      if (std::chrono::steady_clock::now() >= it->second.forced_until) {
+        it = forced.erase(it);
+        continue;
+      }
+
+      const bool already_active = is_r2a ? active_pubsub_r2a_bridges_.count(topic_name) > 0
+                                         : active_pubsub_a2r_bridges_.count(topic_name) > 0;
+      // The same-graph DDS counterpart check is skipped while forced, but a live
+      // local Agnocast endpoint is still required for the bridge to carry traffic.
+      const auto count = is_r2a ? get_agnocast_subscriber_count(topic_name).count
+                                : get_agnocast_publisher_count(topic_name).count;
+      if (!already_active && count > 0) {
+        activate_daemon_forced_bridge(topic_name, it->second.message_type, it->second.qos, is_r2a);
+      }
+      ++it;
+    }
+  }
+}
+
+void PerformanceBridgeManager::activate_daemon_forced_bridge(
+  const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
+  bool is_r2a)
+{
+  try {
+    PerformancePubsubBridgeResult result =
+      is_r2a ? loader_.create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos)
+             : loader_.create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
+    if (!result.entity_handle) {
+      return;
+    }
+
+    if (is_r2a) {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
+      active_pubsub_r2a_bridges_[topic_name] = result;
+    } else {
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+      }
+      active_pubsub_a2r_bridges_[topic_name] = result;
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(
+      logger_, "Failed to create daemon-forced bridge for '%s': %s", topic_name.c_str(), e.what());
+  } catch (...) {
+    RCLCPP_WARN(
+      logger_, "Unknown error creating daemon-forced bridge for '%s'", topic_name.c_str());
   }
 }
 
@@ -187,7 +293,10 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    // A daemon-forced cross-NS bridge is kept alive without a same-graph DDS
+    // counterpart; only a vanished local Agnocast endpoint (count <= 0) removes it.
+    const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
       if (r2a_it->second.callback_group) {
         executor_->stop_callback_group(r2a_it->second.callback_group);
       }
@@ -217,7 +326,8 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
       return;
     }
 
-    if (result.count <= 0 || !is_demanded_by_ros2) {
+    const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
       if (a2r_it->second.callback_group) {
         executor_->stop_callback_group(a2r_it->second.callback_group);
       }
