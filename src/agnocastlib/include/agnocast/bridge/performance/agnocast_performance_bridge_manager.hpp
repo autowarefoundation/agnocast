@@ -7,6 +7,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -26,6 +27,18 @@ public:
 
 private:
   using RequestMap = std::unordered_map<topic_local_id_t, MqMsgPerformanceBridge>;
+
+  // A cross-NS bridge request from the per-NS daemon. Unlike an intra-NS request,
+  // there is no local endpoint to resolve the plugin / QoS from, so the type and
+  // QoS travel in the request itself. While unexpired, the bridge is created
+  // without a same-graph DDS counterpart (the peer NS's bridge creates it) and is
+  // shielded from demand-based teardown.
+  struct DaemonForcedRequest
+  {
+    std::string message_type;
+    rclcpp::QoS qos;
+    std::chrono::steady_clock::time_point forced_until;
+  };
 
   struct R2AServiceBridgeItem
   {
@@ -54,13 +67,25 @@ private:
   std::unordered_map<std::string, PerformancePubsubBridgeResult> active_pubsub_a2r_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
+  // Daemon-forced cross-NS requests, keyed by topic, split by direction.
+  std::unordered_map<std::string, DaemonForcedRequest> daemon_forced_r2a_;
+  std::unordered_map<std::string, DaemonForcedRequest> daemon_forced_a2r_;
+
   std::unordered_map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
 
   void start_ros_execution();
 
   void on_mq_request(int fd);
+  void on_daemon_mq_request(int fd);
   void on_signal();
   std::string on_socket_request() const;
+
+  void register_daemon_pubsub_request(const MqMsgDaemonBridge & req);
+  bool is_daemon_forced(const std::string & topic_name, BridgeDirection direction) const;
+  void create_daemon_forced_bridges();
+  void activate_daemon_forced_bridge(
+    const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
+    bool is_r2a);
 
   void check_and_create_pubsub_bridges();
   void check_and_remove_pubsub_bridges();
