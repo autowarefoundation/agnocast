@@ -86,10 +86,33 @@ struct MqMsgPerformanceBridge
   bool is_service;
 };
 
+// Cross-IPC-namespace bridge request from the per-NS daemon to a same-NS
+// bridge_manager. The daemon holds no process-local factory pointers, so it
+// names the target by topic (standard mode reuses the factory the manager
+// already cached from this process's intra-NS requests) and by type
+// (performance mode resolves a plugin). QoS is sent explicitly since the
+// bridge_manager cannot query the originating endpoint's QoS on its own.
+struct MqMsgDaemonBridge
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  char type_name[MESSAGE_TYPE_BUFFER_SIZE];
+  BridgeDirection direction;
+  uint32_t qos_depth;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+};
+
 constexpr int64_t BRIDGE_MQ_MAX_MESSAGES = 2;
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES = 256;
+constexpr int64_t DAEMON_BRIDGE_MQ_MAX_MESSAGES = 2;
 constexpr int64_t BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgBridge);
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgPerformanceBridge);
+constexpr int64_t DAEMON_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgDaemonBridge);
 constexpr mode_t BRIDGE_MQ_PERMS = 0600;
+
+// Standard mode: one MQ per user process, `/agnocast_daemon_bridge@<pid>`.
+// Performance mode: one MQ per IPC namespace, `/agnocast_daemon_bridge_perf`.
+inline constexpr const char * DAEMON_BRIDGE_MQ_PREFIX = "/agnocast_daemon_bridge";
+inline constexpr const char * PERFORMANCE_DAEMON_BRIDGE_MQ_NAME = "/agnocast_daemon_bridge_perf";
 
 }  // namespace agnocast
