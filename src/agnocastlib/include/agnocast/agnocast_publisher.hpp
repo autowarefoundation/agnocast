@@ -60,7 +60,7 @@ struct PublisherOptions
 };
 
 // Internal implementation — users should use agnocast::Publisher<MessageT> instead.
-template <typename MessageT, typename BridgeRequestPolicy>
+template <typename MessageT, typename BridgeRegistrationPolicy>
 class BasicPublisher
 {
   topic_local_id_t id_ = -1;
@@ -127,13 +127,13 @@ class BasicPublisher
     }
     id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
     generate_gid();
-    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
 
     return actual_qos;
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicPublisher<MessageT, BridgeRequestPolicy>>;
+  using SharedPtr = std::shared_ptr<BasicPublisher<MessageT, BridgeRegistrationPolicy>>;
 
   BasicPublisher(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
@@ -269,7 +269,7 @@ public:
   const char * get_topic_name() const { return topic_name_.c_str(); }
 };
 
-struct AgnocastToRosPubsubRequestPolicy;
+struct AgnocastToRosPubsubRegistrationPolicy;
 
 /**
  * @brief The user-facing Agnocast publisher type.
@@ -279,6 +279,7 @@ struct AgnocastToRosPubsubRequestPolicy;
  */
 AGNOCAST_PUBLIC
 template <typename MessageT>
-using Publisher = agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosPubsubRequestPolicy>;
+using Publisher =
+  agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosPubsubRegistrationPolicy>;
 
 }  // namespace agnocast

@@ -24,7 +24,7 @@
 namespace agnocast
 {
 
-struct NoBridgeRequestPolicy;
+struct NoBridgeRegistrationPolicy;
 
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
@@ -98,8 +98,8 @@ private:
     }
   };
 
-  using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRequestPolicy>;
-  using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRequestPolicy>;
+  using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRegistrationPolicy>;
+  using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRegistrationPolicy>;
 
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;

@@ -236,7 +236,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
   }
 }
 
-BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger)
+BridgeRegistrationMsgBuilder::BridgeRegistrationMsgBuilder(Mode mode, const rclcpp::Logger & logger)
 : logger_(logger), failed_(false)
 {
   if (mode == Mode::Standard) {
@@ -248,7 +248,7 @@ BridgeRequestMsgBuilder::BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger
 
 // NOLINTBEGIN(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
 // hicpp-no-array-decay)
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::fail(const char * format, ...)
 {
   va_list args;
   va_start(args, format);
@@ -273,7 +273,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::fail(const char * format, ...
   return *this;
 }
 
-int BridgeRequestMsgBuilder::checked_snprintf(
+int BridgeRegistrationMsgBuilder::checked_snprintf(
   const std::string & member, char * buffer, size_t size, const char * format, ...)
 {
   if (failed_) return -1;
@@ -296,19 +296,21 @@ int BridgeRequestMsgBuilder::checked_snprintf(
 // NOLINTEND(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
 // hicpp-no-array-decay)
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_direction(BridgeDirection direction)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_direction(
+  BridgeDirection direction)
 {
   std::visit([direction](auto && msg) { msg.direction = direction; }, msg_);
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_is_service(bool is_service)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_is_service(bool is_service)
 {
   std::visit([is_service](auto && msg) { msg.is_service = is_service; }, msg_);
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_factory(
+  uintptr_t fn_r2a, uintptr_t fn_a2r)
 {
   if (!std::holds_alternative<MqMsgBridge>(msg_)) {
     return fail("'factory' is only for standard bridges");
@@ -349,7 +351,8 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_factory(uintptr_t fn_r2a,
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_message_type(const char * message_type)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_message_type(
+  const char * message_type)
 {
   std::visit(
     [this, message_type](auto && msg) {
@@ -365,7 +368,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_message_type(const char *
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_topic_name(const char * topic_name)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_topic_name(const char * topic_name)
 {
   std::visit(
     [this, topic_name](auto && msg) {
@@ -377,13 +380,15 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_topic_name(const char * t
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_pubsub_target_id(topic_local_id_t target_id)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_pubsub_target_id(
+  topic_local_id_t target_id)
 {
   std::visit([target_id](auto && msg) { msg.pubsub_target.target_id = target_id; }, msg_);
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_type(const char * service_type)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_type(
+  const char * service_type)
 {
   std::visit(
     [this, service_type](auto && msg) {
@@ -399,7 +404,8 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_type(const char *
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_name(const char * service_name)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_name(
+  const char * service_name)
 {
   std::visit(
     [this, service_name](auto && msg) {
@@ -411,7 +417,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_service_name(const char *
   return *this;
 }
 
-BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_shadow_node_identity(
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_shadow_node_identity(
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   std::visit(
@@ -434,7 +440,7 @@ BridgeRequestMsgBuilder & BridgeRequestMsgBuilder::set_shadow_node_identity(
   return *this;
 }
 
-std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_message()
+std::pair<MqMsgBridge, std::string> BridgeRegistrationMsgBuilder::build_standard_message()
 {
   assert(std::holds_alternative<MqMsgBridge>(msg_));
 
@@ -442,7 +448,8 @@ std::pair<MqMsgBridge, std::string> BridgeRequestMsgBuilder::build_standard_mess
   return {msg, failed_ ? std::move(reason_) : std::string{}};
 }
 
-std::pair<MqMsgPerformanceBridge, std::string> BridgeRequestMsgBuilder::build_performance_message()
+std::pair<MqMsgPerformanceBridge, std::string>
+BridgeRegistrationMsgBuilder::build_performance_message()
 {
   assert(std::holds_alternative<MqMsgPerformanceBridge>(msg_));
 

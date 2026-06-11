@@ -20,7 +20,7 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_n
   const rclcpp::QoS & sub_qos)
 {
   using MsgT = @(cpp_type);
-  using AgnoPub = agnocast::BasicPublisher<MsgT, agnocast::NoBridgeRequestPolicy>;
+  using AgnoPub = agnocast::BasicPublisher<MsgT, agnocast::NoBridgeRegistrationPolicy>;
 
   auto agno_pub = std::make_shared<AgnoPub>(
     node.get(),
@@ -79,7 +79,7 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
   sub_opts.ignore_local_publications = true;
   sub_opts.callback_group = cb_group;
 
-  using AgnoSub = agnocast::BasicSubscription<MsgT, agnocast::NoBridgeRequestPolicy>;
+  using AgnoSub = agnocast::BasicSubscription<MsgT, agnocast::NoBridgeRegistrationPolicy>;
   auto agno_sub = std::make_shared<AgnoSub>(
     node.get(),
     topic_name,
