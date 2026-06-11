@@ -15,6 +15,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <csignal>
@@ -50,6 +51,13 @@ public:
   void set_signal_handler(SignalCallback cb);
   void set_socket_handler(SocketCallback cb);
 
+  // Register a secondary MQ on this event loop (e.g. the daemon-originated
+  // cross-NS bridge request MQ). Call before `spin_once`; may be called more
+  // than once, each registration keeping its own fd-dispatched handler.
+  // Throws on failure.
+  void register_aux_mq(
+    const std::string & name, long max_messages, long msg_size, EventCallback cb);
+
   const std::string & get_mq_name() const { return mq_name_; }
 
 protected:
@@ -66,6 +74,17 @@ private:
   std::string mq_name_;
 
   long mq_msg_size_;
+
+  // One per `register_aux_mq()` call; matched by fd in `spin_once`.
+  struct AuxMq
+  {
+    mqd_t fd = (mqd_t)-1;
+    std::string name;
+    EventCallback cb;
+  };
+  // Expected to hold only a handful of entries (~5), so a flat vector is both
+  // simpler and faster to scan than a hash map would be at this size.
+  std::vector<AuxMq> aux_mqs_;
 
   EventCallback mq_cb_;
   SignalCallback signal_cb_;
@@ -146,6 +165,12 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
         handle_socket(client_fd);
         close(client_fd);
       }
+    } else {
+      auto it = std::find_if(
+        aux_mqs_.begin(), aux_mqs_.end(), [fd](const AuxMq & aux) { return fd == aux.fd; });
+      if (it != aux_mqs_.end() && it->cb) {
+        it->cb(fd);
+      }
     }
   }
   return true;
@@ -217,6 +242,34 @@ inline void IpcEventLoopBase::set_signal_handler(SignalCallback cb)
 inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
 {
   socket_cb_ = std::move(cb);
+}
+
+inline void IpcEventLoopBase::register_aux_mq(
+  const std::string & name, long max_messages, long msg_size, EventCallback cb)
+{
+  struct mq_attr attr = {};
+  attr.mq_maxmsg = max_messages;
+  attr.mq_msgsize = msg_size;
+
+  mqd_t fd =
+    mq_open(name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK | O_CLOEXEC, BRIDGE_MQ_PERMS, &attr);
+  if (fd == -1) {
+    throw std::system_error(errno, std::generic_category(), "aux MQ open failed: " + name);
+  }
+
+  try {
+    add_fd_to_epoll(fd, "AuxMQ");
+  } catch (...) {
+    if (mq_close(fd) == -1) {
+      RCLCPP_WARN(logger_, "Failed to close aux mq_fd: %s", strerror(errno));
+    }
+    if (mq_unlink(name.c_str()) == -1 && errno != ENOENT) {
+      RCLCPP_WARN(logger_, "Failed to unlink aux mq: %s", strerror(errno));
+    }
+    throw;
+  }
+
+  aux_mqs_.push_back(AuxMq{fd, name, std::move(cb)});
 }
 
 inline void IpcEventLoopBase::setup_mq()
@@ -408,6 +461,21 @@ inline void IpcEventLoopBase::cleanup_resources()
         logger_, "Failed to unlink mq for mq_name='" << mq_name_ << "': " << strerror(errno));
     }
   }
+
+  for (auto & aux : aux_mqs_) {
+    if (aux.fd != (mqd_t)-1) {
+      if (mq_close(aux.fd) == -1) {
+        RCLCPP_WARN_STREAM(
+          logger_,
+          "Failed to close aux mq_fd for mq_name='" << aux.name << "': " << strerror(errno));
+      }
+      if (mq_unlink(aux.name.c_str()) == -1 && errno != ENOENT) {
+        RCLCPP_WARN_STREAM(
+          logger_, "Failed to unlink aux mq for mq_name='" << aux.name << "': " << strerror(errno));
+      }
+    }
+  }
+  aux_mqs_.clear();
 }
 
 }  // namespace agnocast

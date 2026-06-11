@@ -79,16 +79,33 @@ std::string create_mq_name_for_agnocast_publish(
   return create_mq_name("/agnocast", topic_name, id);
 }
 
+// MQ-name suffix that scopes the per-IPC-namespace performance bridge by domain.
+// An unset OR empty ROS_DOMAIN_ID means "no domain" (no suffix), keeping this in
+// sync with the Python discovery agent (bridge_decider._performance_mq_name).
+static std::string performance_domain_suffix()
+{
+  const char * domain_id = getenv("ROS_DOMAIN_ID");
+  if (domain_id == nullptr || *domain_id == '\0') {
+    return "";
+  }
+  return "_d" + std::string(domain_id);
+}
+
 std::string create_mq_name_for_bridge(const pid_t pid)
 {
   std::string name = "/agnocast_bridge_manager@" + std::to_string(pid);
   if (pid == PERFORMANCE_BRIDGE_VIRTUAL_PID) {
-    const char * domain_id = getenv("ROS_DOMAIN_ID");
-    if (domain_id != nullptr) {
-      name += "_d" + std::string(domain_id);
-    }
+    name += performance_domain_suffix();
   }
   return name;
+}
+
+std::string create_mq_name_for_daemon_bridge(const pid_t pid)
+{
+  if (pid == PERFORMANCE_BRIDGE_VIRTUAL_PID) {
+    return std::string(PERFORMANCE_DAEMON_BRIDGE_MQ_NAME) + performance_domain_suffix();
+  }
+  return std::string(DAEMON_BRIDGE_MQ_PREFIX) + "@" + std::to_string(pid);
 }
 
 uint64_t get_self_ipc_ns_inode()
