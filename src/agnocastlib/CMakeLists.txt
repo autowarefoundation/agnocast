@@ -134,6 +134,7 @@ if(BUILD_TESTING)
   find_package(std_msgs REQUIRED)
 
   # Unit tests
+  find_package(rosidl_typesupport_cpp REQUIRED)
   ament_add_gmock(test_unit_${PROJECT_NAME}
     test/unit/test_agnocast_utils.cpp
     test/unit/test_agnocast_subscription.cpp
@@ -150,10 +151,11 @@ if(BUILD_TESTING)
     test/unit/test_cie_client_utils.cpp
     test/unit/test_agnocast_context.cpp
     test/unit/test_diagnostic_updater.cpp
-    test/unit/test_type_registry_writer.cpp)
+    test/unit/test_type_registry_writer.cpp
+    test/unit/test_agnocast_generic_callback.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
-  ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater)
+  ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
   set_tests_properties(test_unit_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
@@ -291,6 +293,19 @@ if(BUILD_TESTING)
   set_tests_properties(test_integration_agnocast_init_ok_shutdown_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # GenericSubscription integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_generic_subscription_${PROJECT_NAME}
+    test/integration/test_agnocast_generic_subscription.cpp)
+  target_include_directories(test_integration_generic_subscription_${PROJECT_NAME} PRIVATE include)
+  target_link_libraries(test_integration_generic_subscription_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_generic_subscription_${PROJECT_NAME}
+    std_msgs rosidl_typesupport_cpp)
+  set_tests_properties(test_integration_generic_subscription_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
     LABELS "requires_kernel_module;requires_heaphook"
   )
 

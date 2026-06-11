@@ -22,9 +22,15 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace rcpputils
+{
+class SharedLibrary;
+}
 
 namespace agnocast
 {
@@ -52,6 +58,31 @@ struct SubscriptionOptions
   bool ignore_local_publications{false};
   /// QoS parameter override options (same semantics as rclcpp).
   rclcpp::QosOverridingOptions qos_overriding_options{};
+};
+
+/**
+ * @brief Role of a subscription with respect to the ROS<->Agnocast bridge.
+ *
+ * Encodes two properties of a subscription:
+ *   - whether it is used by the bridge implementation itself
+ *   - whether it should issue an R2A bridge request on construction
+ *
+ *   | Role            | kmod `is_bridge` | bridge request issued |
+ *   |-----------------|------------------|-----------------------|
+ *   | Default         | false            | yes (R2A)             |
+ *   | AgnocastOnly    | false            | no                    |
+ *   | BridgeInternal  | true             | no                    |
+ */
+enum class SubscriptionRole : uint8_t {
+  /// User-created subscription; issues an R2A bridge request.
+  Default,
+  /// Used internally by the service/client implementation; no bridge request.
+  /// Not intended for direct use by application code.
+  AgnocastOnly,
+  /// Used by the bridge implementation itself; marked as bridge in kmod and
+  /// issues no bridge request.
+  /// Not intended for direct use by application code.
+  BridgeInternal,
 };
 
 // These are cut out of the class for information hiding.
@@ -417,6 +448,108 @@ public:
   /// @return Shared pointer to the latest message.
   AGNOCAST_PUBLIC
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
+};
+
+/// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
+/// as a runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
+/// template argument. The typesupport library is loaded eagerly in the
+/// constructor and held for the subscription's lifetime.
+///
+/// Messages are delivered to the callback as serialized data, outside of Agnocast shared memory.
+///
+/// The supported callback signatures are:
+///   - `void(std::shared_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
+///   - `void(std::unique_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
+///   - `void(const rclcpp::SerializedMessage &)` (and `const` variants)
+///
+/// NOTE: Standard bridge mode is not supported for this subscription type.
+/// When standard bridge is used, no bridge request is issued, so no bridge is created and
+/// communication with ROS 2-only publishers is not possible. This is by design,
+/// as standard bridge support is planned for removal.
+AGNOCAST_PUBLIC
+class GenericSubscription : public SubscriptionBase
+{
+  std::pair<mqd_t, std::string> mq_subscription_;
+  uint32_t callback_info_id_{0};
+  /// Keeps the dynamically loaded typesupport .so alive for our lifetime.
+  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
+  const rosidl_message_type_support_t * type_support_handle_{nullptr};
+
+  void load_typesupport_impl(const std::string & topic_type);
+
+  template <typename NodeT>
+  rclcpp::QoS constructor_impl(
+    NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos,
+    TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
+    const agnocast::SubscriptionOptions & options, SubscriptionRole role);
+
+public:
+  using SharedPtr = std::shared_ptr<GenericSubscription>;
+
+  template <typename Func>
+  GenericSubscription(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
+  : SubscriptionBase(node, topic_name)
+  {
+    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
+
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
+    load_typesupport_impl(topic_type);
+    TypeErasedCallback erased =
+      get_erased_generic_callback(std::forward<Func>(callback), type_support_handle_);
+
+    const rclcpp::QoS actual_qos =
+      constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
+
+    {
+      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(
+          node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
+        callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol,
+        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
+    }
+  }
+
+  template <typename Func>
+  GenericSubscription(
+    agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
+  : SubscriptionBase(node, topic_name)
+  {
+    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
+
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
+    load_typesupport_impl(topic_type);
+    TypeErasedCallback erased =
+      get_erased_generic_callback(std::forward<Func>(callback), type_support_handle_);
+
+    const rclcpp::QoS actual_qos =
+      constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
+
+    {
+      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(get_node_base_address(node)), callback_addr,
+        static_cast<const void *>(callback_group.get()), callback_symbol, topic_name_.c_str(),
+        actual_qos.depth(), pid_callback_info_id);
+    }
+  }
+
+  // Destructor defined in .cpp so that ~shared_ptr<rcpputils::SharedLibrary>
+  // sees the complete SharedLibrary type (forward-declared in this header).
+  ~GenericSubscription();
 };
 
 struct RosToAgnocastPubsubRequestPolicy;

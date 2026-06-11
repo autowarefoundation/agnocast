@@ -1,6 +1,8 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/typesupport_helpers.hpp"
+#include "rcpputils/shared_library.hpp"
 
 namespace agnocast
 {
@@ -119,5 +121,74 @@ rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnoc
 {
   return node->get_node_base_interface()->get_default_callback_group();
 }
+
+void GenericSubscription::load_typesupport_impl(const std::string & topic_type)
+{
+  ts_lib_ = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  type_support_handle_ =
+    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *ts_lib_);
+}
+
+template <typename NodeT>
+rclcpp::QoS GenericSubscription::constructor_impl(
+  NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos,
+  TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
+  const agnocast::SubscriptionOptions & options, SubscriptionRole role)
+{
+  const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+  rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+    override_qos ? node->get_node_parameters_interface() : nullptr;
+  const rclcpp::QoS actual_qos = override_qos
+                                   ? rclcpp::detail::declare_qos_parameters(
+                                       options.qos_overriding_options, node_parameters, topic_name_,
+                                       qos, rclcpp::detail::SubscriptionQosParametersTraits{})
+                                   : qos;
+
+  validate_subscription_qos(actual_qos);
+
+  const std::string node_name = node->get_fully_qualified_name();
+
+  const bool is_bridge = (role == SubscriptionRole::BridgeInternal);
+  union ioctl_add_subscriber_args add_subscriber_args = initialize(
+    actual_qos, false, options.ignore_local_publications, is_bridge, node_name, topic_type);
+
+  id_ = add_subscriber_args.ret_id;
+
+  if (role == SubscriptionRole::Default) {
+    request_pubsub_bridge_by_type_name(
+      topic_name_, id_, topic_type, BridgeDirection::ROS2_TO_AGNOCAST);
+  }
+
+  mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
+
+  const bool is_transient_local =
+    actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+  callback_info_id_ = agnocast::register_generic_callback(
+    std::move(callback), topic_name_, id_, is_transient_local, mq, callback_group);
+
+  return actual_qos;
+}
+
+GenericSubscription::~GenericSubscription()
+{
+  // Remove from callback info map to prevent stale references on re-subscription and to avoid
+  // fd reuse conflicts. When mq_close() is called in remove_mq(), the OS may later reuse the
+  // same fd number for a new subscription. If the old entry remains in id2_callback_info,
+  // adding the new fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still
+  // associates that fd number with the stale entry.
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info.erase(callback_info_id_);
+  }
+  remove_mq(mq_subscription_);
+}
+
+template rclcpp::QoS GenericSubscription::constructor_impl<rclcpp::Node>(
+  rclcpp::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
+  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
+
+template rclcpp::QoS GenericSubscription::constructor_impl<agnocast::Node>(
+  agnocast::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
+  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
 
 }  // namespace agnocast

@@ -4,7 +4,11 @@
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 
+#include <rclcpp/serialized_message.hpp>
+
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <type_traits>
 
@@ -40,8 +44,33 @@ public:
   agnocast::ipc_shared_ptr<T> && get() && { return std::move(ptr_); }
 };
 
+// Class for a generic message type used by GenericSubscription.
+class RawMessagePtr : public AnyObject
+{
+  // We use std::byte for ipc_shared_ptr because the exact message type is unknown
+  // at compile time in GenericSubscription.
+  //
+  // This is safe because this pointer purely references a subscribed message.
+  // It does not handle memory allocation or deallocation (no delete is called);
+  // it strictly manages the reference count and releases the reference to the
+  // kernel module. (See ipc_shared_ptr implementation for details).
+  agnocast::ipc_shared_ptr<std::byte> ptr_;
+
+public:
+  explicit RawMessagePtr(agnocast::ipc_shared_ptr<std::byte> p) : ptr_(std::move(p)) {}
+
+  const std::type_info & type() const override { return typeid(RawMessagePtr); }
+
+  agnocast::ipc_shared_ptr<std::byte> && get() && { return std::move(ptr_); }
+};
+
 // Type for type-erased callback function
 using TypeErasedCallback = std::function<void(AnyObject &&)>;
+
+// Type for message creator function that constructs a type-erased message
+// envelope (AnyObject) from a raw shared-memory pointer and its metadata.
+using MessageCreator = std::function<std::unique_ptr<AnyObject>(
+  const void *, const std::string &, const topic_local_id_t, const int64_t)>;
 
 struct CallbackInfo
 {
@@ -51,9 +80,7 @@ struct CallbackInfo
   mqd_t mqdes;
   rclcpp::CallbackGroup::SharedPtr callback_group;
   TypeErasedCallback callback;
-  std::function<std::unique_ptr<AnyObject>(
-    const void *, const std::string &, const topic_local_id_t, const uint64_t)>
-    message_creator;
+  MessageCreator message_creator;
   bool need_epoll_update = true;
 };
 
@@ -84,10 +111,75 @@ TypeErasedCallback get_erased_callback(Func && callback)
   };
 }
 
+// Serialize directly into an existing stack-allocated SerializedMessage to avoid heap allocation.
+// Returns false (and logs an error) on rmw_serialize failure.
+bool generic_serialize_message_in_place(
+  const void * raw, const rosidl_message_type_support_t * type_support,
+  rclcpp::SerializedMessage & out);
+
+template <typename Func>
+TypeErasedCallback get_erased_generic_callback(
+  Func && callback, const rosidl_message_type_support_t * type_support)
+{
+  using F = std::decay_t<Func>;
+  static_assert(
+    std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>> ||
+      std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>> ||
+      std::is_invocable_v<F, rclcpp::SerializedMessage &>,
+    "This callback type cannot be handled as a GenericCallback."
+    "Callback must be invocable with one of the following arguments "
+    "(or any types implicitly convertible from them, e.g., const variants): "
+    "std::unique_ptr<rclcpp::SerializedMessage>, "
+    "std::shared_ptr<rclcpp::SerializedMessage>, or "
+    "rclcpp::SerializedMessage &.");
+
+  return [callback = std::forward<Func>(callback), type_support](AnyObject && arg) mutable {
+    if (typeid(RawMessagePtr) != arg.type()) {
+      RCLCPP_ERROR(
+        logger, "Agnocast internal implementation error: bad allocation when callback is called");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    agnocast::ipc_shared_ptr<std::byte> raw_ptr =
+      std::move(static_cast<RawMessagePtr &&>(arg)).get();
+    if (!raw_ptr) {
+      RCLCPP_ERROR(logger, "received a null raw message pointer; skipping");
+      return;
+    }
+
+    if constexpr (std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>>) {
+      auto serialized = std::make_shared<rclcpp::SerializedMessage>();
+      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
+        return;
+      }
+      callback(std::move(serialized));
+    } else if constexpr (std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>>) {
+      auto serialized = std::make_unique<rclcpp::SerializedMessage>();
+      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
+        return;
+      }
+      callback(std::move(serialized));
+    } else {
+      // Use a stack-allocated SerializedMessage to avoid heap allocation.
+      rclcpp::SerializedMessage serialized;
+      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, serialized)) {
+        return;
+      }
+      callback(serialized);
+    }
+  };
+}
+
+uint32_t register_erased_callback(
+  TypeErasedCallback callback, MessageCreator message_creator, const std::string & topic_name,
+  topic_local_id_t subscriber_id, bool is_transient_local, mqd_t mqdes,
+  rclcpp::CallbackGroup::SharedPtr callback_group);
+
 template <typename MessageT, typename Func>
 uint32_t register_callback(
   Func && callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
-  const bool is_transient_local, mqd_t mqdes, const rclcpp::CallbackGroup::SharedPtr callback_group)
+  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
 {
   // NOTE: ipc_shared_ptr<MessageT> and ipc_shared_ptr<MessageT>&& make no difference in the
   // assertion expression below, but we go with ipc_shared_ptr<MessageT>&&.
@@ -107,19 +199,14 @@ uint32_t register_callback(
       entry_id));
   };
 
-  uint32_t callback_info_id = allocate_callback_info_id();
-
-  {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-    id2_callback_info[callback_info_id] =
-      CallbackInfo{topic_name,     subscriber_id,   is_transient_local, mqdes,
-                   callback_group, erased_callback, message_creator};
-  }
-
-  EpollUpdateDispatcher::get_instance().request_update_all();
-
-  return callback_info_id;
+  return register_erased_callback(
+    std::move(erased_callback), std::move(message_creator), topic_name, subscriber_id,
+    is_transient_local, mqdes, std::move(callback_group));
 }
+
+uint32_t register_generic_callback(
+  TypeErasedCallback callback, const std::string & topic_name, topic_local_id_t subscriber_id,
+  bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group);
 
 void receive_and_execute_message(
   uint32_t callback_info_id, pid_t my_pid, const CallbackInfo & callback_info,
