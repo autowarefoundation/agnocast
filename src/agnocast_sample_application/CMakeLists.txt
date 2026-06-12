@@ -116,6 +116,24 @@ install(TARGETS agnocast_listener_component
         RUNTIME DESTINATION bin
 )
 
+add_library(agnocast_generic_listener_component SHARED src/minimal_generic_subscriber.cpp)
+ament_target_dependencies(agnocast_generic_listener_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_generic_listener_component PRIVATE ${agnocastlib_INCLUDE_DIRS})
+
+agnocast_components_register_node(
+  agnocast_generic_listener_component
+  PLUGIN "MinimalGenericSubscriber"
+  EXECUTABLE generic_listener
+)
+
+ament_export_targets(export_agnocast_generic_listener_component)
+install(TARGETS agnocast_generic_listener_component
+        EXPORT export_agnocast_generic_listener_component
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+)
+
 ament_export_targets(export_agnocast_cie_listener_component)
 install(TARGETS agnocast_cie_listener_component
         EXPORT export_agnocast_cie_listener_component
