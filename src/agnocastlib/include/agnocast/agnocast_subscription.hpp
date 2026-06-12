@@ -144,7 +144,7 @@ public:
 };
 
 // Internal implementation — users should use agnocast::Subscription<MessageT> instead.
-template <typename MessageT, typename BridgeRequestPolicy>
+template <typename MessageT, typename BridgeRegistrationPolicy>
 class BasicSubscription : public SubscriptionBase
 {
   std::pair<mqd_t, std::string> mq_subscription_;
@@ -179,7 +179,7 @@ class BasicSubscription : public SubscriptionBase
       actual_qos, false, options.ignore_local_publications, is_bridge, node_name, type_name);
 
     id_ = add_subscriber_args.ret_id;
-    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
 
     mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
 
@@ -192,7 +192,7 @@ class BasicSubscription : public SubscriptionBase
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicSubscription<MessageT, BridgeRequestPolicy>>;
+  using SharedPtr = std::shared_ptr<BasicSubscription<MessageT, BridgeRegistrationPolicy>>;
 
   template <typename Func>
   BasicSubscription(
@@ -259,7 +259,7 @@ public:
 };
 
 // Internal implementation — users should use agnocast::TakeSubscription<MessageT> instead.
-template <typename MessageT, typename BridgeRequestPolicy>
+template <typename MessageT, typename BridgeRegistrationPolicy>
 class BasicTakeSubscription : public SubscriptionBase
 {
 private:
@@ -296,13 +296,13 @@ private:
       initialize(actual_qos, true, options.ignore_local_publications, false, node_name, type_name);
 
     id_ = add_subscriber_args.ret_id;
-    BridgeRequestPolicy::template request_bridge<MessageT>(topic_name_, id_);
+    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
 
     return actual_qos;
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>;
+  using SharedPtr = std::shared_ptr<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>;
 
   BasicTakeSubscription(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
@@ -417,19 +417,19 @@ public:
 };
 
 // Internal implementation — users should use agnocast::PollingSubscriber<MessageT> instead.
-template <typename MessageT, typename BridgeRequestPolicy>
+template <typename MessageT, typename BridgeRegistrationPolicy>
 class BasicPollingSubscriber
 {
-  typename BasicTakeSubscription<MessageT, BridgeRequestPolicy>::SharedPtr subscriber_;
+  typename BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>::SharedPtr subscriber_;
 
 public:
-  using SharedPtr = std::shared_ptr<BasicPollingSubscriber<MessageT, BridgeRequestPolicy>>;
+  using SharedPtr = std::shared_ptr<BasicPollingSubscriber<MessageT, BridgeRegistrationPolicy>>;
 
   explicit BasicPollingSubscriber(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
   {
-    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>(
+    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>(
       node, topic_name, qos, options);
   };
 
@@ -437,7 +437,7 @@ public:
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
   {
-    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRequestPolicy>>(
+    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>(
       node, topic_name, qos, options);
   };
 
@@ -552,7 +552,7 @@ public:
   ~GenericSubscription();
 };
 
-struct RosToAgnocastPubsubRequestPolicy;
+struct RosToAgnocastPubsubRegistrationPolicy;
 
 /// @brief The user-facing event-driven subscription type.
 /// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when
@@ -560,7 +560,7 @@ struct RosToAgnocastPubsubRequestPolicy;
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using Subscription =
-  agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
+  agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
 
 /// @brief The user-facing polling take-subscription type.
 /// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly)
@@ -568,7 +568,7 @@ using Subscription =
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using TakeSubscription =
-  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
+  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
 
 /// @brief The user-facing polling subscriber type.
 /// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber
@@ -576,6 +576,6 @@ using TakeSubscription =
 AGNOCAST_PUBLIC
 template <typename MessageT>
 using PollingSubscriber =
-  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastPubsubRequestPolicy>;
+  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
 
 }  // namespace agnocast

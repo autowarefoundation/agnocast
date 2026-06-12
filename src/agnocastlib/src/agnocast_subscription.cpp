@@ -155,7 +155,7 @@ rclcpp::QoS GenericSubscription::constructor_impl(
   id_ = add_subscriber_args.ret_id;
 
   if (role == SubscriptionRole::Default) {
-    request_pubsub_bridge_by_type_name(
+    register_pubsub_bridge_by_type_name(
       topic_name_, id_, topic_type, BridgeDirection::ROS2_TO_AGNOCAST);
   }
 

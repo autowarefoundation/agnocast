@@ -69,20 +69,20 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
 rclcpp::QoS get_service_qos(const std::string & service_name);
 bool is_agnocast_service_alive(const std::string & service_name, std::string & reason);
 
-/// @brief A builder class for creating bridge request messages.
+/// @brief A builder class for creating bridge registration messages.
 ///
 /// It handles errors such as setting non-existent fields or invalid values for each field, and the
 /// `build_*` member functions return an error reason. However, it does not check whether the
 /// computed message as a whole is valid. It's the caller's responsibility to invoke a correct
 /// set of setters to build a valid message.
-class BridgeRequestMsgBuilder
+class BridgeRegistrationMsgBuilder
 {
   std::variant<MqMsgBridge, MqMsgPerformanceBridge> msg_;
   rclcpp::Logger logger_;
   bool failed_;
   std::string reason_;
 
-  BridgeRequestMsgBuilder & fail(const char * format, ...);
+  BridgeRegistrationMsgBuilder & fail(const char * format, ...);
   int checked_snprintf(
     const std::string & member, char * buffer, size_t size, const char * format, ...);
 
@@ -92,17 +92,17 @@ public:
     Performance,
   };
 
-  explicit BridgeRequestMsgBuilder(Mode mode, const rclcpp::Logger & logger);
+  explicit BridgeRegistrationMsgBuilder(Mode mode, const rclcpp::Logger & logger);
 
-  BridgeRequestMsgBuilder & set_direction(BridgeDirection direction);
-  BridgeRequestMsgBuilder & set_is_service(bool is_service);
-  BridgeRequestMsgBuilder & set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r);
-  BridgeRequestMsgBuilder & set_message_type(const char * message_type);
-  BridgeRequestMsgBuilder & set_topic_name(const char * topic_name);
-  BridgeRequestMsgBuilder & set_pubsub_target_id(topic_local_id_t target_id);
-  BridgeRequestMsgBuilder & set_service_type(const char * service_type);
-  BridgeRequestMsgBuilder & set_service_name(const char * service_name);
-  BridgeRequestMsgBuilder & set_shadow_node_identity(
+  BridgeRegistrationMsgBuilder & set_direction(BridgeDirection direction);
+  BridgeRegistrationMsgBuilder & set_is_service(bool is_service);
+  BridgeRegistrationMsgBuilder & set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r);
+  BridgeRegistrationMsgBuilder & set_message_type(const char * message_type);
+  BridgeRegistrationMsgBuilder & set_topic_name(const char * topic_name);
+  BridgeRegistrationMsgBuilder & set_pubsub_target_id(topic_local_id_t target_id);
+  BridgeRegistrationMsgBuilder & set_service_type(const char * service_type);
+  BridgeRegistrationMsgBuilder & set_service_name(const char * service_name);
+  BridgeRegistrationMsgBuilder & set_shadow_node_identity(
     const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
   std::pair<MqMsgBridge, std::string> build_standard_message();

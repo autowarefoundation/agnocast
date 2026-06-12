@@ -307,12 +307,13 @@ void StandardBridgeManager::send_pubsub_delegation(
   const topic_local_id_t target_id =
     (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? entry.target_id_r2a : entry.target_id_a2r;
 
-  auto [req, reason] = BridgeRequestMsgBuilder(BridgeRequestMsgBuilder::Mode::Standard, logger_)
-                         .set_direction(direction)
-                         .set_is_service(false)
-                         .set_topic_name(topic_name.c_str())
-                         .set_pubsub_target_id(target_id)
-                         .build_standard_message();
+  auto [req, reason] =
+    BridgeRegistrationMsgBuilder(BridgeRegistrationMsgBuilder::Mode::Standard, logger_)
+      .set_direction(direction)
+      .set_is_service(false)
+      .set_topic_name(topic_name.c_str())
+      .set_pubsub_target_id(target_id)
+      .build_standard_message();
   // req.factory can be left zeroed because it is not going to be used.
 
   if (!reason.empty()) {

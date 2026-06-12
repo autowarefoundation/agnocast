@@ -41,7 +41,7 @@ extern int agnocast_fd;
 constexpr int64_t ENTRY_ID_NOT_ASSIGNED = -1;
 
 // Forward declaration for friend access
-template <typename MessageT, typename BridgeRequestPolicy>
+template <typename MessageT, typename BridgeRegistrationPolicy>
 class BasicPublisher;
 
 namespace detail
@@ -102,7 +102,7 @@ template <typename T>
 class ipc_shared_ptr
 {
   // Allow BasicPublisher to call invalidate_all_references()
-  template <typename MessageT, typename BridgeRequestPolicy>
+  template <typename MessageT, typename BridgeRegistrationPolicy>
   friend class BasicPublisher;
 
   // Allow converting constructors to access private members of ipc_shared_ptr<U>
