@@ -153,18 +153,21 @@ TypeErasedCallback get_erased_generic_callback(
       if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
         return;
       }
+      raw_ptr.reset();
       callback(std::move(serialized));
     } else if constexpr (std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>>) {
       auto serialized = std::make_unique<rclcpp::SerializedMessage>();
       if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
         return;
       }
+      raw_ptr.reset();
       callback(std::move(serialized));
     } else {
       rclcpp::SerializedMessage serialized;
       if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, serialized)) {
         return;
       }
+      raw_ptr.reset();
       callback(serialized);
     }
   };
