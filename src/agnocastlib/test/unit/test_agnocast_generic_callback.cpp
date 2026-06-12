@@ -28,7 +28,6 @@
 
 using agnocast::get_erased_generic_callback;
 using agnocast::RawMessagePtr;
-using agnocast::TypedMessagePtr;
 using agnocast::TypeErasedCallback;
 
 template <typename T>

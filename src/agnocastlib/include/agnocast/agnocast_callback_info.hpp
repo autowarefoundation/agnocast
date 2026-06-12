@@ -6,6 +6,8 @@
 
 #include <rclcpp/serialized_message.hpp>
 
+#include <rosidl_runtime_c/message_type_support_struct.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
