@@ -460,7 +460,7 @@ public:
 /// The supported callback signatures are:
 ///   - `void(std::shared_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
 ///   - `void(std::unique_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
-///   - `void(const rclcpp::SerializedMessage &)` (and `const` variants)
+///   - `void(rclcpp::SerializedMessage &)` (and `const` variants)
 ///
 /// NOTE: Standard bridge mode is not supported for this subscription type.
 /// When standard bridge is used, no bridge request is issued, so no bridge is created and
@@ -470,7 +470,7 @@ AGNOCAST_PUBLIC
 class GenericSubscription : public SubscriptionBase
 {
   std::pair<mqd_t, std::string> mq_subscription_;
-  uint32_t callback_info_id_{0};
+  uint32_t callback_info_id_;
   /// Keeps the dynamically loaded typesupport .so alive for our lifetime.
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
   const rosidl_message_type_support_t * type_support_handle_{nullptr};

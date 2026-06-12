@@ -111,7 +111,7 @@ TypeErasedCallback get_erased_callback(Func && callback)
   };
 }
 
-// Serialize directly into an existing stack-allocated SerializedMessage to avoid heap allocation.
+// Serialize raw message data into a SerializedMessage.
 // Returns false (and logs an error) on rmw_serialize failure.
 bool generic_serialize_message_in_place(
   const void * raw, const rosidl_message_type_support_t * type_support,
@@ -126,7 +126,7 @@ TypeErasedCallback get_erased_generic_callback(
     std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>> ||
       std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>> ||
       std::is_invocable_v<F, rclcpp::SerializedMessage &>,
-    "This callback type cannot be handled as a GenericCallback."
+    "This callback type cannot be handled as a GenericCallback. "
     "Callback must be invocable with one of the following arguments "
     "(or any types implicitly convertible from them, e.g., const variants): "
     "std::unique_ptr<rclcpp::SerializedMessage>, "
@@ -161,7 +161,6 @@ TypeErasedCallback get_erased_generic_callback(
       }
       callback(std::move(serialized));
     } else {
-      // Use a stack-allocated SerializedMessage to avoid heap allocation.
       rclcpp::SerializedMessage serialized;
       if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, serialized)) {
         return;
