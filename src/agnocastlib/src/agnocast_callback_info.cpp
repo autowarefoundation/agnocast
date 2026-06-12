@@ -5,7 +5,6 @@
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_executor.hpp"
 
-#include <rcutils/allocator.h>
 #include <rmw/rmw.h>
 #include <rmw/serialized_message.h>
 #include <rmw/types.h>

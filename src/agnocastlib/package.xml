@@ -27,6 +27,8 @@
   <depend>rcl_yaml_param_parser</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
+  <depend>rcpputils</depend>
+  <depend>rmw</depend>
   <depend>rosgraph_msgs</depend>
   <depend>tracetools</depend>
 
