@@ -350,10 +350,11 @@ void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
   const rmw_ret_t ret =
     rmw_deserialize(&serialized_msg.get_rcl_serialized_message(), type_support_handle_, ptr);
 
+  decrement_borrowed_publisher_num();
+
   if (ret != RMW_RET_OK) {
     members_->fini_function(ptr);
     ::operator delete(ptr);
-    decrement_borrowed_publisher_num();
     RCLCPP_ERROR(
       logger, "rmw_deserialize failed in GenericPublisher (rmw_ret=%d); dropping message",
       static_cast<int>(ret));
@@ -367,8 +368,6 @@ void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
     std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
     publish_msg_args = publish_core(this, topic_name_, id_, va, opened_mqs_);
   }
-
-  decrement_borrowed_publisher_num();
 
   // Release entries that all subscribers have finished reading.
   // Only the addresses previously passed to the kernel by this publisher are returned here.
