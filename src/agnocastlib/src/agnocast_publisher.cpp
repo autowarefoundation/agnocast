@@ -195,7 +195,12 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
 
 void PublisherBase::generate_gid()
 {
-  std::memset(gid_.data, 0, RMW_GID_STORAGE_SIZE);
+  constexpr size_t kPidOffset = 2;
+  constexpr size_t kHashOffset = 6;
+  constexpr size_t kHashSize = 6;
+  constexpr size_t kPubIdOffset = 12;
+
+  std::memset(static_cast<void *>(&gid_.data[0]), 0, RMW_GID_STORAGE_SIZE);
 
   // [0-1]: Agnocast identifier
   gid_.data[0] = 'A';
@@ -203,14 +208,14 @@ void PublisherBase::generate_gid()
 
   // [2-5]: Process ID
   const auto pid = static_cast<uint32_t>(getpid());
-  std::memcpy(gid_.data + 2, &pid, sizeof(pid));
+  std::memcpy(static_cast<void *>(&gid_.data[kPidOffset]), &pid, sizeof(pid));
 
   // [6-11]: topic_name hash (upper 6 bytes)
   const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
-  std::memcpy(gid_.data + 6, &topic_hash, 6);
+  std::memcpy(static_cast<void *>(&gid_.data[kHashOffset]), &topic_hash, kHashSize);
 
   // [12-15]: publisher id
-  std::memcpy(gid_.data + 12, &id_, sizeof(id_));
+  std::memcpy(static_cast<void *>(&gid_.data[kPubIdOffset]), &id_, sizeof(id_));
 
   // [16-23]: reserved
 
