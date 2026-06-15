@@ -2270,14 +2270,6 @@ static long receive_msg_cmd(union ioctl_receive_msg_args __user * arg)
   }
   kfree(pub_shm_infos);
 
-  // Function Replacement Target
-  /*
-  if (ret == 0) {
-    if (copy_to_user(arg, &receive_msg_args, sizeof(receive_msg_args))) return -EFAULT;
-  }
-  return ret;
-  */
-
   size_t n = receive_msg_args.ret_entry_num;
 
   if (n > MAX_RECEIVE_NUM) n = MAX_RECEIVE_NUM;
