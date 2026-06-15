@@ -122,11 +122,13 @@ rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnoc
   return node->get_node_base_interface()->get_default_callback_group();
 }
 
-void GenericSubscription::load_typesupport_impl(const std::string & topic_type)
+TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string & topic_type)
 {
-  ts_lib_ = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
-  type_support_handle_ =
-    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *ts_lib_);
+  TypeSupportBundle result;
+  result.library = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  result.handle =
+    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+  return result;
 }
 
 template <typename NodeT>

@@ -27,11 +27,6 @@
 #include <thread>
 #include <vector>
 
-namespace rcpputils
-{
-class SharedLibrary;
-}
-
 namespace agnocast
 {
 class Node;
@@ -473,11 +468,10 @@ class GenericSubscription : public SubscriptionBase
 {
   std::pair<mqd_t, std::string> mq_subscription_;
   uint32_t callback_info_id_;
-  /// Keeps the dynamically loaded typesupport .so alive for our lifetime.
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
-  const rosidl_message_type_support_t * type_support_handle_{nullptr};
+  /// Keeps the dynamically loaded typesupport .so and its handle together for our lifetime.
+  TypeSupportBundle type_support_;
 
-  void load_typesupport_impl(const std::string & topic_type);
+  TypeSupportBundle load_typesupport_impl(const std::string & topic_type);
 
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
@@ -501,9 +495,9 @@ public:
     const void * callback_addr = static_cast<const void *>(&callback);
     const char * callback_symbol = tracetools::get_symbol(callback);
 
-    load_typesupport_impl(topic_type);
+    type_support_ = load_typesupport_impl(topic_type);
     TypeErasedCallback erased =
-      get_erased_generic_callback(std::forward<Func>(callback), type_support_handle_);
+      get_erased_generic_callback(std::forward<Func>(callback), type_support_);
 
     const rclcpp::QoS actual_qos =
       constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
@@ -532,9 +526,9 @@ public:
     const void * callback_addr = static_cast<const void *>(&callback);
     const char * callback_symbol = tracetools::get_symbol(callback);
 
-    load_typesupport_impl(topic_type);
+    type_support_ = load_typesupport_impl(topic_type);
     TypeErasedCallback erased =
-      get_erased_generic_callback(std::forward<Func>(callback), type_support_handle_);
+      get_erased_generic_callback(std::forward<Func>(callback), type_support_);
 
     const rclcpp::QoS actual_qos =
       constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
@@ -550,7 +544,8 @@ public:
   }
 
   // Destructor defined in .cpp so that ~shared_ptr<rcpputils::SharedLibrary>
-  // sees the complete SharedLibrary type (forward-declared in this header).
+  // (held inside TypeSupportBundle) sees the complete SharedLibrary type
+  // (forward-declared in this header via agnocast_callback_info.hpp).
   ~GenericSubscription();
 };
 

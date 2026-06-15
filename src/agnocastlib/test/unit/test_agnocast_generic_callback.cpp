@@ -45,12 +45,13 @@ protected:
   void SetUp() override
   {
     rclcpp::init(0, nullptr);
-    ts_ = rosidl_typesupport_cpp::get_message_type_support_handle<std_msgs::msg::String>();
+    ts_ = agnocast::TypeSupportBundle{
+      nullptr, rosidl_typesupport_cpp::get_message_type_support_handle<std_msgs::msg::String>()};
   }
 
   void TearDown() override { rclcpp::shutdown(); }
 
-  const rosidl_message_type_support_t * ts_{nullptr};
+  agnocast::TypeSupportBundle ts_;
 };
 
 // ---------------------------------------------------------------------------

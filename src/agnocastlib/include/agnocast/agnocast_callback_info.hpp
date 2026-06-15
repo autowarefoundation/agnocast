@@ -14,6 +14,11 @@
 #include <mutex>
 #include <type_traits>
 
+namespace rcpputils
+{
+class SharedLibrary;
+}
+
 namespace agnocast
 {
 
@@ -21,6 +26,14 @@ namespace agnocast
 // atomic wrap-around (overflow back to 0) during concurrent fetch_add calls.
 constexpr uint32_t MAX_CALLBACK_INFO_ID_SAFETY_MARGIN = 1000;
 constexpr uint32_t MAX_CALLBACK_INFO_ID = UINT32_MAX - MAX_CALLBACK_INFO_ID_SAFETY_MARGIN;
+
+/// Bundles the dynamically loaded typesupport library with its message handle.
+/// Keeping both together ensures the handle is never outlived by its library.
+struct TypeSupportBundle
+{
+  std::shared_ptr<rcpputils::SharedLibrary> library;
+  const rosidl_message_type_support_t * handle{nullptr};
+};
 
 struct AgnocastExecutable;
 
@@ -120,8 +133,7 @@ bool serialize_message(
   rclcpp::SerializedMessage & out);
 
 template <typename Func>
-TypeErasedCallback get_erased_generic_callback(
-  Func && callback, const rosidl_message_type_support_t * type_support)
+TypeErasedCallback get_erased_generic_callback(Func && callback, TypeSupportBundle ts)
 {
   using F = std::decay_t<Func>;
   static_assert(
@@ -135,7 +147,7 @@ TypeErasedCallback get_erased_generic_callback(
     "std::shared_ptr<rclcpp::SerializedMessage>, or "
     "rclcpp::SerializedMessage &.");
 
-  return [callback = std::forward<Func>(callback), type_support](AnyObject && arg) mutable {
+  return [callback = std::forward<Func>(callback), ts = std::move(ts)](AnyObject && arg) mutable {
     if (typeid(RawMessagePtr) != arg.type()) {
       RCLCPP_ERROR(
         logger, "Agnocast internal implementation error: bad allocation when callback is called");
@@ -152,21 +164,21 @@ TypeErasedCallback get_erased_generic_callback(
 
     if constexpr (std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>>) {
       auto serialized = std::make_shared<rclcpp::SerializedMessage>();
-      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
+      if (!serialize_message(raw_ptr.get(), ts.handle, *serialized)) {
         return;
       }
       raw_ptr.reset();
       callback(std::move(serialized));
     } else if constexpr (std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>>) {
       auto serialized = std::make_unique<rclcpp::SerializedMessage>();
-      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, *serialized)) {
+      if (!serialize_message(raw_ptr.get(), ts.handle, *serialized)) {
         return;
       }
       raw_ptr.reset();
       callback(std::move(serialized));
     } else {
       rclcpp::SerializedMessage serialized;
-      if (!generic_serialize_message_in_place(raw_ptr.get(), type_support, serialized)) {
+      if (!serialize_message(raw_ptr.get(), ts.handle, serialized)) {
         return;
       }
       raw_ptr.reset();
