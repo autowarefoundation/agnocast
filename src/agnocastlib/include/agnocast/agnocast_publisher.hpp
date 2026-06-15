@@ -300,7 +300,7 @@ class GenericPublisher : public PublisherBase
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
     NodeT * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, PublisherRole role);
+    const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role);
 
 public:
   using SharedPtr = std::shared_ptr<GenericPublisher>;
@@ -308,13 +308,13 @@ public:
   AGNOCAST_PUBLIC
   GenericPublisher(
     rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, agnocast::PublisherOptions options = agnocast::PublisherOptions{},
+    const rclcpp::QoS & qos, const PublisherOptions & options = PublisherOptions{},
     PublisherRole role = PublisherRole::Default);
 
   AGNOCAST_PUBLIC
   GenericPublisher(
     agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, agnocast::PublisherOptions options = agnocast::PublisherOptions{},
+    const rclcpp::QoS & qos, const PublisherOptions & options = PublisherOptions{},
     PublisherRole role = PublisherRole::Default);
 
   /**

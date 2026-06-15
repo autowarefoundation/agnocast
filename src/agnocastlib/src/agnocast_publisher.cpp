@@ -300,7 +300,7 @@ rclcpp::QoS GenericPublisher::constructor_impl(
 
 GenericPublisher::GenericPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
-  const rclcpp::QoS & qos, agnocast::PublisherOptions options, PublisherRole role)
+  const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
 {
   const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
 
@@ -312,7 +312,7 @@ GenericPublisher::GenericPublisher(
 
 GenericPublisher::GenericPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
-  const rclcpp::QoS & qos, agnocast::PublisherOptions options, PublisherRole role)
+  const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
 {
   const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
 
