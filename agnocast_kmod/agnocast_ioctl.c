@@ -2270,9 +2270,45 @@ static long receive_msg_cmd(union ioctl_receive_msg_args __user * arg)
   }
   kfree(pub_shm_infos);
 
+  // Function Replacement Target
+  /*
   if (ret == 0) {
     if (copy_to_user(arg, &receive_msg_args, sizeof(receive_msg_args))) return -EFAULT;
   }
+  return ret;
+  */
+
+  size_t n = receive_msg_args.ret_entry_num;
+
+  if (n > MAX_RECEIVE_NUM) n = MAX_RECEIVE_NUM;
+
+  /* scalar fields */
+  if (copy_to_user(
+        &arg->ret_entry_num, &receive_msg_args.ret_entry_num,
+        sizeof(receive_msg_args.ret_entry_num)))
+    return -EFAULT;
+
+  if (copy_to_user(
+        &arg->ret_call_again, &receive_msg_args.ret_call_again,
+        sizeof(receive_msg_args.ret_call_again)))
+    return -EFAULT;
+
+  if (copy_to_user(
+        &arg->ret_pub_shm_num, &receive_msg_args.ret_pub_shm_num,
+        sizeof(receive_msg_args.ret_pub_shm_num)))
+    return -EFAULT;
+
+  /* arrays (only valid prefix) */
+  if (copy_to_user(
+        arg->ret_entry_ids, receive_msg_args.ret_entry_ids,
+        n * sizeof(receive_msg_args.ret_entry_ids[0])))
+    return -EFAULT;
+
+  if (copy_to_user(
+        arg->ret_entry_addrs, receive_msg_args.ret_entry_addrs,
+        n * sizeof(receive_msg_args.ret_entry_addrs[0])))
+    return -EFAULT;
+
   return ret;
 }
 
