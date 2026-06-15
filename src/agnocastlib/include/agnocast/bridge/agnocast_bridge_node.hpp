@@ -41,7 +41,7 @@ template <typename MessageT>
 void send_performance_pubsub_bridge_registration(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction);
 inline void send_performance_pubsub_bridge_registration_by_type_name(
-  const std::string & topic_name, topic_local_id_t id, const std::string & message_type,
+  const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction);
 template <typename ServiceT>
 void send_performance_service_bridge_registration(
