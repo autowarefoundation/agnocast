@@ -436,7 +436,7 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction)
 {
-  static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_registrar");
+  static const auto logger = rclcpp::get_logger("agnocast_performance_bridge_registrar");
 
   auto [msg, reason] =
     BridgeRegistrationMsgBuilder(BridgeRegistrationMsgBuilder::Mode::Performance, logger)
