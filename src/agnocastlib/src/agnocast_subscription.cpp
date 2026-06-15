@@ -2,6 +2,7 @@
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/typesupport_helpers.hpp"
+#include "rclcpp/version.h"
 #include "rcpputils/shared_library.hpp"
 
 namespace agnocast
@@ -126,8 +127,15 @@ TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string &
 {
   TypeSupportBundle result;
   result.library = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  // rclcpp::get_typesupport_handle() was deprecated in Jazzy (rclcpp 28) in favor of
+  // rclcpp::get_message_typesupport_handle() to distinguish message handles from service handles.
+#if RCLCPP_VERSION_MAJOR >= 28
   result.handle =
     rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#else
+  result.handle =
+    rclcpp::get_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#endif
   return result;
 }
 
