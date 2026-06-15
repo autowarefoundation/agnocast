@@ -30,6 +30,7 @@
   <depend>rcpputils</depend>
   <depend>rmw</depend>
   <depend>rosgraph_msgs</depend>
+  <depend>rosidl_typesupport_introspection_cpp</depend>
   <depend>tracetools</depend>
 
   <depend>agnocast_cie_config_msgs</depend>

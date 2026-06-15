@@ -37,6 +37,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(diagnostic_updater REQUIRED)
 find_package(glog REQUIRED)
+find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 
 add_library(agnocast SHARED
   src/agnocast.cpp src/agnocast_utils.cpp src/agnocast_publisher.cpp src/agnocast_subscription.cpp
@@ -55,7 +56,7 @@ add_library(agnocast SHARED
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp)
 
-ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
+ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
 
 target_link_libraries(agnocast
   ${rcl_yaml_param_parser_LIBRARIES}
@@ -154,7 +155,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_context.cpp
     test/unit/test_diagnostic_updater.cpp
     test/unit/test_type_registry_writer.cpp
-    test/unit/test_agnocast_generic_callback.cpp)
+    test/unit/test_agnocast_generic_callback.cpp
+    test/unit/test_agnocast_generic_publisher.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
@@ -306,6 +308,19 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_generic_subscription_${PROJECT_NAME}
     std_msgs rosidl_typesupport_cpp)
   set_tests_properties(test_integration_generic_subscription_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # GenericPublisher integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_generic_publisher_${PROJECT_NAME}
+    test/integration/test_agnocast_generic_publisher.cpp)
+  target_include_directories(test_integration_generic_publisher_${PROJECT_NAME} PRIVATE include)
+  target_link_libraries(test_integration_generic_publisher_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_generic_publisher_${PROJECT_NAME}
+    std_msgs rosidl_typesupport_cpp)
+  set_tests_properties(test_integration_generic_publisher_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 60
     LABELS "requires_kernel_module;requires_heaphook"

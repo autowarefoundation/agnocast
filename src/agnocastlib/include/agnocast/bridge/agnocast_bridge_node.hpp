@@ -69,7 +69,7 @@ inline void register_pubsub_bridge_by_type_name(
     static const auto logger = rclcpp::get_logger("agnocast_bridge_registrar");
     RCLCPP_WARN_ONCE(
       logger,
-      "GenericSubscription does not support standard-mode bridge. "
+      "GenericSubscription and GenericPublisher do not support standard-mode bridge. "
       "Set AGNOCAST_BRIDGE_MODE=performance to enable bridging.");
   } else if (bridge_mode == BridgeMode::Performance) {
     send_performance_pubsub_bridge_registration_by_type_name(

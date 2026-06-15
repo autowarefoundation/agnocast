@@ -8,6 +8,8 @@
 #include "agnocast/agnocast_utils.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/serialized_message.hpp"
+#include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
 #include <fcntl.h>
 #include <mqueue.h>
@@ -57,6 +59,31 @@ struct PublisherOptions
   bool do_always_ros2_publish = false;
   /// QoS parameter override options (same semantics as rclcpp).
   rclcpp::QosOverridingOptions qos_overriding_options{};
+};
+
+/**
+ * @brief Role of a publisher with respect to the Agnocast<->ROS bridge.
+ *
+ * Encodes two properties of a publisher:
+ *   - whether it is used by the bridge implementation itself
+ *   - whether it should issue an A2R bridge request on construction
+ *
+ *   | Role            | kmod `is_bridge` | bridge request issued |
+ *   |-----------------|------------------|-----------------------|
+ *   | Default         | false            | yes (A2R)             |
+ *   | AgnocastOnly    | false            | no                    |
+ *   | BridgeInternal  | true             | no                    |
+ */
+enum class PublisherRole : uint8_t {
+  /// User-created publisher; issues an A2R bridge request.
+  Default,
+  /// Used internally; no bridge request is issued.
+  /// Not intended for direct use by application code.
+  AgnocastOnly,
+  /// Used by the bridge implementation itself; marked as bridge in kmod and
+  /// issues no bridge request.
+  /// Not intended for direct use by application code.
+  BridgeInternal,
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
@@ -244,6 +271,60 @@ public:
 
     message.reset();
   }
+};
+
+/**
+ * @brief Mirrors `rclcpp::GenericPublisher` semantics: the topic type is supplied as a
+ * runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
+ * template argument. The typesupport library is loaded eagerly in the
+ * constructor and held for the publisher's lifetime.
+ *
+ * Messages are passed to `publish()` as `rclcpp::SerializedMessage` objects
+ * and are deserialized into Agnocast shared memory within the `publish()` call.
+ *
+ * NOTE: Standard bridge mode is not supported for this publisher type.
+ * When standard bridge is used, no bridge request is issued, so no bridge is
+ * created and communication with ROS 2 subscribers is not possible. This is
+ * by design, as standard bridge support is planned for removal.
+ */
+AGNOCAST_PUBLIC
+class GenericPublisher : public PublisherBase
+{
+  // Keeps the dynamically loaded typesupport and introspection shared libraries
+  // (.so) alongside their handles for the lifetime of the publisher.
+  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
+  const rosidl_message_type_support_t * type_support_handle_{nullptr};
+  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
+  const rosidl_typesupport_introspection_cpp::MessageMembers * members_{nullptr};
+
+  template <typename NodeT>
+  rclcpp::QoS constructor_impl(
+    NodeT * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, PublisherRole role);
+
+public:
+  using SharedPtr = std::shared_ptr<GenericPublisher>;
+
+  AGNOCAST_PUBLIC
+  GenericPublisher(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, agnocast::PublisherOptions options = agnocast::PublisherOptions{},
+    PublisherRole role = PublisherRole::Default);
+
+  AGNOCAST_PUBLIC
+  GenericPublisher(
+    agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, agnocast::PublisherOptions options = agnocast::PublisherOptions{},
+    PublisherRole role = PublisherRole::Default);
+
+  /**
+   * @brief Deserialize a serialized message into Agnocast shared memory and
+   * publish it via zero-copy IPC.
+   *
+   * @param serialized_msg Serialized ROS 2 message to deserialize and publish.
+   */
+  AGNOCAST_PUBLIC
+  void publish(const rclcpp::SerializedMessage & serialized_msg);
 };
 
 struct AgnocastToRosPubsubRegistrationPolicy;
