@@ -202,11 +202,11 @@ void PublisherBase::generate_gid()
   gid_.data[1] = 'G';
 
   // [2-5]: Process ID
-  pid_t pid = getpid();
+  const auto pid = static_cast<uint32_t>(getpid());
   std::memcpy(gid_.data + 2, &pid, sizeof(pid));
 
   // [6-11]: topic_name hash (upper 6 bytes)
-  size_t topic_hash = std::hash<std::string>{}(topic_name_);
+  const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
   std::memcpy(gid_.data + 6, &topic_hash, 6);
 
   // [12-15]: publisher id
@@ -219,11 +219,14 @@ void PublisherBase::generate_gid()
 
 PublisherBase::~PublisherBase()
 {
-  for (auto & [_, t] : opened_mqs_) {
-    mqd_t mq = std::get<0>(t);
-    if (mq_close(mq) == -1) {
-      RCLCPP_ERROR_STREAM(
-        logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
+  {
+    std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+    for (auto & [_, t] : opened_mqs_) {
+      mqd_t mq = std::get<0>(t);
+      if (mq_close(mq) == -1) {
+        RCLCPP_ERROR_STREAM(
+          logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
+      }
     }
   }
 
