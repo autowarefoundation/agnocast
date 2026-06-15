@@ -32,7 +32,7 @@ uint32_t allocate_callback_info_id()
   return callback_info_id;
 }
 
-bool generic_serialize_message_in_place(
+bool serialize_message(
   const void * raw, const rosidl_message_type_support_t * type_support,
   rclcpp::SerializedMessage & out)
 {

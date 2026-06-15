@@ -115,7 +115,7 @@ TypeErasedCallback get_erased_callback(Func && callback)
 
 // Serialize raw message data into a SerializedMessage.
 // Returns false (and logs an error) on rmw_serialize failure.
-bool generic_serialize_message_in_place(
+bool serialize_message(
   const void * raw, const rosidl_message_type_support_t * type_support,
   rclcpp::SerializedMessage & out);
 
