@@ -73,11 +73,10 @@ uint32_t register_generic_callback(
   const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
 {
   auto message_creator = [](
-                           const void * ptr, const std::string & topic_name,
+                           void * ptr, const std::string & topic_name,
                            const topic_local_id_t subscriber_id, const int64_t entry_id) {
     return std::make_unique<RawMessagePtr>(agnocast::ipc_shared_ptr<std::byte>(
-      const_cast<std::byte *>(static_cast<const std::byte *>(ptr)), topic_name, subscriber_id,
-      entry_id));
+      static_cast<std::byte *>(ptr), topic_name, subscriber_id, entry_id));
   };
 
   return register_erased_callback(

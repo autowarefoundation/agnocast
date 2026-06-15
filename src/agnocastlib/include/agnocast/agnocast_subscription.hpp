@@ -471,7 +471,7 @@ class GenericSubscription : public SubscriptionBase
   /// Keeps the dynamically loaded typesupport .so and its handle together for our lifetime.
   TypeSupportBundle type_support_;
 
-  TypeSupportBundle load_typesupport_impl(const std::string & topic_type);
+  static TypeSupportBundle load_typesupport_impl(const std::string & topic_type);
 
   template <typename NodeT>
   rclcpp::QoS constructor_impl(

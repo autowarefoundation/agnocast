@@ -85,7 +85,7 @@ using TypeErasedCallback = std::function<void(AnyObject &&)>;
 // Type for message creator function that constructs a type-erased message
 // envelope (AnyObject) from a raw shared-memory pointer and its metadata.
 using MessageCreator = std::function<std::unique_ptr<AnyObject>(
-  const void *, const std::string &, const topic_local_id_t, const int64_t)>;
+  void *, const std::string &, const topic_local_id_t, const int64_t)>;
 
 struct CallbackInfo
 {
@@ -208,11 +208,10 @@ uint32_t register_callback(
   TypeErasedCallback erased_callback = get_erased_callback<MessageT>(std::forward<Func>(callback));
 
   auto message_creator = [](
-                           const void * ptr, const std::string & topic_name,
+                           void * ptr, const std::string & topic_name,
                            const topic_local_id_t subscriber_id, const int64_t entry_id) {
     return std::make_unique<TypedMessagePtr<MessageT>>(agnocast::ipc_shared_ptr<MessageT>(
-      const_cast<MessageT *>(static_cast<const MessageT *>(ptr)), topic_name, subscriber_id,
-      entry_id));
+      static_cast<MessageT *>(ptr), topic_name, subscriber_id, entry_id));
   };
 
   return register_erased_callback(

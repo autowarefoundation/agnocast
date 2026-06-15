@@ -145,7 +145,7 @@ rclcpp::QoS GenericSubscription::constructor_impl(
   TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
   const agnocast::SubscriptionOptions & options, SubscriptionRole role)
 {
-  const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
+  const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
     override_qos ? node->get_node_parameters_interface() : nullptr;
   const rclcpp::QoS actual_qos = override_qos
@@ -174,7 +174,7 @@ rclcpp::QoS GenericSubscription::constructor_impl(
   const bool is_transient_local =
     actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   callback_info_id_ = agnocast::register_generic_callback(
-    std::move(callback), topic_name_, id_, is_transient_local, mq, callback_group);
+    std::move(callback), topic_name_, id_, is_transient_local, mq, std::move(callback_group));
 
   return actual_qos;
 }
