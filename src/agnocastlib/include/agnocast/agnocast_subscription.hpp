@@ -114,7 +114,7 @@ rclcpp::CallbackGroup::SharedPtr get_valid_callback_group(
 class SubscriptionBase
 {
 protected:
-  topic_local_id_t id_;
+  topic_local_id_t id_{-1};
   const std::string topic_name_;
   union ioctl_add_subscriber_args initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
@@ -128,17 +128,19 @@ public:
 
   virtual ~SubscriptionBase()
   {
-    // NOTE: Unmapping memory when a subscriber is destroyed is not implemented. Multiple
-    // subscribers
-    // may share the same mmap region, requiring reference counting in kmod. Since leaving the
-    // memory mapped should not cause any functional issues, this is left as future work.
-    struct ioctl_remove_subscriber_args remove_subscriber_args
-    {
-    };
-    remove_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
-    remove_subscriber_args.subscriber_id = id_;
-    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_SUBSCRIBER_CMD, &remove_subscriber_args) < 0) {
-      RCLCPP_WARN(logger, "Failed to remove subscriber (id=%d) from kernel.", id_);
+    if (id_ >= 0) {
+      // NOTE: Unmapping memory when a subscriber is destroyed is not implemented. Multiple
+      // subscribers
+      // may share the same mmap region, requiring reference counting in kmod. Since leaving the
+      // memory mapped should not cause any functional issues, this is left as future work.
+      struct ioctl_remove_subscriber_args remove_subscriber_args
+      {
+      };
+      remove_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
+      remove_subscriber_args.subscriber_id = id_;
+      if (ioctl(agnocast_fd, AGNOCAST_REMOVE_SUBSCRIBER_CMD, &remove_subscriber_args) < 0) {
+        RCLCPP_WARN(logger, "Failed to remove subscriber (id=%d) from kernel.", id_);
+      }
     }
   }
 };
