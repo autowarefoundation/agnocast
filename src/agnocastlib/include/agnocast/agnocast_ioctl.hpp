@@ -55,6 +55,7 @@ union ioctl_add_process_args {
   struct
   {
     bool is_performance_bridge_manager;
+    uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
   {

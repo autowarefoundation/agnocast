@@ -91,6 +91,20 @@ static std::string performance_domain_suffix()
   return "_d" + std::string(domain_id);
 }
 
+uint32_t get_ros_domain_id()
+{
+  const char * domain_id_env = getenv("ROS_DOMAIN_ID");
+  if (domain_id_env == nullptr || domain_id_env[0] == '\0') {
+    return 0;
+  }
+  char * end = nullptr;
+  const unsigned long value = std::strtoul(domain_id_env, &end, 10);
+  if (*end != '\0') {
+    return 0;  // Unparsable: fall back to the default domain.
+  }
+  return static_cast<uint32_t>(value);
+}
+
 std::string create_mq_name_for_bridge(const pid_t pid)
 {
   std::string name = "/agnocast_bridge_manager@" + std::to_string(pid);
