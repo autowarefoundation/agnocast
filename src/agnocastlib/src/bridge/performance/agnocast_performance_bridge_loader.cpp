@@ -1,5 +1,7 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
+
 #include <ament_index_cpp/get_package_prefix.hpp>
 
 #include <dlfcn.h>
@@ -31,7 +33,8 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
 {
   void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_pubsub_bridge", false);
   if (symbol == nullptr) {
-    return {nullptr, nullptr};
+    // Fall back to the generic bridge, which is independent of plugins.
+    return create_r2a_pubsub_bridge_generic(node, topic_name, message_type, qos);
   }
 
   auto factory = reinterpret_cast<R2APubsubBridgeFactory>(symbol);
@@ -44,7 +47,8 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
 {
   void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_pubsub_bridge", false);
   if (symbol == nullptr) {
-    return {nullptr, nullptr};
+    // Fall back to the generic bridge, which is independent of plugins.
+    return create_a2r_pubsub_bridge_generic(node, topic_name, message_type, qos);
   }
 
   auto factory = reinterpret_cast<A2RPubsubBridgeFactory>(symbol);
@@ -108,7 +112,6 @@ std::vector<std::string> PerformanceBridgeLoader::generate_library_paths()
 void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::string> & paths)
 {
   if (paths.empty()) {
-    RCLCPP_ERROR(logger_, "No plugin paths available. Have you generated bridge plugins?");
     return nullptr;
   }
 
@@ -126,14 +129,6 @@ void * PerformanceBridgeLoader::load_library_from_paths(const std::vector<std::s
     }
   }
 
-  // All paths failed - log the error
-  std::string tried_paths;
-  for (const auto & path : paths) {
-    tried_paths += "\n  - " + path;
-  }
-  RCLCPP_ERROR(
-    logger_, "Failed to load plugin. Tried paths:%s\nLast error: %s", tried_paths.c_str(),
-    dlerror());
   return nullptr;
 }
 
@@ -146,6 +141,22 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
 
   void * handle = load_library_from_paths(lib_paths);
   if (handle == nullptr) {
+    if (is_service) {
+      if (lib_paths.empty()) {
+        RCLCPP_ERROR(
+          logger_,
+          "No plugin paths available. Have you generated bridge plugins? "
+          "Bridge plugins are required for service bridge.");
+      } else {
+        std::string tried_paths;
+        for (const auto & path : lib_paths) {
+          tried_paths += "\n  - " + path;
+        }
+        RCLCPP_ERROR(
+          logger_, "Failed to load plugin library for service type '%s'. Tried paths:%s",
+          type_name.c_str(), tried_paths.c_str());
+      }
+    }
     return nullptr;
   }
 
@@ -156,22 +167,73 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
 
   const char * dlsym_error = dlerror();
   if (dlsym_error != nullptr) {
-    RCLCPP_ERROR(
-      logger_, "Failed to find symbol '%s' for %s type '%s': %s", symbol_name.c_str(), type_label,
-      type_name.c_str(), dlsym_error);
+    if (is_service) {
+      RCLCPP_ERROR(
+        logger_, "Failed to find symbol '%s' for %s type '%s': %s", symbol_name.c_str(), type_label,
+        type_name.c_str(), dlsym_error);
+    }
     return nullptr;
   }
 
   if (symbol == nullptr) {
-    RCLCPP_ERROR(
-      logger_,
-      "Symbol '%s' was found for %s type '%s' but returned NULL, which is invalid for a factory "
-      "function.",
-      symbol_name.c_str(), type_label, type_name.c_str());
+    if (is_service) {
+      RCLCPP_ERROR(
+        logger_,
+        "Symbol '%s' was found for %s type '%s' but returned NULL, which is invalid for a factory "
+        "function.",
+        symbol_name.c_str(), type_label, type_name.c_str());
+    }
     return nullptr;
   }
 
   return symbol;
+}
+
+PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_generic(
+  const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
+  const std::string & message_type, const rclcpp::QoS & qos)
+{
+  auto agno_pub = std::make_shared<agnocast::GenericPublisher>(
+    node.get(), topic_name, message_type,
+    rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(), agnocast::PublisherOptions{},
+    agnocast::PublisherRole::BridgeInternal);
+
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions opts;
+  opts.ignore_local_publications = true;
+  opts.callback_group = cb_group;
+
+  auto sub = node->create_generic_subscription(
+    topic_name, message_type, qos,
+    [agno_pub](const rclcpp::SerializedMessage & serialized_msg) {
+      agno_pub->publish(serialized_msg);
+    },
+    opts);
+
+  return {sub, cb_group};
+}
+
+PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_generic(
+  const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
+  const std::string & message_type, const rclcpp::QoS & qos)
+{
+  auto ros_pub = node->create_generic_publisher(
+    topic_name, message_type,
+    rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
+
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  agnocast::SubscriptionOptions sub_opts;
+  sub_opts.ignore_local_publications = true;
+  sub_opts.callback_group = cb_group;
+
+  auto agno_sub = std::make_shared<agnocast::GenericSubscription>(
+    node.get(), topic_name, message_type, qos,
+    [ros_pub](const rclcpp::SerializedMessage & serialized_msg) {
+      ros_pub->publish(serialized_msg);
+    },
+    sub_opts, agnocast::SubscriptionRole::BridgeInternal);
+
+  return {agno_sub, cb_group};
 }
 
 }  // namespace agnocast
