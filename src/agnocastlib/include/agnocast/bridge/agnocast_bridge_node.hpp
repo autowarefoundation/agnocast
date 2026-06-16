@@ -53,9 +53,7 @@ void register_pubsub_bridge_core(
   const std::string & topic_name, topic_local_id_t id, BridgeDirection direction)
 {
   auto bridge_mode = get_bridge_mode();
-  if (bridge_mode == BridgeMode::Standard) {
-    send_standard_pubsub_bridge_registration<MessageT>(topic_name, id, direction);
-  } else if (bridge_mode == BridgeMode::Performance) {
+  if (bridge_mode == BridgeMode::On) {
     send_performance_pubsub_bridge_registration<MessageT>(topic_name, id, direction);
   }
 }
@@ -65,13 +63,7 @@ inline void register_pubsub_bridge_by_type_name(
   BridgeDirection direction)
 {
   auto bridge_mode = get_bridge_mode();
-  if (bridge_mode == BridgeMode::Standard) {
-    static const auto logger = rclcpp::get_logger("agnocast_bridge_registrar");
-    RCLCPP_WARN_ONCE(
-      logger,
-      "GenericSubscription and GenericPublisher do not support standard-mode bridge. "
-      "Set AGNOCAST_BRIDGE_MODE=performance to enable bridging.");
-  } else if (bridge_mode == BridgeMode::Performance) {
+  if (bridge_mode == BridgeMode::On) {
     send_performance_pubsub_bridge_registration_by_type_name(
       topic_name, id, message_type, direction);
   }
@@ -83,10 +75,7 @@ void register_service_bridge_core(
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   auto bridge_mode = get_bridge_mode();
-  if (bridge_mode == BridgeMode::Standard) {
-    send_standard_service_bridge_registration<ServiceT>(
-      service_name, direction, shadow_node_identity);
-  } else if (bridge_mode == BridgeMode::Performance) {
+  if (bridge_mode == BridgeMode::On) {
     send_performance_service_bridge_registration<ServiceT>(
       service_name, direction, shadow_node_identity);
   }
@@ -325,11 +314,7 @@ void send_mq_message(
   const rclcpp::Logger & logger)
 {
   struct mq_attr attr = {};
-  int64_t max_messages = BRIDGE_MQ_MAX_MESSAGES;
-  if (get_bridge_mode() == BridgeMode::Performance) {
-    max_messages = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
-  }
-  attr.mq_maxmsg = max_messages;
+  attr.mq_maxmsg = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
   attr.mq_msgsize = msg_size_limit;
 
   mqd_t mq =

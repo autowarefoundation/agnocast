@@ -314,11 +314,7 @@ inline void IpcEventLoopBase::setup_epoll()
 inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const
 {
   struct mq_attr attr = {};
-  int64_t max_messages = BRIDGE_MQ_MAX_MESSAGES;
-  if (get_bridge_mode() == BridgeMode::Performance) {
-    max_messages = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
-  }
-  attr.mq_maxmsg = max_messages;
+  attr.mq_maxmsg = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
   attr.mq_msgsize = mq_msg_size_;
 
   mqd_t fd =

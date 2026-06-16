@@ -25,7 +25,7 @@ BridgeMode get_bridge_mode()
 {
   const char * env_val = std::getenv("AGNOCAST_BRIDGE_MODE");
   if (env_val == nullptr) {
-    return BridgeMode::Standard;
+    return BridgeMode::On;
   }
 
   std::string val = env_val;
@@ -34,15 +34,20 @@ BridgeMode get_bridge_mode()
   if (val == "0" || val == "off") {
     return BridgeMode::Off;
   }
+  if (val == "3" || val == "on") {
+    return BridgeMode::On;
+  }
   if (val == "1" || val == "standard") {
-    return BridgeMode::Standard;
+    RCLCPP_WARN(logger, "AGNOCAST_BRIDGE_MODE=%s is deprecated. Fallback to ON.", env_val);
+    return BridgeMode::On;
   }
   if (val == "2" || val == "performance") {
-    return BridgeMode::Performance;
+    RCLCPP_WARN(logger, "AGNOCAST_BRIDGE_MODE=%s is deprecated. Fallback to ON.", env_val);
+    return BridgeMode::On;
   }
 
-  RCLCPP_WARN(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to STANDARD.", env_val);
-  return BridgeMode::Standard;
+  RCLCPP_WARN(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to ON.", env_val);
+  return BridgeMode::On;
 }
 
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id)

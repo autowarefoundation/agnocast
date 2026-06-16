@@ -28,7 +28,7 @@ static_assert(SUFFIX_PUBSUB_A2R.length() == SUFFIX_LEN);
 static_assert(SUFFIX_SERVICE_R2A.length() == SUFFIX_LEN);
 static_assert(SUFFIX_SERVICE_A2R.length() == SUFFIX_LEN);
 
-enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };
+enum class BridgeMode { Off, On };
 
 class PubsubBridgeBase
 {
