@@ -458,11 +458,6 @@ public:
 ///   - `void(std::shared_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
 ///   - `void(std::unique_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
 ///   - `void(rclcpp::SerializedMessage &)` (and `const` variants)
-///
-/// NOTE: Standard bridge mode is not supported for this subscription type.
-/// When standard bridge is used, no bridge request is issued, so no bridge is created and
-/// communication with ROS 2-only publishers is not possible. This is by design,
-/// as standard bridge support is planned for removal.
 AGNOCAST_PUBLIC
 class GenericSubscription : public SubscriptionBase
 {
