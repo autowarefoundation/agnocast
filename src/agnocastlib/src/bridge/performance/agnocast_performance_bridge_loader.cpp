@@ -34,7 +34,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
   void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_pubsub_bridge", false);
   if (symbol == nullptr) {
     // Fall back to the generic bridge, which is independent of plugins.
-    RCLCPP_INFO(
+    RCLCPP_DEBUG(
       logger_, "No plugin found for topic '%s' (type: %s). Using generic bridge.",
       topic_name.c_str(), message_type.c_str());
     return create_r2a_pubsub_bridge_generic(node, topic_name, message_type, qos);
@@ -51,7 +51,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
   void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_pubsub_bridge", false);
   if (symbol == nullptr) {
     // Fall back to the generic bridge, which is independent of plugins.
-    RCLCPP_INFO(
+    RCLCPP_DEBUG(
       logger_, "No plugin found for topic '%s' (type: %s). Using generic bridge.",
       topic_name.c_str(), message_type.c_str());
     return create_a2r_pubsub_bridge_generic(node, topic_name, message_type, qos);
