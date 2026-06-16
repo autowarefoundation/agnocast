@@ -1,6 +1,7 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "rclcpp/version.h"
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 
@@ -229,14 +230,28 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_
   opts.ignore_local_publications = true;
   opts.callback_group = cb_group;
 
+  // Compatibility note:
+  // - Humble expects the callback taking std::shared_ptr<SerializedMessage>.
+  // - Jazzy treats the callback as AnySubscriptionCallback, but if we receive the message as
+  //   std::shared_ptr<SerializedMessage>, rclcpp deep-copies the message.
+  // Keep the Humble/Jazzy split here for performance optimization.
   auto sub = node->create_generic_subscription(
     topic_name, message_type, qos,
+#if RCLCPP_VERSION_MAJOR >= 28
     [agno_pub](const rclcpp::SerializedMessage & serialized_msg) {
       agno_pub->publish(serialized_msg);
     },
+#else
+    [agno_pub](const std::shared_ptr<rclcpp::SerializedMessage> & serialized_msg) {
+      agno_pub->publish(*serialized_msg);
+    },
+#endif
     opts);
 
-  return {sub, cb_group};
+  PerformancePubsubBridgeResult result;
+  result.entity_handle = sub;
+  result.callback_group = cb_group;
+  return result;
 }
 
 PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_generic(
