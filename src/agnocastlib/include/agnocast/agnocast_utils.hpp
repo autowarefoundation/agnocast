@@ -77,6 +77,10 @@ inline void validate_subscription_qos(const rclcpp::QoS & qos)
 }
 
 void validate_ld_preload();
+// Return the calling process's ROS_DOMAIN_ID parsed from the env var (0 if unset
+// or unparsable), matching ROS 2's default. Registered with the kmod so topics
+// in different domains are isolated.
+uint32_t get_ros_domain_id();
 std::string create_mq_name_for_agnocast_publish(
   const std::string & topic_name, const topic_local_id_t id);
 std::string create_mq_name_for_bridge(const pid_t pid);
