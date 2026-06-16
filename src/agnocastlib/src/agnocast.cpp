@@ -157,6 +157,7 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 {
   union ioctl_add_process_args add_process_args = {};
   add_process_args.is_performance_bridge_manager = true;
+  add_process_args.domain_id = get_ros_domain_id();
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
@@ -463,6 +464,7 @@ struct initialize_agnocast_result initialize_agnocast(
   }
 
   union ioctl_add_process_args add_process_args = {};
+  add_process_args.domain_id = get_ros_domain_id();
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
     close(agnocast_fd);

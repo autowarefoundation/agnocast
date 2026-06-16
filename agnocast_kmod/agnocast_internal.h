@@ -66,6 +66,9 @@ struct process_info
   pid_t local_pid;
   struct mempool_entry * mempool_entry;
   const struct ipc_namespace * ipc_ns;
+  // The process's ROS_DOMAIN_ID (0 if unset), fixed for the process's lifetime.
+  // Used as the domain component of the topic key for this process's operations.
+  uint32_t domain_id;
   struct list_head exit_subscription_list;
   uint32_t exit_subscription_count;
   struct hlist_node node;
@@ -127,6 +130,9 @@ struct topic_wrapper
 {
   const struct ipc_namespace *
     ipc_ns;  // For use in separating topic namespaces when using containers.
+  // Part of the topic identity: topics with the same name/ipc_ns but different
+  // ROS_DOMAIN_ID are distinct wrappers and do not match (ROS 2 domain isolation).
+  uint32_t domain_id;
   char * key;
   struct rw_semaphore
     topic_rwsem;  // Per-topic rwsem: read for read-only ops, write for publish/receive/modify
