@@ -34,7 +34,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
   void * symbol = get_bridge_factory_symbol(message_type, "create_r2a_pubsub_bridge", false);
   if (symbol == nullptr) {
     // Fall back to the generic bridge, which is independent of plugins.
-    RCLCPP_INFO_ONCE(
+    RCLCPP_INFO(
       logger_, "No plugin found for topic '%s' (type: %s). Using generic bridge.",
       topic_name.c_str(), message_type.c_str());
     return create_r2a_pubsub_bridge_generic(node, topic_name, message_type, qos);
@@ -51,7 +51,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
   void * symbol = get_bridge_factory_symbol(message_type, "create_a2r_pubsub_bridge", false);
   if (symbol == nullptr) {
     // Fall back to the generic bridge, which is independent of plugins.
-    RCLCPP_INFO_ONCE(
+    RCLCPP_INFO(
       logger_, "No plugin found for topic '%s' (type: %s). Using generic bridge.",
       topic_name.c_str(), message_type.c_str());
     return create_a2r_pubsub_bridge_generic(node, topic_name, message_type, qos);
@@ -118,6 +118,8 @@ std::vector<std::string> PerformanceBridgeLoader::generate_library_paths()
 void * PerformanceBridgeLoader::load_library_from_paths(
   const std::vector<std::string> & paths, std::string & last_error)
 {
+  last_error.clear();
+
   if (paths.empty()) {
     return nullptr;
   }
@@ -154,20 +156,30 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   std::string last_dlopen_error;
   void * handle = load_library_from_paths(lib_paths, last_dlopen_error);
   if (handle == nullptr) {
-    if (is_service) {
-      if (lib_paths.empty()) {
+    if (lib_paths.empty()) {
+      if (is_service) {
         RCLCPP_ERROR(
           logger_,
-          "No plugin paths available. Have you generated bridge plugins? "
-          "Bridge plugins are required for service bridge.");
+          "No plugin paths available for service bridge. Have you generated bridge plugins?");
+      }
+    } else {
+      std::string tried_paths;
+      for (const auto & path : lib_paths) {
+        tried_paths += "\n  - " + path;
+      }
+      if (is_service) {
+        RCLCPP_ERROR(
+          logger_,
+          "Failed to load plugin for service type '%s'.\n"
+          "Tried paths:%s\n"
+          "Last error: %s",
+          type_name.c_str(), tried_paths.c_str(), last_dlopen_error.c_str());
       } else {
-        std::string tried_paths;
-        for (const auto & path : lib_paths) {
-          tried_paths += "\n  - " + path;
-        }
-        RCLCPP_ERROR(
+        RCLCPP_WARN(
           logger_,
-          "Failed to load plugin library for service type '%s'. Tried paths:%s\nLast error: %s",
+          "Failed to load plugin for message type '%s'. Falling back to generic bridge.\n"
+          "Tried paths:%s\n"
+          "Last error: %s",
           type_name.c_str(), tried_paths.c_str(), last_dlopen_error.c_str());
       }
     }
