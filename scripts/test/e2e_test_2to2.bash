@@ -81,17 +81,6 @@ CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
 if [ "$LOWER_BRIDGE_MODE" = "performance" ] || [ "$LOWER_BRIDGE_MODE" = "2" ]; then
-    if [ -d "agnocast_bridge_plugins" ]; then
-        echo "Skip generating bridge plugins: agnocast_bridge_plugins directory already exists" | sudo tee /dev/kmsg
-    else
-        ros2 agnocast generate-bridge-plugins --all
-    fi
-    if ! colcon build --packages-select agnocast_bridge_plugins; then
-        echo "ERROR: colcon build failed for agnocast_bridge_plugins" | sudo tee /dev/kmsg
-        exit 1
-    fi
-    source install/setup.bash
-
     echo "Performance mode cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
     # Kill stale performance bridge processes directly by PID.
     mapfile -t AGNO_PBR_PIDS < <(ps -eo pid=,comm= | awk '$2 ~ /^agno_pbr_/ {print $1}')
