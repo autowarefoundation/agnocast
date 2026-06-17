@@ -311,6 +311,10 @@ union ioctl_topic_list_args {
   struct
   {
     uint64_t topic_name_buffer_addr;
+    // Parallel array of uint32 domain_ids, one per returned topic name. The same
+    // topic name can appear in multiple domains, so the caller pairs name[i] with
+    // domain_id[i] to disambiguate. Pass 0 to skip domain output.
+    uint64_t domain_id_buffer_addr;
     uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
@@ -341,6 +345,9 @@ union ioctl_topic_info_args {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
     uint32_t topic_info_ret_buffer_size;
+    // Which domain's endpoints to return. A topic name can exist in multiple
+    // domains; the caller selects one (paired with get_topic_list output).
+    uint32_t domain_id;
   };
   uint32_t ret_topic_info_ret_num;
 };
