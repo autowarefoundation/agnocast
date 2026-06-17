@@ -39,7 +39,7 @@ The message queue is also used for communication between Agnocast processes and 
 
 The message queue is used as follows:
 
-- The first Agnocast process spawns a global Bridge Manager that opens `/agnocast_bridge_manager@-1` as a receiver.
+- The first Agnocast process spawns a global Bridge Manager that opens `/agnocast_bridge_manager@-1` (optionally with a `_d<ROS_DOMAIN_ID>` suffix when `ROS_DOMAIN_ID` is set) as a receiver.
 - All Agnocast processes send bridge requests to this shared message queue.
 - Upon receiving the request, the Bridge Manager creates the appropriate bridge if conditions are met.
 
