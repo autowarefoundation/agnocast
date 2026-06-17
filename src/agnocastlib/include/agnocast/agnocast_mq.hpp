@@ -8,10 +8,8 @@
 namespace agnocast
 {
 
-inline pid_t standard_bridge_manager_pid = 0;
 inline constexpr pid_t PERFORMANCE_BRIDGE_VIRTUAL_PID = -1;
 
-inline constexpr size_t SHARED_LIB_PATH_BUFFER_SIZE = 4096;  // Linux PATH_MAX is 4096
 inline constexpr size_t SERVICE_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t MESSAGE_TYPE_BUFFER_SIZE = 256;
 inline constexpr size_t SERVICE_TYPE_BUFFER_SIZE = 256;
@@ -25,39 +23,6 @@ struct MqMsgAgnocast
 struct MqMsgROS2Publish
 {
   bool should_terminate;
-};
-
-struct BridgeFactoryInfo
-{
-  char shared_lib_path[SHARED_LIB_PATH_BUFFER_SIZE];
-  bool in_main_executable;
-  uintptr_t fn_offset_r2a;
-  uintptr_t fn_offset_a2r;
-};
-
-struct PubsubBridgeTargetInfo
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t target_id;
-};
-
-struct ServiceBridgeTargetInfo
-{
-  char service_name[SERVICE_NAME_BUFFER_SIZE];
-  bool create_shadow_node;
-  char shadow_node_namespace[NODE_NAME_BUFFER_SIZE];
-  char shadow_node_name[NODE_NAME_BUFFER_SIZE];
-};
-
-struct MqMsgBridge
-{
-  BridgeFactoryInfo factory;
-  union {
-    PubsubBridgeTargetInfo pubsub_target;
-    ServiceBridgeTargetInfo srv_target;
-  };
-  BridgeDirection direction;
-  bool is_service;
 };
 
 struct PubsubBridgeTargetInfoWithType
@@ -102,10 +67,8 @@ struct MqMsgDaemonBridge
   bool qos_is_reliable;
 };
 
-constexpr int64_t BRIDGE_MQ_MAX_MESSAGES = 2;
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES = 256;
 constexpr int64_t DAEMON_BRIDGE_MQ_MAX_MESSAGES = 2;
-constexpr int64_t BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgBridge);
 constexpr int64_t PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgPerformanceBridge);
 constexpr int64_t DAEMON_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgDaemonBridge);
 constexpr mode_t BRIDGE_MQ_PERMS = 0600;

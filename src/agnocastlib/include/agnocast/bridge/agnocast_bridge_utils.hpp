@@ -10,40 +10,12 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <variant>
 
 namespace agnocast
 {
 
-inline constexpr std::string_view SUFFIX_PUBSUB_R2A = "_P_R2A";
-inline constexpr std::string_view SUFFIX_PUBSUB_A2R = "_P_A2R";
-inline constexpr std::string_view SUFFIX_SERVICE_R2A = "_S_R2A";
-inline constexpr std::string_view SUFFIX_SERVICE_A2R = "_S_A2R";
-
-inline constexpr size_t SUFFIX_LEN = 6;
-static_assert(SUFFIX_PUBSUB_R2A.length() == SUFFIX_LEN);
-static_assert(SUFFIX_PUBSUB_A2R.length() == SUFFIX_LEN);
-static_assert(SUFFIX_SERVICE_R2A.length() == SUFFIX_LEN);
-static_assert(SUFFIX_SERVICE_A2R.length() == SUFFIX_LEN);
-
-enum class BridgeMode : int { Off = 0, Standard = 1, Performance = 2 };
-
-class PubsubBridgeBase
-{
-public:
-  virtual ~PubsubBridgeBase() = default;
-  virtual rclcpp::CallbackGroup::SharedPtr get_callback_group() const = 0;
-};
-
-class ServiceBridgeBase
-{
-public:
-  virtual ~ServiceBridgeBase() = default;
-  virtual std::pair<rclcpp::CallbackGroup::SharedPtr, rclcpp::CallbackGroup::SharedPtr>
-  get_callback_groups() const = 0;
-};
+enum class BridgeMode { Off, On };
 
 struct SubscriberCountResult
 {
@@ -71,14 +43,13 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 
 /// @brief A builder class for creating bridge registration messages.
 ///
-/// It handles errors such as setting non-existent fields or invalid values for each field, and the
-/// `build_*` member functions return an error reason. However, it does not check whether the
-/// computed message as a whole is valid. It's the caller's responsibility to invoke a correct
+/// It detects errors such as string truncation when copying string fields, and
+/// `build_performance_message()` returns the error reason. However, it does not check whether
+/// the computed message as a whole is valid. It's the caller's responsibility to invoke a correct
 /// set of setters to build a valid message.
 class BridgeRegistrationMsgBuilder
 {
-  std::variant<MqMsgBridge, MqMsgPerformanceBridge> msg_;
-  rclcpp::Logger logger_;
+  MqMsgPerformanceBridge msg_{};
   bool failed_;
   std::string reason_;
 
@@ -87,16 +58,10 @@ class BridgeRegistrationMsgBuilder
     const std::string & member, char * buffer, size_t size, const char * format, ...);
 
 public:
-  enum class Mode {
-    Standard,
-    Performance,
-  };
-
-  explicit BridgeRegistrationMsgBuilder(Mode mode, const rclcpp::Logger & logger);
+  BridgeRegistrationMsgBuilder();
 
   BridgeRegistrationMsgBuilder & set_direction(BridgeDirection direction);
   BridgeRegistrationMsgBuilder & set_is_service(bool is_service);
-  BridgeRegistrationMsgBuilder & set_factory(uintptr_t fn_r2a, uintptr_t fn_a2r);
   BridgeRegistrationMsgBuilder & set_message_type(const char * message_type);
   BridgeRegistrationMsgBuilder & set_topic_name(const char * topic_name);
   BridgeRegistrationMsgBuilder & set_pubsub_target_id(topic_local_id_t target_id);
@@ -105,7 +70,6 @@ public:
   BridgeRegistrationMsgBuilder & set_shadow_node_identity(
     const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
-  std::pair<MqMsgBridge, std::string> build_standard_message();
   std::pair<MqMsgPerformanceBridge, std::string> build_performance_message();
 };
 

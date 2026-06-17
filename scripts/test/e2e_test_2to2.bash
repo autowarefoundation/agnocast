@@ -7,7 +7,7 @@ if ! grep -q "^agnocast " /proc/modules; then
 fi
 
 # Parsing arguments
-OPTIONS=$(getopt -o hscb: --long help,single,continue,bridge-only: -- "$@")
+OPTIONS=$(getopt -o hscb --long help,single,continue,bridge-only -- "$@")
 if [ $? -ne 0 ]; then
     echo "Invalid options provided"
     exit 1
@@ -17,12 +17,10 @@ eval set -- "$OPTIONS"
 usage() {
     echo "Usage: $0 [options]"
     echo "Options:"
-    echo "  -h, --help      Show this help message"
-    echo "  -s, --single    Run only one test case (Native mode, current config)"
-    echo "  -c, --continue  Continue running tests even if one fails"
-    echo "  -b, --bridge-only MODE"
-    echo "                  Run only bridge tests (ros2agno, agno2ros)"
-    echo "                  MODE: standard | performance"
+    echo "  -h, --help         Show this help message"
+    echo "  -s, --single       Run only one test case (Native mode, current config)"
+    echo "  -c, --continue     Continue running tests even if one fails"
+    echo "  -b, --bridge-only  Run only bridge tests (ros2agno, agno2ros) with AGNOCAST_BRIDGE_MODE=on"
     exit 0
 }
 
@@ -44,21 +42,8 @@ while true; do
         ;;
     -b | --bridge-only)
         BRIDGE_ONLY=true
-        LOWER_BRIDGE_ONLY_MODE=$(echo "$2" | tr '[:upper:]' '[:lower:]')
-        case "$LOWER_BRIDGE_ONLY_MODE" in
-        standard | 1)
-            export AGNOCAST_BRIDGE_MODE=standard
-            ;;
-        performance | 2)
-            export AGNOCAST_BRIDGE_MODE=performance
-            ;;
-        *)
-            echo "Invalid --bridge-only mode: $2"
-            echo "Expected: standard,1, performance, or 2"
-            exit 1
-            ;;
-        esac
-        shift 2
+        export AGNOCAST_BRIDGE_MODE=on
+        shift
         ;;
     --)
         shift
@@ -77,12 +62,12 @@ colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args 
 source install/setup.bash
 
 LOWER_BRIDGE_MODE=$(echo "$AGNOCAST_BRIDGE_MODE" | tr '[:upper:]' '[:lower:]')
-CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
+CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"on (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
-if [ "$LOWER_BRIDGE_MODE" = "performance" ] || [ "$LOWER_BRIDGE_MODE" = "2" ]; then
-    echo "Performance mode cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
-    # Kill stale performance bridge processes directly by PID.
+if [ "$LOWER_BRIDGE_MODE" != "off" ] && [ "$LOWER_BRIDGE_MODE" != "0" ]; then
+    echo "Bridge cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
+    # Kill stale bridge processes directly by PID.
     mapfile -t AGNO_PBR_PIDS < <(ps -eo pid=,comm= | awk '$2 ~ /^agno_pbr_/ {print $1}')
     if [ "${#AGNO_PBR_PIDS[@]}" -gt 0 ]; then
         KILL_FAILED=false

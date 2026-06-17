@@ -4,7 +4,6 @@
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
-#include "agnocast/bridge/standard/agnocast_standard_bridge_manager.hpp"
 
 #include <dlfcn.h>
 #include <sys/stat.h>
@@ -154,17 +153,15 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
   }
 }
 
-initialize_agnocast_result acquire_agnocast_resources_for_bridge(BridgeMode bridge_mode)
+initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_performance_bridge_manager = (bridge_mode == BridgeMode::Performance);
+  add_process_args.is_performance_bridge_manager = true;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (
-    bridge_mode == BridgeMode::Performance &&
-    add_process_args.ret_performance_bridge_daemon_exist) {
+  if (add_process_args.ret_performance_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -224,7 +221,7 @@ void poll_for_unlink()
 
     if (get_exit_process_args.ret_daemon_should_exit) {
       auto bridge_mode = get_bridge_mode();
-      if (bridge_mode == BridgeMode::Performance) {
+      if (bridge_mode == BridgeMode::On) {
         const std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
         mq_unlink(mq_name.c_str());
       }
@@ -235,21 +232,13 @@ void poll_for_unlink()
   exit(0);
 }
 
-void poll_for_bridge_manager([[maybe_unused]] pid_t target_pid)
+void poll_for_bridge_manager()
 {
   try {
-    auto bridge_mode = get_bridge_mode();
-    const auto resources = acquire_agnocast_resources_for_bridge(bridge_mode);
+    const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-    if (bridge_mode == BridgeMode::Standard) {
-      StandardBridgeManager manager(target_pid);
-      manager.run();
-    } else if (bridge_mode == BridgeMode::Performance) {
-      {
-        PerformanceBridgeManager manager;
-        manager.run();
-      }
-    }
+    PerformanceBridgeManager manager;
+    manager.run();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "BridgeManager crashed: %s", e.what());
     exit(EXIT_FAILURE);
@@ -480,7 +469,6 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
-  pid_t target_pid = 0;
   bool should_spawn_bridge = false;
   auto bridge_mode = get_bridge_mode();
 
@@ -488,19 +476,12 @@ struct initialize_agnocast_result initialize_agnocast(
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
-  if (
-    bridge_mode == BridgeMode::Performance &&
-    !add_process_args.ret_performance_bridge_daemon_exist) {
-    should_spawn_bridge = true;
-  }
-  if (bridge_mode == BridgeMode::Standard) {
-    target_pid = getpid();
+  if (bridge_mode == BridgeMode::On && !add_process_args.ret_performance_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
 
   if (should_spawn_bridge) {
-    standard_bridge_manager_pid =
-      spawn_daemon_process([target_pid]() { poll_for_bridge_manager(target_pid); });
+    spawn_daemon_process([]() { poll_for_bridge_manager(); });
   }
 
   void * mempool_ptr =

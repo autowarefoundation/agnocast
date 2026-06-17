@@ -281,11 +281,6 @@ public:
  *
  * Messages are passed to `publish()` as `rclcpp::SerializedMessage` objects
  * and are deserialized into Agnocast shared memory within the `publish()` call.
- *
- * NOTE: Standard bridge mode is not supported for this publisher type.
- * When standard bridge is used, no bridge request is issued, so no bridge is
- * created and communication with ROS 2 subscribers is not possible. This is
- * by design, as standard bridge support is planned for removal.
  */
 AGNOCAST_PUBLIC
 class GenericPublisher : public PublisherBase
