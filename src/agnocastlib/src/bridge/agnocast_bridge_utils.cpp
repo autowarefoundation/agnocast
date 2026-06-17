@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstdarg>
 #include <cstdio>
 #include <memory>
@@ -236,8 +235,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
   }
 }
 
-BridgeRegistrationMsgBuilder::BridgeRegistrationMsgBuilder(const rclcpp::Logger & logger)
-: logger_(logger), failed_(false)
+BridgeRegistrationMsgBuilder::BridgeRegistrationMsgBuilder() : failed_(false)
 {
 }
 

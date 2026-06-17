@@ -10,22 +10,10 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 
 namespace agnocast
 {
-
-inline constexpr std::string_view SUFFIX_PUBSUB_R2A = "_P_R2A";
-inline constexpr std::string_view SUFFIX_PUBSUB_A2R = "_P_A2R";
-inline constexpr std::string_view SUFFIX_SERVICE_R2A = "_S_R2A";
-inline constexpr std::string_view SUFFIX_SERVICE_A2R = "_S_A2R";
-
-inline constexpr size_t SUFFIX_LEN = 6;
-static_assert(SUFFIX_PUBSUB_R2A.length() == SUFFIX_LEN);
-static_assert(SUFFIX_PUBSUB_A2R.length() == SUFFIX_LEN);
-static_assert(SUFFIX_SERVICE_R2A.length() == SUFFIX_LEN);
-static_assert(SUFFIX_SERVICE_A2R.length() == SUFFIX_LEN);
 
 enum class BridgeMode { Off, On };
 
@@ -55,14 +43,13 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 
 /// @brief A builder class for creating bridge registration messages.
 ///
-/// It handles errors such as setting non-existent fields or invalid values for each field, and the
-/// `build_*` member functions return an error reason. However, it does not check whether the
-/// computed message as a whole is valid. It's the caller's responsibility to invoke a correct
+/// It detects errors such as buffer overflow when copying string fields, and
+/// `build_performance_message()` returns the error reason. However, it does not check whether
+/// the computed message as a whole is valid. It's the caller's responsibility to invoke a correct
 /// set of setters to build a valid message.
 class BridgeRegistrationMsgBuilder
 {
-  MqMsgPerformanceBridge msg_;
-  rclcpp::Logger logger_;
+  MqMsgPerformanceBridge msg_{};
   bool failed_;
   std::string reason_;
 
@@ -71,7 +58,7 @@ class BridgeRegistrationMsgBuilder
     const std::string & member, char * buffer, size_t size, const char * format, ...);
 
 public:
-  explicit BridgeRegistrationMsgBuilder(const rclcpp::Logger & logger);
+  BridgeRegistrationMsgBuilder();
 
   BridgeRegistrationMsgBuilder & set_direction(BridgeDirection direction);
   BridgeRegistrationMsgBuilder & set_is_service(bool is_service);

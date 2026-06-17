@@ -189,7 +189,7 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
 {
   static const auto logger = rclcpp::get_logger("agnocast_performance_bridge_registrar");
 
-  auto [msg, reason] = BridgeRegistrationMsgBuilder(logger)
+  auto [msg, reason] = BridgeRegistrationMsgBuilder()
                          .set_direction(direction)
                          .set_is_service(false)
                          .set_message_type(message_type_name.c_str())
@@ -216,7 +216,7 @@ void send_performance_service_bridge_registration(
 
   const std::string service_type_name = rosidl_generator_traits::name<ServiceT>();
 
-  auto [msg, reason] = BridgeRegistrationMsgBuilder(logger)
+  auto [msg, reason] = BridgeRegistrationMsgBuilder()
                          .set_direction(direction)
                          .set_is_service(true)
                          .set_service_type(service_type_name.c_str())

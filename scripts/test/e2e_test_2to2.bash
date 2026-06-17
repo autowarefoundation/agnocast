@@ -67,7 +67,7 @@ echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
 if [ "$LOWER_BRIDGE_MODE" != "off" ] && [ "$LOWER_BRIDGE_MODE" != "0" ]; then
     echo "Bridge cleanup: checking agno_pbr_* processes" | sudo tee /dev/kmsg
-    # Kill stale performance bridge processes directly by PID.
+    # Kill stale bridge processes directly by PID.
     mapfile -t AGNO_PBR_PIDS < <(ps -eo pid=,comm= | awk '$2 ~ /^agno_pbr_/ {print $1}')
     if [ "${#AGNO_PBR_PIDS[@]}" -gt 0 ]; then
         KILL_FAILED=false
