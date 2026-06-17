@@ -62,6 +62,9 @@ class BridgeRequest:
     qos_depth: int
     qos_is_transient_local: bool
     qos_is_reliable: bool
+    # Selects the target bridge_manager's MQ (one manager per domain); not part
+    # of the wire payload, since that manager already runs in this domain.
+    domain_id: int = 0
 
 
 def serialize_request(req: BridgeRequest) -> bytes:
@@ -79,17 +82,18 @@ def serialize_request(req: BridgeRequest) -> bytes:
 
 
 def _resolve_types(local_state, remote_states) -> dict:
-    """Resolve each topic's message type, preferring local then any remote.
+    """Resolve each ``(topic, domain)``'s message type, preferring local then any remote.
 
-    A bridge is deduped per ``(topic, direction)``, so its type must be resolved
-    per-topic across local + *all* remotes: the remote that supplies the
-    opposite-role endpoint may lack the type while another snapshot has it.
+    The type must be resolved across local + *all* remotes: the remote that
+    supplies the opposite-role endpoint may lack the type while another snapshot
+    has it.
     """
-    types = {t.topic_name: t.type_name for t in local_state.topics if t.type_name}
+    types = {
+        (t.topic_name, t.domain_id): t.type_name for t in local_state.topics if t.type_name}
     for remote in remote_states.values():
         for t in remote.topics:
             if t.type_name:
-                types.setdefault(t.topic_name, t.type_name)
+                types.setdefault((t.topic_name, t.domain_id), t.type_name)
     return types
 
 
@@ -97,18 +101,20 @@ def decide_bridges(local_state, remote_states) -> list:
     """Return the bridge requests this namespace should issue this tick.
 
     ``remote_states`` maps ``(host_uuid, ipc_ns_inode)`` to AgnocastDaemonState.
-    Requests are collapsed to one per ``(topic, direction)``.
+    Topics match only within the same domain (a bridge never crosses domains;
+    cross-domain relaying is the external domain_bridge's job), and requests are
+    collapsed to one per ``(topic, domain, direction)``.
     """
     requests = {}
 
-    local_by_topic = {t.topic_name: t for t in local_state.topics}
+    local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
     types = _resolve_types(local_state, remote_states)
 
     for (host_uuid, ipc_ns_inode), remote in remote_states.items():
         if host_uuid == local_state.host_uuid and ipc_ns_inode == local_state.ipc_ns_inode:
             continue
         for remote_topic in remote.topics:
-            local_topic = local_by_topic.get(remote_topic.topic_name)
+            local_topic = local_by_topic.get((remote_topic.topic_name, remote_topic.domain_id))
             if local_topic is None:
                 continue
 
@@ -117,13 +123,14 @@ def decide_bridges(local_state, remote_states) -> list:
             remote_pubs = [p for p in remote_topic.publishers if not p.is_bridge]
             remote_subs = [s for s in remote_topic.subscribers if not s.is_bridge]
 
-            type_name = types.get(local_topic.topic_name)
+            domain_id = local_topic.domain_id
+            type_name = types.get((local_topic.topic_name, domain_id))
             if not type_name:
                 continue
 
             if local_pubs and remote_subs:
                 pub = local_pubs[0]
-                key = (local_topic.topic_name, DIRECTION_AGNOCAST_TO_ROS2)
+                key = (local_topic.topic_name, domain_id, DIRECTION_AGNOCAST_TO_ROS2)
                 requests.setdefault(key, BridgeRequest(
                     topic_name=local_topic.topic_name,
                     type_name=type_name,
@@ -131,11 +138,12 @@ def decide_bridges(local_state, remote_states) -> list:
                     qos_depth=pub.qos_depth,
                     qos_is_transient_local=pub.qos_is_transient_local,
                     qos_is_reliable=pub.qos_is_reliable,
+                    domain_id=domain_id,
                 ))
 
             if local_subs and remote_pubs:
                 sub = local_subs[0]
-                key = (local_topic.topic_name, DIRECTION_ROS2_TO_AGNOCAST)
+                key = (local_topic.topic_name, domain_id, DIRECTION_ROS2_TO_AGNOCAST)
                 requests.setdefault(key, BridgeRequest(
                     topic_name=local_topic.topic_name,
                     type_name=type_name,
@@ -143,16 +151,16 @@ def decide_bridges(local_state, remote_states) -> list:
                     qos_depth=sub.qos_depth,
                     qos_is_transient_local=sub.qos_is_transient_local,
                     qos_is_reliable=sub.qos_is_reliable,
+                    domain_id=domain_id,
                 ))
 
     return list(requests.values())
 
 
-def _performance_mq_name() -> str:
+def _performance_mq_name(domain_id: int) -> str:
     name = _PERFORMANCE_MQ_NAME
-    domain_id = os.environ.get('ROS_DOMAIN_ID')
     if domain_id:
-        name += '_d' + domain_id
+        name += '_d' + str(domain_id)
     return name
 
 
@@ -183,12 +191,12 @@ def send_request(mq_name: str, payload: bytes) -> Optional[str]:
 def dispatch_requests(requests: Iterable[BridgeRequest], logger=None) -> None:
     """Deliver each request to the per-namespace bridge_manager MQ.
 
-    The MQ is absent until a bridge_manager is up; ``send_request`` skips
+    Each request goes to the manager that owns its domain (one per domain). The
+    MQ is absent until that bridge_manager is up; ``send_request`` skips
     ENOENT/EAGAIN so a missing or full queue never stalls the daemon, and the
     request is re-issued idempotently next tick.
     """
-    perf_mq = _performance_mq_name()
     for req in requests:
-        err = send_request(perf_mq, serialize_request(req))
+        err = send_request(_performance_mq_name(req.domain_id), serialize_request(req))
         if err is not None and logger is not None:
             logger.warn('daemon bridge dispatch failed: %s', err)

@@ -32,11 +32,11 @@ def _endpoint(node, depth=10, transient=False, reliable=True, is_bridge=False):
     return ep
 
 
-def _topic(name, type_name='std_msgs/msg/Int32', pubs=None, subs=None):
+def _topic(name, type_name='std_msgs/msg/Int32', pubs=None, subs=None, domain=0):
     t = AgnocastTopic()
     t.topic_name = name
     t.type_name = type_name
-    t.domain_id = 0
+    t.domain_id = domain
     t.publishers = pubs or []
     t.subscribers = subs or []
     return t
@@ -143,6 +143,25 @@ def test_decide_skips_when_only_same_role_present():
     assert decide_bridges(local, {('OTHER', 222): remote}) == []
 
 
+def test_decide_skips_cross_domain_match():
+    # Same topic name but different domains must not be bridged: isolation holds
+    # and cross-domain relaying is the external domain_bridge's job.
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=0)])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_topic('/x', subs=[_endpoint('/rs')], domain=1)])
+    assert decide_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_decide_matches_within_same_nonzero_domain():
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=5)])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_topic('/x', subs=[_endpoint('/rs')], domain=5)])
+    reqs = decide_bridges(local, {('OTHER', 222): remote})
+    assert len(reqs) == 1
+    assert reqs[0].direction == DIRECTION_AGNOCAST_TO_ROS2
+    assert reqs[0].domain_id == 5
+
+
 def test_decide_collapses_duplicates_across_remotes():
     local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')])])
     remote_a = _state(host_uuid='A', ipc_ns=1, topics=[_topic('/x', subs=[_endpoint('/sa')])])
@@ -182,3 +201,16 @@ def test_dispatch_targets_per_namespace_mq(monkeypatch):
 
     assert all(name.startswith('/agnocast_daemon_bridge_perf') for name in sent)
     assert len(sent) == 1
+
+
+def test_dispatch_routes_to_per_domain_mq(monkeypatch):
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    sent = []
+    monkeypatch.setattr(bd, 'send_request', lambda mq, payload: sent.append(mq) or None)
+
+    dispatch_requests([
+        BridgeRequest('/a', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=0),
+        BridgeRequest('/b', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=5),
+    ])
+
+    assert sent == ['/agnocast_daemon_bridge_perf', '/agnocast_daemon_bridge_perf_d5']
