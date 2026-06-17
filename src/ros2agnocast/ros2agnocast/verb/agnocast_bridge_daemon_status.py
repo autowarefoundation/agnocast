@@ -132,18 +132,24 @@ class _BridgeResult:
 
 def _build_summary(results: list[_BridgeResult]) -> tuple[str, bool]:
     if not results:
-        return 'NG. There is no bridge daemon process.', True
+        return 'NG. The bridge daemon is not running.', True
 
-    if len(results) >= 2:
-        pids = ', '.join(str(r.pid) for r in results)
-        return f'NG. There are multiple performance bridge processes. (PIDs: {pids})', True
+    ok_results = [r for r in results if r.is_ok]
+    ng_results = [r for r in results if not r.is_ok]
 
-    first_ng_result = next((r for r in results if not r.is_ok), None)
-    if first_ng_result is not None:
-        pid = first_ng_result.pid
-        return f'NG. The performance bridge process is not working. (PID: {pid})', True
+    if ng_results:
+        first_ng = ng_results[0]
+        return (
+            f'NG. A bridge daemon is not working.'
+            f' (PID: {first_ng.pid}): {first_ng.ng_message}',
+            True,
+        )
 
-    return f'OK. A performance bridge is running. (PID: {results[0].pid})', False
+    if len(ok_results) >= 2:
+        pids = ', '.join(str(r.pid) for r in ok_results)
+        return f'NG. Multiple bridge daemons are running. (PIDs: {pids})', True
+
+    return f'OK. The bridge daemon is running. (PID: {ok_results[0].pid})', False
 
 
 class BridgeDaemonStatusVerb(VerbExtension):
@@ -255,14 +261,7 @@ class BridgeDaemonStatusVerb(VerbExtension):
             print(f'IPC namespace inode: {ipc_inode}')
             print()
 
-        if verbose:
-            print('Summary:')
-            print(f'  {summary}')
-        else:
-            print(summary)
-
         if verbose and results:
-            print()
             print('Bridge Status:')
             type_width = max(len(f'({r.bridge_type.capitalize()})') for r in results)
             pid_width = max(len(str(r.pid)) for r in results)
@@ -273,5 +272,8 @@ class BridgeDaemonStatusVerb(VerbExtension):
                     print(f'  PID {pid_str} {type_label} OK')
                 else:
                     print(f'  PID {pid_str} {type_label} NG: {r.ng_message}')
+            print()
+
+        print(summary)
 
         return 1 if is_ng else 0

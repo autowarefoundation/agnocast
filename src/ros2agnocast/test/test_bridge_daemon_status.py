@@ -91,13 +91,13 @@ def _ng(pid: int, bridge_type: str, msg: str = 'error') -> _BridgeResult:
 def test_build_summary_no_results_is_ng():
     summary, is_ng = _build_summary([])
     assert is_ng is True
-    assert 'no bridge' in summary.lower()
+    assert 'not running' in summary.lower()
 
 
 def test_build_summary_single_performance_ok():
     summary, is_ng = _build_summary([_ok(100, 'performance')])
     assert is_ng is False
-    assert 'performance' in summary.lower()
+    assert 'running' in summary.lower()
     assert '100' in summary
 
 
@@ -112,7 +112,7 @@ def test_build_summary_multiple_bridges_is_ng():
 def test_build_summary_performance_ng():
     summary, is_ng = _build_summary([_ng(100, 'performance')])
     assert is_ng is True
-    assert 'performance' in summary.lower()
+    assert 'not working' in summary.lower()
     assert '100' in summary
 
 
