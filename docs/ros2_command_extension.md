@@ -42,14 +42,14 @@ This does not necessarily mean that a bridge process is currently running. If th
 
 | pub | sub | bridge | display |
 | :--- | :--- | :--- | :--- |
-| rclcpp::publisher | rclcpp::subscription | off / standard / performance | /my_topic |
+| rclcpp::publisher | rclcpp::subscription | off / on | /my_topic |
 | agnocast::publisher | rclcpp::subscription | off | /my_topic (WARN: Agnocast and ROS 2 endpoints exist but bridge is not active) |
-| agnocast::publisher | rclcpp::subscription | standard / performance | /my_topic (Agnocast enabled, bridged) |
+| agnocast::publisher | rclcpp::subscription | on | /my_topic (Agnocast enabled, bridged) |
 | rclcpp::publisher | agnocast::subscription | off | /my_topic (WARN: Agnocast and ROS 2 endpoints exist but bridge is not active) |
-| rclcpp::publisher | agnocast::subscription | standard / performance | /my_topic (Agnocast enabled, bridged) |
-| agnocast::publisher | agnocast::subscription | off / standard / performance | /my_topic (Agnocast enabled) |
-| agnocast::publisher | non | off / standard / performance | /my_topic (Agnocast enabled) |
-| non | agnocast::subscription | off / standard / performance | /my_topic (Agnocast enabled) |
+| rclcpp::publisher | agnocast::subscription | on | /my_topic (Agnocast enabled, bridged) |
+| agnocast::publisher | agnocast::subscription | off / on | /my_topic (Agnocast enabled) |
+| agnocast::publisher | non | off / on | /my_topic (Agnocast enabled) |
+| non | agnocast::subscription | off / on | /my_topic (Agnocast enabled) |
 
 #### Notes
 
