@@ -42,6 +42,7 @@ from ros2agnocast_discovery_msgs.msg import (
     AgnocastTopic,
 )
 
+from . import bridge_decider
 from .type_registry import TypeRegistryReader
 
 
@@ -291,8 +292,8 @@ class DiscoveryAgent(Node):
     """rclpy Node that publishes the local Agnocast state every PUBLISH_INTERVAL_SEC.
 
     Also subscribes to its own gossip topic and caches the latest snapshot per
-    ``(host_uuid, ipc_ns_inode)`` — exposed through ``remote_states`` for
-    future consumers (e.g. cross-NS decision logic added in a follow-up PR).
+    ``(host_uuid, ipc_ns_inode)``; each tick the bridge decider diffs that
+    against the local state and issues cross-NS bridge requests.
     """
 
     def __init__(self, registry: TypeRegistryReader | None = None):
@@ -333,7 +334,8 @@ class DiscoveryAgent(Node):
         self._registry.rebuild()
         self._registry.cleanup_dead_pids()
         self._prune_stale_remote_states()
-        self.publish_snapshot()
+        snapshot = self.publish_snapshot()
+        self._dispatch_bridge_requests(snapshot)
 
     def _prune_stale_remote_states(
             self, now_sec: float | None = None,
@@ -353,10 +355,19 @@ class DiscoveryAgent(Node):
         for key in stale_keys:
             del self._remote_states[key]
 
-    def publish_snapshot(self) -> None:
+    def publish_snapshot(self) -> AgnocastDaemonState:
         """Build and publish the current local AgnocastDaemonState."""
         msg = self.build_state()
         self._pub.publish(msg)
+        return msg
+
+    def _dispatch_bridge_requests(self, local_state: AgnocastDaemonState) -> None:
+        if not self._remote_states:
+            return
+        remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
+        requests = bridge_decider.decide_bridges(local_state, remote_states)
+        if requests:
+            bridge_decider.dispatch_requests(requests, logger=self.get_logger())
 
     def build_state(self) -> AgnocastDaemonState:
         msg = AgnocastDaemonState()
