@@ -86,7 +86,7 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
-CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
+CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"on (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
 # Run test
