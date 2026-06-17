@@ -13,6 +13,10 @@
 
 ## Notes for reviewers
 
+## Post-merge checklist
+
+- [ ] Reflect the changes in [`agnocast_doc`](https://github.com/autowarefoundation/agnocast_doc) after merging (if documentation needs updating)
+
 ## Version Update Label (Required)
 
 Please add **exactly one** of the following labels to this PR:

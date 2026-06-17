@@ -42,6 +42,9 @@ jobs:
           IGNORE="LEADING_SPACE,POINTER_LOCATION,SUSPECT_CODE_INDENT,CODE_INDENT"
           IGNORE="$IGNORE,LINE_SPACING,BRACES,OPEN_BRACE,SPLIT_STRING,BLOCK_COMMENT_STYLE"
           IGNORE="$IGNORE,TRAILING_STATEMENTS,LINUX_VERSION_CODE"
+          # COMPLEX_MACRO: the KUnit suite's TEST_CASES_* macros are comma-separated
+          # KUNIT_CASE(...) lists that cannot be parenthesized; this is a false positive.
+          IGNORE="$IGNORE,COMPLEX_MACRO"
 
           git diff origin/${{ github.base_ref }}...HEAD -- agnocast_kmod/ \
             | ./checkpatch.pl --no-tree --show-types --ignore="$IGNORE" -
