@@ -1417,6 +1417,16 @@ int agnocast_ioctl_get_topic_list(
       goto unlock;
     }
 
+    if (topic_list_args->domain_id_buffer_addr) {
+      uint32_t domain_id = wrapper->domain_id;
+      if (copy_to_user(
+            (uint32_t __user *)topic_list_args->domain_id_buffer_addr + topic_num, &domain_id,
+            sizeof(domain_id))) {
+        ret = -EFAULT;
+        goto unlock;
+      }
+    }
+
     topic_num++;
   }
 
@@ -1560,7 +1570,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
 
   down_read(&global_htables_rwsem);
 
-  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
   if (!wrapper) {
     up_read(&global_htables_rwsem);
     return 0;
@@ -1646,7 +1656,7 @@ int agnocast_ioctl_get_topic_publisher_info(
 
   down_read(&global_htables_rwsem);
 
-  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
   if (!wrapper) {
     up_read(&global_htables_rwsem);
     return 0;

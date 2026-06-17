@@ -31,6 +31,9 @@ union ioctl_topic_list_args {
   struct
   {
     uint64_t topic_name_buffer_addr;
+    // Parallel array of uint32 domain_ids (one per topic name). Pass 0 to skip.
+    // Must mirror agnocast_kmod/agnocast.h so _IOWR encodes the same size.
+    uint64_t domain_id_buffer_addr;
     uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
@@ -61,6 +64,9 @@ union ioctl_topic_info_args {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
     uint32_t topic_info_ret_buffer_size;
+    // Which domain's endpoints to return (0 = default domain). Must mirror
+    // agnocast_kmod/agnocast.h so _IOWR encodes the same size.
+    uint32_t domain_id;
   };
   uint32_t ret_topic_info_ret_num;
 };

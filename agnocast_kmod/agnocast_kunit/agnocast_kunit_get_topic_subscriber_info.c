@@ -18,6 +18,14 @@ static void setup_process(struct kunit * test, const pid_t pid)
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
+static void setup_process_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
+{
+  union ioctl_add_process_args add_process_args;
+  int ret =
+    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+}
+
 // Normal case: one subscriber exists, should return count == 1
 void test_case_get_topic_sub_info_one_subscriber(struct kunit * test)
 {
@@ -72,4 +80,35 @@ void test_case_get_topic_sub_info_topic_not_found(struct kunit * test)
     "/nonexistent_topic", current->nsproxy->ipc_ns, &topic_info_args);
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, topic_info_args.ret_topic_info_ret_num, (uint32_t)0);
+}
+
+// The query selects the wrapper by domain: a subscriber registered in domain 1 is
+// visible only when domain_id == 1, regardless of the caller's own domain.
+void test_case_get_topic_sub_info_selects_by_domain(struct kunit * test)
+{
+  const pid_t pid_d1 = 1001;
+  union ioctl_add_subscriber_args add_sub_args;
+  int ret;
+
+  setup_process_domain(test, pid_d1, 1);
+  ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid_d1, QOS_DEPTH, false, false, false, false,
+    IS_BRIDGE, &add_sub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // domain 1: the topic exists -> the subscriber is counted (copy_to_user
+  // fails with -EFAULT in KUnit context, but reaching it confirms the count).
+  union ioctl_topic_info_args args_d1 = {0};
+  args_d1.domain_id = 1;
+  args_d1.topic_info_ret_buffer_size = MAX_SUBSCRIBER_NUM;
+  ret = agnocast_ioctl_get_topic_subscriber_info(TOPIC_NAME, current->nsproxy->ipc_ns, &args_d1);
+  KUNIT_EXPECT_TRUE(test, ret == -EFAULT || (ret == 0 && args_d1.ret_topic_info_ret_num == 1));
+
+  // domain 0: no wrapper for this name -> nothing found.
+  union ioctl_topic_info_args args_d0 = {0};
+  args_d0.domain_id = 0;
+  args_d0.topic_info_ret_buffer_size = MAX_SUBSCRIBER_NUM;
+  ret = agnocast_ioctl_get_topic_subscriber_info(TOPIC_NAME, current->nsproxy->ipc_ns, &args_d0);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, args_d0.ret_topic_info_ret_num, (uint32_t)0);
 }
