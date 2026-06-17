@@ -43,7 +43,7 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 
 /// @brief A builder class for creating bridge registration messages.
 ///
-/// It detects errors such as buffer overflow when copying string fields, and
+/// It detects errors such as string truncation when copying string fields, and
 /// `build_performance_message()` returns the error reason. However, it does not check whether
 /// the computed message as a whole is valid. It's the caller's responsibility to invoke a correct
 /// set of setters to build a valid message.

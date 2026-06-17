@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <string>
