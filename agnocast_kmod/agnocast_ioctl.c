@@ -553,15 +553,19 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-static bool has_alive_performance_bridge_manager(const struct ipc_namespace * ipc_ns)
+// A performance bridge manager is per-(ipc_ns, domain): its MQ name carries the
+// domain suffix, so each domain needs its own manager. Gate on the domain too,
+// otherwise a manager in one domain would suppress spawning in another.
+static bool has_alive_performance_bridge_manager(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   struct process_info * proc_info;
   int bkt;
   hash_for_each(proc_info_htable, bkt, proc_info, node)
   {
     if (
-      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->is_performance_bridge_manager &&
-      !proc_info->exited) {
+      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
+      proc_info->is_performance_bridge_manager && !proc_info->exited) {
       return true;
     }
   }
@@ -582,7 +586,8 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
-  ioctl_ret->ret_performance_bridge_daemon_exist = has_alive_performance_bridge_manager(ipc_ns);
+  ioctl_ret->ret_performance_bridge_daemon_exist =
+    has_alive_performance_bridge_manager(ipc_ns, domain_id);
 
   if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
     goto unlock;
