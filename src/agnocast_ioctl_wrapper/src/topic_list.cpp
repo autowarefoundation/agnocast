@@ -11,7 +11,9 @@
 
 extern "C" {
 
-char ** get_agnocast_topics(int * topic_count)
+// domain_buffer (optional, may be nullptr) is a caller-allocated array of
+// MAX_TOPIC_NUM uint32; on return domain_buffer[i] is the domain of topic[i].
+char ** get_agnocast_topics(int * topic_count, uint32_t * domain_buffer)
 {
   *topic_count = 0;
 
@@ -35,6 +37,7 @@ char ** get_agnocast_topics(int * topic_count)
 
   ioctl_topic_list_args topic_list_args = {};
   topic_list_args.topic_name_buffer_addr = reinterpret_cast<uint64_t>(agnocast_topic_buffer);
+  topic_list_args.domain_id_buffer_addr = reinterpret_cast<uint64_t>(domain_buffer);
   topic_list_args.topic_name_buffer_size = MAX_TOPIC_NUM;
   if (ioctl(fd, AGNOCAST_GET_TOPIC_LIST_CMD, &topic_list_args) < 0) {
     perror("AGNOCAST_GET_TOPIC_LIST_CMD failed");
