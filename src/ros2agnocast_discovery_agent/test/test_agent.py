@@ -72,9 +72,14 @@ def test_ioctl_to_endpoint_fills_pid_from_registry():
     assert ep.pid == 4242
 
 
-def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
-    """Build a ctypes-flavoured mock that returns the given topic data."""
+def _make_mock_lib(topic_to_endpoints: dict, topic_domains: dict | None = None) -> MagicMock:
+    """Build a ctypes-flavoured mock that returns the given topic data.
+
+    ``topic_domains`` optionally maps a topic name to its domain_id (default 0);
+    the mock fills the wrapper-owned domain array returned via the out-pointer.
+    """
     lib = MagicMock()
+    topic_domains = topic_domains or {}
 
     topic_names = list(topic_to_endpoints.keys())
 
@@ -86,15 +91,24 @@ def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
     char_pp = (ctypes.POINTER(ctypes.c_char) * len(name_storage))(
         *(ctypes.cast(b, ctypes.POINTER(ctypes.c_char)) for b in name_storage))
 
-    def get_topics(count_ptr):
+    # Keep the domain arrays alive for the duration of the call (the wrapper would
+    # own this memory; here the mock does).
+    domain_storage = []
+
+    def get_topics(count_ptr, domain_ids_out):
         count_ptr._obj.value = len(topic_names)
+        arr = (ctypes.c_uint32 * len(topic_names))(
+            *(topic_domains.get(name, 0) for name in topic_names))
+        domain_storage.append(arr)
+        domain_ids_out[0] = ctypes.cast(arr, ctypes.POINTER(ctypes.c_uint32))
         return char_pp
 
     lib.get_agnocast_topics = MagicMock(side_effect=get_topics)
     lib.free_agnocast_topics = MagicMock()
+    lib.free_agnocast_topic_domains = MagicMock()
 
     def make_endpoints_getter(direction):
-        def getter(topic_name_b, count_ptr):
+        def getter(topic_name_b, count_ptr, domain_id):
             name = topic_name_b.decode('utf-8')
             infos = topic_to_endpoints.get(name, {}).get(direction, [])
             count_ptr._obj.value = len(infos)
@@ -134,6 +148,21 @@ def test_read_local_topics_combines_pub_and_sub():
     assert topic.publishers[0].qos_depth == 3
     assert len(topic.subscribers) == 1
     assert topic.subscribers[0].node_name == '/listener_node'
+
+
+def test_read_local_topics_stamps_domain_id():
+    """The real domain_id from the ioctl is stamped onto the gossip topic."""
+    pub_info = _make_info('/talker_node')
+    lib = _make_mock_lib(
+        {'/chatter': {'pub': [pub_info], 'sub': []}},
+        topic_domains={'/chatter': 7})
+
+    topics = read_local_topics(lib)
+    assert len(topics) == 1
+    assert topics[0].domain_id == 7
+    # The per-topic domain is forwarded to the endpoint queries.
+    _name, _count, domain_arg = lib.get_agnocast_pub_nodes.call_args.args
+    assert domain_arg == 7
 
 
 def test_read_local_topics_resolves_type_from_registry():
