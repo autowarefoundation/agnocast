@@ -83,17 +83,24 @@ def _load_ioctl_wrapper():
     """Load libagnocast_ioctl_wrapper.so and set argtypes for the symbols we use."""
     lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
 
-    lib.get_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_topics.argtypes = [
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_uint32)),
+    ]
     lib.get_agnocast_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
     lib.free_agnocast_topics.argtypes = [
         ctypes.POINTER(ctypes.POINTER(ctypes.c_char)),
         ctypes.c_int,
     ]
     lib.free_agnocast_topics.restype = None
+    lib.free_agnocast_topic_domains.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+    lib.free_agnocast_topic_domains.restype = None
 
-    lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_sub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(TopicInfoRet)
-    lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_pub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
     lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
     lib.free_agnocast_topic_info_ret.restype = None
@@ -135,7 +142,11 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
     supplies the type names and pids that the ioctl does not expose.
     """
     topic_count = ctypes.c_int()
-    topic_names_ptr = lib.get_agnocast_topics(ctypes.byref(topic_count))
+    # The wrapper allocates the domain array (sized to match the name buffer) and
+    # returns it here; we own it and free it below.
+    domain_ids_ptr = ctypes.POINTER(ctypes.c_uint32)()
+    topic_names_ptr = lib.get_agnocast_topics(
+        ctypes.byref(topic_count), ctypes.pointer(domain_ids_ptr))
     topics = []
     if not topic_names_ptr:
         return topics
@@ -144,15 +155,20 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
         for i in range(topic_count.value):
             topic_name_b = ctypes.cast(topic_names_ptr[i], ctypes.c_char_p).value
             topic_name = topic_name_b.decode('utf-8', errors='replace')
+            # The same topic name can occur once per domain; each row is a
+            # distinct (name, domain) pair that becomes its own AgnocastTopic.
+            domain_id = domain_ids_ptr[i]
 
             agnocast_topic = AgnocastTopic()
             agnocast_topic.topic_name = topic_name
             agnocast_topic.type_name = ''
-            agnocast_topic.domain_id = 0
+            agnocast_topic.domain_id = domain_id
             agnocast_topic.publishers = _collect_endpoints(
-                lib.get_agnocast_pub_nodes, lib, topic_name_b, topic_name, 'pub', registry)
+                lib.get_agnocast_pub_nodes, lib, topic_name_b, topic_name, domain_id, 'pub',
+                registry)
             agnocast_topic.subscribers = _collect_endpoints(
-                lib.get_agnocast_sub_nodes, lib, topic_name_b, topic_name, 'sub', registry)
+                lib.get_agnocast_sub_nodes, lib, topic_name_b, topic_name, domain_id, 'sub',
+                registry)
             # Type name comes from the tmpfs registry; any registered
             # endpoint on this topic carries the same type (ROS 2
             # invariant), so the first non-empty one wins.
@@ -163,6 +179,7 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
             topics.append(agnocast_topic)
     finally:
         lib.free_agnocast_topics(topic_names_ptr, topic_count.value)
+        lib.free_agnocast_topic_domains(domain_ids_ptr)
 
     return topics
 
@@ -181,10 +198,10 @@ def _resolve_topic_type(
 
 
 def _collect_endpoints(
-        getter, lib, topic_name_b: bytes, topic_name: str, role: str,
+        getter, lib, topic_name_b: bytes, topic_name: str, domain_id: int, role: str,
         registry: TypeRegistryReader | None = None) -> list:
     count = ctypes.c_int()
-    array = getter(topic_name_b, ctypes.byref(count))
+    array = getter(topic_name_b, ctypes.byref(count), domain_id)
     endpoints = []
     if not array:
         return endpoints
