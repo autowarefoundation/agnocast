@@ -90,7 +90,6 @@ class GenerateBridgePluginsVerb(VerbExtension):
         print('\nNext steps:')
         print(f'  1. colcon build --packages-select agnocast_bridge_plugins')
         print(f'  2. source install/setup.bash')
-        print(f'  3. export AGNOCAST_BRIDGE_MODE=performance')
         return 0
 
     def _get_all_types(self, interface_type):
