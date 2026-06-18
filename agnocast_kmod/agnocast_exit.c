@@ -37,10 +37,7 @@ static void remove_all_topics(void)
       kfree(sub_info);
     }
 
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+    agnocast_release_topic_wrapper(wrapper);
   }
 }
 
