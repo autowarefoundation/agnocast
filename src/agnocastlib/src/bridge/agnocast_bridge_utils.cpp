@@ -82,6 +82,17 @@ rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t p
                                                     : rclcpp::DurabilityPolicy::Volatile);
 }
 
+rclcpp::QoS daemon_request_qos(const MqMsgDaemonBridge & req)
+{
+  return rclcpp::QoS(req.qos_depth)
+    .durability(
+      req.qos_is_transient_local ? rclcpp::DurabilityPolicy::TransientLocal
+                                 : rclcpp::DurabilityPolicy::Volatile)
+    .reliability(
+      req.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
+                          : rclcpp::ReliabilityPolicy::BestEffort);
+}
+
 SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args args = {};
