@@ -108,6 +108,11 @@ protected:
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
     SubscriptionRole role, const std::string & node_name, const std::string & type_name);
 
+  template <typename NodeT>
+  rclcpp::QoS init_base(
+    NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
+    const SubscriptionOptions & options, SubscriptionRole role);
+
 public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
   SubscriptionBase(agnocast::Node * node, const std::string & topic_name);
@@ -155,18 +160,6 @@ class Subscription : public SubscriptionBase
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
     SubscriptionRole role)
   {
-    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
-    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
-      override_qos ? node->get_node_parameters_interface() : nullptr;
-    const rclcpp::QoS actual_qos =
-      override_qos ? rclcpp::detail::declare_qos_parameters(
-                       options.qos_overriding_options, node_parameters, topic_name_, qos,
-                       rclcpp::detail::SubscriptionQosParametersTraits{})
-                   : qos;
-
-    validate_subscription_qos(actual_qos);
-
-    const std::string node_name = node->get_fully_qualified_name();
     // Gated to message types — service types pulled in by
     // BasicService<ServiceT> have no rosidl message name. The empty string
     // signals "skip registry" to initialize().
@@ -174,7 +167,8 @@ class Subscription : public SubscriptionBase
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    initialize(actual_qos, false, options.ignore_local_publications, role, node_name, type_name);
+
+    const rclcpp::QoS actual_qos = init_base(node, qos, type_name, false, options, role);
 
     mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
 
@@ -278,18 +272,6 @@ private:
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options,
     SubscriptionRole role)
   {
-    const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
-    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
-      override_qos ? node->get_node_parameters_interface() : nullptr;
-    const rclcpp::QoS actual_qos =
-      override_qos ? rclcpp::detail::declare_qos_parameters(
-                       options.qos_overriding_options, node_parameters, topic_name_, qos,
-                       rclcpp::detail::SubscriptionQosParametersTraits{})
-                   : qos;
-
-    validate_subscription_qos(actual_qos);
-
-    const std::string node_name = node->get_fully_qualified_name();
     // Gated to message types — service types pulled in by
     // BasicService<ServiceT> have no rosidl message name. The empty string
     // signals "skip registry" to initialize().
@@ -297,9 +279,7 @@ private:
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    initialize(actual_qos, true, options.ignore_local_publications, role, node_name, type_name);
-
-    return actual_qos;
+    return init_base(node, qos, type_name, true, options, role);
   }
 
 public:
