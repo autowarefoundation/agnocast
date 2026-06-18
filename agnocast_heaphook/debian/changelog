@@ -1,3 +1,7 @@
+agnocast-heaphook-v2.3.5 (2.3.5-1) noble; urgency=medium
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 09 Jun 2026 18:30:00 +0900
+
 agnocast-heaphook-v2.3.4 (2.3.4-2) noble; urgency=medium
 
   * chore: remove @veqcc from maintainers (#1296 <https://github.com/tier4/agnocast/issues/1296>)

@@ -2,6 +2,10 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+* feat: per-IPC-namespace discovery daemon + AgnocastDaemonState msgs (shared base) (`#1350 <https://github.com/autowarefoundation/agnocast/issues/1350>`_)
+
 2.3.4 (2026-05-21)
 ------------------
 * fix(sample_application): add agnocast\_ prefix to sample app and thread_configurator (`#1319 <https://github.com/autowarefoundation/agnocast/issues/1319>`_)

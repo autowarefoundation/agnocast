@@ -5,11 +5,15 @@
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_executor.hpp"
 
+#include <rmw/rmw.h>
+#include <rmw/serialized_message.h>
+#include <rmw/types.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 
 #include <array>
 #include <stdexcept>
+#include <utility>
 
 namespace agnocast
 {
@@ -26,6 +30,58 @@ uint32_t allocate_callback_info_id()
     throw std::runtime_error("Callback info ID overflow: too many callbacks registered");
   }
   return callback_info_id;
+}
+
+bool serialize_message(
+  const void * raw, const rosidl_message_type_support_t * type_support,
+  rclcpp::SerializedMessage & out)
+{
+  const rmw_ret_t ret = rmw_serialize(raw, type_support, &out.get_rcl_serialized_message());
+  if (ret != RMW_RET_OK) {
+    RCLCPP_ERROR(logger, "rmw_serialize failed (rmw_ret=%d); skipping", static_cast<int>(ret));
+    return false;
+  }
+  return true;
+}
+
+uint32_t register_erased_callback(
+  TypeErasedCallback callback, MessageCreator message_creator, const std::string & topic_name,
+  const topic_local_id_t subscriber_id, const bool is_transient_local, mqd_t mqdes,
+  rclcpp::CallbackGroup::SharedPtr callback_group)
+{
+  uint32_t callback_info_id = allocate_callback_info_id();
+
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info[callback_info_id] = CallbackInfo{
+      topic_name,
+      subscriber_id,
+      is_transient_local,
+      mqdes,
+      std::move(callback_group),
+      std::move(callback),
+      std::move(message_creator)};
+  }
+
+  EpollUpdateDispatcher::get_instance().request_update_all();
+
+  return callback_info_id;
+}
+
+uint32_t register_generic_callback(
+  TypeErasedCallback callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
+  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
+{
+  auto message_creator = [](
+                           void * ptr, const std::string & topic_name,
+                           const topic_local_id_t subscriber_id, const int64_t entry_id) {
+    return std::make_unique<RawMessagePtr>(agnocast::ipc_shared_ptr<std::byte>(
+      static_cast<std::byte *>(ptr), topic_name, subscriber_id, entry_id));
+  };
+
+  return register_erased_callback(
+    std::move(callback), std::move(message_creator), topic_name, subscriber_id, is_transient_local,
+    mqdes, std::move(callback_group));
 }
 
 void receive_and_execute_message(

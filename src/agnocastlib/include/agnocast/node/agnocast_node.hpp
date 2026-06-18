@@ -587,17 +587,12 @@ public:
   /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
   /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created client.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT>
   typename agnocast::Client<ServiceT>::SharedPtr create_client(
     const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
     rclcpp::CallbackGroup::SharedPtr group = nullptr)
   {
-    RCLCPP_WARN(
-      get_logger(),
-      "Agnocast service/client is not officially supported yet and the API may change in the "
-      "future: %s",
-      get_node_services_interface()->resolve_service_name(service_name).c_str());
     return std::make_shared<Client<ServiceT>>(this, service_name, qos, group);
   }
 
@@ -610,18 +605,13 @@ public:
   /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
   /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created service.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT, typename Func>
   typename agnocast::Service<ServiceT>::SharedPtr create_service(
     const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
     rclcpp::CallbackGroup::SharedPtr group = nullptr)
   {
-    RCLCPP_WARN(
-      get_logger(),
-      "Agnocast service/client is not officially supported yet and the API may change in the "
-      "future: %s",
-      get_node_services_interface()->resolve_service_name(service_name).c_str());
     return std::make_shared<Service<ServiceT>>(
       this, service_name, std::forward<Func>(callback), qos, group);
   }

@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>ros2agnocast_discovery_agent</name>
-  <version>2.3.4</version>
+  <version>2.3.5</version>
   <description>
     Per-IPC-namespace daemon that reads the local Agnocast state via the
     existing NS-scoped ioctl and publishes it on /_agnocast_discovery so

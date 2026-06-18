@@ -6,7 +6,7 @@
 #   ./scripts/switch_kmod.bash <version>
 #
 # Example:
-#   ./scripts/switch_kmod.bash 2.3.4
+#   ./scripts/switch_kmod.bash 2.3.5
 #
 # Intended for setups where autoware runs inside a container (so heaphook
 # is switched by swapping containers) and only the host-side kmod needs
@@ -24,15 +24,15 @@ set -euo pipefail
 
 if [ $# -ne 1 ]; then
 	echo "Usage: $0 <version>"
-	echo "Example: $0 2.3.4"
+	echo "Example: $0 2.3.5"
 	exit 1
 fi
 
 target_version="$1"
 
 if ! [[ "${target_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	echo "Error: version must be in full X.Y.Z form (e.g., 2.3.4); got '${target_version}'." >&2
-	echo "       Short forms like '2.3' or 'v2.3.4' are not accepted." >&2
+	echo "Error: version must be in full X.Y.Z form (e.g., 2.3.5); got '${target_version}'." >&2
+	echo "       Short forms like '2.3' or 'v2.3.5' are not accepted." >&2
 	exit 1
 fi
 

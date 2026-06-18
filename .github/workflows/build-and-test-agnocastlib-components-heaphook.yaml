@@ -61,6 +61,12 @@ jobs:
           echo "heaphook_changed=false" >> "$GITHUB_OUTPUT"
         fi
 
+        if echo "$CHANGED_FILES" | grep -qE '^src/agnocast_cie_thread_configurator/rust/.*\.(rs|toml|lock)$'; then
+          echo "cie_rust_changed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "cie_rust_changed=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Setup ROS 2 environment
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
       run: |
@@ -199,7 +205,7 @@ jobs:
     # ===== agnocast_heaphook =====
 
     - name: Cache Rust (cargo + target + rustup)
-      if: github.event_name == 'push' || (steps.check_diff.outputs.heaphook_changed == 'true')
+      if: github.event_name == 'push' || (steps.check_diff.outputs.heaphook_changed == 'true' || steps.check_diff.outputs.cie_rust_changed == 'true')
       uses: actions/cache@v4
       with:
         path: |
@@ -207,12 +213,12 @@ jobs:
           ~/.cargo/git
           ~/.rustup
           agnocast_heaphook/target
-        key: ${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('agnocast_heaphook/Cargo.toml') }}-v1
+        key: ${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('agnocast_heaphook/Cargo.toml', 'src/agnocast_cie_thread_configurator/rust/Cargo.toml') }}-v1
         restore-keys: |
           ${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-
 
     - name: Setup Rust environment
-      if: github.event_name == 'push' || (steps.check_diff.outputs.heaphook_changed == 'true')
+      if: github.event_name == 'push' || (steps.check_diff.outputs.heaphook_changed == 'true' || steps.check_diff.outputs.cie_rust_changed == 'true')
       run: |
         rustup set profile minimal
         rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --no-self-update
@@ -258,6 +264,26 @@ jobs:
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         source install/setup.bash
         colcon test --merge-install --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -R "test_integration_agnocast_heaphook"
+
+    # ===== agnocast_cie_thread_configurator (Rust crate) =====
+
+    - name: Run rustfmt on agnocast_cie_thread_configurator (Rust)
+      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cie_rust_changed == 'true'
+      run: |
+        cd src/agnocast_cie_thread_configurator/rust
+        cargo fmt && git diff --exit-code
+
+    - name: Run clippy on agnocast_cie_thread_configurator (Rust)
+      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cie_rust_changed == 'true'
+      run: |
+        cd src/agnocast_cie_thread_configurator/rust
+        cargo clippy --all-targets -- --deny warnings
+
+    - name: Unit and integration tests for agnocast_cie_thread_configurator (Rust)
+      if: github.event_name == 'pull_request' && steps.check_diff.outputs.cie_rust_changed == 'true'
+      run: |
+        cd src/agnocast_cie_thread_configurator/rust
+        cargo test
 
   # Summary job that provides a single status check for branch protection rules.
   # Matrix jobs report status as "job-name (matrix-value)", but branch protection

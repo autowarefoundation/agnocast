@@ -70,7 +70,7 @@ private:
   static void notify_signal_eventfd();
   static void wait_for_signal_eventfd();
   static void signal_processing_loop();
-  static void signal_handler(int signum);
+  static void signal_handler(int signum, siginfo_t * siginfo, void * context);
 };
 
 }  // namespace agnocast

@@ -99,6 +99,54 @@ struct sigaction get_current_sigaction(int signum)
   return action;
 }
 
+template <typename Pred>
+bool wait_for_condition(Pred pred, int timeout_ms = TIMEOUT_MS_DEFAULT)
+{
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (!pred() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  return pred();
+}
+
+static_assert(
+  std::atomic<int>::is_always_lock_free,
+  "std::atomic<int> is not lock-free on this target architecture!");
+
+// Global atomics for signal argument capture in old-handler stub functions.
+std::atomic<int> g_sa_handler_signum{-1};
+
+void old_sa_handler_stub(int signum)
+{
+  g_sa_handler_signum.store(signum);
+}
+
+std::atomic<int> g_sa_sigaction_signum{-1};
+std::atomic<int> g_sa_sigaction_si_signo{-1};
+std::atomic<int> g_sa_sigaction_si_code{-1};
+std::atomic<int> g_sa_sigaction_si_pid{-1};
+
+void old_sa_sigaction_stub(int signum, siginfo_t * siginfo, void * /* context */)
+{
+  g_sa_sigaction_signum.store(signum);
+  if (siginfo != nullptr) {
+    g_sa_sigaction_si_signo.store(siginfo->si_signo);
+    g_sa_sigaction_si_code.store(siginfo->si_code);
+    g_sa_sigaction_si_pid.store(static_cast<int>(siginfo->si_pid));
+  }
+}
+
+bool sigactions_equal(const struct sigaction & a, const struct sigaction & b)
+{
+  if ((a.sa_flags & SA_SIGINFO) != (b.sa_flags & SA_SIGINFO)) {
+    return false;
+  }
+  if (a.sa_flags & SA_SIGINFO) {
+    return a.sa_sigaction == b.sa_sigaction;
+  }
+  return a.sa_handler == b.sa_handler;
+}
+
 }  // namespace
 
 class SignalHandlerTest : public ::testing::Test
@@ -138,15 +186,15 @@ TEST_F(SignalHandlerTest, InstallAndUninstallRestoreSigintAndSigtermHandlers)
 
   const auto sigint_installed = get_current_sigaction(SIGINT);
   const auto sigterm_installed = get_current_sigaction(SIGTERM);
-  EXPECT_NE(sigint_installed.sa_handler, sigint_before.sa_handler);
-  EXPECT_NE(sigterm_installed.sa_handler, sigterm_before.sa_handler);
+  EXPECT_FALSE(sigactions_equal(sigint_installed, sigint_before));
+  EXPECT_FALSE(sigactions_equal(sigterm_installed, sigterm_before));
 
   agnocast::SignalHandler::uninstall();
 
   const auto sigint_after = get_current_sigaction(SIGINT);
   const auto sigterm_after = get_current_sigaction(SIGTERM);
-  EXPECT_EQ(sigint_after.sa_handler, sigint_before.sa_handler);
-  EXPECT_EQ(sigterm_after.sa_handler, sigterm_before.sa_handler);
+  EXPECT_TRUE(sigactions_equal(sigint_after, sigint_before));
+  EXPECT_TRUE(sigactions_equal(sigterm_after, sigterm_before));
 }
 
 TEST_F(SignalHandlerTest, InstallAndUninstallAreIdempotent)
@@ -157,26 +205,26 @@ TEST_F(SignalHandlerTest, InstallAndUninstallAreIdempotent)
   agnocast::SignalHandler::install();
   const auto sigint_after_first_install = get_current_sigaction(SIGINT);
   const auto sigterm_after_first_install = get_current_sigaction(SIGTERM);
-  EXPECT_NE(sigint_after_first_install.sa_handler, sigint_before.sa_handler);
-  EXPECT_NE(sigterm_after_first_install.sa_handler, sigterm_before.sa_handler);
+  EXPECT_FALSE(sigactions_equal(sigint_after_first_install, sigint_before));
+  EXPECT_FALSE(sigactions_equal(sigterm_after_first_install, sigterm_before));
 
   agnocast::SignalHandler::install();
   const auto sigint_after_second_install = get_current_sigaction(SIGINT);
   const auto sigterm_after_second_install = get_current_sigaction(SIGTERM);
-  EXPECT_EQ(sigint_after_second_install.sa_handler, sigint_after_first_install.sa_handler);
-  EXPECT_EQ(sigterm_after_second_install.sa_handler, sigterm_after_first_install.sa_handler);
+  EXPECT_TRUE(sigactions_equal(sigint_after_second_install, sigint_after_first_install));
+  EXPECT_TRUE(sigactions_equal(sigterm_after_second_install, sigterm_after_first_install));
 
   agnocast::SignalHandler::uninstall();
   const auto sigint_after_first_uninstall = get_current_sigaction(SIGINT);
   const auto sigterm_after_first_uninstall = get_current_sigaction(SIGTERM);
-  EXPECT_EQ(sigint_after_first_uninstall.sa_handler, sigint_before.sa_handler);
-  EXPECT_EQ(sigterm_after_first_uninstall.sa_handler, sigterm_before.sa_handler);
+  EXPECT_TRUE(sigactions_equal(sigint_after_first_uninstall, sigint_before));
+  EXPECT_TRUE(sigactions_equal(sigterm_after_first_uninstall, sigterm_before));
 
   agnocast::SignalHandler::uninstall();
   const auto sigint_after_second_uninstall = get_current_sigaction(SIGINT);
   const auto sigterm_after_second_uninstall = get_current_sigaction(SIGTERM);
-  EXPECT_EQ(sigint_after_second_uninstall.sa_handler, sigint_after_first_uninstall.sa_handler);
-  EXPECT_EQ(sigterm_after_second_uninstall.sa_handler, sigterm_after_first_uninstall.sa_handler);
+  EXPECT_TRUE(sigactions_equal(sigint_after_second_uninstall, sigint_after_first_uninstall));
+  EXPECT_TRUE(sigactions_equal(sigterm_after_second_uninstall, sigterm_after_first_uninstall));
 }
 
 TEST_F(SignalHandlerTest, SigintNotifiesRegisteredEventfdViaWorkerThread)
@@ -466,4 +514,85 @@ TEST_F(SignalHandlerTest, NotifyAllExecutorsFailsAfterUninstall)
 
   agnocast::SignalHandler::notify_all_executors();
   EXPECT_FALSE(event_fd_has_notification(fd));
+}
+
+TEST_F(SignalHandlerTest, OldSaHandlerIsCalledWithCorrectSigintArgument)
+{
+  g_sa_handler_signum.store(-1);
+
+  struct sigaction old_before
+  {
+  };
+  struct sigaction sa
+  {
+  };
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sa.sa_handler = old_sa_handler_stub;
+  ASSERT_EQ(sigaction(SIGINT, &sa, &old_before), 0);
+
+  agnocast::SignalHandler::install();
+  send_sigint();
+
+  EXPECT_TRUE(wait_for_condition([] { return g_sa_handler_signum.load() != -1; }));
+  EXPECT_EQ(g_sa_handler_signum.load(), SIGINT);
+
+  agnocast::SignalHandler::uninstall();
+  ASSERT_EQ(sigaction(SIGINT, &old_before, nullptr), 0);
+}
+
+TEST_F(SignalHandlerTest, OldSaHandlerIsCalledWithCorrectSigtermArgument)
+{
+  g_sa_handler_signum.store(-1);
+
+  struct sigaction old_before
+  {
+  };
+  struct sigaction sa
+  {
+  };
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sa.sa_handler = old_sa_handler_stub;
+  ASSERT_EQ(sigaction(SIGTERM, &sa, &old_before), 0);
+
+  agnocast::SignalHandler::install();
+  send_sigterm();
+
+  EXPECT_TRUE(wait_for_condition([] { return g_sa_handler_signum.load() != -1; }));
+  EXPECT_EQ(g_sa_handler_signum.load(), SIGTERM);
+
+  agnocast::SignalHandler::uninstall();
+  ASSERT_EQ(sigaction(SIGTERM, &old_before, nullptr), 0);
+}
+
+TEST_F(SignalHandlerTest, OldSaSigactionHandlerIsCalledWithCorrectArguments)
+{
+  g_sa_sigaction_signum.store(-1);
+  g_sa_sigaction_si_signo.store(-1);
+  g_sa_sigaction_si_code.store(-1);
+  g_sa_sigaction_si_pid.store(-1);
+
+  struct sigaction old_before
+  {
+  };
+  struct sigaction sa
+  {
+  };
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_SIGINFO;
+  sa.sa_sigaction = old_sa_sigaction_stub;
+  ASSERT_EQ(sigaction(SIGINT, &sa, &old_before), 0);
+
+  agnocast::SignalHandler::install();
+  send_sigint();
+
+  EXPECT_TRUE(wait_for_condition([] { return g_sa_sigaction_signum.load() != -1; }));
+  EXPECT_EQ(g_sa_sigaction_signum.load(), SIGINT);
+  EXPECT_EQ(g_sa_sigaction_si_signo.load(), SIGINT);
+  EXPECT_EQ(g_sa_sigaction_si_code.load(), SI_USER);
+  EXPECT_EQ(g_sa_sigaction_si_pid.load(), static_cast<int>(getpid()));
+
+  agnocast::SignalHandler::uninstall();
+  ASSERT_EQ(sigaction(SIGINT, &old_before, nullptr), 0);
 }

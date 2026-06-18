@@ -1,19 +1,22 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/typesupport_helpers.hpp"
+#include "rclcpp/version.h"
+#include "rcpputils/shared_library.hpp"
 
 namespace agnocast
 {
 
 SubscriptionBase::SubscriptionBase(rclcpp::Node * node, const std::string & topic_name)
-: id_(0), topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
+: topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
 {
   validate_ld_preload();
 }
 
 SubscriptionBase::SubscriptionBase(
   agnocast::Node * node, const std::string & topic_name)  // NOLINT(modernize-pass-by-value)
-: id_(0), topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
+: topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
 {
   validate_ld_preload();
 }
@@ -119,5 +122,83 @@ rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnoc
 {
   return node->get_node_base_interface()->get_default_callback_group();
 }
+
+TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string & topic_type)
+{
+  TypeSupportBundle result;
+  result.library = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  // rclcpp::get_typesupport_handle() was deprecated in Jazzy (rclcpp 28) in favor of
+  // rclcpp::get_message_typesupport_handle() to distinguish message handles from service handles.
+#if RCLCPP_VERSION_MAJOR >= 28
+  result.handle =
+    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#else
+  result.handle =
+    rclcpp::get_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#endif
+  return result;
+}
+
+template <typename NodeT>
+rclcpp::QoS GenericSubscription::constructor_impl(
+  NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos,
+  TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
+  const agnocast::SubscriptionOptions & options, SubscriptionRole role)
+{
+  const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
+  rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+    override_qos ? node->get_node_parameters_interface() : nullptr;
+  const rclcpp::QoS actual_qos = override_qos
+                                   ? rclcpp::detail::declare_qos_parameters(
+                                       options.qos_overriding_options, node_parameters, topic_name_,
+                                       qos, rclcpp::detail::SubscriptionQosParametersTraits{})
+                                   : qos;
+
+  validate_subscription_qos(actual_qos);
+
+  const std::string node_name = node->get_fully_qualified_name();
+
+  const bool is_bridge = (role == SubscriptionRole::BridgeInternal);
+  union ioctl_add_subscriber_args add_subscriber_args = initialize(
+    actual_qos, false, options.ignore_local_publications, is_bridge, node_name, topic_type);
+
+  id_ = add_subscriber_args.ret_id;
+
+  if (role == SubscriptionRole::Default) {
+    register_pubsub_bridge_by_type_name(
+      topic_name_, id_, topic_type, BridgeDirection::ROS2_TO_AGNOCAST);
+  }
+
+  mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
+
+  const bool is_transient_local =
+    actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+  callback_info_id_ = agnocast::register_generic_callback(
+    std::move(callback), topic_name_, id_, is_transient_local, mq, std::move(callback_group));
+
+  return actual_qos;
+}
+
+GenericSubscription::~GenericSubscription()
+{
+  // Remove from callback info map to prevent stale references on re-subscription and to avoid
+  // fd reuse conflicts. When mq_close() is called in remove_mq(), the OS may later reuse the
+  // same fd number for a new subscription. If the old entry remains in id2_callback_info,
+  // adding the new fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still
+  // associates that fd number with the stale entry.
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info.erase(callback_info_id_);
+  }
+  remove_mq(mq_subscription_);
+}
+
+template rclcpp::QoS GenericSubscription::constructor_impl<rclcpp::Node>(
+  rclcpp::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
+  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
+
+template rclcpp::QoS GenericSubscription::constructor_impl<agnocast::Node>(
+  agnocast::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
+  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
 
 }  // namespace agnocast

@@ -15,10 +15,10 @@
 #     sudo bats scripts/test/switch_kmod.bats
 #
 # Required versions (overridable via env):
-#     CANONICAL_VER   version the host is restored to between tests (default 2.3.4)
+#     CANONICAL_VER   version the host is restored to between tests (default 2.3.5)
 #     UPGRADE_VER     version used as the swap target (default 2.1.2)
 
-CANONICAL_VER="${CANONICAL_VER:-2.3.4}"
+CANONICAL_VER="${CANONICAL_VER:-2.3.5}"
 UPGRADE_VER="${UPGRADE_VER:-2.1.2}"
 
 setup_file() {

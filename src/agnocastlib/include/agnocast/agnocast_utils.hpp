@@ -80,6 +80,10 @@ void validate_ld_preload();
 std::string create_mq_name_for_agnocast_publish(
   const std::string & topic_name, const topic_local_id_t id);
 std::string create_mq_name_for_bridge(const pid_t pid);
+// Name of the MQ a per-NS daemon uses to ask a bridge_manager to create a
+// cross-NS bridge. Standard mode keys on the owning user process's pid;
+// performance mode is per-NS (see impl).
+std::string create_mq_name_for_daemon_bridge(const pid_t pid);
 std::string create_shm_name(const pid_t pid);
 // Return the inode number of the calling process's IPC namespace
 // (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the

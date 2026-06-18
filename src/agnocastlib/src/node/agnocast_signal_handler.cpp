@@ -75,8 +75,8 @@ void SignalHandler::install()
   {
   };
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = 0;
-  sa.sa_handler = &SignalHandler::signal_handler;
+  sa.sa_flags = SA_SIGINFO;
+  sa.sa_sigaction = &SignalHandler::signal_handler;
 
   if (sigaction(SIGINT, &sa, &old_sigint_action_) != 0) {
     RCLCPP_ERROR(logger, "Failed to install SIGINT handler: %s", strerror(errno));
@@ -249,11 +249,23 @@ void SignalHandler::wait_for_signal_eventfd()
   }
 }
 
-void SignalHandler::signal_handler(int signum)
+void SignalHandler::signal_handler(int signum, siginfo_t * siginfo, void * context)
 {
-  (void)signum;
-
   int saved_errno = errno;
+
+  const struct sigaction & old_action =
+    (signum == SIGINT) ? old_sigint_action_ : old_sigterm_action_;
+  if (old_action.sa_flags & SA_SIGINFO) {
+    if (old_action.sa_sigaction != nullptr) {
+      old_action.sa_sigaction(signum, siginfo, context);
+    }
+  } else {
+    if (
+      old_action.sa_handler != nullptr && old_action.sa_handler != SIG_DFL &&
+      old_action.sa_handler != SIG_IGN) {
+      old_action.sa_handler(signum);
+    }
+  }
 
   handler_inflight_count_.fetch_add(1);
   signal_received_.store(true);
