@@ -99,11 +99,18 @@ static struct topic_struct * find_grouped_topic_struct(
 }
 
 // Whether a publication in pub_domain may be delivered to a subscriber in
-// sub_domain within a (possibly grouped) topic_struct. Same domain is always
-// allowed; cross-domain delivery is opened per rule direction in a later change.
-static bool domain_delivery_allowed(uint32_t pub_domain, uint32_t sub_domain)
+// sub_domain within this topic_struct. Same domain is always allowed; crossing
+// domains requires a rule permitting that direction (from_domain -> to_domain).
+static bool domain_delivery_allowed(
+  const struct topic_struct * topic, uint32_t pub_domain, uint32_t sub_domain)
 {
-  return pub_domain == sub_domain;
+  if (pub_domain == sub_domain) return true;
+
+  const struct domain_bridge_rule * rule = topic->rule;
+  if (!rule) return false;
+  if (pub_domain == rule->domain_a && sub_domain == rule->domain_b) return rule->a_to_b;
+  if (pub_domain == rule->domain_b && sub_domain == rule->domain_a) return rule->b_to_a;
+  return false;
 }
 
 static int add_topic(
@@ -158,6 +165,7 @@ static int add_topic(
     (*wrapper)->topic->ros2_subscriber_num = 0;
     (*wrapper)->topic->ros2_publisher_num = 0;
     (*wrapper)->topic->wrapper_refcnt = 1;
+    (*wrapper)->topic->rule = find_domain_rule(topic_name, ipc_ns);
   }
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
@@ -901,7 +909,8 @@ int agnocast_ioctl_publish_msg(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
-    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) continue;
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
+      continue;
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
@@ -986,7 +995,7 @@ static int receive_msg_core(
       continue;
     }
 
-    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) {
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
       continue;
     }
 
@@ -1131,7 +1140,7 @@ int agnocast_ioctl_take_msg(
       continue;
     }
 
-    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) {
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
       continue;
     }
 
@@ -1656,10 +1665,12 @@ int agnocast_ioctl_get_topic_subscriber_info(
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
-  // Count actual subscribers first
+  // Count actual subscribers first. The htable may be shared with a bridged
+  // domain, so only count endpoints in the requested domain.
   uint32_t subscriber_num = 0;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
     subscriber_num++;
   }
 
@@ -1685,6 +1696,8 @@ int agnocast_ioctl_get_topic_subscriber_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
+
     if (!sub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
@@ -1742,10 +1755,12 @@ int agnocast_ioctl_get_topic_publisher_info(
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
-  // Count actual publishers first
+  // Count actual publishers first. The htable may be shared with a bridged
+  // domain, so only count endpoints in the requested domain.
   uint32_t publisher_num = 0;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
     publisher_num++;
   }
 
@@ -1771,6 +1786,8 @@ int agnocast_ioctl_get_topic_publisher_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
+
     if (!pub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
