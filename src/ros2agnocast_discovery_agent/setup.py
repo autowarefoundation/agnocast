@@ -13,7 +13,7 @@ setup(
         ('share/' + package_name + '/launch', ['launch/discovery_agent.launch.xml']),
         ('lib/' + package_name, ['scripts/discovery_agent']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
     extras_require={'test': ['pytest']},
     maintainer='Keita Morisaki, Takahiro Ishikawa-Aso, Koichi Imai, Takumi Jin',
