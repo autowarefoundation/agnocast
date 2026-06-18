@@ -62,17 +62,14 @@ void remove_mq(const std::pair<mqd_t, std::string> &)
 {
 }
 
-union ioctl_add_subscriber_args SubscriptionBase::initialize(
-  const rclcpp::QoS & qos, const bool, const bool, const bool, const std::string &,
+void SubscriptionBase::initialize(
+  const rclcpp::QoS & qos, const bool, const bool, SubscriptionRole, const std::string &,
   const std::string &)
 {
   initialize_subscriber_call_count++;
   initialized_topic_names.push_back(topic_name_);
   initialized_qos_values.push_back(qos);
-  union ioctl_add_subscriber_args args {
-  };
-  args.ret_id = 0;
-  return args;
+  id_ = 0;
 }
 
 BridgeMode get_bridge_mode()

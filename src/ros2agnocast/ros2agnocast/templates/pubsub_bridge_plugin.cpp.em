@@ -79,14 +79,14 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
   sub_opts.ignore_local_publications = true;
   sub_opts.callback_group = cb_group;
 
-  using AgnoSub = agnocast::BasicSubscription<MsgT, agnocast::NoBridgeRegistrationPolicy>;
+  using AgnoSub = agnocast::Subscription<MsgT>;
   auto agno_sub = std::make_shared<AgnoSub>(
     node.get(),
     topic_name,
     sub_qos,
     agno_callback,
     sub_opts,
-    true);
+    agnocast::SubscriptionRole::BridgeInternal);
 
   return {agno_sub, cb_group};
 }

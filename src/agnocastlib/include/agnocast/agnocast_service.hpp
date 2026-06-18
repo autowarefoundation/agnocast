@@ -50,7 +50,7 @@ private:
   };
 
   using ServiceResponsePublisher = Publisher<ResponseT>;
-  using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRegistrationPolicy>;
+  using ServiceRequestSubscriber = Subscription<RequestT>;
 
   const std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string service_name_;
@@ -134,11 +134,13 @@ private:
     if constexpr (is_basic_cb<Func>::value) {
       subscriber_ = std::make_shared<ServiceRequestSubscriber>(
         node, topic_name, qos_,
-        wrap_basic_service_callback_for_subscriber(std::forward<Func>(callback)), options);
+        wrap_basic_service_callback_for_subscriber(std::forward<Func>(callback)), options,
+        SubscriptionRole::AgnocastOnly);
     } else if constexpr (is_deferred_cb<Func>::value) {
       subscriber_ = std::make_shared<ServiceRequestSubscriber>(
         node, topic_name, qos_,
-        wrap_deferred_service_callback_for_subscriber(std::forward<Func>(callback)), options);
+        wrap_deferred_service_callback_for_subscriber(std::forward<Func>(callback)), options,
+        SubscriptionRole::AgnocastOnly);
     }
 
     BridgeRegistrationPolicy::template register_bridge<NodeT, ServiceT>(node, service_name_);

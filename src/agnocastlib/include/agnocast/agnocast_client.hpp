@@ -24,8 +24,6 @@
 namespace agnocast
 {
 
-struct NoBridgeRegistrationPolicy;
-
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
   const rclcpp::Context::SharedPtr & context, const std::string & service_name,
@@ -99,7 +97,7 @@ private:
   };
 
   using ServiceRequestPublisher = Publisher<RequestT>;
-  using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRegistrationPolicy>;
+  using ServiceResponseSubscriber = Subscription<ResponseT>;
 
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
@@ -151,7 +149,8 @@ private:
     SubscriptionOptions options{group};
     std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-      node, topic_name, qos, std::move(subscriber_callback), options);
+      node, topic_name, qos, std::move(subscriber_callback), options,
+      SubscriptionRole::AgnocastOnly);
   }
 
 public:
