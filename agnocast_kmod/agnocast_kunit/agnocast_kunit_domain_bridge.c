@@ -4,6 +4,7 @@
 #include "../agnocast.h"
 
 #include <kunit/test.h>
+#include <linux/delay.h>
 
 static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 
@@ -161,4 +162,46 @@ void test_case_domain_bridge_direction_respected(struct kunit * test)
 
   // The domain-1 subscriber must not receive a domain-2 publication (no 2 -> 1).
   KUNIT_EXPECT_EQ(test, publish_args.ret_subscriber_num, (uint32_t)0);
+}
+
+void test_case_domain_bridge_partial_remove_keeps_struct(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  // remove_publisher resolves the wrapper by the caller's domain, so the caller
+  // is in domain 1 alongside the publisher being removed.
+  setup_process_in_domain(test, current->tgid, 1);
+  const topic_local_id_t pub_id = add_publisher_for(test, current->tgid);
+  setup_process_in_domain(test, 1001, 2);
+  add_subscriber_for(test, 1001);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 2);
+
+  // Dropping domain 1's last endpoint drops its wrapper, but the shared struct
+  // must survive for domain 2 (refcnt 2 -> 1); freeing it here would be a UAF.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_remove_publisher(TOPIC_NAME, current->nsproxy->ipc_ns, pub_id), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 1);
+}
+
+void test_case_domain_bridge_exit_frees_shared_struct(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, 1000, 1);
+  add_publisher_for(test, 1000);
+  setup_process_in_domain(test, 1001, 2);
+  add_subscriber_for(test, 1001);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 2);
+
+  // Both domains' processes exit: each wrapper is dropped as its domain empties,
+  // and the shared struct is freed only with the last one (KASAN checks the free).
+  agnocast_enqueue_exit_pid(1000);
+  agnocast_enqueue_exit_pid(1001);
+  msleep(20);  // let exit_worker_thread drain both pids
+
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 0);
 }
