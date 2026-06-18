@@ -49,7 +49,7 @@ private:
     int64_t _sequence_number;
   };
 
-  using ServiceResponsePublisher = BasicPublisher<ResponseT, NoBridgeRegistrationPolicy>;
+  using ServiceResponsePublisher = Publisher<ResponseT>;
   using ServiceRequestSubscriber = BasicSubscription<RequestT, NoBridgeRegistrationPolicy>;
 
   const std::variant<rclcpp::Node *, agnocast::Node *> node_;
@@ -71,7 +71,8 @@ private:
           [this, &pub, &node_name](auto * node) {
             std::string topic_name = create_service_response_topic_name(service_name_, node_name);
             agnocast::PublisherOptions pub_options;
-            pub = std::make_shared<ServiceResponsePublisher>(node, topic_name, qos_, pub_options);
+            pub = std::make_shared<ServiceResponsePublisher>(
+              node, topic_name, qos_, pub_options, PublisherRole::AgnocastOnly);
             publishers_[node_name] = pub;
           },
           node_);

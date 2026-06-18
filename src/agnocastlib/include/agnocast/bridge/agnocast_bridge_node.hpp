@@ -85,17 +85,6 @@ struct RosToAgnocastPubsubRegistrationPolicy
   }
 };
 
-// Policy for agnocast::Publisher.
-// Registers a bridge that forwards messages from Agnocast to ROS 2 (A2R).
-struct AgnocastToRosPubsubRegistrationPolicy
-{
-  template <typename MessageT>
-  static void register_bridge(const std::string & topic_name, topic_local_id_t id)
-  {
-    register_pubsub_bridge_core<MessageT>(topic_name, id, BridgeDirection::AGNOCAST_TO_ROS2);
-  }
-};
-
 // Policy for agnocast::Service.
 // Registers a bridge that forwards requests from ROS 2 to Agnocast (R2A).
 struct RosToAgnocastServiceRegistrationPolicy

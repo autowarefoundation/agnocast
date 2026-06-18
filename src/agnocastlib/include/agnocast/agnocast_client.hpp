@@ -98,7 +98,7 @@ private:
     }
   };
 
-  using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRegistrationPolicy>;
+  using ServiceRequestPublisher = Publisher<RequestT>;
   using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRegistrationPolicy>;
 
   std::atomic<int64_t> next_sequence_number_;
@@ -124,7 +124,8 @@ private:
 
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
-      node, create_service_request_topic_name(service_name_), qos, pub_options);
+      node, create_service_request_topic_name(service_name_), qos, pub_options,
+      PublisherRole::AgnocastOnly);
 
     auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);

@@ -20,14 +20,14 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_n
   const rclcpp::QoS & sub_qos)
 {
   using MsgT = @(cpp_type);
-  using AgnoPub = agnocast::BasicPublisher<MsgT, agnocast::NoBridgeRegistrationPolicy>;
+  using AgnoPub = agnocast::Publisher<MsgT>;
 
   auto agno_pub = std::make_shared<AgnoPub>(
     node.get(),
     topic_name,
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(),
     agnocast::PublisherOptions{},
-    true);
+    agnocast::PublisherRole::BridgeInternal);
 
   return create_r2a_generic_bridge(
     node, topic_name, sub_qos, "@(msg_type)",
