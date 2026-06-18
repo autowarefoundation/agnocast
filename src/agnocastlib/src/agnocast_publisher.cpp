@@ -231,8 +231,16 @@ rclcpp::QoS PublisherBase::init_base(
   generate_gid();
 
   if (role == PublisherRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, type_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    } else {
+      RCLCPP_WARN(
+        logger,
+        "Bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
   }
 
   return actual_qos;

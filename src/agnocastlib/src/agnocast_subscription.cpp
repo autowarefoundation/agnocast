@@ -53,8 +53,16 @@ void SubscriptionBase::initialize(
   id_ = add_subscriber_args.ret_id;
 
   if (role == SubscriptionRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    } else {
+      RCLCPP_WARN(
+        logger,
+        "Bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
   }
 }
 
