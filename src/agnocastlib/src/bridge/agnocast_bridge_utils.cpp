@@ -30,7 +30,7 @@ BridgeMode get_bridge_mode()
   if (val == "0" || val == "off") {
     return BridgeMode::Off;
   }
-  if (val == "3" || val == "on") {
+  if (val == "on") {
     return BridgeMode::On;
   }
   if (val == "1" || val == "standard") {

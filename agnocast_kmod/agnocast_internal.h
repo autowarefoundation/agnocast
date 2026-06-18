@@ -57,10 +57,10 @@ struct exit_subscription_entry
 struct process_info
 {
   bool exited;
-  // Used to track whether this process is an alive Performance Bridge Manager.
-  // Standard Bridge Manager also updates this flag for consistency, but the flag
-  // is not used for Standard Bridge spawn decisions (Standard bridges are spawned
-  // per-process, not per-IPC-namespace).
+  // Tracks whether this process is the alive Bridge Manager for the IPC namespace.
+  // The name is kept as "is_performance_bridge_manager" for ABI compatibility with existing
+  // kmod interfaces, even though the Standard Bridge has been removed and this now refers
+  // to the single unified Bridge Manager.
   bool is_performance_bridge_manager;
   pid_t global_pid;
   pid_t local_pid;
