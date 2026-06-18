@@ -75,7 +75,7 @@ class BridgeControlSocket:
         """Connect to the socket, receive the JSON payload, and return a typed result.
 
         The daemon sends a JSON payload immediately on connection:
-        ``{"type":"standard"|"performance","ipc_ns":<int>,"pid":<int>}``
+        ``{"type":"performance","ipc_ns":<int>,"pid":<int>}``
         """
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         chunks: list[bytes] = []
@@ -116,44 +116,40 @@ _NG_MSG_UNKNOWN_TYPE = (
     'Response contains an unknown bridge type. '
     'Please ensure the CLI and agnocastlib versions are compatible.'
 )
+_NG_MSG_STANDARD_TYPE = (
+    'Response contains a standard bridge type, which is no longer supported. '
+    'Please ensure the CLI and agnocastlib versions are compatible.'
+)
 
 @dataclass
 class _BridgeResult:
     pid: int
     ipc_ns: int
-    bridge_type: str  # 'performance', 'standard', or 'unknown'
+    bridge_type: str  # 'performance' or 'unknown'
     is_ok: bool
     ng_message: str = field(default='')
 
 
 def _build_summary(results: list[_BridgeResult]) -> tuple[str, bool]:
-    perf_results = [r for r in results if r.bridge_type == 'performance']
-    std_results = [r for r in results if r.bridge_type == 'standard']
-
     if not results:
-        return 'NG. There is no bridge daemon process.', True
-    if len(perf_results) >= 2:
-        pids = ', '.join(str(r.pid) for r in perf_results)
-        return f'NG. There are multiple performance bridge processes. (PIDs: {pids})', True
-    if perf_results and std_results:
-        pids = ', '.join(str(r.pid) for r in results)
-        return f'NG. Both performance and standard bridge processes exist. (PIDs: {pids})', True
+        return 'NG. The bridge daemon is not running.', True
 
-    first_ng_result = next((r for r in results if not r.is_ok), None)
-    if first_ng_result is not None:
-        pid = first_ng_result.pid
-        if first_ng_result.bridge_type == 'performance':
-            return f'NG. The performance bridge process is not working. (PID: {pid})', True
-        if first_ng_result.bridge_type == 'standard':
-            return f'NG. A standard bridge process is not working. (PID: {pid})', True
-        return f'NG. A bridge process is not working. (PID: {pid})', True
+    ok_results = [r for r in results if r.is_ok]
+    ng_results = [r for r in results if not r.is_ok]
 
-    if perf_results:
-        return f'OK. A performance bridge is running. (PID: {perf_results[0].pid})', False
-    if len(std_results) == 1:
-        return f'OK. A standard bridge is running. (PID: {std_results[0].pid})', False
-    pids = ', '.join(str(r.pid) for r in std_results)
-    return f'OK. Standard bridges are running. (PIDs: {pids})', False
+    if ng_results:
+        first_ng = ng_results[0]
+        return (
+            f'NG. A bridge daemon is not working.'
+            f' (PID: {first_ng.pid}): {first_ng.ng_message}',
+            True,
+        )
+
+    if len(ok_results) >= 2:
+        pids = ', '.join(str(r.pid) for r in ok_results)
+        return f'NG. Multiple bridge daemons are running. (PIDs: {pids})', True
+
+    return f'OK. The bridge daemon is running. (PID: {ok_results[0].pid})', False
 
 
 class BridgeDaemonStatusVerb(VerbExtension):
@@ -208,7 +204,17 @@ class BridgeDaemonStatusVerb(VerbExtension):
                 continue
 
             bridge_type = recv_result.type
-            if bridge_type not in ('performance', 'standard'):
+            if bridge_type == 'standard':
+                results.append(_BridgeResult(
+                    pid=pid,
+                    ipc_ns=ipc_inode,
+                    bridge_type='unknown',
+                    is_ok=False,
+                    ng_message=_NG_MSG_STANDARD_TYPE,
+                ))
+                continue
+
+            if bridge_type != 'performance':
                 results.append(_BridgeResult(
                     pid=pid,
                     ipc_ns=ipc_inode,
@@ -255,14 +261,7 @@ class BridgeDaemonStatusVerb(VerbExtension):
             print(f'IPC namespace inode: {ipc_inode}')
             print()
 
-        if verbose:
-            print('Summary:')
-            print(f'  {summary}')
-        else:
-            print(summary)
-
         if verbose and results:
-            print()
             print('Bridge Status:')
             type_width = max(len(f'({r.bridge_type.capitalize()})') for r in results)
             pid_width = max(len(str(r.pid)) for r in results)
@@ -273,5 +272,8 @@ class BridgeDaemonStatusVerb(VerbExtension):
                     print(f'  PID {pid_str} {type_label} OK')
                 else:
                     print(f'  PID {pid_str} {type_label} NG: {r.ng_message}')
+            print()
+
+        print(summary)
 
         return 1 if is_ng else 0
