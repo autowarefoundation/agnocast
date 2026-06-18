@@ -217,7 +217,7 @@ rclcpp::QoS PublisherBase::init_base(
   topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
 
   auto node_parameters = node->get_node_parameters_interface();
-  const rclcpp::QoS actual_qos = options.qos_overriding_options.get_policy_kinds().size()
+  const rclcpp::QoS actual_qos = !options.qos_overriding_options.get_policy_kinds().empty()
                                    ? rclcpp::detail::declare_qos_parameters(
                                        options.qos_overriding_options, node_parameters, topic_name_,
                                        qos, rclcpp::detail::PublisherQosParametersTraits{})
