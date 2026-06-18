@@ -14,6 +14,7 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_get_subscriber_qos.o \
   agnocast_kunit_add_bridge.o \
   agnocast_kunit_remove_bridge.o \
+  agnocast_kunit_domain_bridge.o \
   agnocast_kunit_set_ros2_subscriber_num.o \
   agnocast_kunit_set_ros2_publisher_num.o \
   agnocast_kunit_do_exit.o \
