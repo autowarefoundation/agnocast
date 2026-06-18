@@ -43,8 +43,10 @@ from ros2agnocast_discovery_msgs.msg import (
     AgnocastEndpoint,
     AgnocastTopic,
 )
+import yaml
 
 from . import bridge_decider
+from . import domain_bridge_config
 from .type_registry import TypeRegistryReader
 
 
@@ -104,6 +106,10 @@ def _load_ioctl_wrapper():
     lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
     lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
     lib.free_agnocast_topic_info_ret.restype = None
+
+    lib.add_agnocast_domain_bridge_rule.argtypes = [
+        ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32]
+    lib.add_agnocast_domain_bridge_rule.restype = ctypes.c_int
 
     return lib
 
@@ -372,10 +378,33 @@ class DiscoveryAgent(Node):
 
         self._timer = self.create_timer(PUBLISH_INTERVAL_SEC, self._on_tick)
 
+        # Inject domain bridge rules at startup, before application endpoints can
+        # join (the kmod rejects a rule once a domain has allocated ids).
+        self._register_domain_bridge_rules()
+
         self.get_logger().info(
             f'agnocast_discovery_agent up: host_uuid={self._host_uuid} '
             f'hostname={self._host_hostname} ipc_ns_inode={self._ipc_ns_inode} '
             f'version={self._agnocast_version}')
+
+    def _register_domain_bridge_rules(self) -> None:
+        path = os.environ.get(domain_bridge_config.CONFIG_ENV)
+        if not path:
+            return
+        try:
+            rules = domain_bridge_config.load_domain_bridge_rules(path)
+        except (OSError, yaml.YAMLError) as e:
+            self.get_logger().warning(f'could not load domain bridge config {path}: {e}')
+            return
+        for topic, from_domain, to_domain in rules:
+            # Idempotent in the kmod, so every per-domain agent in this namespace
+            # may register the same rule without conflict.
+            ret = self._lib.add_agnocast_domain_bridge_rule(
+                topic.encode('utf-8'), from_domain, to_domain)
+            if ret != 0:
+                self.get_logger().warning(
+                    f'failed to register domain bridge rule '
+                    f'{topic} {from_domain}->{to_domain} (ret={ret})')
 
     def _on_tick(self) -> None:
         self._registry.rebuild()

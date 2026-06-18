@@ -1,0 +1,43 @@
+#include "agnocast_ioctl.hpp"
+
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+
+extern "C" {
+
+// Register a domain bridge rule with the kmod so it relays the topic between
+// from_domain and to_domain within this process's IPC namespace. Returns 0 on
+// success, -1 on failure.
+int add_agnocast_domain_bridge_rule(
+  const char * topic_name, uint32_t from_domain, uint32_t to_domain)
+{
+  int fd = open("/dev/agnocast", O_RDONLY);
+  if (fd < 0) {
+    if (errno == ENOENT) {
+      fprintf(stderr, "%s", AGNOCAST_DEVICE_NOT_FOUND_MSG);
+    } else {
+      perror("Failed to open /dev/agnocast");
+    }
+    return -1;
+  }
+
+  ioctl_add_domain_bridge_args args = {};
+  args.topic_name = {topic_name, strlen(topic_name)};
+  args.from_domain = from_domain;
+  args.to_domain = to_domain;
+
+  if (ioctl(fd, AGNOCAST_ADD_DOMAIN_BRIDGE_CMD, &args) < 0) {
+    perror("AGNOCAST_ADD_DOMAIN_BRIDGE_CMD failed");
+    close(fd);
+    return -1;
+  }
+
+  close(fd);
+  return 0;
+}
+}
