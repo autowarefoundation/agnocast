@@ -91,6 +91,15 @@ static int add_topic(
     return -ENOMEM;
   }
 
+  (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
+  if (!(*wrapper)->topic) {
+    dev_warn(
+      agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n", topic_name,
+      __func__);
+    kfree(*wrapper);
+    return -ENOMEM;
+  }
+
   (*wrapper)->ipc_ns = ipc_ns;
   (*wrapper)->domain_id = domain_id;
   (*wrapper)->key = kstrdup(topic_name, GFP_KERNEL);
@@ -98,18 +107,19 @@ static int add_topic(
     dev_warn(
       agnocast_device, "Failed to add a new topic (topic_name=%s) by kstrdup. (%s)\n", topic_name,
       __func__);
+    kfree((*wrapper)->topic);
     kfree(*wrapper);
     return -ENOMEM;
   }
 
-  init_rwsem(&(*wrapper)->topic_rwsem);
-  (*wrapper)->topic.entries = RB_ROOT;
-  hash_init((*wrapper)->topic.pub_info_htable);
-  hash_init((*wrapper)->topic.sub_info_htable);
-  (*wrapper)->topic.current_pubsub_id = 0;
-  (*wrapper)->topic.current_entry_id = 0;
-  (*wrapper)->topic.ros2_subscriber_num = 0;
-  (*wrapper)->topic.ros2_publisher_num = 0;
+  init_rwsem(&(*wrapper)->topic->rwsem);
+  (*wrapper)->topic->entries = RB_ROOT;
+  hash_init((*wrapper)->topic->pub_info_htable);
+  hash_init((*wrapper)->topic->sub_info_htable);
+  (*wrapper)->topic->current_pubsub_id = 0;
+  (*wrapper)->topic->current_entry_id = 0;
+  (*wrapper)->topic->ros2_subscriber_num = 0;
+  (*wrapper)->topic->ros2_publisher_num = 0;
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
   dev_dbg(agnocast_device, "Topic (topic_name=%s) added. (%s)\n", topic_name, __func__);
@@ -132,7 +142,7 @@ static struct subscriber_info * find_subscriber_info(
 {
   struct subscriber_info * info;
   uint32_t hash_val = hash_min(subscriber_id, SUB_INFO_HASH_BITS);
-  hash_for_each_possible(wrapper->topic.sub_info_htable, info, node, hash_val)
+  hash_for_each_possible(wrapper->topic->sub_info_htable, info, node, hash_val)
   {
     if (info->id == subscriber_id) {
       return info;
@@ -159,13 +169,13 @@ static int insert_subscriber_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+  if (wrapper->topic->current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
       agnocast_device,
       "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
       "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
       "added. (%s)\n",
-      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
+      wrapper->topic->current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
     return -ENOSPC;
   }
 
@@ -180,8 +190,8 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
-  const topic_local_id_t new_id = wrapper->topic.current_pubsub_id;
-  wrapper->topic.current_pubsub_id++;
+  const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
+  wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
   (*new_info)->pid = subscriber_pid;
@@ -191,7 +201,7 @@ static int insert_subscriber_info(
   if (qos_is_transient_local) {
     (*new_info)->latest_received_entry_id = -1;
   } else {
-    (*new_info)->latest_received_entry_id = wrapper->topic.current_entry_id++;
+    (*new_info)->latest_received_entry_id = wrapper->topic->current_entry_id++;
   }
   (*new_info)->node_name = node_name_copy;
   (*new_info)->is_take_sub = is_take_sub;
@@ -200,7 +210,7 @@ static int insert_subscriber_info(
   (*new_info)->is_bridge = is_bridge;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
-  hash_add(wrapper->topic.sub_info_htable, &(*new_info)->node, hash_val);
+  hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -214,7 +224,7 @@ static int insert_subscriber_info(
   if (qos_is_transient_local) {
     struct publisher_info * pub_info;
     int bkt_pub_info;
-    hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+    hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
     {
       if (!pub_info->qos_is_transient_local) {
         dev_warn(
@@ -235,7 +245,7 @@ static struct publisher_info * find_publisher_info(
 {
   struct publisher_info * info;
   uint32_t hash_val = hash_min(publisher_id, PUB_INFO_HASH_BITS);
-  hash_for_each_possible(wrapper->topic.pub_info_htable, info, node, hash_val)
+  hash_for_each_possible(wrapper->topic->pub_info_htable, info, node, hash_val)
   {
     if (info->id == publisher_id) {
       return info;
@@ -261,13 +271,13 @@ static int insert_publisher_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic.current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+  if (wrapper->topic->current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
       agnocast_device,
       "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
       "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
       "added. (%s)\n",
-      wrapper->topic.current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
+      wrapper->topic->current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
     return -ENOSPC;
   }
 
@@ -282,8 +292,8 @@ static int insert_publisher_info(
     return -ENOMEM;
   }
 
-  const topic_local_id_t new_id = wrapper->topic.current_pubsub_id;
-  wrapper->topic.current_pubsub_id++;
+  const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
+  wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
   (*new_info)->pid = publisher_pid;
@@ -294,7 +304,7 @@ static int insert_publisher_info(
   (*new_info)->is_bridge = is_bridge;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
-  hash_add(wrapper->topic.pub_info_htable, &(*new_info)->node, hash_val);
+  hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -308,7 +318,7 @@ static int insert_publisher_info(
   if (!qos_is_transient_local) {
     struct subscriber_info * sub_info;
     int bkt_sub_info;
-    hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+    hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
     {
       if (sub_info->qos_is_transient_local) {
         dev_warn(
@@ -348,7 +358,7 @@ static int add_subscriber_reference(struct entry_node * en, const topic_local_id
 static struct entry_node * find_message_entry(
   struct topic_wrapper * wrapper, const int64_t entry_id)
 {
-  struct rb_root * root = &wrapper->topic.entries;
+  struct rb_root * root = &wrapper->topic->entries;
   struct rb_node ** new = &(root->rb_node);
 
   while (*new) {
@@ -386,7 +396,7 @@ int agnocast_ioctl_release_message_entry_reference(
     goto unlock_only_global;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   struct entry_node * en = find_message_entry(wrapper, entry_id);
   if (!en) {
@@ -418,7 +428,7 @@ int agnocast_ioctl_release_message_entry_reference(
   }
 
 unlock_all:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -433,14 +443,14 @@ static int insert_message_entry(
     return -ENOMEM;
   }
 
-  new_node->entry_id = wrapper->topic.current_entry_id++;
+  new_node->entry_id = wrapper->topic->current_entry_id++;
   new_node->publisher_id = pub_info->id;
   new_node->msg_virtual_address = msg_virtual_address;
   // Publisher-side handles do not participate in reference counting.
   // Subscribers will add their references when they receive/take the message.
   bitmap_zero(new_node->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 
-  struct rb_root * root = &wrapper->topic.entries;
+  struct rb_root * root = &wrapper->topic->entries;
   struct rb_node ** new = &(root->rb_node);
   struct rb_node * parent = NULL;
 
@@ -485,7 +495,7 @@ static int set_publisher_shm_info(
   uint32_t publisher_num = 0;
   struct publisher_info * pub_info;
   int bkt;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
     if (subscriber_pid == pub_info->pid) {
       continue;
@@ -690,7 +700,7 @@ int agnocast_ioctl_add_publisher(
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;
   int bkt_sub_info;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     sub_info->need_mmap_update = true;
   }
@@ -722,7 +732,7 @@ static int release_msgs_to_meet_depth(
       wrapper->key, pub_info->id, pub_info->entries_num, __func__);
   }
 
-  struct rb_node * node = rb_first(&wrapper->topic.entries);
+  struct rb_node * node = rb_first(&wrapper->topic->entries);
   if (!node) {
     dev_warn(
       agnocast_device,
@@ -768,7 +778,7 @@ static int release_msgs_to_meet_depth(
     ioctl_ret->ret_released_addrs[ioctl_ret->ret_released_num] = en->msg_virtual_address;
     ioctl_ret->ret_released_num++;
 
-    rb_erase(&en->node, &wrapper->topic.entries);
+    rb_erase(&en->node, &wrapper->topic->entries);
     kfree(en);
 
     pub_info->entries_num--;
@@ -808,7 +818,7 @@ int agnocast_ioctl_publish_msg(
     goto unlock_only_global;
   }
 
-  down_write(&wrapper->topic_rwsem);
+  down_write(&wrapper->topic->rwsem);
 
   struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
   if (!pub_info) {
@@ -847,7 +857,7 @@ int agnocast_ioctl_publish_msg(
   uint32_t subscriber_num = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
@@ -859,7 +869,7 @@ int agnocast_ioctl_publish_msg(
   ioctl_ret->ret_subscriber_num = subscriber_num;
 
 unlock_all:
-  up_write(&wrapper->topic_rwsem);
+  up_write(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -891,7 +901,7 @@ static int receive_msg_core(
   ioctl_ret->ret_entry_num = 0;
   ioctl_ret->ret_call_again = false;
 
-  struct rb_node * newest_node = rb_last(&wrapper->topic.entries);
+  struct rb_node * newest_node = rb_last(&wrapper->topic->entries);
   if (!newest_node) {
     return 0;
   }
@@ -905,7 +915,7 @@ static int receive_msg_core(
   const int64_t start_entry_id =
     (qos_start > latest_received_entry_id) ? qos_start : (latest_received_entry_id + 1);
 
-  struct rb_node * node = find_first_entry_ge(&wrapper->topic.entries, start_entry_id);
+  struct rb_node * node = find_first_entry_ge(&wrapper->topic->entries, start_entry_id);
 
   for (; node; node = rb_next(node)) {
     struct entry_node * en = container_of(node, struct entry_node, node);
@@ -968,7 +978,7 @@ int agnocast_ioctl_receive_msg(
   }
 
   // Use write lock because we modify sub_info fields (latest_received_entry_id, need_mmap_update)
-  down_write(&wrapper->topic_rwsem);
+  down_write(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
@@ -1001,7 +1011,7 @@ int agnocast_ioctl_receive_msg(
   sub_info->need_mmap_update = false;
 
 unlock_all:
-  up_write(&wrapper->topic_rwsem);
+  up_write(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1025,7 +1035,7 @@ int agnocast_ioctl_take_msg(
   }
 
   // Use write lock because we modify sub_info fields (latest_received_entry_id, need_mmap_update)
-  down_write(&wrapper->topic_rwsem);
+  down_write(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
@@ -1042,7 +1052,7 @@ int agnocast_ioctl_take_msg(
 
   uint32_t searched_count = 0;
   struct entry_node * candidate_en = NULL;
-  struct rb_node * node = rb_last(&wrapper->topic.entries);
+  struct rb_node * node = rb_last(&wrapper->topic->entries);
   while (node && searched_count < sub_info->qos_depth) {
     struct entry_node * en = container_of(node, struct entry_node, node);
     node = rb_prev(node);
@@ -1115,7 +1125,7 @@ int agnocast_ioctl_take_msg(
   sub_info->need_mmap_update = false;
 
 unlock_all:
-  up_write(&wrapper->topic_rwsem);
+  up_write(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1144,14 +1154,14 @@ int agnocast_ioctl_get_subscriber_num(
     return 0;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
 
   struct subscriber_info * sub_info;
   int bkt_sub;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
     if (sub_info->is_bridge) {
       ioctl_ret->ret_a2r_bridge_exist = true;
@@ -1165,7 +1175,7 @@ int agnocast_ioctl_get_subscriber_num(
 
   struct publisher_info * pub_info;
   int bkt_pub;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub, pub_info, node)
   {
     if (pub_info->is_bridge) {
       ioctl_ret->ret_r2a_bridge_exist = true;
@@ -1175,9 +1185,9 @@ int agnocast_ioctl_get_subscriber_num(
 
   ioctl_ret->ret_other_process_subscriber_num = inter_count;
   ioctl_ret->ret_same_process_subscriber_num = intra_count;
-  ioctl_ret->ret_ros2_subscriber_num = wrapper->topic.ros2_subscriber_num;
+  ioctl_ret->ret_ros2_subscriber_num = wrapper->topic->ros2_subscriber_num;
 
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
   up_read(&global_htables_rwsem);
 
   return 0;
@@ -1192,9 +1202,9 @@ int agnocast_ioctl_set_ros2_subscriber_num(
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
   if (wrapper) {
-    down_write(&wrapper->topic_rwsem);
-    wrapper->topic.ros2_subscriber_num = count;
-    up_write(&wrapper->topic_rwsem);
+    down_write(&wrapper->topic->rwsem);
+    wrapper->topic->ros2_subscriber_num = count;
+    up_write(&wrapper->topic->rwsem);
   } else {
     ret = -ENOENT;
   }
@@ -1212,9 +1222,9 @@ int agnocast_ioctl_set_ros2_publisher_num(
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
   if (wrapper) {
-    down_write(&wrapper->topic_rwsem);
-    wrapper->topic.ros2_publisher_num = count;
-    up_write(&wrapper->topic_rwsem);
+    down_write(&wrapper->topic->rwsem);
+    wrapper->topic->ros2_publisher_num = count;
+    up_write(&wrapper->topic->rwsem);
   } else {
     ret = -ENOENT;
   }
@@ -1241,14 +1251,14 @@ int agnocast_ioctl_get_publisher_num(
     return 0;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   ioctl_ret->ret_publisher_num = agnocast_get_size_pub_info_htable(wrapper);
-  ioctl_ret->ret_ros2_publisher_num = wrapper->topic.ros2_publisher_num;
+  ioctl_ret->ret_ros2_publisher_num = wrapper->topic->ros2_publisher_num;
 
   struct publisher_info * pub_info;
   int bkt_pub;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub, pub_info, node)
   {
     if (pub_info->is_bridge) {
       ioctl_ret->ret_r2a_bridge_exist = true;
@@ -1258,7 +1268,7 @@ int agnocast_ioctl_get_publisher_num(
 
   struct subscriber_info * sub_info;
   int bkt_sub;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
     if (sub_info->is_bridge) {
       ioctl_ret->ret_a2r_bridge_exist = true;
@@ -1266,7 +1276,7 @@ int agnocast_ioctl_get_publisher_num(
     }
   }
 
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
   up_read(&global_htables_rwsem);
 
   return 0;
@@ -1460,12 +1470,12 @@ int agnocast_ioctl_get_node_subscriber_topics(
       continue;
     }
 
-    down_read(&wrapper->topic_rwsem);
+    down_read(&wrapper->topic->rwsem);
 
     struct subscriber_info * sub_info;
     int bkt_sub_info;
     bool found = false;
-    hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+    hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
     {
       if (strcmp(sub_info->node_name, node_name) == 0) {
         found = true;
@@ -1473,7 +1483,7 @@ int agnocast_ioctl_get_node_subscriber_topics(
       }
     }
 
-    up_read(&wrapper->topic_rwsem);
+    up_read(&wrapper->topic->rwsem);
 
     if (found) {
       if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
@@ -1522,12 +1532,12 @@ int agnocast_ioctl_get_node_publisher_topics(
       continue;
     }
 
-    down_read(&wrapper->topic_rwsem);
+    down_read(&wrapper->topic->rwsem);
 
     struct publisher_info * pub_info;
     int bkt_pub_info;
     bool found = false;
-    hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+    hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
     {
       if (strcmp(pub_info->node_name, node_name) == 0) {
         found = true;
@@ -1535,7 +1545,7 @@ int agnocast_ioctl_get_node_publisher_topics(
       }
     }
 
-    up_read(&wrapper->topic_rwsem);
+    up_read(&wrapper->topic->rwsem);
 
     if (found) {
       if (topic_num >= MAX_TOPIC_NUM || topic_num >= node_info_args->topic_name_buffer_size) {
@@ -1581,7 +1591,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
     return 0;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info;
   int bkt_sub_info;
@@ -1591,7 +1601,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
 
   // Count actual subscribers first
   uint32_t subscriber_num = 0;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     subscriber_num++;
   }
@@ -1616,7 +1626,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
   }
 
   uint32_t idx = 0;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (!sub_info->node_name) {
       kvfree(topic_info_mem);
@@ -1647,7 +1657,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
   topic_info_args->ret_topic_info_ret_num = subscriber_num;
 
 unlock:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
   up_read(&global_htables_rwsem);
   return ret;
 }
@@ -1667,7 +1677,7 @@ int agnocast_ioctl_get_topic_publisher_info(
     return 0;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   struct publisher_info * pub_info;
   int bkt_pub_info;
@@ -1677,7 +1687,7 @@ int agnocast_ioctl_get_topic_publisher_info(
 
   // Count actual publishers first
   uint32_t publisher_num = 0;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     publisher_num++;
   }
@@ -1702,7 +1712,7 @@ int agnocast_ioctl_get_topic_publisher_info(
   }
 
   uint32_t idx = 0;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     if (!pub_info->node_name) {
       kvfree(topic_info_mem);
@@ -1733,7 +1743,7 @@ int agnocast_ioctl_get_topic_publisher_info(
   topic_info_args->ret_topic_info_ret_num = publisher_num;
 
 unlock:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
   up_read(&global_htables_rwsem);
   return ret;
 }
@@ -1753,7 +1763,7 @@ int agnocast_ioctl_get_subscriber_qos(
     goto unlock_only_global;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
@@ -1771,7 +1781,7 @@ int agnocast_ioctl_get_subscriber_qos(
   args->ret_is_reliable = sub_info->qos_is_reliable;
 
 unlock_all:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1792,7 +1802,7 @@ int agnocast_ioctl_get_publisher_qos(
     goto unlock_only_global;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
   if (!pub_info) {
@@ -1809,7 +1819,7 @@ int agnocast_ioctl_get_publisher_qos(
   args->ret_is_transient_local = pub_info->qos_is_transient_local;
 
 unlock_all:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1851,7 +1861,7 @@ int agnocast_ioctl_remove_subscriber(
     goto unlock;
   }
 
-  struct rb_root * root = &wrapper->topic.entries;
+  struct rb_root * root = &wrapper->topic->entries;
   struct rb_node * node = rb_first(root);
 
   while (node) {
@@ -1866,7 +1876,7 @@ int agnocast_ioctl_remove_subscriber(
     bool publisher_exited = false;
     struct publisher_info * pub_info;
     uint32_t hash_val = hash_min(en->publisher_id, PUB_INFO_HASH_BITS);
-    hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
+    hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
     {
       if (pub_info->id == en->publisher_id) {
         const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
@@ -1891,16 +1901,17 @@ int agnocast_ioctl_remove_subscriber(
   if (
     agnocast_get_size_pub_info_htable(wrapper) == 0 &&
     agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic.entries);
+    struct rb_node * n = rb_first(&wrapper->topic->entries);
     while (n) {
       struct entry_node * en = rb_entry(n, struct entry_node, node);
       n = rb_next(n);
-      rb_erase(&en->node, &wrapper->topic.entries);
+      rb_erase(&en->node, &wrapper->topic->entries);
       kfree(en);
     }
 
     hash_del(&wrapper->node);
     kfree(wrapper->key);
+    kfree(wrapper->topic);
     kfree(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
@@ -1931,7 +1942,7 @@ int agnocast_ioctl_remove_publisher(
 
   // Publisher-side handles do not participate in reference counting, so we don't need
   // to remove publisher references. Just clean up entries that have no subscriber references.
-  struct rb_root * root = &wrapper->topic.entries;
+  struct rb_root * root = &wrapper->topic->entries;
   struct rb_node * node = rb_first(root);
   struct rb_node * next_node;
 
@@ -1962,7 +1973,7 @@ int agnocast_ioctl_remove_publisher(
   if (
     agnocast_get_size_pub_info_htable(wrapper) == 0 &&
     agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic.entries);
+    struct rb_node * n = rb_first(&wrapper->topic->entries);
     while (n) {
       struct entry_node * en = rb_entry(n, struct entry_node, node);
       n = rb_next(n);
@@ -1971,6 +1982,7 @@ int agnocast_ioctl_remove_publisher(
 
     hash_del(&wrapper->node);
     kfree(wrapper->key);
+    kfree(wrapper->topic);
     kfree(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
@@ -2862,7 +2874,7 @@ int agnocast_increment_message_entry_rc(
     goto unlock_only_global;
   }
 
-  down_read(&wrapper->topic_rwsem);
+  down_read(&wrapper->topic->rwsem);
 
   struct entry_node * en = find_message_entry(wrapper, entry_id);
   if (!en) {
@@ -2891,7 +2903,7 @@ int agnocast_increment_message_entry_rc(
   }
 
 unlock_all:
-  up_read(&wrapper->topic_rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -2937,7 +2949,7 @@ int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_nam
     return 0;
   }
 
-  struct rb_root * root = &wrapper->topic.entries;
+  struct rb_root * root = &wrapper->topic->entries;
   struct rb_node * node;
   int count = 0;
   for (node = rb_first(root); node; node = rb_next(node)) {
