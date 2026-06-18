@@ -120,6 +120,8 @@ static inline long copy_name_from_user(char * dst, size_t dst_size, const struct
   return 0;
 }
 
+struct domain_bridge_rule;
+
 struct topic_struct
 {
   struct rb_root entries;
@@ -135,6 +137,9 @@ struct topic_struct
   // bridge rule groups two domains' wrappers onto one entry/id space. The struct
   // is freed only when the last referencing wrapper is dropped.
   uint32_t wrapper_refcnt;
+  // The domain bridge rule covering this topic, or NULL if none. Cached here so
+  // the publish/receive hot path can check delivery direction without a lookup.
+  const struct domain_bridge_rule * rule;
 };
 
 struct topic_wrapper
