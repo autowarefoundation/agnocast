@@ -529,4 +529,8 @@ pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_na
 bool agnocast_get_domain_rule(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
   uint32_t * domain_b, bool * a_to_b, bool * b_to_a);
+// Returns the shared topic_struct's wrapper refcount for the wrapper in domain_id,
+// or 0 if no such wrapper exists. Used to observe domain-bridge grouping.
+int agnocast_topic_wrapper_refcnt(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id);
 #endif

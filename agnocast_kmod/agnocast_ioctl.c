@@ -74,6 +74,38 @@ static struct topic_wrapper * find_topic_for_current(
   return find_topic(topic_name, ipc_ns, get_current_domain_id());
 }
 
+static struct domain_bridge_rule * find_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns);
+
+// If a domain bridge rule pairs this domain with another whose wrapper already
+// exists, return that partner's topic_struct so the new wrapper can share it.
+static struct topic_struct * find_grouped_topic_struct(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
+{
+  const struct domain_bridge_rule * rule = find_domain_rule(topic_name, ipc_ns);
+  if (!rule) return NULL;
+
+  uint32_t partner_domain;
+  if (domain_id == rule->domain_a) {
+    partner_domain = rule->domain_b;
+  } else if (domain_id == rule->domain_b) {
+    partner_domain = rule->domain_a;
+  } else {
+    return NULL;
+  }
+
+  struct topic_wrapper * partner = find_topic(topic_name, ipc_ns, partner_domain);
+  return partner ? partner->topic : NULL;
+}
+
+// Whether a publication in pub_domain may be delivered to a subscriber in
+// sub_domain within a (possibly grouped) topic_struct. Same domain is always
+// allowed; cross-domain delivery is opened per rule direction in a later change.
+static bool domain_delivery_allowed(uint32_t pub_domain, uint32_t sub_domain)
+{
+  return pub_domain == sub_domain;
+}
+
 static int add_topic(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
@@ -91,35 +123,41 @@ static int add_topic(
     return -ENOMEM;
   }
 
-  (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
-  if (!(*wrapper)->topic) {
-    dev_warn(
-      agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n", topic_name,
-      __func__);
-    kfree(*wrapper);
-    return -ENOMEM;
-  }
-
-  (*wrapper)->ipc_ns = ipc_ns;
-  (*wrapper)->domain_id = domain_id;
   (*wrapper)->key = kstrdup(topic_name, GFP_KERNEL);
   if (!(*wrapper)->key) {
     dev_warn(
       agnocast_device, "Failed to add a new topic (topic_name=%s) by kstrdup. (%s)\n", topic_name,
       __func__);
-    kfree((*wrapper)->topic);
     kfree(*wrapper);
     return -ENOMEM;
   }
+  (*wrapper)->ipc_ns = ipc_ns;
+  (*wrapper)->domain_id = domain_id;
 
-  init_rwsem(&(*wrapper)->topic->rwsem);
-  (*wrapper)->topic->entries = RB_ROOT;
-  hash_init((*wrapper)->topic->pub_info_htable);
-  hash_init((*wrapper)->topic->sub_info_htable);
-  (*wrapper)->topic->current_pubsub_id = 0;
-  (*wrapper)->topic->current_entry_id = 0;
-  (*wrapper)->topic->ros2_subscriber_num = 0;
-  (*wrapper)->topic->ros2_publisher_num = 0;
+  struct topic_struct * grouped = find_grouped_topic_struct(topic_name, ipc_ns, domain_id);
+  if (grouped) {
+    (*wrapper)->topic = grouped;
+    grouped->wrapper_refcnt++;
+  } else {
+    (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
+    if (!(*wrapper)->topic) {
+      dev_warn(
+        agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n", topic_name,
+        __func__);
+      kfree((*wrapper)->key);
+      kfree(*wrapper);
+      return -ENOMEM;
+    }
+    init_rwsem(&(*wrapper)->topic->rwsem);
+    (*wrapper)->topic->entries = RB_ROOT;
+    hash_init((*wrapper)->topic->pub_info_htable);
+    hash_init((*wrapper)->topic->sub_info_htable);
+    (*wrapper)->topic->current_pubsub_id = 0;
+    (*wrapper)->topic->current_entry_id = 0;
+    (*wrapper)->topic->ros2_subscriber_num = 0;
+    (*wrapper)->topic->ros2_publisher_num = 0;
+    (*wrapper)->topic->wrapper_refcnt = 1;
+  }
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
   dev_dbg(agnocast_device, "Topic (topic_name=%s) added. (%s)\n", topic_name, __func__);
@@ -194,6 +232,7 @@ static int insert_subscriber_info(
   wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
+  (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = subscriber_pid;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
@@ -296,6 +335,7 @@ static int insert_publisher_info(
   wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
+  (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = publisher_pid;
   (*new_info)->node_name = node_name_copy;
   (*new_info)->qos_depth = qos_depth;
@@ -860,6 +900,7 @@ int agnocast_ioctl_publish_msg(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
+    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) continue;
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
@@ -941,6 +982,10 @@ static int receive_msg_core(
     }
 
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
+    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) {
       continue;
     }
 
@@ -1082,6 +1127,10 @@ int agnocast_ioctl_take_msg(
     }
 
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
+    if (!domain_delivery_allowed(pub_info->domain_id, sub_info->domain_id)) {
       continue;
     }
 
@@ -1898,21 +1947,8 @@ int agnocast_ioctl_remove_subscriber(
     }
   }
 
-  if (
-    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-    agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic->entries);
-    while (n) {
-      struct entry_node * en = rb_entry(n, struct entry_node, node);
-      n = rb_next(n);
-      rb_erase(&en->node, &wrapper->topic->entries);
-      kfree(en);
-    }
-
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+  if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+    agnocast_release_topic_wrapper(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 
@@ -3180,6 +3216,13 @@ bool agnocast_get_domain_rule(
   *a_to_b = rule->a_to_b;
   *b_to_a = rule->b_to_a;
   return true;
+}
+
+int agnocast_topic_wrapper_refcnt(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
+{
+  const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, domain_id);
+  return wrapper ? (int)wrapper->topic->wrapper_refcnt : 0;
 }
 
 #endif
