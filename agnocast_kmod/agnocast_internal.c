@@ -167,6 +167,39 @@ int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper)
   return count;
 }
 
+bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
+{
+  struct publisher_info * pub_info;
+  struct subscriber_info * sub_info;
+  int bkt;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
+  {
+    if (pub_info->domain_id == wrapper->domain_id) return true;
+  }
+  hash_for_each(wrapper->topic->sub_info_htable, bkt, sub_info, node)
+  {
+    if (sub_info->domain_id == wrapper->domain_id) return true;
+  }
+  return false;
+}
+
+void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
+{
+  hash_del(&wrapper->node);
+  kfree(wrapper->key);
+  if (--wrapper->topic->wrapper_refcnt == 0) {
+    struct rb_node * node = rb_first(&wrapper->topic->entries);
+    while (node) {
+      struct entry_node * en = rb_entry(node, struct entry_node, node);
+      node = rb_next(node);
+      rb_erase(&en->node, &wrapper->topic->entries);
+      kfree(en);
+    }
+    kfree(wrapper->topic);
+  }
+  kfree(wrapper);
+}
+
 bool agnocast_is_referenced(struct entry_node * en)
 {
   return !bitmap_empty(en->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
@@ -301,14 +334,9 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 
     pre_handler_subscriber_exit(wrapper, pid, proc_info);
 
-    // Check if we can release the topic_wrapper
-    if (
-      agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-      agnocast_get_size_sub_info_htable(wrapper) == 0) {
-      hash_del(&wrapper->node);
-      kfree(wrapper->key);
-      kfree(wrapper->topic);
-      kfree(wrapper);
+    // Release this wrapper once its own domain has no endpoints left.
+    if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+      agnocast_release_topic_wrapper(wrapper);
     }
   }
 
