@@ -57,9 +57,9 @@ void SubscriptionBase::initialize(
       register_pubsub_bridge_by_type_name(
         topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
     } else {
-      RCLCPP_WARN(
+      RCLCPP_ERROR(
         logger,
-        "Bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "R2A bridge registration is skipped because the type_name is empty (topic: '%s'). "
         "Please make sure to specify the valid message type in normal use case.",
         topic_name_.c_str());
     }
