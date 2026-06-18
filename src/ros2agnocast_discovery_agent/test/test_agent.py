@@ -165,6 +165,20 @@ def test_read_local_topics_stamps_domain_id():
     assert domain_arg == 7
 
 
+def test_read_local_topics_filters_by_own_domain():
+    """A per-(NS, domain) agent reports only its own domain's topics."""
+    lib = _make_mock_lib(
+        {
+            '/chatter': {'pub': [_make_info('/talker_d1')], 'sub': []},
+            '/mrm': {'pub': [_make_info('/talker_d3')], 'sub': []},
+        },
+        topic_domains={'/chatter': 1, '/mrm': 3})
+
+    topics = read_local_topics(lib, own_domain_id=1)
+    assert [t.topic_name for t in topics] == ['/chatter']
+    assert topics[0].domain_id == 1
+
+
 def test_read_local_topics_resolves_type_from_registry():
     """A registry entry for any endpoint on the topic populates `type_name`."""
     from ros2agnocast_discovery_agent.type_registry import RegistryEntry

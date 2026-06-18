@@ -133,13 +133,21 @@ def _ioctl_to_endpoint(
     return ep
 
 
-def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
+def read_local_topics(
+        lib, registry: TypeRegistryReader | None = None,
+        own_domain_id: int | None = None) -> list:
     """Snapshot the current namespace's Agnocast topics via the ioctl wrapper.
 
     Returns a list of AgnocastTopic msgs. The ioctl returns only the caller's
     IPC namespace, so the daemon process just being inside that namespace is
     sufficient to scope the result. The optional ``registry`` argument
     supplies the type names and pids that the ioctl does not expose.
+
+    When ``own_domain_id`` is given, only topics in that domain are returned.
+    Each agent is per-(IPC namespace, domain) and gossips on its own DDS domain,
+    so it must report only its own domain's topics; otherwise it would leak
+    other domains' endpoints onto its channel and let its bridge decider issue
+    requests for domains it does not own.
     """
     topic_count = ctypes.c_int()
     # The wrapper allocates the domain array (sized to match the name buffer) and
@@ -158,6 +166,8 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
             # The same topic name can occur once per domain; each row is a
             # distinct (name, domain) pair that becomes its own AgnocastTopic.
             domain_id = domain_ids_ptr[i]
+            if own_domain_id is not None and domain_id != own_domain_id:
+                continue
 
             agnocast_topic = AgnocastTopic()
             agnocast_topic.topic_name = topic_name
@@ -413,7 +423,7 @@ class DiscoveryAgent(Node):
         msg.host_uuid = self._host_uuid
         msg.host_hostname = self._host_hostname
         msg.ipc_ns_inode = self._ipc_ns_inode
-        msg.topics = read_local_topics(self._lib, self._registry)
+        msg.topics = read_local_topics(self._lib, self._registry, self._domain_id)
         return msg
 
     def _on_remote_state(self, msg: AgnocastDaemonState) -> None:
