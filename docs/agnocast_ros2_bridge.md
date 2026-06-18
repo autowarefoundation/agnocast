@@ -38,7 +38,7 @@ Agnocast supports the following bridge modes controlled by the `AGNOCAST_BRIDGE_
 | Mode | Value | Description |
 |------|-------|-------------|
 | Off | `0` or `off` | Bridge disabled; no ROS 2 interoperability |
-| On | `3` or `on` | Bridge enabled (default). One bridge manager per IPC namespace |
+| On | `on` | Bridge enabled (default). One bridge manager per IPC namespace |
 
 **Note:**
 
@@ -78,8 +78,6 @@ Set `AGNOCAST_BRIDGE_MODE` before launching your application:
 ```bash
 # Bridge enabled (default)
 export AGNOCAST_BRIDGE_MODE=on
-# OR
-export AGNOCAST_BRIDGE_MODE=3
 
 # Disable bridge
 export AGNOCAST_BRIDGE_MODE=off
