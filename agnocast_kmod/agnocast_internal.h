@@ -165,6 +165,22 @@ struct bridge_info
 
 extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
+// A domain bridge rule relays one topic between two ROS domains within one IPC
+// namespace (from_domain -> to_domain). v1 supports a single domain pair per
+// (topic, ipc_ns); see agnocast_ioctl_add_domain_bridge.
+struct domain_bridge_rule
+{
+  char * topic_name;
+  const struct ipc_namespace * ipc_ns;
+  uint32_t domain_a;  // canonical ordering: domain_a < domain_b
+  uint32_t domain_b;
+  bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
+  bool b_to_a;
+  struct hlist_node node;
+};
+
+extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 
 int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper);

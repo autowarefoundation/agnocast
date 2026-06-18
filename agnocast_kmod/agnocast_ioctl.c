@@ -2093,6 +2093,82 @@ unlock:
   return ret;
 }
 
+static struct domain_bridge_rule * find_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns)
+{
+  struct domain_bridge_rule * rule;
+  uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
+  hash_for_each_possible(domain_rule_htable, rule, node, hash_val)
+  {
+    if (ipc_ns == rule->ipc_ns && strcmp(rule->topic_name, topic_name) == 0) {
+      return rule;
+    }
+  }
+  return NULL;
+}
+
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  int ret = 0;
+
+  if (from_domain == to_domain) return -EINVAL;
+
+  const uint32_t lo = from_domain < to_domain ? from_domain : to_domain;
+  const uint32_t hi = from_domain < to_domain ? to_domain : from_domain;
+  const bool lo_to_hi = (from_domain == lo);
+
+  down_write(&global_htables_rwsem);
+
+  struct domain_bridge_rule * existing = find_domain_rule(topic_name, ipc_ns);
+  if (existing) {
+    // Re-declaring the same pair just adds the reverse direction; a third domain
+    // on the same topic is rejected (v1 supports a single pair per topic).
+    if (existing->domain_a != lo || existing->domain_b != hi) {
+      ret = -EBUSY;
+      goto unlock;
+    }
+    existing->a_to_b |= lo_to_hi;
+    existing->b_to_a |= !lo_to_hi;
+    goto unlock;
+  }
+
+  // Grouping merges the two domains' id and entry_id spaces, which is only safe
+  // before either side has allocated any; reject if an endpoint already joined.
+  if (find_topic(topic_name, ipc_ns, from_domain) || find_topic(topic_name, ipc_ns, to_domain)) {
+    ret = -EBUSY;
+    goto unlock;
+  }
+
+  struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
+  if (!rule) {
+    ret = -ENOMEM;
+    goto unlock;
+  }
+  rule->topic_name = kstrdup(topic_name, GFP_KERNEL);
+  if (!rule->topic_name) {
+    kfree(rule);
+    ret = -ENOMEM;
+    goto unlock;
+  }
+  rule->ipc_ns = ipc_ns;
+  rule->domain_a = lo;
+  rule->domain_b = hi;
+  rule->a_to_b = lo_to_hi;
+  rule->b_to_a = !lo_to_hi;
+  INIT_HLIST_NODE(&rule->node);
+  hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, topic_name, strlen(topic_name)));
+
+  dev_info(
+    agnocast_device, "Domain bridge rule added (topic=%s, %u->%u).\n", topic_name, from_domain,
+    to_domain);
+
+unlock:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
 int agnocast_ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, const bool is_r2a, const struct ipc_namespace * ipc_ns)
 {
@@ -2712,6 +2788,22 @@ static long add_bridge_cmd(struct ioctl_add_bridge_args __user * arg)
   return ret;
 }
 
+static long add_domain_bridge_cmd(struct ioctl_add_domain_bridge_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_add_domain_bridge_args domain_bridge_args;
+  if (copy_from_user(&domain_bridge_args, arg, sizeof(domain_bridge_args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret =
+    copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &domain_bridge_args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_add_domain_bridge(
+    topic_name_buf, domain_bridge_args.from_domain, domain_bridge_args.to_domain, ipc_ns);
+}
+
 static long remove_bridge_cmd(struct ioctl_remove_bridge_args __user * arg)
 {
   int ret = 0;
@@ -2836,6 +2928,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return add_bridge_cmd((struct ioctl_add_bridge_args __user *)arg);
     case AGNOCAST_REMOVE_BRIDGE_CMD:
       return remove_bridge_cmd((struct ioctl_remove_bridge_args __user *)arg);
+    case AGNOCAST_ADD_DOMAIN_BRIDGE_CMD:
+      return add_domain_bridge_cmd((struct ioctl_add_domain_bridge_args __user *)arg);
     case AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD:
       return check_and_request_bridge_shutdown_cmd(
         (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg);
@@ -3073,6 +3167,19 @@ pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_na
     return br_info->pid;
   }
   return -1;
+}
+
+bool agnocast_get_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
+  uint32_t * domain_b, bool * a_to_b, bool * b_to_a)
+{
+  const struct domain_bridge_rule * rule = find_domain_rule(topic_name, ipc_ns);
+  if (!rule) return false;
+  *domain_a = rule->domain_a;
+  *domain_b = rule->domain_b;
+  *a_to_b = rule->a_to_b;
+  *b_to_a = rule->b_to_a;
+  return true;
 }
 
 #endif

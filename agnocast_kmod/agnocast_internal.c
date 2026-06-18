@@ -10,6 +10,7 @@ DECLARE_RWSEM(global_htables_rwsem);
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
+DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
 
 DEFINE_SPINLOCK(pid_queue_lock);
 pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
