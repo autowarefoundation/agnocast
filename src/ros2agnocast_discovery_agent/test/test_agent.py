@@ -215,33 +215,45 @@ def test_read_host_uuid_returns_uuid_string():
 def test_singleton_lock_path_honors_tmpfs_dir(monkeypatch, tmp_path):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
     from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42) == str(tmp_path / 'agnocast_discovery_agent_42.lock')
+    assert _singleton_lock_path(42, 3) == str(tmp_path / 'agnocast_discovery_agent_42_d3.lock')
 
 
 def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
     monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
     from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42) == '/dev/shm/agnocast_discovery_agent_42.lock'
+    assert _singleton_lock_path(42, 0) == '/dev/shm/agnocast_discovery_agent_42_d0.lock'
+
+
+def test_read_ros_domain_id_parses_env(monkeypatch):
+    from ros2agnocast_discovery_agent.agent import _read_ros_domain_id
+    monkeypatch.delenv('ROS_DOMAIN_ID', raising=False)
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', '7')
+    assert _read_ros_domain_id() == 7
+    monkeypatch.setenv('ROS_DOMAIN_ID', '')   # unset-equivalent -> default 0
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', 'abc')  # unparsable -> default 0
+    assert _read_ros_domain_id() == 0
 
 
 def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
     from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    attempt = _try_acquire_singleton_lock(123)
+    attempt = _try_acquire_singleton_lock(123, 0)
     assert attempt.status == LockStatus.ACQUIRED
     attempt.file.close()
 
 
 def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
-    """A second acquire in the same process reports HELD while the first is alive."""
+    """A second acquire in the same (NS, domain) reports HELD while the first is alive."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
     from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    first = _try_acquire_singleton_lock(456)
+    first = _try_acquire_singleton_lock(456, 0)
     assert first.status == LockStatus.ACQUIRED
-    assert _try_acquire_singleton_lock(456).status == LockStatus.HELD
+    assert _try_acquire_singleton_lock(456, 0).status == LockStatus.HELD
     first.file.close()
     # After releasing, a new acquire succeeds.
-    third = _try_acquire_singleton_lock(456)
+    third = _try_acquire_singleton_lock(456, 0)
     assert third.status == LockStatus.ACQUIRED
     third.file.close()
 
@@ -250,12 +262,25 @@ def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
     """Different IPC NS inodes get independent locks."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
     from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    lock_a = _try_acquire_singleton_lock(111)
-    lock_b = _try_acquire_singleton_lock(222)
+    lock_a = _try_acquire_singleton_lock(111, 0)
+    lock_b = _try_acquire_singleton_lock(222, 0)
     assert lock_a.status == LockStatus.ACQUIRED
     assert lock_b.status == LockStatus.ACQUIRED
     lock_a.file.close()
     lock_b.file.close()
+
+
+def test_acquire_singleton_lock_independent_per_domain(monkeypatch, tmp_path):
+    """Same IPC NS but different ROS_DOMAIN_ID get independent locks, so two
+    launches sharing a namespace in different domains each run their own agent."""
+    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
+    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
+    lock_d1 = _try_acquire_singleton_lock(111, 1)
+    lock_d3 = _try_acquire_singleton_lock(111, 3)
+    assert lock_d1.status == LockStatus.ACQUIRED
+    assert lock_d3.status == LockStatus.ACQUIRED
+    lock_d1.file.close()
+    lock_d3.file.close()
 
 
 def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
@@ -263,7 +288,7 @@ def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
     from HELD) so the caller can surface a non-zero exit code."""
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
     from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    assert _try_acquire_singleton_lock(789).status == LockStatus.ERROR
+    assert _try_acquire_singleton_lock(789, 0).status == LockStatus.ERROR
 
 
 def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_path):
@@ -276,9 +301,10 @@ def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_
     """
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
     from ros2agnocast_discovery_agent.agent import (
-        LockStatus, _read_ipc_ns_inode, _try_acquire_singleton_lock, main)
+        LockStatus, _read_ipc_ns_inode, _read_ros_domain_id,
+        _try_acquire_singleton_lock, main)
 
-    holder = _try_acquire_singleton_lock(_read_ipc_ns_inode())
+    holder = _try_acquire_singleton_lock(_read_ipc_ns_inode(), _read_ros_domain_id())
     assert holder.status == LockStatus.ACQUIRED
     try:
         result = {}
