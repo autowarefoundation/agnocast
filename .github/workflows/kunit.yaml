@@ -1,0 +1,159 @@
+name: kunit
+
+# Runs the Agnocast kernel-module KUnit suite (agnocast_kmod/agnocast_kunit/).
+# kunit.py builds the suite into a throwaway kernel, boots it under QEMU, and
+# reports KTAP results -- no insmod, no root, no real hardware.
+#
+# Why kunit.py (not insmod): scripts/test/run_kunit.bash builds a .ko and
+# insmods it, which CI runners block via kernel lockdown
+# (actions/runner-images#8623). kunit.py links the suite in instead.
+#
+# Why --arch=x86_64 and not kunit.py's default UML: several tests call
+# copy_to_user, which UML can't service from the no-userspace KUnit context
+# (it panics with "Segfault with no mm"). x86_64 under QEMU runs the whole
+# suite. (IPC_NS and tracepoints, the suite's other needs, do work under UML.)
+#
+# Future: an --arch=arm64 matrix axis (qemu-system-aarch64) could be added to
+# catch arch-specific regressions.
+
+on:
+  pull_request:
+    paths:
+      - 'agnocast_kmod/**'
+      - '.github/kunit/**'
+      - '.github/workflows/kunit.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'agnocast_kmod/**'
+      - '.github/kunit/**'
+      - '.github/workflows/kunit.yaml'
+
+# Cancel superseded runs on the same ref so concurrent pushes don't fight over
+# the same cache entries.
+concurrency:
+  group: kunit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned LTS kernel for reproducible builds. Bump deliberately; the API guards
+  # in agnocast_kmod/Makefile already cover newer kernels.
+  LINUX_REF: v6.12
+  LINUX_REPO: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+  # Suite-name glob passed to kunit.py. Trailing '*' is resilient to a suite
+  # rename; the "no tests ran" guard below catches a zero-match (kunit.py itself
+  # exits 0 when the filter matches nothing).
+  KUNIT_FILTER: 'agnocast*'
+
+jobs:
+  agnocast-kunit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kunit.py prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison libelf-dev libssl-dev bc python3 \
+            qemu-system-x86
+
+      # Cache the Linux source tree. Keyed on LINUX_REF only — safe for an
+      # immutable tag. If LINUX_REF is ever pointed at a moving branch, add a
+      # commit SHA or date to the key.
+      - name: Cache Linux source tree
+        id: linux-src-cache
+        uses: actions/cache@v4
+        with:
+          path: linux
+          key: linux-src-${{ env.LINUX_REF }}
+
+      - name: Shallow clone Linux ${{ env.LINUX_REF }}
+        if: steps.linux-src-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "${LINUX_REF}" "${LINUX_REPO}" linux
+
+      # Cache kunit.py's build dir, kept outside the source tree so the cache
+      # above doesn't absorb build artifacts. restore-keys reuses a previous
+      # build dir, so only the changed Agnocast objects recompile.
+      - name: Cache KUnit build dir
+        id: kunit-build-cache
+        uses: actions/cache@v4
+        with:
+          path: kunit-build
+          key: kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-${{ hashFiles('agnocast_kmod/**', '.github/kunit/**', '.github/workflows/kunit.yaml') }}
+          restore-keys: |
+            kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-
+
+      # If the source tree was just re-cloned but restore-keys brought back a
+      # build dir from a previous run, that dir may reference object paths the
+      # fresh tree lacks. Drop it so kunit.py does a clean build.
+      - name: Drop stale build dir if source was re-cloned
+        if: steps.linux-src-cache.outputs.cache-hit != 'true'
+        run: rm -rf kunit-build
+
+      # Stage the Agnocast sources into the kernel tree and hand kbuild our
+      # in-tree Makefile (.github/kunit/Kbuild). The layout mirrors agnocast_kmod/
+      # so the tests' "../agnocast.h" includes resolve.
+      - name: Stage Agnocast sources into Linux tree
+        run: |
+          set -euo pipefail
+          dst=linux/drivers/agnocast
+          rm -rf "${dst}"
+          mkdir -p "${dst}/agnocast_kunit"
+          cp agnocast_kmod/*.c agnocast_kmod/*.h "${dst}/"
+          cp agnocast_kmod/agnocast_kunit/*.c \
+             agnocast_kmod/agnocast_kunit/*.h \
+             agnocast_kmod/agnocast_kunit/Makefile.inc \
+             "${dst}/agnocast_kunit/"
+          cp .github/kunit/Kbuild "${dst}/Makefile"
+          if ! grep -q 'drivers/agnocast' linux/drivers/Makefile; then
+            echo 'obj-$(CONFIG_KUNIT) += agnocast/' >> linux/drivers/Makefile
+          fi
+
+      # Build the suite into a kernel, boot it under QEMU, run the tests.
+      - name: Run Agnocast KUnit suite under QEMU
+        working-directory: linux
+        run: |
+          set -euo pipefail
+          ./tools/testing/kunit/kunit.py run \
+            --kunitconfig="${GITHUB_WORKSPACE}/.github/kunit/kunitconfig" \
+            --arch=x86_64 \
+            --build_dir="${GITHUB_WORKSPACE}/kunit-build" \
+            --jobs="$(nproc)" \
+            "${KUNIT_FILTER}" 2>&1 | tee "${GITHUB_WORKSPACE}/kunit-run.log"
+          # kunit.py exits 0 even when the filter matches zero suites; guard
+          # against a silent false-green after a suite rename.
+          ran=$(grep -oE 'Ran [0-9]+ tests' "${GITHUB_WORKSPACE}/kunit-run.log" | grep -oE '[0-9]+' | tail -1 || echo 0)
+          echo "KUnit tests ran: ${ran:-0}"
+          if [ "${ran:-0}" -lt 1 ]; then
+            echo "::error::No KUnit tests ran — check KUNIT_FILTER vs the suite name."
+            exit 1
+          fi
+
+      - name: Show KTAP results
+        if: always()
+        run: |
+          if [ -f kunit-build/test.log ]; then
+            echo "--- KTAP log ---"
+            cat kunit-build/test.log
+          fi
+
+      # On failure, upload the test log and resolved .config so the failure is
+      # debuggable without re-running the job.
+      - name: Upload KUnit artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kunit-debug-${{ github.run_id }}
+          path: |
+            kunit-run.log
+            kunit-build/test.log
+            kunit-build/.config
+          if-no-files-found: ignore
