@@ -2,6 +2,9 @@
 Changelog for package agnocast_cie_config_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+
 2.3.4 (2026-05-21)
 ------------------
 * feat(cie_thread_configurator): add ~/reapply_config service for runtime YAML reload (`#1303 <https://github.com/autowarefoundation/agnocast/issues/1303>`_)

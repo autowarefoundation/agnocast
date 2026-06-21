@@ -5,13 +5,17 @@ Reads the local Agnocast state via the existing NS-scoped ioctl wrapper
 ``/_agnocast_discovery`` so other namespaces and ECUs running ros2agnocast
 tooling can observe and make bridge generation decisions.
 
-One daemon process is intended to run per IPC namespace. To make duplicate
+One daemon process is intended to run per (IPC namespace, ROS_DOMAIN_ID):
+gossip is published on the agent's DDS domain, so a namespace shared by
+launches in different domains needs one agent per domain. To make duplicate
 launches (e.g. one node spawning the agent and another ``ros2 launch``
 session also trying to spawn one) safe, the agent acquires an
-``flock(2)``-based singleton lock on a per-IPC-namespace file before
-starting; subsequent instances detect the held lock and stay idle on
-``signal.pause()`` until terminated, so they don't disturb the launch
-tree they belong to.
+``flock(2)``-based singleton lock on a per-(namespace, domain) file before
+starting; subsequent instances in the same (namespace, domain) detect the
+held lock and exit cleanly (code 0), leaving exactly one live agent per
+(namespace, domain). Emitting a single agent per launch tree is the launch
+side's responsibility; this lock is the cross-invocation safety net for when
+separate launches target the same (namespace, domain).
 """
 
 import ctypes
@@ -21,7 +25,6 @@ import fcntl
 import importlib.metadata
 import logging
 import os
-import signal
 import socket
 import sys
 from typing import IO
@@ -41,6 +44,7 @@ from ros2agnocast_discovery_msgs.msg import (
     AgnocastTopic,
 )
 
+from . import bridge_decider
 from .type_registry import TypeRegistryReader
 
 
@@ -211,14 +215,31 @@ def _read_ipc_ns_inode() -> int:
     return os.stat(SELF_IPC_NS_PATH).st_ino
 
 
-def _singleton_lock_path(ipc_ns_inode: int) -> str:
-    """Return the singleton lock-file path for this IPC namespace.
+def _read_ros_domain_id() -> int:
+    """Return ROS_DOMAIN_ID from the environment (0 if unset, empty, or
+    unparsable), matching ROS 2's default and the kmod's get_ros_domain_id."""
+    raw = os.environ.get('ROS_DOMAIN_ID')
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
 
-    Co-located with the rest of Agnocast tmpfs state so a container
-    overriding ``AGNOCAST_TMPFS_DIR`` keeps the lock under the same root.
+
+def _singleton_lock_path(ipc_ns_inode: int, domain_id: int) -> str:
+    """Return the singleton lock-file path for this (IPC namespace, domain).
+
+    Keyed by both the IPC namespace and ROS_DOMAIN_ID: gossip is published on
+    the agent's DDS domain, so launches sharing a namespace but using different
+    domains each need their own agent and must not deduplicate against each
+    other.
+
+    Co-located with the rest of Agnocast tmpfs state so a container overriding
+    ``AGNOCAST_TMPFS_DIR`` keeps the lock under the same root.
     """
     root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
-    return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}.lock')
+    return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}_d{domain_id}.lock')
 
 
 class LockStatus(Enum):
@@ -238,9 +259,9 @@ class SingletonLockAttempt:
     file: IO | None = None
 
 
-def _try_acquire_singleton_lock(ipc_ns_inode: int) -> SingletonLockAttempt:
-    """Try to take an exclusive ``flock(2)`` on the per-IPC-namespace lock file."""
-    lock_path = _singleton_lock_path(ipc_ns_inode)
+def _try_acquire_singleton_lock(ipc_ns_inode: int, domain_id: int) -> SingletonLockAttempt:
+    """Try to take an exclusive ``flock(2)`` on the per-(IPC namespace, domain) lock file."""
+    lock_path = _singleton_lock_path(ipc_ns_inode, domain_id)
     try:
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
     except OSError as e:
@@ -290,21 +311,22 @@ class DiscoveryAgent(Node):
     """rclpy Node that publishes the local Agnocast state every PUBLISH_INTERVAL_SEC.
 
     Also subscribes to its own gossip topic and caches the latest snapshot per
-    ``(host_uuid, ipc_ns_inode)`` — exposed through ``remote_states`` for
-    future consumers (e.g. cross-NS decision logic added in a follow-up PR).
+    ``(host_uuid, ipc_ns_inode)``; each tick the bridge decider diffs that
+    against the local state and issues cross-NS bridge requests.
     """
 
     def __init__(self, registry: TypeRegistryReader | None = None):
         self._host_uuid = _read_host_uuid()
         self._host_hostname = socket.gethostname()
         self._ipc_ns_inode = _read_ipc_ns_inode()
-        # Multiple agents may run on one ECU (one per IPC NS); disambiguate.
+        self._domain_id = _read_ros_domain_id()
+        # Multiple agents may run on one ECU (one per (IPC NS, domain)); disambiguate.
         host_short = self._host_uuid.replace('-', '')[:8]
         # Force use_sim_time=False so the 1 Hz timer + clock reads are
         # wall-clock regardless of /clock; sim-time playback would otherwise
         # stretch the publish cadence past the liveliness lease window.
         super().__init__(
-            f'agnocast_discovery_agent_{host_short}_{self._ipc_ns_inode}',
+            f'agnocast_discovery_agent_{host_short}_{self._ipc_ns_inode}_d{self._domain_id}',
             parameter_overrides=[Parameter('use_sim_time', value=False)],
         )
         self._lib = _load_ioctl_wrapper()
@@ -332,7 +354,8 @@ class DiscoveryAgent(Node):
         self._registry.rebuild()
         self._registry.cleanup_dead_pids()
         self._prune_stale_remote_states()
-        self.publish_snapshot()
+        snapshot = self.publish_snapshot()
+        self._dispatch_bridge_requests(snapshot)
 
     def _prune_stale_remote_states(
             self, now_sec: float | None = None,
@@ -352,10 +375,19 @@ class DiscoveryAgent(Node):
         for key in stale_keys:
             del self._remote_states[key]
 
-    def publish_snapshot(self) -> None:
+    def publish_snapshot(self) -> AgnocastDaemonState:
         """Build and publish the current local AgnocastDaemonState."""
         msg = self.build_state()
         self._pub.publish(msg)
+        return msg
+
+    def _dispatch_bridge_requests(self, local_state: AgnocastDaemonState) -> None:
+        if not self._remote_states:
+            return
+        remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
+        requests = bridge_decider.decide_bridges(local_state, remote_states)
+        if requests:
+            bridge_decider.dispatch_requests(requests, logger=self.get_logger())
 
     def build_state(self) -> AgnocastDaemonState:
         msg = AgnocastDaemonState()
@@ -380,26 +412,20 @@ class DiscoveryAgent(Node):
 
 
 def main(argv=None) -> int:
-    # Singleton check before DDS / ioctl bring-up so duplicate launches stay
-    # passive instead of polluting the gossip topic or hammering the kmod.
+    # Take the per-IPC-namespace singleton lock before any DDS / ioctl work.
+    # If another agent holds it, exit cleanly (0).
     #
-    # Duplicates DO NOT exit early: launch supervisors (especially
-    # `launch_test` running parallel sample-app tests) treat a Node exit as a
-    # process-died event and propagate teardown to the rest of the launch
-    # tree. So when the lock is held, we sit idle on `signal.pause()` —
-    # SIGINT / SIGTERM still tears the duplicate down cleanly with the rest
-    # of its parent launch.
+    # A duplicate that exits early *could* make launch_test treat it as a
+    # crashed node and tear down the launch tree. That's not a risk here: the
+    # launch emits one agent per tree, so a held lock always means a separate
+    # launch/run — never a same-tree sibling — which exiting can't affect.
     ipc_ns_inode = _read_ipc_ns_inode()
-    lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode)
+    domain_id = _read_ros_domain_id()
+    lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode, domain_id)
     if lock_attempt.status == LockStatus.HELD:
         sys.stderr.write(
-            f'agnocast_discovery_agent: another instance is already running in this '
-            f'IPC namespace (inode={ipc_ns_inode}); staying idle.\n')
-        try:
-            while True:
-                signal.pause()
-        except KeyboardInterrupt:
-            pass
+            'agnocast_discovery_agent: another instance is already running in this '
+            f'IPC namespace (inode={ipc_ns_inode}, domain={domain_id}); exiting.\n')
         return 0
     if lock_attempt.status == LockStatus.ERROR:
         # Don't masquerade as "already running" — propagate failure so

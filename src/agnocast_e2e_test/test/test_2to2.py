@@ -23,10 +23,15 @@ FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 # is done in Test2To2.setUpClass.
 READY_TO_TEST_DELAY = 8.0
 
-BRIDGE_MODE = os.environ.get('AGNOCAST_BRIDGE_MODE', 'off').lower()
-IS_STANDARD_BRIDGE = (BRIDGE_MODE == '1' or BRIDGE_MODE == 'standard')
 
 def generate_test_description():
+    bridge_mode = os.environ.get('AGNOCAST_BRIDGE_MODE', 'on').lower()
+    if TEST_MODE != 'agno2agno' and bridge_mode in ('0', 'off'):
+        raise RuntimeError(
+            f"TEST_MODE={TEST_MODE} requires the bridge to be enabled "
+            f"(set AGNOCAST_BRIDGE_MODE=on)"
+        )
+
     pub_i = 0
     sub_i = 0
     containers = []
@@ -72,8 +77,8 @@ def generate_test_description():
                                     "init_pub_num": 0,
                                     "pub_num": PUB_NUM,
                                     # For agno2agno mode, no ROS 2 bridge is created (no external ROS 2 pub/sub exists), so 0 planned ROS 2 publishers.
-                                    # For agno2ros with Standard bridge enabled, exactly 1 ROS 2 publisher is expected to be created by the bridge.
-                                    "planned_pub_count": 1 if (IS_STANDARD_BRIDGE and TEST_MODE != 'agno2agno') else 0,
+                                    # In agno2ros mode the bridge creates exactly 1 ROS 2 publisher.
+                                    "planned_pub_count": 1 if TEST_MODE != 'agno2agno' else 0,
                                      # Number of external Agnocast subscribers.
                                     "planned_sub_count": 2,
                                     "forever": FOREVER,

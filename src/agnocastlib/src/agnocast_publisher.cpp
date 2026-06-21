@@ -1,11 +1,19 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
+#include <rclcpp/typesupport_helpers.hpp>
+#include <rosidl_runtime_cpp/message_initialization.hpp>
+
+#include <rcutils/allocator.h>
+#include <rmw/rmw.h>
+#include <rmw/serialized_message.h>
 #include <sys/types.h>
 
 #include <array>
+#include <new>
 
 namespace agnocast
 {
@@ -191,6 +199,185 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
   }
 
   return get_subscriber_count_args.ret_same_process_subscriber_num;
+}
+
+void PublisherBase::generate_gid()
+{
+  constexpr size_t kPidOffset = 2;
+  constexpr size_t kHashOffset = 6;
+  constexpr size_t kHashSize = 6;
+  constexpr size_t kPubIdOffset = 12;
+
+  std::memset(static_cast<void *>(&gid_.data[0]), 0, RMW_GID_STORAGE_SIZE);
+
+  // [0-1]: Agnocast identifier
+  gid_.data[0] = 'A';
+  gid_.data[1] = 'G';
+
+  // [2-5]: Process ID
+  const auto pid = static_cast<uint32_t>(getpid());
+  std::memcpy(static_cast<void *>(&gid_.data[kPidOffset]), &pid, sizeof(pid));
+
+  // [6-11]: topic_name hash (upper 6 bytes)
+  const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
+  std::memcpy(static_cast<void *>(&gid_.data[kHashOffset]), &topic_hash, kHashSize);
+
+  // [12-15]: publisher id
+  std::memcpy(static_cast<void *>(&gid_.data[kPubIdOffset]), &id_, sizeof(id_));
+
+  // [16-23]: reserved
+
+  gid_.implementation_identifier = "agnocast";
+}
+
+PublisherBase::~PublisherBase()
+{
+  {
+    std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+    for (auto & [_, t] : opened_mqs_) {
+      mqd_t mq = std::get<0>(t);
+      if (mq_close(mq) == -1) {
+        RCLCPP_ERROR_STREAM(
+          logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
+      }
+    }
+  }
+
+  if (id_ >= 0) {
+    // NOTE: When a publisher is destroyed, subscribers should unmap its memory, but this is not yet
+    // implemented. Since multiple publishers in the same process share a mempool, process-level
+    // reference counting in kmod is needed. Leaving memory mapped causes no functional issues, so
+    // this is left as future work.
+    struct ioctl_remove_publisher_args remove_publisher_args
+    {
+    };
+    remove_publisher_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
+    remove_publisher_args.publisher_id = id_;
+    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_PUBLISHER_CMD, &remove_publisher_args) < 0) {
+      RCLCPP_WARN(logger, "Failed to remove publisher (id=%d) from kernel.", id_);
+    }
+  }
+}
+
+template <typename NodeT>
+rclcpp::QoS GenericPublisher::constructor_impl(
+  NodeT * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
+{
+  // The typesupport functions may throw exceptions if the shared libraries
+  // fail to load or an invalid message type name is provided. These
+  // exceptions are not handled here, causing the constructor to exit
+  // immediately.
+  ts_lib_ = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  ts_lib_introspection_ =
+    rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_introspection_cpp");
+#if RCLCPP_VERSION_MAJOR >= 28
+  type_support_handle_ =
+    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *ts_lib_);
+  const rosidl_message_type_support_t * introspection_handle =
+    rclcpp::get_message_typesupport_handle(
+      topic_type, "rosidl_typesupport_introspection_cpp", *ts_lib_introspection_);
+#else
+  type_support_handle_ =
+    rclcpp::get_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *ts_lib_);
+  const rosidl_message_type_support_t * introspection_handle = rclcpp::get_typesupport_handle(
+    topic_type, "rosidl_typesupport_introspection_cpp", *ts_lib_introspection_);
+#endif
+  members_ = static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(
+    introspection_handle->data);
+
+  const bool is_bridge = (role == PublisherRole::BridgeInternal);
+  const rclcpp::QoS actual_qos =
+    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
+
+  if (role == PublisherRole::Default) {
+    register_pubsub_bridge_by_type_name(
+      topic_name_, id_, topic_type, BridgeDirection::AGNOCAST_TO_ROS2);
+  }
+
+  return actual_qos;
+}
+
+GenericPublisher::GenericPublisher(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
+{
+  const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
+    topic_name_.c_str(), actual_qos.depth());
+}
+
+GenericPublisher::GenericPublisher(
+  agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
+{
+  const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
+    actual_qos.depth());
+}
+
+void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
+{
+  // Mirror the pre-conditions checked by rclcpp::SerializationBase::deserialize_message
+  // to avoid a SIGSEGV inside rmw_deserialize on malformed input.
+  if (serialized_msg.capacity() == 0) {
+    RCLCPP_ERROR(
+      logger,
+      "GenericPublisher::publish: serialized message has capacity of zero; dropping message");
+    return;
+  }
+  if (serialized_msg.size() == 0) {
+    RCLCPP_ERROR(
+      logger, "GenericPublisher::publish: serialized message has size of zero; dropping message");
+    return;
+  }
+
+  increment_borrowed_publisher_num();
+  void * ptr = ::operator new(members_->size_of_);
+
+  // Invoke the constructor of the message type at ptr.
+  // Type-specific initialization is unnecessary because the message object
+  // will be immediately populated with data by rmw_deserialize.
+  // Perform minimal initialization only.
+  members_->init_function(ptr, rosidl_runtime_cpp::MessageInitialization::SKIP);
+
+  const rmw_ret_t ret =
+    rmw_deserialize(&serialized_msg.get_rcl_serialized_message(), type_support_handle_, ptr);
+
+  decrement_borrowed_publisher_num();
+
+  if (ret != RMW_RET_OK) {
+    members_->fini_function(ptr);
+    ::operator delete(ptr);
+    RCLCPP_ERROR(
+      logger, "rmw_deserialize failed in GenericPublisher (rmw_ret=%d); dropping message",
+      static_cast<int>(ret));
+    return;
+  }
+
+  const auto va = reinterpret_cast<uint64_t>(ptr);
+  union ioctl_publish_msg_args publish_msg_args {
+  };
+  {
+    std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+    publish_msg_args = publish_core(this, topic_name_, id_, va, opened_mqs_);
+  }
+
+  // Release entries that all subscribers have finished reading.
+  // Only the addresses previously passed to the kernel by this publisher are returned here.
+  // Therefore, the message type is guaranteed to match members_ and it's safe to call
+  // fini_function on the pointer.
+  for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
+    void * rptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);
+    members_->fini_function(rptr);
+    ::operator delete(rptr);
+  }
 }
 
 }  // namespace agnocast

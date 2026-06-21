@@ -67,8 +67,6 @@ This reflects the current status, and support is expected to expand in the futur
 | Linux Distribution | Ubuntu 22.04 (Jammy) / Ubuntu 24.04 (Noble)                 |
 | Linux Kernel       | 5.x / 6.x series (detailed version matrix not yet available) |
 
-> **Warning**: Agnocast service/client is not officially supported yet and the API may change in the future. Use at your own risk.
-
 ---
 
 ## For Users

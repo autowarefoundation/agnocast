@@ -2,6 +2,17 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+* Feat/ros2 bag record agnocast/topic filter (`#1377 <https://github.com/autowarefoundation/agnocast/issues/1377>`_)
+* refactor(ros2agnocast): reorganize verb directory and extract common logic (`#1374 <https://github.com/autowarefoundation/agnocast/issues/1374>`_)
+* feat(ros2agnocast): add `ros2 bag record_agnocast` CLI verb (`#1373 <https://github.com/autowarefoundation/agnocast/issues/1373>`_)
+* feat(ros2agnocast): add ros2agnocast verb `ros2 agnocast bridge-daemo… (`#1369 <https://github.com/autowarefoundation/agnocast/issues/1369>`_)
+* perf(ros2agnocast): return from gossip collection once all publishers report (`#1370 <https://github.com/autowarefoundation/agnocast/issues/1370>`_)
+* feat(ros2agnocast): add discovery_daemon_status verb for daemon liveness (`#1363 <https://github.com/autowarefoundation/agnocast/issues/1363>`_)
+* feat(ros2agnocast): support ros2 topic hz/echo/delay for Agnocast (`#1357 <https://github.com/autowarefoundation/agnocast/issues/1357>`_)
+* feat: ros2agnocast CLI verbs see Agnocast endpoints across IPC namespaces and ECUs (`#1351 <https://github.com/autowarefoundation/agnocast/issues/1351>`_)
+
 2.3.4 (2026-05-21)
 ------------------
 * fix(bridge): suppress bridge plugin compilation warning (`#1347 <https://github.com/autowarefoundation/agnocast/issues/1347>`_)

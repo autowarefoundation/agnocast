@@ -33,71 +33,41 @@ flowchart LR
 
 ## Bridge Modes
 
-Agnocast supports three bridge modes controlled by the `AGNOCAST_BRIDGE_MODE` environment variable:
+Agnocast supports the following bridge modes controlled by the `AGNOCAST_BRIDGE_MODE` environment variable:
 
 | Mode | Value | Description |
 |------|-------|-------------|
 | Off | `0` or `off` | Bridge disabled; no ROS 2 interoperability |
-| Standard | `1` or `standard` | One bridge manager per Agnocast process (default) |
-| Performance | `2` or `performance` | Single global bridge manager for all processes |
+| On | `on` | Bridge enabled (default). One bridge manager per IPC namespace |
 
 **Note:**
 
-- Values are case-insensitive (e.g., `Standard`, `OFF`, `Performance` are valid).
-- If an unknown value is provided, it falls back to Standard mode with a warning.
+- Values are case-insensitive (e.g., `On`, `OFF`, are valid).
+- If an unknown value is provided, it falls back to On mode with a warning.
+- `1` / `standard` and `2` / `performance` are accepted for backward compatibility but are deprecated aliases for On mode.
 
-### Standard Mode vs Performance Mode
+## Bridge Architecture
 
-Standard Mode and Performance Mode have distinct trade-offs regarding resource usage, isolation, and setup complexity.
-
-| Feature | [Standard Mode](#standard-mode-default) | [Performance Mode](#performance-mode) |
-| :--- | :--- | :--- |
-| Architecture | Distributed: 1 Bridge Manager per Agnocast process. | Centralized: 1 Global Bridge Manager for all processes. |
-| Resource Usage | High: Increases linearly with the number of processes. | Low: Minimal overhead. Efficient for systems with many nodes. |
-| Activation Strategy | Eager: Starts immediately regardless of ROS 2 status. | Lazy: Starts only when a counterpart exists ([See Conditions](#bridge-activation-conditions)). |
-| Isolation & Safety | High: Bridges are isolated. If one bridge crashes, others are unaffected. | Low: Shared process. A crash in the manager affects all bridged topics. |
-| Setup | Easy: No preparation needed. Works dynamically. | Complex: Requires pre-compiled plugins ([See Setup](#performance-mode-setup)). |
-
-### Standard Mode (Default)
-
-Each Agnocast process spawns its own bridge manager as a forked child process. This provides process isolation and is suitable for most use cases.
-
-```mermaid
-flowchart TB    
-    subgraph ParentB ["Parent Process B"]
-        ProcB[Agnocast Process B]
-    end
-
-    subgraph ParentA ["Parent Process A"]
-        ProcA[Agnocast Process A]
-    end
-    
-    subgraph ChildB ["Child Process B"]
-        BMB[Bridge Manager B]
-    end
-
-    subgraph ChildA ["Child Process A"]
-        BMA[Bridge Manager A]
-    end
-    
-    ProcA --> BMA
-    ProcB --> BMB
-```
-
-### Performance Mode
-
-A single bridge manager handles all bridge requests across the system. This reduces resource usage when running many Agnocast processes but requires pre-compiled bridge plugins for each message type.
+A global bridge manager handles all bridge requests for all Agnocast processes within an IPC namespace. All topics within the same namespace share this manager.
 
 ```mermaid
 flowchart TD
     ProcessA[Agnocast Process A]
     ProcessB[Agnocast Process B]
 
-    GlobalBM[Performance Bridge Manager]
+    GlobalBM[Bridge Manager]
 
     ProcessA --> GlobalBM
     ProcessB --> GlobalBM
 ```
+
+### Activation Strategy
+
+Bridges are activated **lazily**: a bridge is created only when both an Agnocast endpoint and an external ROS 2 endpoint exist for the same topic. It is destroyed when either endpoint is removed. This avoids unnecessary overhead when there is no ROS 2 counterpart.
+
+### Isolation & Safety
+
+Because a single bridge manager process is shared across all Agnocast processes in the IPC namespace, a crash in the bridge manager will affect all bridged topics.
 
 ## Configuration
 
@@ -106,15 +76,8 @@ flowchart TD
 Set `AGNOCAST_BRIDGE_MODE` before launching your application:
 
 ```bash
-# Standard mode (Default)
-export AGNOCAST_BRIDGE_MODE=standard
-# OR
-export AGNOCAST_BRIDGE_MODE=1
-
-# Performance mode
-export AGNOCAST_BRIDGE_MODE=performance
-# OR
-export AGNOCAST_BRIDGE_MODE=2
+# Bridge enabled (default)
+export AGNOCAST_BRIDGE_MODE=on
 
 # Disable bridge
 export AGNOCAST_BRIDGE_MODE=off
@@ -132,14 +95,16 @@ def generate_launch_description():
             package='your_package',
             executable='your_node',
             name='your_node',
-            env={'AGNOCAST_BRIDGE_MODE': 'standard'}
+            env={'AGNOCAST_BRIDGE_MODE': 'on'}
         ),
     ])
 ```
 
-### Performance Mode Setup
+### Bridge Plugins (Performance Optimization)
 
-Performance mode requires pre-compiled bridge plugins for each message type used. Generate and build them using the following steps:
+The bridge works out of the box without any additional setup. Internally, it dynamically resolves topic message types at runtime.
+
+For higher throughput, you can optionally provide pre-compiled type-specific bridge plugins via the `agnocast_bridge_plugins` package. When a plugin is available for a given message type, the bridge uses it; otherwise, it falls back to the generic bridge automatically.
 
 **1. Generate the plugin package:**
 
@@ -160,16 +125,14 @@ ros2 agnocast generate-bridge-plugins --all --output-dir ~/my_ws/src/agnocast_br
 colcon build --packages-select agnocast_bridge_plugins
 ```
 
-**3. Source and run:**
+**3. Source:**
 
 ```bash
 source install/setup.bash
-export AGNOCAST_BRIDGE_MODE=performance
-# Run your application
 ```
 
 > [!NOTE]
-> If you add new custom message types later, regenerate and rebuild the plugins to support them in Performance Mode.
+> If you add new custom message types later, regenerate and rebuild the plugins.
 
 #### Advanced: Custom Plugin Path
 
@@ -178,15 +141,6 @@ You can specify custom plugin search paths using the `AGNOCAST_BRIDGE_PLUGINS_PA
 ```bash
 export AGNOCAST_BRIDGE_PLUGINS_PATH=/path/to/plugins:/another/path
 ```
-
-## Bridge Activation Conditions
-
-Bridges are not always active. The activation conditions differ between Standard mode and Performance mode.
-
-| Mode | Bridge Creation (Start) | Bridge Destruction (Stop) | Behavior Summary |
-| :--- | :--- | :--- | :--- |
-| Standard |Agnocast endpoint exists. | Agnocast endpoint removed. | Eager: Bridges are created immediately when an Agnocast node starts, regardless of whether a ROS 2 counterpart exists. |
-| Performance | Agnocast endpoint and External ROS 2 endpoint exist. | Agnocast endpoint removed or External ROS 2 endpoint removed. | Lazy: Bridges are only created when there is an active pair of sender/receiver across the domains, reducing unnecessary overhead. |
 
 ## QoS Behavior
 

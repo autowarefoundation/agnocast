@@ -37,34 +37,13 @@ To satisfy the second rule, all the occurrence of `/` in topic names are replace
 
 The message queue is also used for communication between Agnocast processes and Bridge Manager processes. When an Agnocast publisher or subscriber is created, it sends a bridge request to the Bridge Manager via message queue.
 
-### Standard Mode
+The message queue is used as follows:
 
-In Standard mode, each Agnocast process forks its own Bridge Manager. The message queue is used as follows:
-
-- When an Agnocast process starts, it forks a Bridge Manager child process. The Bridge Manager opens a message queue as a receiver.
-- When an Agnocast publisher calls `create_publisher`, it sends a bridge request (A2R direction) to the Bridge Manager's message queue.
-- When an Agnocast subscriber calls `create_subscription`, it sends a bridge request (R2A direction) to the Bridge Manager's message queue.
+- The first Agnocast process spawns a global Bridge Manager that opens `/agnocast_bridge_manager@-1` (optionally with a `_d<ROS_DOMAIN_ID>` suffix when `ROS_DOMAIN_ID` is set) as a receiver.
+- All Agnocast processes send bridge requests to this shared message queue.
 - Upon receiving the request, the Bridge Manager creates the appropriate bridge if conditions are met.
 
-The message definition for Standard mode contains factory function information:
-
-```cpp
-struct MqMsgBridge {
-  BridgeFactoryInfo factory;  // shared library path, symbol name, function offsets
-  BridgeTargetInfo target;    // topic name, target ID
-  BridgeDirection direction;  // ROS2_TO_AGNOCAST or AGNOCAST_TO_ROS2
-};
-```
-
-### Performance Mode
-
-In Performance mode, a single global Bridge Manager handles all bridge requests. The message queue is used as follows:
-
-- The first Agnocast process spawns a global Performance Bridge Manager that opens a message queue as a receiver.
-- All Agnocast processes send bridge requests to this shared message queue.
-- The Performance Bridge Manager loads pre-compiled plugins based on the message type.
-
-The message definition for Performance mode is simpler:
+The message definition is:
 
 ```cpp
 struct MqMsgPerformanceBridge {
@@ -74,11 +53,5 @@ struct MqMsgPerformanceBridge {
 };
 ```
 
-### Naming rules
-
-The Bridge Manager message queue is named using the process ID:
-
-| Mode | Message Queue Name | Description |
-|------|-------------------|-------------|
-| Standard | `/agnocast_bridge_manager@{pid}` | `{pid}` is the PID of the bridge manager's parent process |
-| Performance | `/agnocast_bridge_manager@-1` | Uses virtual PID `-1` for the global manager |
+> [!NOTE]
+> The struct is named `MqMsgPerformanceBridge` for historical reasons. Before the bridge implementation was unified, this message format was specific to the "Performance Bridge" as opposed to the "Standard Bridge". The Standard Bridge has since been removed, but the struct name has been kept as-is to minimize churn.

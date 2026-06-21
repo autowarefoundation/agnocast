@@ -31,6 +31,7 @@ usage() {
     echo "  -s, --single       Run only one test case using current config file"
     echo "  -c, --continue     Continue running tests even if one fails"
     echo "  -p, --parallel N   Run tests in parallel with N workers (default: 1 = sequential)"
+    echo "                     NOTE: Requires AGNOCAST_BRIDGE_MODE=off (or 0)."
     exit 0
 }
 
@@ -77,6 +78,12 @@ else
     BRIDGE_OFF=false
 fi
 
+if [ "$PARALLEL" -gt 1 ] && [ "$BRIDGE_OFF" != true ]; then
+    echo "Error: -p/--parallel requires AGNOCAST_BRIDGE_MODE=off (or 0)." >&2
+    echo "       Either set AGNOCAST_BRIDGE_MODE=off, or run sequentially without -p." >&2
+    exit 1
+fi
+
 # Topic name prefix (can be overridden via E2E_TOPIC_PREFIX)
 TOPIC_PREFIX=${E2E_TOPIC_PREFIX:-/test_topic}
 
@@ -86,7 +93,7 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
-CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
+CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"on (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
 # Run test

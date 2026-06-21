@@ -2109,7 +2109,6 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
-    // Unconditionally clear the flag; standard bridge managers also call this for consistency.
     proc_info->is_performance_bridge_manager = false;
   }
   up_write(&global_htables_rwsem);

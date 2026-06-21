@@ -2,6 +2,9 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+
 2.3.4 (2026-05-21)
 ------------------
 * fix: e2e stress workaround (`#1340 <https://github.com/autowarefoundation/agnocast/issues/1340>`_)

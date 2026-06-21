@@ -2,6 +2,9 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+
 2.3.4 (2026-05-21)
 ------------------
 * fix(cie): fix cancel_executor race condition (`#1278 <https://github.com/autowarefoundation/agnocast/issues/1278>`_)

@@ -1,3 +1,7 @@
+agnocast-kmod-v2.3.5 (2.3.5-1) noble; urgency=medium
+
+ -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 09 Jun 2026 18:30:00 +0900
+
 agnocast-kmod-v2.3.4 (2.3.4-2) noble; urgency=medium
 
   * fix(kmod): suppress parameter service log (#1334 <https://github.com/tier4/agnocast/issues/1334>)

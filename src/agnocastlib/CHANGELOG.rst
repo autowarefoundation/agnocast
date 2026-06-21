@@ -2,6 +2,19 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.5 (2026-06-09)
+------------------
+* fix(agnocastlib): make SignalHandler chain previously registered handlers (`#1379 <https://github.com/autowarefoundation/agnocast/issues/1379>`_)
+* refactor(bridge): fixed performance node name (`#1378 <https://github.com/autowarefoundation/agnocast/issues/1378>`_)
+* chore(agnocastlib): mark service/client API as officially supported (`#1376 <https://github.com/autowarefoundation/agnocast/issues/1376>`_)
+* fix(agnocastlib): allow agnostic node types in service and client creation (`#1375 <https://github.com/autowarefoundation/agnocast/issues/1375>`_)
+* feat(agnocastlib): add deferred service callback support (`#1365 <https://github.com/autowarefoundation/agnocast/issues/1365>`_)
+* feat(ros2agnocast): add ros2agnocast verb `ros2 agnocast bridge-daemo… (`#1369 <https://github.com/autowarefoundation/agnocast/issues/1369>`_)
+* fix(agnocastlib): add mutex to protect opened_mqs\_ during publish (`#1367 <https://github.com/autowarefoundation/agnocast/issues/1367>`_)
+* refactor(bridge): introduce a builder class for bridge request messages (`#1341 <https://github.com/autowarefoundation/agnocast/issues/1341>`_)
+* feat(ros2agnocast_discovery_agent,agnocastlib): publish Agnocast endpoint types in gossip via tmpfs registry (`#1356 <https://github.com/autowarefoundation/agnocast/issues/1356>`_)
+* refactor(bridge): replace map with unordered_map for standard bridge (`#1358 <https://github.com/autowarefoundation/agnocast/issues/1358>`_)
+
 2.3.4 (2026-05-21)
 ------------------
 * fix(AgnocastOnlyExecutor): add `cancel_requested\_` to separate the state (`#1346 <https://github.com/autowarefoundation/agnocast/issues/1346>`_)

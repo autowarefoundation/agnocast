@@ -1,0 +1,15 @@
+# Kernel config fragment for kunit.py (see .github/workflows/kunit.yaml).
+# Each option must survive `make olddefconfig`, so the dependency-providing
+# symbols (SYSVIPC, FTRACE) are listed alongside the ones the suite needs.
+CONFIG_KUNIT=y
+CONFIG_KUNIT_DEBUGFS=y
+
+# Agnocast resolves topics per IPC namespace (current->nsproxy->ipc_ns).
+CONFIG_SYSVIPC=y
+CONFIG_NAMESPACES=y
+CONFIG_IPC_NS=y
+
+# The exit hook looks up the sched_process_exit tracepoint; without tracepoints
+# the suite fails to start (-ENOENT). FTRACE gates ENABLE_DEFAULT_TRACERS.
+CONFIG_FTRACE=y
+CONFIG_ENABLE_DEFAULT_TRACERS=y
