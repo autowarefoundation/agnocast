@@ -145,7 +145,7 @@ struct topic_struct
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
-  // Per-topic rwsem: read for read-only ops, write for publish/receive/modify.
+  // Per-topic rwsem: read for receive/take/read-only ops, write for publish/modify.
   struct rw_semaphore rwsem;
   // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
   // bridge rule groups two domains' wrappers onto one entry/id space. The struct
