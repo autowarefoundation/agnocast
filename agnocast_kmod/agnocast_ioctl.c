@@ -1424,9 +1424,9 @@ int agnocast_ioctl_get_topic_list(
 
     if (topic_list_args->domain_id_buffer_addr) {
       uint32_t domain_id = wrapper->domain_id;
-      if (copy_to_user(
-            (uint32_t __user *)topic_list_args->domain_id_buffer_addr + topic_num, &domain_id,
-            sizeof(domain_id))) {
+      uint32_t __user * domain_id_buffer =
+        (uint32_t __user *)u64_to_user_ptr(topic_list_args->domain_id_buffer_addr);
+      if (copy_to_user(domain_id_buffer + topic_num, &domain_id, sizeof(domain_id))) {
         ret = -EFAULT;
         goto unlock;
       }
@@ -2147,6 +2147,20 @@ static int get_process_num(const struct ipc_namespace * ipc_ns)
   return count;
 }
 
+static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id) {
+      count++;
+    }
+  }
+  return count;
+}
+
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
 {
   down_write(&global_htables_rwsem);
@@ -2163,8 +2177,11 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret)
 {
   down_write(&global_htables_rwsem);
-  // Request shutdown if there is no other process excluding poll_for_unlink.
-  if (get_process_num(ipc_ns) <= 1) {
+  // A performance bridge manager is per (ipc_ns, domain), so it must shut down once its
+  // own domain is empty -- counting the whole namespace would keep it alive while an
+  // unrelated domain is busy. The manager itself is the remaining process (count == 1),
+  // and poll_for_unlink is not registered here, so it is excluded.
+  if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
       proc_info->is_performance_bridge_manager = false;

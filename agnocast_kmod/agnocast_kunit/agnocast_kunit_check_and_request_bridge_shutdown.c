@@ -62,3 +62,27 @@ void test_case_check_and_request_bridge_shutdown_when_others_exist(struct kunit 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_TRUE(test, new_args.ret_performance_bridge_daemon_exist);
 }
+
+// A per-(ipc_ns, domain) manager shuts down once its own domain is empty, even if
+// another domain in the same namespace still has processes.
+void test_case_check_and_request_bridge_shutdown_per_domain(struct kunit * test)
+{
+  // Manager is the only process in domain 1.
+  pid_t mgr_d1 = pid_carbs++;
+  union ioctl_add_process_args mgr_args = {};
+  int ret = agnocast_ioctl_add_process(mgr_d1, current->nsproxy->ipc_ns, true, 1, &mgr_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+
+  // A normal process keeps domain 2 busy.
+  pid_t other_d2 = pid_carbs++;
+  union ioctl_add_process_args other_args = {};
+  ret = agnocast_ioctl_add_process(other_d2, current->nsproxy->ipc_ns, false, 2, &other_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+
+  // Domain 1 holds only the manager, so it should shut down despite domain 2 being busy.
+  struct ioctl_check_and_request_bridge_shutdown_args shutdown_args = {};
+  ret = agnocast_ioctl_check_and_request_bridge_shutdown(
+    mgr_d1, current->nsproxy->ipc_ns, &shutdown_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_TRUE(test, shutdown_args.ret_should_shutdown);
+}
