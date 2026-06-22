@@ -103,8 +103,10 @@ def self_ns_snapshot() -> Optional[AgnocastDaemonState]:
     state.topics = []
 
     topic_count = ctypes.c_int()
-    # The CLI is not domain-aware yet: it queries the default domain (0). Full
-    # per-domain CLI output is a follow-up; here we only keep the ABI in sync.
+    # TODO: make the CLI domain-aware. It currently queries only the default
+    # domain (0) -- pass a real domain_ids array here and use each topic's
+    # stamped domain for get_agnocast_{pub,sub}_nodes below, instead of
+    # hardcoding 0. For now we only keep the ABI in sync.
     topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count), None)
     try:
         for i in range(topic_count.value):
