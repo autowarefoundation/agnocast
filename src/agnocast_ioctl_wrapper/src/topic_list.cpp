@@ -11,11 +11,14 @@
 
 extern "C" {
 
-// When domain_ids_out is non-null, on success *domain_ids_out receives a malloc'd
-// array of *topic_count domain_ids parallel to the returned topic names; the caller
-// frees it with free_agnocast_topic_domains. The domain buffer is allocated here so
-// it always matches the name buffer's capacity — the caller never sizes it. Pass
-// nullptr to skip domain output.
+// When domain_ids_out is non-null, the function allocates a buffer into *domain_ids_out and
+// passes its address to the GET_TOPIC_LIST ioctl, which fills it with the topics' domain ids.
+// It is the same size as the topic buffer and maps one-to-one to it (the id at index i is
+// topic i's domain).
+// Allocation and freeing of the returned buffers are unified in this layer (the ioctl
+// wrapper) for simplicity, so the caller never sizes them and frees the domain buffer with
+// free_agnocast_topic_domains.
+// Pass nullptr as domain_ids_out when you don't need the buffer to be allocated.
 char ** get_agnocast_topics(int * topic_count, uint32_t ** domain_ids_out)
 {
   *topic_count = 0;
