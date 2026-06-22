@@ -24,6 +24,7 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_check_and_request_bridge_shutdown.o \
   agnocast_kunit_get_topic_subscriber_info.o \
   agnocast_kunit_get_topic_publisher_info.o \
+  agnocast_kunit_get_discovery_snapshot.o \
   agnocast_kunit_init_memory_allocator.o
 
 agnocast_kunit-objs += $(addprefix agnocast_kunit/, $(KUNIT_TEST_OBJS))

@@ -72,6 +72,38 @@ union ioctl_topic_info_args {
 };
 #pragma GCC diagnostic pop
 
+// Mirror of the kmod structs in agnocast.h. Keep the layout identical (ABI).
+// pid is pid_t (== int32_t) on Linux; use int32_t here to keep this header self-contained.
+struct snapshot_topic_ret
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  uint32_t publisher_num;
+  uint32_t subscriber_num;
+  uint32_t ros2_publisher_num;
+  uint32_t ros2_subscriber_num;
+};
+
+struct snapshot_endpoint_ret
+{
+  char node_name[NODE_NAME_BUFFER_SIZE];
+  int32_t pid;
+  uint32_t qos_depth;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+  bool is_bridge;
+};
+
+struct ioctl_discovery_snapshot_args
+{
+  uint64_t topic_buffer_addr;
+  uint32_t topic_buffer_size;
+  uint64_t endpoint_buffer_addr;
+  uint32_t endpoint_buffer_size;
+  uint32_t ret_topic_num;
+  uint32_t ret_endpoint_num;
+  uint64_t ret_epoch;
+};
+
 #define VERSION_BUFFER_LEN 32
 
 struct ioctl_get_version_args
@@ -85,3 +117,4 @@ struct ioctl_get_version_args
 #define AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD _IOWR(0xA6, 22, union ioctl_topic_info_args)
 #define AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD _IOWR(0xA6, 23, union ioctl_node_info_args)
 #define AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD _IOWR(0xA6, 24, union ioctl_node_info_args)
+#define AGNOCAST_GET_DISCOVERY_SNAPSHOT_CMD _IOWR(0xA6, 28, struct ioctl_discovery_snapshot_args)

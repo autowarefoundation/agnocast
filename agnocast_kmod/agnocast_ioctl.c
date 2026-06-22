@@ -1738,6 +1738,120 @@ unlock:
   return ret;
 }
 
+int agnocast_ioctl_get_discovery_snapshot(
+  const struct ipc_namespace * ipc_ns, struct ioctl_discovery_snapshot_args * args)
+{
+  int ret = 0;
+  uint32_t topic_idx = 0;
+  uint32_t ep_idx = 0;
+  bool overflow = false;
+
+  struct snapshot_topic_ret __user * topic_ubuf =
+    (struct snapshot_topic_ret __user *)args->topic_buffer_addr;
+  struct snapshot_endpoint_ret __user * ep_ubuf =
+    (struct snapshot_endpoint_ret __user *)args->endpoint_buffer_addr;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper;
+  int bkt_topic;
+  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
+  {
+    if (!ipc_eq(ipc_ns, wrapper->ipc_ns)) {
+      continue;
+    }
+
+    down_read(&wrapper->topic_rwsem);
+
+    uint32_t pub_n = (uint32_t)agnocast_get_size_pub_info_htable(wrapper);
+    uint32_t sub_n = (uint32_t)agnocast_get_size_sub_info_htable(wrapper);
+
+    bool fits = !overflow && topic_idx < args->topic_buffer_size &&
+                (uint64_t)ep_idx + pub_n + sub_n <= args->endpoint_buffer_size;
+
+    if (fits) {
+      struct snapshot_topic_ret topic_hdr = {0};
+      strscpy(topic_hdr.topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
+      topic_hdr.publisher_num = pub_n;
+      topic_hdr.subscriber_num = sub_n;
+      topic_hdr.ros2_publisher_num = wrapper->topic.ros2_publisher_num;
+      topic_hdr.ros2_subscriber_num = wrapper->topic.ros2_subscriber_num;
+      if (copy_to_user(&topic_ubuf[topic_idx], &topic_hdr, sizeof(topic_hdr))) {
+        ret = -EFAULT;
+        up_read(&wrapper->topic_rwsem);
+        goto unlock;
+      }
+
+      uint32_t k = ep_idx;
+
+      struct publisher_info * pub_info;
+      int bkt_pub_info;
+      hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+      {
+        if (!pub_info->node_name) {
+          ret = -EFAULT;
+          up_read(&wrapper->topic_rwsem);
+          goto unlock;
+        }
+        struct snapshot_endpoint_ret ep = {0};
+        strscpy(ep.node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
+        ep.pid = pub_info->pid;
+        ep.qos_depth = pub_info->qos_depth;
+        ep.qos_is_transient_local = pub_info->qos_is_transient_local;
+        ep.qos_is_reliable = false;  // Publishers do not have reliability QoS
+        ep.is_bridge = pub_info->is_bridge;
+        if (copy_to_user(&ep_ubuf[k++], &ep, sizeof(ep))) {
+          ret = -EFAULT;
+          up_read(&wrapper->topic_rwsem);
+          goto unlock;
+        }
+      }
+
+      struct subscriber_info * sub_info;
+      int bkt_sub_info;
+      hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+      {
+        if (!sub_info->node_name) {
+          ret = -EFAULT;
+          up_read(&wrapper->topic_rwsem);
+          goto unlock;
+        }
+        struct snapshot_endpoint_ret ep = {0};
+        strscpy(ep.node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
+        ep.pid = sub_info->pid;
+        ep.qos_depth = sub_info->qos_depth;
+        ep.qos_is_transient_local = sub_info->qos_is_transient_local;
+        ep.qos_is_reliable = sub_info->qos_is_reliable;
+        ep.is_bridge = sub_info->is_bridge;
+        if (copy_to_user(&ep_ubuf[k++], &ep, sizeof(ep))) {
+          ret = -EFAULT;
+          up_read(&wrapper->topic_rwsem);
+          goto unlock;
+        }
+      }
+    } else {
+      // Out of buffer space: keep counting to report the required capacity.
+      overflow = true;
+    }
+
+    topic_idx++;
+    ep_idx += pub_n + sub_n;
+
+    up_read(&wrapper->topic_rwsem);
+  }
+
+  args->ret_topic_num = topic_idx;
+  args->ret_endpoint_num = ep_idx;
+  args->ret_epoch = 0;  // proposal 3: replace with the global discovery epoch
+  if (overflow) {
+    ret = -ENOBUFS;
+  }
+
+unlock:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct ioctl_get_subscriber_qos_args * args)
@@ -2617,6 +2731,22 @@ static long get_topic_publisher_info_cmd(union ioctl_topic_info_args __user * ar
   return ret;
 }
 
+static long get_discovery_snapshot_cmd(struct ioctl_discovery_snapshot_args __user * arg)
+{
+  int ret = 0;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_discovery_snapshot_args snapshot_args;
+  if (copy_from_user(&snapshot_args, arg, sizeof(snapshot_args))) return -EFAULT;
+
+  ret = agnocast_ioctl_get_discovery_snapshot(ipc_ns, &snapshot_args);
+  // On -ENOBUFS the ret_* counts carry the required capacity, so copy them back too.
+  if (ret == 0 || ret == -ENOBUFS) {
+    if (copy_to_user(arg, &snapshot_args, sizeof(snapshot_args))) return -EFAULT;
+  }
+  return ret;
+}
+
 static long get_subscriber_qos_cmd(struct ioctl_get_subscriber_qos_args __user * arg)
 {
   int ret = 0;
@@ -2829,6 +2959,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_topic_subscriber_info_cmd((union ioctl_topic_info_args __user *)arg);
     case AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD:
       return get_topic_publisher_info_cmd((union ioctl_topic_info_args __user *)arg);
+    case AGNOCAST_GET_DISCOVERY_SNAPSHOT_CMD:
+      return get_discovery_snapshot_cmd((struct ioctl_discovery_snapshot_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_QOS_CMD:
       return get_subscriber_qos_cmd((struct ioctl_get_subscriber_qos_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_QOS_CMD:

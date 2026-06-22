@@ -352,11 +352,49 @@ union ioctl_topic_info_args {
   uint32_t ret_topic_info_ret_num;
 };
 
+// One topic header in the discovery snapshot stream.
+struct snapshot_topic_ret
+{
+  char topic_name[TOPIC_NAME_BUFFER_SIZE];
+  uint32_t publisher_num;        // # of publisher endpoints that follow for this topic
+  uint32_t subscriber_num;       // # of subscriber endpoints that follow for this topic
+  uint32_t ros2_publisher_num;   // DDS-side pub count the kmod tracks (proposal 5 hook)
+  uint32_t ros2_subscriber_num;  // DDS-side sub count the kmod tracks (proposal 5 hook)
+};
+
+// One endpoint record in the discovery snapshot. Superset of topic_info_ret: adds pid.
+struct snapshot_endpoint_ret
+{
+  char node_name[NODE_NAME_BUFFER_SIZE];
+  pid_t pid;  // as stored by the kmod (fills AgnocastEndpoint.pid, today 0)
+  uint32_t qos_depth;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;  // always false for publishers
+  bool is_bridge;
+};
+
+// Single-shot snapshot of all topics and their pub/sub endpoints in the caller's IPC namespace.
+// Replaces the per-topic 1+2N ioctl pattern with one call.
+struct ioctl_discovery_snapshot_args
+{
+  // input: user-space buffers (addr=0 / size=0 ⇒ count-only probe)
+  uint64_t topic_buffer_addr;     // -> array of struct snapshot_topic_ret
+  uint32_t topic_buffer_size;     // capacity in records
+  uint64_t endpoint_buffer_addr;  // -> array of struct snapshot_endpoint_ret
+  uint32_t endpoint_buffer_size;  // capacity in records
+  // output
+  uint32_t ret_topic_num;     // topics present (= required capacity on overflow)
+  uint32_t ret_endpoint_num;  // endpoints present (= required capacity on overflow)
+  uint64_t ret_epoch;         // discovery generation (proposal 3 hook; 0 until wired)
+};
+
 #define AGNOCAST_GET_TOPIC_LIST_CMD _IOWR(0xA6, 20, union ioctl_topic_list_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD _IOWR(0xA6, 22, union ioctl_topic_info_args)
 #define AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD _IOWR(0xA6, 23, union ioctl_node_info_args)
 #define AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD _IOWR(0xA6, 24, union ioctl_node_info_args)
+#define AGNOCAST_GET_DISCOVERY_SNAPSHOT_CMD _IOWR(0xA6, 28, struct ioctl_discovery_snapshot_args)
+// cmd 29 reserved for AGNOCAST_GET_DISCOVERY_EPOCH_CMD (proposal 3)
 
 // ================================================
 // public macros and functions in agnocast_main.c
@@ -459,6 +497,9 @@ int agnocast_ioctl_get_node_subscriber_topics(
 int agnocast_ioctl_get_node_publisher_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args);
+
+int agnocast_ioctl_get_discovery_snapshot(
+  const struct ipc_namespace * ipc_ns, struct ioctl_discovery_snapshot_args * args);
 
 int agnocast_ioctl_check_and_request_bridge_shutdown(
   const pid_t pid, const struct ipc_namespace * ipc_ns,

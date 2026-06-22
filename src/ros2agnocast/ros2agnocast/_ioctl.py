@@ -1,6 +1,5 @@
 """ioctl fallback: synthesise an AgnocastDaemonState for the caller's NS."""
 
-from contextlib import contextmanager
 import ctypes
 import os
 from typing import Optional
@@ -17,9 +16,24 @@ BOOT_ID_PATH = '/proc/sys/kernel/random/boot_id'
 SELF_IPC_NS_PATH = '/proc/self/ns/ipc'
 
 
-class _TopicInfoRet(ctypes.Structure):
+class _SnapshotTopicRet(ctypes.Structure):
+    """Mirror of ``struct snapshot_topic_ret`` in agnocast.h / agnocast_ioctl.hpp."""
+
+    _fields_ = [
+        ('topic_name', ctypes.c_char * 256),
+        ('publisher_num', ctypes.c_uint32),
+        ('subscriber_num', ctypes.c_uint32),
+        ('ros2_publisher_num', ctypes.c_uint32),
+        ('ros2_subscriber_num', ctypes.c_uint32),
+    ]
+
+
+class _SnapshotEndpointRet(ctypes.Structure):
+    """Mirror of ``struct snapshot_endpoint_ret``. ``pid`` is pid_t (== int32)."""
+
     _fields_ = [
         ('node_name', ctypes.c_char * 256),
+        ('pid', ctypes.c_int32),
         ('qos_depth', ctypes.c_uint32),
         ('qos_is_transient_local', ctypes.c_bool),
         ('qos_is_reliable', ctypes.c_bool),
@@ -33,44 +47,26 @@ def _load_lib() -> Optional[ctypes.CDLL]:
         lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
     except OSError:
         return None
-    lib.get_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.c_int)]
-    lib.get_agnocast_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
-    lib.free_agnocast_topics.argtypes = [
-        ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
-    lib.free_agnocast_topics.restype = None
-    lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
-    lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(_TopicInfoRet)
-    lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
-    lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(_TopicInfoRet)
-    lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(_TopicInfoRet)]
-    lib.free_agnocast_topic_info_ret.restype = None
+    lib.get_agnocast_discovery_snapshot.argtypes = [
+        ctypes.POINTER(ctypes.POINTER(_SnapshotTopicRet)), ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.POINTER(_SnapshotEndpointRet)), ctypes.POINTER(ctypes.c_int),
+    ]
+    lib.get_agnocast_discovery_snapshot.restype = ctypes.c_int
+    lib.free_agnocast_discovery_snapshot.argtypes = [
+        ctypes.POINTER(_SnapshotTopicRet), ctypes.POINTER(_SnapshotEndpointRet)]
+    lib.free_agnocast_discovery_snapshot.restype = None
     return lib
 
 
-def _endpoint_from_topic_info_ret(tir: _TopicInfoRet) -> AgnocastEndpoint:
+def _endpoint_from_snapshot(ep_ret: _SnapshotEndpointRet) -> AgnocastEndpoint:
     ep = AgnocastEndpoint()
-    ep.node_name = tir.node_name.decode('utf-8').rstrip('\x00')
-    ep.pid = 0
-    ep.qos_depth = tir.qos_depth
-    ep.qos_is_transient_local = tir.qos_is_transient_local
-    ep.qos_is_reliable = tir.qos_is_reliable
-    ep.is_bridge = tir.is_bridge
+    ep.node_name = ep_ret.node_name.decode('utf-8').rstrip('\x00')
+    ep.pid = ep_ret.pid
+    ep.qos_depth = ep_ret.qos_depth
+    ep.qos_is_transient_local = ep_ret.qos_is_transient_local
+    ep.qos_is_reliable = ep_ret.qos_is_reliable
+    ep.is_bridge = ep_ret.is_bridge
     return ep
-
-
-@contextmanager
-def _endpoints(lib, fn, topic_name: str):
-    """Yield a list[AgnocastEndpoint] for one topic; free the ctypes buffer on exit."""
-    count = ctypes.c_int()
-    arr = fn(topic_name.encode('utf-8'), ctypes.byref(count))
-    try:
-        if not arr:
-            yield []
-            return
-        yield [_endpoint_from_topic_info_ret(arr[i]) for i in range(count.value)]
-    finally:
-        if arr:
-            lib.free_agnocast_topic_info_ret(arr)
 
 
 def _local_host_uuid() -> str:
@@ -99,21 +95,36 @@ def self_ns_snapshot() -> Optional[AgnocastDaemonState]:
     state.ipc_ns_inode = _local_ipc_ns_inode()
     state.topics = []
 
+    # One ioctl returns every topic plus its pub/sub endpoints. The endpoint array is laid out
+    # in topic order as "publishers then subscribers", sliced via publisher_num / subscriber_num.
+    topics_ptr = ctypes.POINTER(_SnapshotTopicRet)()
     topic_count = ctypes.c_int()
-    topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count))
+    endpoints_ptr = ctypes.POINTER(_SnapshotEndpointRet)()
+    endpoint_count = ctypes.c_int()
+    rc = lib.get_agnocast_discovery_snapshot(
+        ctypes.byref(topics_ptr), ctypes.byref(topic_count),
+        ctypes.byref(endpoints_ptr), ctypes.byref(endpoint_count))
+    if rc != 0 or topic_count.value == 0:
+        # Error or empty namespace: best-effort empty snapshot (matches old behaviour).
+        return state
+
     try:
+        cursor = 0
         for i in range(topic_count.value):
-            tname = ctypes.cast(topic_array[i], ctypes.c_char_p).value.decode('utf-8')
-            t = AgnocastTopic()
-            t.topic_name = tname
-            t.type_name = ''
-            t.domain_id = 0
-            with _endpoints(lib, lib.get_agnocast_pub_nodes, tname) as pubs:
-                t.publishers = pubs
-            with _endpoints(lib, lib.get_agnocast_sub_nodes, tname) as subs:
-                t.subscribers = subs
-            state.topics.append(t)
+            topic_ret = topics_ptr[i]
+            topic = AgnocastTopic()
+            topic.topic_name = topic_ret.topic_name.decode('utf-8').rstrip('\x00')
+            topic.type_name = ''
+            topic.domain_id = 0
+            topic.publishers = [
+                _endpoint_from_snapshot(endpoints_ptr[cursor + j])
+                for j in range(topic_ret.publisher_num)]
+            cursor += topic_ret.publisher_num
+            topic.subscribers = [
+                _endpoint_from_snapshot(endpoints_ptr[cursor + j])
+                for j in range(topic_ret.subscriber_num)]
+            cursor += topic_ret.subscriber_num
+            state.topics.append(topic)
     finally:
-        if topic_count.value != 0:
-            lib.free_agnocast_topics(topic_array, topic_count)
+        lib.free_agnocast_discovery_snapshot(topics_ptr, endpoints_ptr)
     return state
