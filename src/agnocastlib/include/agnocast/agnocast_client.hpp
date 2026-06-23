@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -120,7 +121,7 @@ private:
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
     check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
-      if constexpr (std::is_base_of_v<agnocast::Node, NodeT>) {
+      if constexpr (std::is_same_v<agnocast::Node, NodeT>) {
         return agnocast::ok();
       } else {
         return rclcpp::ok(context);
