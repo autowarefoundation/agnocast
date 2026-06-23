@@ -193,9 +193,9 @@ public:
    *  @param timeout Maximum duration to wait (-1 = wait forever).
    *  @return True if service became available, false on timeout. */
   AGNOCAST_PUBLIC
-  template <typename RepT, typename RatioT>
+  template <typename RepT = int64_t, typename RatioT = std::milli>
   bool wait_for_service(
-    std::chrono::duration<RepT, RatioT> timeout = std::chrono::nanoseconds(-1)) const
+    std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
   {
     return wait_for_service_nanoseconds(
       node_base_->get_context(), service_name_,
