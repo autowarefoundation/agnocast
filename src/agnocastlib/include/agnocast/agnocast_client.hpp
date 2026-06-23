@@ -29,7 +29,7 @@ struct NoBridgeRegistrationPolicy;
 
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
-  const std::function<bool()> & check_context_valid, const std::string & service_name,
+  const std::function<bool()> & check_context_ok, const std::string & service_name,
   std::chrono::nanoseconds timeout);
 
 extern int agnocast_fd;
@@ -107,7 +107,7 @@ private:
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   std::string node_name_;
   std::string service_name_;
-  std::function<bool()> check_context_valid_;
+  std::function<bool()> check_context_ok_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
@@ -119,7 +119,7 @@ private:
     node_name_ = node->get_fully_qualified_name();
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
-    check_context_valid_ = [context = node->get_node_base_interface()->get_context()]() {
+    check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
       if constexpr (std::is_base_of_v<agnocast::Node, NodeT>) {
         return agnocast::ok();
       } else {
@@ -206,7 +206,7 @@ public:
     std::chrono::duration<RepT, RatioT> timeout = std::chrono::nanoseconds(-1)) const
   {
     return wait_for_service_nanoseconds(
-      check_context_valid_, service_name_,
+      check_context_ok_, service_name_,
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
 

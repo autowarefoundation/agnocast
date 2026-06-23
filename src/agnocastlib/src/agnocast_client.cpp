@@ -47,7 +47,7 @@ bool service_is_ready_core(const std::string & service_name)
 }
 
 bool wait_for_service_nanoseconds(
-  const std::function<bool()> & check_context_valid, const std::string & service_name,
+  const std::function<bool()> & check_context_ok, const std::string & service_name,
   nanoseconds timeout)
 {
   auto start = steady_clock::now();
@@ -62,7 +62,7 @@ bool wait_for_service_nanoseconds(
   nanoseconds time_to_wait =
     timeout > nanoseconds(0) ? timeout - (steady_clock::now() - start) : nanoseconds::max();
   do {
-    if (!check_context_valid()) {
+    if (!check_context_ok()) {
       return false;
     }
     nanoseconds interval = std::min(time_to_wait, duration_cast<nanoseconds>(100ms));
