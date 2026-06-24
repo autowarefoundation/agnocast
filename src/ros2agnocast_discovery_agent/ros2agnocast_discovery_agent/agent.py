@@ -393,7 +393,8 @@ class DiscoveryAgent(Node):
             return
         try:
             rules = domain_bridge_config.load_domain_bridge_rules(path)
-        except (OSError, yaml.YAMLError) as e:
+        except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
+            # A bad config must not take the daemon down: warn and run without rules.
             self.get_logger().warning(f'could not load domain bridge config {path}: {e}')
             return
         for topic, from_domain, to_domain in rules:
