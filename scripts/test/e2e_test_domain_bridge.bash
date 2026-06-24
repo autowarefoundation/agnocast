@@ -1,5 +1,5 @@
 #!/bin/bash
-# Case 2 (same IPC namespace, cross-domain) zero-copy e2e.
+# Same-IPC-namespace cross-domain zero-copy e2e (two ROS domains, one mempool).
 #
 # Registers a domain bridge rule for the sample topic, then runs the sample
 # talker in FROM_DOMAIN and the sample listener in TO_DOMAIN as SEPARATE launches
@@ -15,7 +15,7 @@
 # never block on a graceful exit.
 #
 # Run on a freshly loaded kmod — the rule must be registered before any endpoint
-# for the topic joins. Pure Case 2 uses no bridge, so AGNOCAST_BRIDGE_MODE=off.
+# for the topic joins. This path uses no bridge, so AGNOCAST_BRIDGE_MODE=off.
 
 set -uo pipefail
 
@@ -75,7 +75,7 @@ sub_count=$(grep -c "subscribe message: id=" "$SUBLOG" || true)
 echo "published=${pub_count}  received(cross-domain)=${sub_count}"
 
 if [ "$pub_count" -gt 0 ] && [ "$sub_count" -gt 0 ]; then
-    echo "PASS: domain ${FROM_DOMAIN} publisher reached domain ${TO_DOMAIN} subscriber (Case 2 zero-copy)."
+    echo "PASS: domain ${FROM_DOMAIN} publisher reached domain ${TO_DOMAIN} subscriber (cross-domain zero-copy)."
     exit 0
 fi
 echo "FAIL: cross-domain delivery not observed (published=${pub_count}, received=${sub_count})." >&2
