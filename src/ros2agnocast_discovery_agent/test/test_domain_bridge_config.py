@@ -3,6 +3,8 @@
 These exercise the pure parser only; no kmod, DDS, or file I/O is involved.
 """
 
+import pytest
+
 from ros2agnocast_discovery_agent.domain_bridge_config import parse_domain_bridge_config
 
 
@@ -45,3 +47,17 @@ topics:
 def test_empty_or_topicless_config_yields_no_rules():
     assert parse_domain_bridge_config('') == []
     assert parse_domain_bridge_config('topics:') == []
+
+
+def test_non_integer_domain_raises():
+    # A non-integer domain raises; the agent catches this and runs without rules
+    # rather than crashing at startup.
+    text = """
+from_domain: not_a_number
+to_domain: 2
+topics:
+  chatter:
+    type: std_msgs/msg/String
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
