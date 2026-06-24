@@ -2175,10 +2175,12 @@ int agnocast_ioctl_add_domain_bridge(
 
   struct domain_bridge_rule * existing = find_domain_rule(topic_name, ipc_ns);
   if (existing) {
-    // Re-declaring the same pair just adds the reverse direction; a third domain
-    // on the same topic is rejected (v1 supports a single pair per topic).
-    // TODO: support >2 domains per topic (fan-out, e.g. 1->2 and 1->3) by storing a
-    // domain group instead of a fixed pair and grouping N wrappers onto one topic_struct.
+    // Re-declaring the same pair just adds the reverse direction. A third domain on a
+    // topic is rejected: the current implementation supports exactly one domain pair per
+    // topic (no fan-out such as 1->2 and 1->3 on the same topic). This is the one place
+    // that enforces it.
+    // TODO: support >2 domains per topic by storing a domain group instead of a fixed
+    // pair and grouping N wrappers onto one topic_struct.
     if (existing->domain_a != lo || existing->domain_b != hi) {
       ret = -EBUSY;
       goto unlock;

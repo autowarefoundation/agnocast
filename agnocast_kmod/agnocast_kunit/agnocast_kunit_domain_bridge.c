@@ -88,7 +88,7 @@ void test_case_add_domain_bridge_third_domain_rejected(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
-  // A different domain pair on the same topic is rejected (v1 is pair-only).
+  // A different domain pair on the same topic is rejected (one pair per topic).
   int ret = agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 3, current->nsproxy->ipc_ns);
   KUNIT_EXPECT_EQ(test, ret, -EBUSY);
 }
