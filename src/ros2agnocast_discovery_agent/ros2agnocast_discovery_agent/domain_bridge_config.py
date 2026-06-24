@@ -1,9 +1,9 @@
 """Parse a ROS 2 ``domain_bridge`` YAML into the (topic, from_domain, to_domain)
 rules the Agnocast daemon registers with the kmod.
 
-The same YAML drives both the external ``domain_bridge`` node (cross-ECU, Case 8)
-and the daemon's kmod rule injection that opens same-namespace zero-copy
-cross-domain delivery (Case 2). Only the topic name and domain pair matter here;
+The same YAML drives both the external ``domain_bridge`` node (cross-ECU, via DDS)
+and the daemon's kmod rule injection that opens same-IPC-namespace zero-copy
+cross-domain delivery. Only the topic name and domain pair matter here;
 ``type`` and other fields are ignored.
 """
 import yaml
