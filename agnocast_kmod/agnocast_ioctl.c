@@ -550,6 +550,12 @@ static int set_publisher_shm_info(
       continue;
     }
 
+    // A subscriber only reads from publishers that deliver to it; a one-way
+    // bridge rule can exclude opposite-domain publishers, so skip mapping them.
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
+      continue;
+    }
+
     const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
     if (!proc_info || proc_info->exited) {
       continue;
@@ -1218,10 +1224,16 @@ int agnocast_ioctl_get_subscriber_num(
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
 
+  // The caller is a publisher in wrapper->domain_id; count only the subscribers
+  // it actually delivers to. For a one-way bridge rule this excludes the
+  // opposite-domain subscribers; for ungrouped topics every subscriber qualifies.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
+    if (!domain_delivery_allowed(wrapper->topic, wrapper->domain_id, sub_info->domain_id)) {
+      continue;
+    }
     if (sub_info->is_bridge) {
       ioctl_ret->ret_a2r_bridge_exist = true;
     }
@@ -1312,18 +1324,25 @@ int agnocast_ioctl_get_publisher_num(
 
   down_read(&wrapper->topic->rwsem);
 
-  ioctl_ret->ret_publisher_num = agnocast_get_size_pub_info_htable(wrapper);
   ioctl_ret->ret_ros2_publisher_num = wrapper->topic->ros2_publisher_num;
 
+  // The caller is a subscriber in wrapper->domain_id; count only the publishers
+  // that actually deliver to it. For a one-way bridge rule this excludes the
+  // opposite-domain publishers; for ungrouped topics every publisher qualifies.
+  uint32_t publisher_num = 0;
   struct publisher_info * pub_info;
   int bkt_pub;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub, pub_info, node)
   {
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
+      continue;
+    }
+    publisher_num++;
     if (pub_info->is_bridge) {
       ioctl_ret->ret_r2a_bridge_exist = true;
-      break;
     }
   }
+  ioctl_ret->ret_publisher_num = publisher_num;
 
   struct subscriber_info * sub_info;
   int bkt_sub;
@@ -3246,20 +3265,27 @@ bool agnocast_get_domain_rule(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
   uint32_t * domain_b, bool * a_to_b, bool * b_to_a)
 {
+  down_read(&global_htables_rwsem);
   const struct domain_bridge_rule * rule = find_domain_rule(topic_name, ipc_ns);
-  if (!rule) return false;
-  *domain_a = rule->domain_a;
-  *domain_b = rule->domain_b;
-  *a_to_b = rule->a_to_b;
-  *b_to_a = rule->b_to_a;
-  return true;
+  bool found = rule != NULL;
+  if (found) {
+    *domain_a = rule->domain_a;
+    *domain_b = rule->domain_b;
+    *a_to_b = rule->a_to_b;
+    *b_to_a = rule->b_to_a;
+  }
+  up_read(&global_htables_rwsem);
+  return found;
 }
 
 int agnocast_topic_wrapper_refcnt(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
 {
+  down_read(&global_htables_rwsem);
   const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, domain_id);
-  return wrapper ? (int)wrapper->topic->wrapper_refcnt : 0;
+  int refcnt = wrapper ? (int)wrapper->topic->wrapper_refcnt : 0;
+  up_read(&global_htables_rwsem);
+  return refcnt;
 }
 
 #endif

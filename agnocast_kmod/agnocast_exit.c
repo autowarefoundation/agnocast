@@ -7,36 +7,10 @@ static void remove_all_topics(void)
   struct hlist_node * tmp;
   int bkt;
 
+  // release frees the shared topic_struct (rbtree + pub/sub tables) once its
+  // last wrapper goes; for a grouped pair that is the second wrapper.
   hash_for_each_safe(topic_hashtable, bkt, tmp, wrapper, node)
   {
-    struct rb_root * root = &wrapper->topic->entries;
-    struct rb_node * node = rb_first(root);
-    while (node) {
-      struct entry_node * en = rb_entry(node, struct entry_node, node);
-      node = rb_next(node);
-      agnocast_remove_entry_node(wrapper, en);
-    }
-
-    struct publisher_info * pub_info;
-    int bkt_pub_info;
-    struct hlist_node * tmp_pub_info;
-    hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
-    {
-      hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
-    }
-
-    struct subscriber_info * sub_info;
-    int bkt_sub_info;
-    struct hlist_node * tmp_sub_info;
-    hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
-    {
-      hash_del(&sub_info->node);
-      kfree(sub_info->node_name);
-      kfree(sub_info);
-    }
-
     agnocast_release_topic_wrapper(wrapper);
   }
 }
