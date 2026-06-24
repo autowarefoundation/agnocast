@@ -8,6 +8,8 @@
 
 static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 
+#define KUNIT_PUB_SHM_BUF_SIZE 4
+
 static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
 // Returns the process's mempool base address, used as a valid publish address.
@@ -223,4 +225,78 @@ void test_case_domain_bridge_exit_frees_shared_struct(struct kunit * test)
 
   KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 0);
   KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 0);
+}
+
+// A publisher's subscriber count must include only the subscribers it delivers to:
+// same-domain ones always, opposite-domain ones only in the rule's direction. With
+// a 1 -> 2 rule, a domain-2 publisher reaches the domain-2 subscriber but not the
+// domain-1 one.
+void test_case_domain_bridge_get_subscriber_num_filtered(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 2);
+  add_publisher_for(test, current->tgid);
+  setup_process_in_domain(test, 1002, 2);
+  add_subscriber_for(test, 1002);
+  setup_process_in_domain(test, 1001, 1);
+  add_subscriber_for(test, 1001);
+
+  union ioctl_get_subscriber_num_args args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, current->tgid, &args),
+    0);
+  KUNIT_EXPECT_EQ(test, args.ret_other_process_subscriber_num, (uint32_t)1);
+  KUNIT_EXPECT_EQ(test, args.ret_same_process_subscriber_num, (uint32_t)0);
+}
+
+// A subscriber's publisher count must include only the publishers that deliver to
+// it. With a 1 -> 2 rule, a domain-1 subscriber sees the domain-1 publisher but not
+// the domain-2 one (2 -> 1 is not allowed).
+void test_case_domain_bridge_get_publisher_num_filtered(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  add_subscriber_for(test, current->tgid);
+  setup_process_in_domain(test, 1000, 1);
+  add_publisher_for(test, 1000);
+  setup_process_in_domain(test, 1001, 2);
+  add_publisher_for(test, 1001);
+
+  union ioctl_get_publisher_num_args args;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_get_publisher_num(TOPIC_NAME, current->nsproxy->ipc_ns, &args), 0);
+  KUNIT_EXPECT_EQ(test, args.ret_publisher_num, (uint32_t)1);
+}
+
+// A subscriber maps only the mempools of publishers that deliver to it. With a
+// 1 -> 2 rule, the domain-1 subscriber maps the domain-1 publisher but skips the
+// domain-2 one, so the opposite-domain mempool is never referenced.
+void test_case_domain_bridge_shm_info_skips_undelivered_publisher(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  const topic_local_id_t sub_id = add_subscriber_for(test, current->tgid);
+  setup_process_in_domain(test, 1000, 1);
+  add_publisher_for(test, 1000);
+  setup_process_in_domain(test, 1001, 2);
+  add_publisher_for(test, 1001);
+
+  union ioctl_receive_msg_args receive_args;
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_receive_msg(
+      TOPIC_NAME, current->nsproxy->ipc_ns, sub_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+      &receive_args),
+    0);
+
+  KUNIT_EXPECT_EQ(test, receive_args.ret_pub_shm_num, (uint32_t)1);
+  KUNIT_EXPECT_EQ(test, pub_shm_infos[0].pid, (pid_t)1000);
 }

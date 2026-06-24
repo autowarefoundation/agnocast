@@ -187,6 +187,10 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
 {
   hash_del(&wrapper->node);
   kfree(wrapper->key);
+
+  // Grouped domains share one topic_struct, so it (and everything it owns) is
+  // torn down only when the last referencing wrapper is released. This is the
+  // single place that frees the shared rbtree and pub/sub tables.
   if (--wrapper->topic->wrapper_refcnt == 0) {
     struct rb_node * node = rb_first(&wrapper->topic->entries);
     while (node) {
@@ -195,6 +199,27 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
       rb_erase(&en->node, &wrapper->topic->entries);
       kfree(en);
     }
+
+    struct publisher_info * pub_info;
+    int bkt_pub;
+    struct hlist_node * tmp_pub;
+    hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub, tmp_pub, pub_info, node)
+    {
+      hash_del(&pub_info->node);
+      kfree(pub_info->node_name);
+      kfree(pub_info);
+    }
+
+    struct subscriber_info * sub_info;
+    int bkt_sub;
+    struct hlist_node * tmp_sub;
+    hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub, tmp_sub, sub_info, node)
+    {
+      hash_del(&sub_info->node);
+      kfree(sub_info->node_name);
+      kfree(sub_info);
+    }
+
     kfree(wrapper->topic);
   }
   kfree(wrapper);
