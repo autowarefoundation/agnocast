@@ -10,6 +10,8 @@ import tempfile
 from argparse import Namespace
 from unittest.mock import patch
 
+import pytest
+
 from ros2agnocast.verb import agnocast_discovery_daemon_status as ds
 
 
@@ -64,7 +66,7 @@ def test_describe_type_registry_stale_pid_noted():
 def test_check_daemon_process_missing_lock_is_ng():
     with tempfile.TemporaryDirectory() as tmpdir:
         with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, reason = ds._check_daemon_process(424242)
+            ok, reason = ds._check_daemon_process(424242, 0)
         assert ok is False
         assert 'no singleton lock file' in reason
 
@@ -73,23 +75,28 @@ def test_check_daemon_process_free_lock_is_ng():
     """Lock file exists but nobody holds it -> no live agent."""
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 424242
-        open(os.path.join(tmpdir, f'agnocast_discovery_agent_{ns_inode}.lock'), 'w').close()
+        domain_id = 0
+        open(os.path.join(
+            tmpdir, f'agnocast_discovery_agent_{ns_inode}_d{domain_id}.lock'), 'w').close()
         with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, reason = ds._check_daemon_process(ns_inode)
+            ok, reason = ds._check_daemon_process(ns_inode, domain_id)
         assert ok is False
         assert 'free' in reason
 
 
 def test_check_daemon_process_held_lock_is_ok():
-    """A held flock (as the real agent holds it) -> OK."""
+    """A held flock (as the real agent holds it) -> OK. A non-zero domain also
+    proves the domain is part of the probed path."""
     with tempfile.TemporaryDirectory() as tmpdir:
         ns_inode = 424242
-        lock_path = os.path.join(tmpdir, f'agnocast_discovery_agent_{ns_inode}.lock')
+        domain_id = 2
+        lock_path = os.path.join(
+            tmpdir, f'agnocast_discovery_agent_{ns_inode}_d{domain_id}.lock')
         holder = open(lock_path, 'w')
         try:
             fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-                ok, reason = ds._check_daemon_process(ns_inode)
+                ok, reason = ds._check_daemon_process(ns_inode, domain_id)
             assert ok is True
             assert 'holds the singleton lock' in reason
         finally:
@@ -100,10 +107,21 @@ def test_check_daemon_process_held_lock_is_ok():
 
 def test_singleton_lock_path_honors_agnocast_tmpfs_dir(monkeypatch):
     monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
-    assert ds._singleton_lock_path(7) == '/run/custom/agnocast_discovery_agent_7.lock'
+    assert ds._singleton_lock_path(7, 2) == '/run/custom/agnocast_discovery_agent_7_d2.lock'
 
     monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
-    assert ds._singleton_lock_path(7) == '/dev/shm/agnocast_discovery_agent_7.lock'
+    assert ds._singleton_lock_path(7, 0) == '/dev/shm/agnocast_discovery_agent_7_d0.lock'
+
+
+def test_singleton_lock_path_matches_agent(monkeypatch):
+    """The verb must probe the exact file the agent locks. The path is duplicated
+    in two packages, so this cross-checks them to catch drift (e.g. the domain
+    suffix added by the per-(namespace, domain) agent change)."""
+    agent = pytest.importorskip('ros2agnocast_discovery_agent.agent')
+    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
+    for ns_inode, domain_id in [(7, 0), (4026531839, 2), (12345, 7)]:
+        assert ds._singleton_lock_path(ns_inode, domain_id) == \
+            agent._singleton_lock_path(ns_inode, domain_id)
 
 
 def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):

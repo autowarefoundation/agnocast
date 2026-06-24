@@ -1,12 +1,14 @@
-"""Check that the per-IPC-namespace Agnocast discovery agent is alive.
+"""Check that this (IPC namespace, ROS_DOMAIN_ID)'s Agnocast discovery agent is alive.
 
 The agent publishes the local Agnocast state on ``/_agnocast_discovery``
 for cross-namespace observability. If the agent is not running (or
 running in a different IPC namespace), that observability silently stops
 working — this verb gives the operator a single place to confirm liveness.
 
-This command only inspects the **current** IPC namespace (the one the
-command itself runs in); run it inside the namespace you want to check.
+The agent runs one instance per (IPC namespace, ROS_DOMAIN_ID), so this
+command only inspects the **current** namespace and domain (the ones the
+command itself runs in); run it inside the namespace and with the
+ROS_DOMAIN_ID you want to check.
 
 Default output is a single one-line verdict — nothing else:
 
@@ -18,18 +20,18 @@ Default output is a single one-line verdict — nothing else:
 
 The verdict is driven by two internal checks:
 
-  * **process** — the agent holds an exclusive ``flock(2)`` on its per-NS
-    singleton lock file for its whole lifetime, so we probe that lock. The
-    lock path encodes the IPC namespace, so this needs no executable-path
-    matching.
+  * **process** — the agent holds an exclusive ``flock(2)`` on its
+    per-(namespace, domain) singleton lock file for its whole lifetime, so we
+    probe that lock. The lock path encodes the IPC namespace and ROS_DOMAIN_ID,
+    so this needs no executable-path matching.
   * **gossip** — a snapshot from this IPC namespace is received on
     ``/_agnocast_discovery`` within the timeout. ``gossip`` OK implies
     ``process`` OK (an agent that publishes is alive), so it is the primary,
     end-to-end signal; ``process`` only distinguishes "not running" from
     "running but not publishing" when ``gossip`` is NG.
 
-``--verbose`` additionally prints the IPC namespace inode, each check's
-result, and a ``type_registry`` line (how many live Agnocast processes have
+``--verbose`` additionally prints the IPC namespace inode, the ROS_DOMAIN_ID,
+each check's result, and a ``type_registry`` line (how many live Agnocast processes have
 registered). None of those affect the exit code — they are context, not part
 of the verdict.
 
@@ -60,28 +62,44 @@ def _self_ipc_ns_inode():
     return os.stat('/proc/self/ns/ipc').st_ino
 
 
-def _singleton_lock_path(my_ns_inode) -> str:
-    """Path of the agent's per-IPC-namespace singleton lock.
+def _read_ros_domain_id() -> int:
+    """Return ROS_DOMAIN_ID from the environment (0 if unset, empty, or
+    unparsable), matching ``ros2agnocast_discovery_agent.agent._read_ros_domain_id``
+    so this verb resolves the same domain the agent locked under.
+    """
+    raw = os.environ.get('ROS_DOMAIN_ID')
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _singleton_lock_path(my_ns_inode, domain_id) -> str:
+    """Path of the agent's per-(IPC namespace, domain) singleton lock.
 
     Must match ``_singleton_lock_path`` in
     ``ros2agnocast_discovery_agent.agent``, including the ``AGNOCAST_TMPFS_DIR``
-    override, so this verb probes the same file the agent locks.
+    override and the ``_d<domain>`` suffix, so this verb probes the same file the
+    agent locks. The agent runs one instance per (namespace, domain), so the
+    domain is part of the path.
     """
     root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
-    return os.path.join(root, f'agnocast_discovery_agent_{my_ns_inode}.lock')
+    return os.path.join(root, f'agnocast_discovery_agent_{my_ns_inode}_d{domain_id}.lock')
 
 
-def _check_daemon_process(my_ns_inode):
+def _check_daemon_process(my_ns_inode, domain_id):
     """Return (ok, reason) for the daemon-liveness check.
 
-    The agent holds an exclusive ``flock(2)`` on its per-NS lock file for its
-    whole lifetime. We probe that lock with a non-blocking ``LOCK_EX``: if we
-    cannot take it, a live agent in this namespace is holding it. The kernel
-    releases the lock when the holder dies, so a lock we *can* take (or a
-    missing file) means no live agent. ``reason`` is a short phrase for the
-    verdict breakdown, not a full sentence.
+    The agent holds an exclusive ``flock(2)`` on its per-(namespace, domain) lock
+    file for its whole lifetime. We probe that lock with a non-blocking
+    ``LOCK_EX``: if we cannot take it, a live agent for this (namespace, domain)
+    is holding it. The kernel releases the lock when the holder dies, so a lock
+    we *can* take (or a missing file) means no live agent. ``reason`` is a short
+    phrase for the verdict breakdown, not a full sentence.
     """
-    lock_path = _singleton_lock_path(my_ns_inode)
+    lock_path = _singleton_lock_path(my_ns_inode, domain_id)
     if not os.path.exists(lock_path):
         return False, f'no singleton lock file ({lock_path})'
 
@@ -181,8 +199,9 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
         warn_if_gossip_timeout_overridden(args)
 
         my_ns_inode = _self_ipc_ns_inode()
+        my_domain_id = _read_ros_domain_id()
 
-        proc_ok, proc_reason = _check_daemon_process(my_ns_inode)
+        proc_ok, proc_reason = _check_daemon_process(my_ns_inode, my_domain_id)
         # gossip is the end-to-end signal, but it only matters if a process is
         # up; skip its timeout wait when the agent clearly isn't running.
         if proc_ok:
@@ -191,7 +210,7 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
             gossip_ok, gossip_reason = None, None
 
         if args.verbose:
-            print(f'IPC namespace inode: {my_ns_inode}')
+            print(f'IPC namespace inode: {my_ns_inode}, ROS_DOMAIN_ID: {my_domain_id}')
             print(f'  process:       {"OK" if proc_ok else "NG"} ({proc_reason})')
             if gossip_ok is None:
                 print('  gossip:        skipped (agent not running)')
