@@ -1390,6 +1390,13 @@ void agnocast_commit_exit_process(
   up_write(&global_htables_rwsem);
 }
 
+// Intentionally namespace-scoped, not caller-domain-scoped: this returns every
+// domain's topics, each stamped with its domain_id, rather than filtering to the
+// caller's ROS_DOMAIN_ID. get_topic_*_info takes a domain input and filters here;
+// the list stays broad so one call serves both a per-(NS, domain) consumer (which
+// filters client-side -- cheap) and a cross-domain view (e.g. a future domain-aware
+// `ros2 topic list_agnocast`). Revisit by adding a domain input if a strictly
+// per-domain enumeration is ever needed.
 int agnocast_ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args)
 {
