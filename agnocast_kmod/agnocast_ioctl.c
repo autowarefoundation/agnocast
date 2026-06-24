@@ -2031,20 +2031,8 @@ int agnocast_ioctl_remove_publisher(
     }
   }
 
-  if (
-    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-    agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic->entries);
-    while (n) {
-      struct entry_node * en = rb_entry(n, struct entry_node, node);
-      n = rb_next(n);
-      agnocast_remove_entry_node(wrapper, en);
-    }
-
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+  if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+    agnocast_release_topic_wrapper(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 

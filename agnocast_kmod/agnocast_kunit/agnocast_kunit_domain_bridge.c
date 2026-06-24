@@ -185,6 +185,25 @@ void test_case_domain_bridge_partial_remove_keeps_struct(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 1);
 }
 
+// Same as above, but the dropped endpoint is a subscriber: remove_subscriber must
+// release only its own domain's wrapper and keep the shared struct for domain 2.
+void test_case_domain_bridge_partial_remove_sub_keeps_struct(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  const topic_local_id_t sub_id = add_subscriber_for(test, current->tgid);
+  setup_process_in_domain(test, 1001, 2);
+  add_publisher_for(test, 1001);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 2);
+
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_remove_subscriber(TOPIC_NAME, current->nsproxy->ipc_ns, sub_id), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 1), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 1);
+}
+
 void test_case_domain_bridge_exit_frees_shared_struct(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(
