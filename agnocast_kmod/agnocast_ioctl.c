@@ -2164,6 +2164,9 @@ int agnocast_ioctl_add_domain_bridge(
 
   if (from_domain == to_domain) return -EINVAL;
 
+  // Store the pair canonically (domain_a < domain_b), keeping direction only as the
+  // a_to_b / b_to_a flags: grouping (find_grouped_topic_struct) cares only about the pair,
+  // while direction is enforced at delivery (domain_delivery_allowed).
   const uint32_t lo = from_domain < to_domain ? from_domain : to_domain;
   const uint32_t hi = from_domain < to_domain ? to_domain : from_domain;
   const bool lo_to_hi = (from_domain == lo);
@@ -2174,6 +2177,8 @@ int agnocast_ioctl_add_domain_bridge(
   if (existing) {
     // Re-declaring the same pair just adds the reverse direction; a third domain
     // on the same topic is rejected (v1 supports a single pair per topic).
+    // TODO: support >2 domains per topic (fan-out, e.g. 1->2 and 1->3) by storing a
+    // domain group instead of a fixed pair and grouping N wrappers onto one topic_struct.
     if (existing->domain_a != lo || existing->domain_b != hi) {
       ret = -EBUSY;
       goto unlock;
