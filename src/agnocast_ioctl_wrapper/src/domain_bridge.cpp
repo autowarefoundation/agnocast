@@ -16,6 +16,13 @@ extern "C" {
 int add_agnocast_domain_bridge_rule(
   const char * topic_name, uint32_t from_domain, uint32_t to_domain)
 {
+  // Exported C symbol: guard the pointer so a null from a caller returns an
+  // error instead of segfaulting in strlen() below.
+  if (topic_name == nullptr) {
+    errno = EINVAL;
+    return -1;
+  }
+
   int fd = open("/dev/agnocast", O_RDONLY);
   if (fd < 0) {
     if (errno == ENOENT) {

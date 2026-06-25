@@ -61,3 +61,58 @@ topics:
 """
     with pytest.raises(ValueError):
         parse_domain_bridge_config(text)
+
+
+def test_out_of_range_domain_raises():
+    # uint32 overflow would wrap silently at the ioctl boundary, so reject it.
+    text = """
+from_domain: 1
+to_domain: 4294967296
+topics:
+  chatter:
+    type: std_msgs/msg/String
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
+
+
+def test_negative_domain_raises():
+    text = """
+from_domain: -1
+to_domain: 2
+topics:
+  chatter:
+    type: std_msgs/msg/String
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
+
+
+# Malformed structure must raise a caught exception (ValueError/TypeError), not
+# AttributeError, so the daemon runs without rules instead of crashing.
+
+def test_non_mapping_root_raises():
+    with pytest.raises((ValueError, TypeError)):
+        parse_domain_bridge_config('- a\n- b\n')
+
+
+def test_non_mapping_topics_raises():
+    with pytest.raises((ValueError, TypeError)):
+        parse_domain_bridge_config('topics:\n  - chatter\n  - special\n')
+
+
+def test_non_mapping_topic_spec_raises():
+    with pytest.raises((ValueError, TypeError)):
+        parse_domain_bridge_config('from_domain: 1\nto_domain: 2\ntopics:\n  chatter: oops\n')
+
+
+def test_null_topic_spec_with_top_level_domains_is_used():
+    # `chatter:` with no body is a None spec; it should fall back to the
+    # top-level domains, not crash.
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  chatter:
+"""
+    assert parse_domain_bridge_config(text) == [('chatter', 1, 2)]
