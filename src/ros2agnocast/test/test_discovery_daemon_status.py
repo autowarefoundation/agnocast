@@ -10,9 +10,8 @@ import tempfile
 from argparse import Namespace
 from unittest.mock import patch
 
-import pytest
-
 from ros2agnocast.verb import agnocast_discovery_daemon_status as ds
+from ros2agnocast_discovery_agent import agent as discovery_agent
 
 
 # --- type_registry: informational description (no OK/NG) --------------------
@@ -113,15 +112,25 @@ def test_singleton_lock_path_honors_agnocast_tmpfs_dir(monkeypatch):
     assert ds._singleton_lock_path(7, 0) == '/dev/shm/agnocast_discovery_agent_7_d0.lock'
 
 
+def test_read_ros_domain_id(monkeypatch):
+    monkeypatch.delenv('ROS_DOMAIN_ID', raising=False)
+    assert ds._read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', '')
+    assert ds._read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', '5')
+    assert ds._read_ros_domain_id() == 5
+    monkeypatch.setenv('ROS_DOMAIN_ID', 'notanint')
+    assert ds._read_ros_domain_id() == 0
+
+
 def test_singleton_lock_path_matches_agent(monkeypatch):
     """The verb must probe the exact file the agent locks. The path is duplicated
     in two packages, so this cross-checks them to catch drift (e.g. the domain
     suffix added by the per-(namespace, domain) agent change)."""
-    agent = pytest.importorskip('ros2agnocast_discovery_agent.agent')
     monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
     for ns_inode, domain_id in [(7, 0), (4026531839, 2), (12345, 7)]:
         assert ds._singleton_lock_path(ns_inode, domain_id) == \
-            agent._singleton_lock_path(ns_inode, domain_id)
+            discovery_agent._singleton_lock_path(ns_inode, domain_id)
 
 
 def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):
