@@ -63,6 +63,7 @@ union ioctl_add_process_args {
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
     bool ret_performance_bridge_daemon_exist;
+    bool ret_discovery_agent_exist;
   };
 };
 #pragma GCC diagnostic pop
