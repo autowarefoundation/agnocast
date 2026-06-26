@@ -65,6 +65,40 @@ TOPIC_NAME_BUFFER_SIZE = 256
 # being refreshed before we drop it. Matches the gossip Liveliness lease so
 # DDS-side liveliness loss and local prune happen on the same timescale.
 REMOTE_STATE_STALE_SEC = 30.0
+# Opt-in idle-exit (--exit-when-idle CLI flag or the env var): the agent exits
+# after its (IPC NS, domain) has had no Agnocast node for EXIT_WHEN_IDLE_GRACE_SEC.
+# Off by default, so a launch-started agent runs until the launch stops it.
+EXIT_WHEN_IDLE_FLAG = '--exit-when-idle'
+EXIT_WHEN_IDLE_ENV = 'AGNOCAST_DISCOVERY_AGENT_EXIT_WHEN_IDLE'
+EXIT_WHEN_IDLE_GRACE_SEC = 30.0
+
+
+def _exit_when_idle_enabled(argv=None) -> bool:
+    if argv is None:
+        argv = sys.argv
+    if EXIT_WHEN_IDLE_FLAG in argv:
+        return True
+    return os.environ.get(EXIT_WHEN_IDLE_ENV, '').strip().lower() in ('1', 'true', 'yes')
+
+
+class IdleExitTracker:
+    """Reports idle after ``threshold`` consecutive idle ticks.
+
+    ``update()`` returns True on every idle tick at or beyond the threshold
+    (level-triggered, not one-shot); a single non-idle tick resets the count,
+    so a brief gap (e.g. a node restarting) does not trigger an exit.
+    """
+
+    def __init__(self, threshold: int):
+        self._threshold = max(1, threshold)
+        self._idle_count = 0
+
+    def update(self, is_idle: bool) -> bool:
+        self._idle_count = self._idle_count + 1 if is_idle else 0
+        return self._idle_count >= self._threshold
+
+    def reset(self) -> None:
+        self._idle_count = 0
 
 
 class TopicInfoRet(ctypes.Structure):
@@ -104,6 +138,9 @@ def _load_ioctl_wrapper():
     lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
     lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
     lib.free_agnocast_topic_info_ret.restype = None
+
+    lib.agnocast_discovery_agent_should_exit.argtypes = [ctypes.c_uint32]
+    lib.agnocast_discovery_agent_should_exit.restype = ctypes.c_int
 
     return lib
 
@@ -342,7 +379,12 @@ class DiscoveryAgent(Node):
     against the local state and issues cross-NS bridge requests.
     """
 
-    def __init__(self, registry: TypeRegistryReader | None = None):
+    def __init__(
+        self,
+        registry: TypeRegistryReader | None = None,
+        *,
+        exit_when_idle: bool | None = None,
+    ):
         self._host_uuid = _read_host_uuid()
         self._host_hostname = socket.gethostname()
         self._ipc_ns_inode = _read_ipc_ns_inode()
@@ -370,6 +412,12 @@ class DiscoveryAgent(Node):
             AgnocastDaemonState, GOSSIP_TOPIC, self._on_remote_state, qos)
         self._remote_states = {}
 
+        if exit_when_idle is None:
+            exit_when_idle = _exit_when_idle_enabled()
+        self._exit_when_idle = exit_when_idle
+        self._idle_tracker = IdleExitTracker(
+            threshold=round(EXIT_WHEN_IDLE_GRACE_SEC / PUBLISH_INTERVAL_SEC))
+
         self._timer = self.create_timer(PUBLISH_INTERVAL_SEC, self._on_tick)
 
         self.get_logger().info(
@@ -383,6 +431,23 @@ class DiscoveryAgent(Node):
         self._prune_stale_remote_states()
         snapshot = self.publish_snapshot()
         self._dispatch_bridge_requests(snapshot)
+        if self._exit_when_idle:
+            self._maybe_exit_when_idle()
+
+    def _maybe_exit_when_idle(self) -> None:
+        """Exit once this (IPC NS, domain) has had no Agnocast node for the grace period.
+
+        A query error counts as "not idle", so a transient failure never exits.
+        """
+        ret = self._lib.agnocast_discovery_agent_should_exit(self._domain_id)
+        if ret < 0:
+            self._idle_tracker.reset()
+            return
+        if self._idle_tracker.update(ret == 1):
+            self.get_logger().info(
+                f'no Agnocast node in (ipc_ns={self._ipc_ns_inode}, domain={self._domain_id}) '
+                f'for {EXIT_WHEN_IDLE_GRACE_SEC:.0f}s; exiting.')
+            raise ExternalShutdownException()
 
     def _prune_stale_remote_states(
             self, now_sec: float | None = None,
@@ -461,7 +526,7 @@ def main(argv=None) -> int:
         return 1
 
     rclpy.init(args=argv)
-    node = DiscoveryAgent()
+    node = DiscoveryAgent(exit_when_idle=_exit_when_idle_enabled(argv))
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):

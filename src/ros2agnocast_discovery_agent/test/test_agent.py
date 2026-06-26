@@ -5,14 +5,19 @@ helpers directly with a mock ctypes library.
 """
 
 import ctypes
+import sys
 import threading
 from unittest.mock import MagicMock
 
 import pytest
 
 from ros2agnocast_discovery_agent.agent import (
+    EXIT_WHEN_IDLE_ENV,
+    EXIT_WHEN_IDLE_FLAG,
+    IdleExitTracker,
     NODE_NAME_BUFFER_SIZE,
     TopicInfoRet,
+    _exit_when_idle_enabled,
     _ioctl_to_endpoint,
     _read_host_uuid,
     read_local_topics,
@@ -358,3 +363,46 @@ def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_
         assert result['rc'] == 0
     finally:
         holder.file.close()
+
+
+# --- idle-exit (opt-in auto-fork cleanup) -----------------------------------
+
+def test_idle_exit_tracker_fires_after_threshold():
+    tracker = IdleExitTracker(threshold=3)
+    assert tracker.update(True) is False
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True  # third consecutive idle tick
+
+
+def test_idle_exit_tracker_resets_on_activity():
+    tracker = IdleExitTracker(threshold=3)
+    tracker.update(True)
+    tracker.update(True)
+    assert tracker.update(False) is False  # a busy tick resets the count
+    assert tracker.update(True) is False   # counting restarts from zero
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True
+
+
+def test_idle_exit_tracker_threshold_floor():
+    # A non-positive threshold is clamped to 1, so a single idle tick fires.
+    assert IdleExitTracker(threshold=0).update(True) is True
+
+
+def test_exit_when_idle_enabled_via_env(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent'])  # no CLI flag
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    assert _exit_when_idle_enabled() is False
+    for truthy in ('1', 'true', 'TRUE', 'yes'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, truthy)
+        assert _exit_when_idle_enabled() is True
+    for falsy in ('0', 'false', '', 'no'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, falsy)
+        assert _exit_when_idle_enabled() is False
+
+
+def test_exit_when_idle_enabled_via_cli_flag(monkeypatch):
+    # The auto-fork passes the flag as an argv literal (no env set in the child).
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent', EXIT_WHEN_IDLE_FLAG])
+    assert _exit_when_idle_enabled() is True
