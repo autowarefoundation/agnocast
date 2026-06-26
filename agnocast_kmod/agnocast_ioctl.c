@@ -427,6 +427,9 @@ static struct entry_node * find_message_entry(
 
 // Forward declaration
 static int get_process_num(const struct ipc_namespace * ipc_ns);
+static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+static int get_alive_process_num_in_domain(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
 
 // Release subscriber reference from message entry (set boolean flag to false).
 // Called when subscriber's last ipc_shared_ptr reference is destroyed.
@@ -653,6 +656,7 @@ int agnocast_ioctl_add_process(
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
   ioctl_ret->ret_performance_bridge_daemon_exist =
     has_alive_performance_bridge_manager(ipc_ns, domain_id);
+  ioctl_ret->ret_discovery_agent_exist = (get_alive_process_num_in_domain(ipc_ns, domain_id) > 0);
 
   if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
     goto unlock;
@@ -2326,6 +2330,26 @@ static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const 
   return count;
 }
 
+// Like get_process_num_in_domain() but excludes processes that have exited and are still
+// pending cleanup. The discovery agent tracks live endpoints, so an exited entry that lingers
+// until the unlink daemon drains it must not gate the agent's spawn or self-exit.
+static int get_alive_process_num_in_domain(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (
+      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
+      !proc_info->exited) {
+      count++;
+    }
+  }
+  return count;
+}
+
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
 {
   down_write(&global_htables_rwsem);
@@ -2334,6 +2358,16 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
     proc_info->is_performance_bridge_manager = false;
   }
   up_write(&global_htables_rwsem);
+  return 0;
+}
+
+// The agent is not a registered Agnocast process, so it passes its own ROS_DOMAIN_ID.
+int agnocast_ioctl_discovery_agent_should_exit(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_should_exit)
+{
+  down_read(&global_htables_rwsem);
+  *ret_should_exit = (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0);
+  up_read(&global_htables_rwsem);
   return 0;
 }
 
@@ -2975,6 +3009,20 @@ static long notify_bridge_shutdown_cmd(void)
   return ret;
 }
 
+static long discovery_agent_should_exit_cmd(
+  struct ioctl_discovery_agent_should_exit_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_discovery_agent_should_exit_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  int ret =
+    agnocast_ioctl_discovery_agent_should_exit(ipc_ns, args.domain_id, &args.ret_should_exit);
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return ret;
+}
+
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
 {
   switch (cmd) {
@@ -3033,6 +3081,9 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return set_ros2_publisher_num_cmd((struct ioctl_set_ros2_publisher_num_args __user *)arg);
     case AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD:
       return notify_bridge_shutdown_cmd();
+    case AGNOCAST_DISCOVERY_AGENT_SHOULD_EXIT_CMD:
+      return discovery_agent_should_exit_cmd(
+        (struct ioctl_discovery_agent_should_exit_args __user *)arg);
     default:
       return -EINVAL;
   }

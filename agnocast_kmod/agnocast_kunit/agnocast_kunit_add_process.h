@@ -6,10 +6,16 @@
   KUNIT_CASE(test_case_add_process_normal), KUNIT_CASE(test_case_add_process_many), \
     KUNIT_CASE(test_case_add_process_twice),                                        \
     KUNIT_CASE(test_case_add_process_perf_manager_per_domain),                      \
+    KUNIT_CASE(test_case_add_process_discovery_agent_per_domain),                   \
+    KUNIT_CASE(test_case_discovery_agent_should_exit),                              \
+    KUNIT_CASE(test_case_discovery_agent_ignores_exited_process),                   \
     KUNIT_CASE(test_case_add_process_too_many)
 
 void test_case_add_process_normal(struct kunit * test);
 void test_case_add_process_many(struct kunit * test);
 void test_case_add_process_twice(struct kunit * test);
 void test_case_add_process_perf_manager_per_domain(struct kunit * test);
+void test_case_add_process_discovery_agent_per_domain(struct kunit * test);
+void test_case_discovery_agent_should_exit(struct kunit * test);
+void test_case_discovery_agent_ignores_exited_process(struct kunit * test);
 void test_case_add_process_too_many(struct kunit * test);

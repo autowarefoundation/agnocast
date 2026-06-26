@@ -5,6 +5,7 @@
 #include "../agnocast_memory_allocator.h"
 
 #include <kunit/test.h>
+#include <linux/delay.h>
 
 static pid_t pid = 1000;
 void test_case_add_process_normal(struct kunit * test)
@@ -90,6 +91,80 @@ void test_case_add_process_perf_manager_per_domain(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret_d0_again, 0);
   KUNIT_EXPECT_TRUE(test, args_d0_again.ret_performance_bridge_daemon_exist);
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 2);
+}
+
+// Spawn gate is per-(ipc_ns, domain): first process sees none, a later one sees
+// it, a first process in another domain sees none again.
+void test_case_add_process_discovery_agent_per_domain(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 0);
+
+  union ioctl_add_process_args first_d0;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 0, &first_d0), 0);
+  KUNIT_EXPECT_FALSE(test, first_d0.ret_discovery_agent_exist);
+
+  union ioctl_add_process_args second_d0;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 0, &second_d0), 0);
+  KUNIT_EXPECT_TRUE(test, second_d0.ret_discovery_agent_exist);
+
+  union ioctl_add_process_args first_d1;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 1, &first_d1), 0);
+  KUNIT_EXPECT_FALSE(test, first_d1.ret_discovery_agent_exist);
+}
+
+// The agent self-exit query is true only when its (ipc_ns, domain) has no process.
+void test_case_discovery_agent_should_exit(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 0);
+
+  bool should_exit = false;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_discovery_agent_should_exit(current->nsproxy->ipc_ns, 7, &should_exit), 0);
+  KUNIT_EXPECT_TRUE(test, should_exit);  // empty domain
+
+  union ioctl_add_process_args args;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 7, &args), 0);
+
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_discovery_agent_should_exit(current->nsproxy->ipc_ns, 7, &should_exit), 0);
+  KUNIT_EXPECT_FALSE(test, should_exit);  // domain 7 now has a process
+
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_discovery_agent_should_exit(current->nsproxy->ipc_ns, 8, &should_exit), 0);
+  KUNIT_EXPECT_TRUE(test, should_exit);  // a different, empty domain
+}
+
+// A domain whose only process has exited but is not yet drained must be treated as empty:
+// the exited entry lingers in proc_info_htable until the unlink daemon reaps it, and it must
+// neither keep the discovery agent alive nor block a fresh agent from spawning.
+void test_case_discovery_agent_ignores_exited_process(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 0);
+
+  const pid_t exited_pid = pid++;
+  union ioctl_add_process_args args;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(exited_pid, current->nsproxy->ipc_ns, false, 9, &args), 0);
+  KUNIT_EXPECT_FALSE(test, args.ret_discovery_agent_exist);  // first live process in domain 9
+
+  agnocast_enqueue_exit_pid(exited_pid);
+  msleep(10);  // let exit_worker_thread mark the process exited
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exited_pid));
+
+  bool should_exit = false;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_discovery_agent_should_exit(current->nsproxy->ipc_ns, 9, &should_exit), 0);
+  KUNIT_EXPECT_TRUE(test, should_exit);  // exited-but-not-drained must not keep the agent alive
+
+  union ioctl_add_process_args next_args;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 9, &next_args), 0);
+  KUNIT_EXPECT_FALSE(
+    test, next_args.ret_discovery_agent_exist);  // exited predecessor is not counted
 }
 
 void test_case_add_process_too_many(struct kunit * test)
