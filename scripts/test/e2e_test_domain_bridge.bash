@@ -31,20 +31,20 @@ TO_DOMAIN="${E2E_TO_DOMAIN:-2}"
 RUN_SECONDS="${E2E_RUN_SECONDS:-10}"
 
 echo "Registering domain bridge rule: ${TOPIC} ${FROM_DOMAIN}->${TO_DOMAIN}"
-if ! python3 - "$TOPIC" "$FROM_DOMAIN" "$TO_DOMAIN" <<'PY'
-import ctypes, sys
-lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
-lib.add_agnocast_domain_bridge_rule.argtypes = [ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32]
-lib.add_agnocast_domain_bridge_rule.restype = ctypes.c_int
-rc = lib.add_agnocast_domain_bridge_rule(sys.argv[1].encode(), int(sys.argv[2]), int(sys.argv[3]))
-if rc != 0:
-    sys.stderr.write(f"add_agnocast_domain_bridge_rule failed (rc={rc})\n")
-sys.exit(0 if rc == 0 else 1)
-PY
-then
+# Register through the same tool production uses, not an inline ioctl call.
+BRIDGE_CONFIG="$(mktemp --suffix=.yaml)"
+cat > "$BRIDGE_CONFIG" <<YAML
+from_domain: ${FROM_DOMAIN}
+to_domain: ${TO_DOMAIN}
+topics:
+  "${TOPIC}":
+YAML
+if ! ros2 run ros2agnocast_discovery_agent register_domain_bridge --config "$BRIDGE_CONFIG"; then
     echo "Rule registration failed (was the kmod freshly loaded?)." >&2
+    rm -f "$BRIDGE_CONFIG"
     exit 1
 fi
+rm -f "$BRIDGE_CONFIG"
 
 SUBLOG="$(mktemp)"; PUBLOG="$(mktemp)"
 LISTEN_SECS=$((5 + RUN_SECONDS + 3))   # listener: startup + run + drain
