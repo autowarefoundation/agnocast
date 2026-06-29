@@ -94,8 +94,9 @@ static int add_topic(
   (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
   if (!(*wrapper)->topic) {
     dev_warn(
-      agnocast_device, "Failed to add a new topic (topic_name=%s) by kmalloc. (%s)\n", topic_name,
-      __func__);
+      agnocast_device,
+      "Failed to allocate topic_struct for a new topic (topic_name=%s) by kmalloc. (%s)\n",
+      topic_name, __func__);
     kfree(*wrapper);
     return -ENOMEM;
   }
