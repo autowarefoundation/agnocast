@@ -261,11 +261,11 @@ public:
 
   TypeErasedPublisher(
     rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const bool is_bridge);
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
   TypeErasedPublisher(
     agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const bool is_bridge);
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
   ipc_shared_ptr<void> borrow_loaned_message(size_t size);
 

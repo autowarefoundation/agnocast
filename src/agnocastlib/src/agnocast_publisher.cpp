@@ -313,10 +313,9 @@ PublisherBase::~PublisherBase()
 
 TypeErasedPublisher::TypeErasedPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
-  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const bool is_bridge)
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos =
-    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
+  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),
@@ -326,10 +325,9 @@ TypeErasedPublisher::TypeErasedPublisher(
 
 TypeErasedPublisher::TypeErasedPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
-  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const bool is_bridge)
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos =
-    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
+  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),
@@ -372,8 +370,7 @@ void GenericPublisher::load_type_support(const std::string & topic_type)
 GenericPublisher::GenericPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
-: TypeErasedPublisher(
-    node, topic_name, topic_type, qos, options, role == PublisherRole::BridgeInternal)
+: TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
   load_type_support(topic_type);
 
@@ -386,8 +383,7 @@ GenericPublisher::GenericPublisher(
 GenericPublisher::GenericPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
-: TypeErasedPublisher(
-    node, topic_name, topic_type, qos, options, role == PublisherRole::BridgeInternal)
+: TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
   load_type_support(topic_type);
 
