@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -350,8 +351,6 @@ public:
   }
 };
 
-// TOOD(bdm-k): Incorporate TypeErasedPublisher into GenericPublisher to increase code reuse.
-
 /**
  * @brief Mirrors `rclcpp::GenericPublisher` semantics: the topic type is supplied as a
  * runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
@@ -362,7 +361,7 @@ public:
  * and are deserialized into Agnocast shared memory within the `publish()` call.
  */
 AGNOCAST_PUBLIC
-class GenericPublisher : public PublisherBase
+class GenericPublisher : public TypeErasedPublisher
 {
   // Keeps the dynamically loaded typesupport and introspection shared libraries
   // (.so) alongside their handles for the lifetime of the publisher.
@@ -371,10 +370,7 @@ class GenericPublisher : public PublisherBase
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
   const rosidl_typesupport_introspection_cpp::MessageMembers * members_{nullptr};
 
-  template <typename NodeT>
-  rclcpp::QoS constructor_impl(
-    NodeT * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role);
+  void load_type_support(const std::string & topic_type);
 
 public:
   using SharedPtr = std::shared_ptr<GenericPublisher>;
