@@ -1,0 +1,72 @@
+"""Register Agnocast domain bridge rules with the kernel module.
+
+Reads a ROS 2 ``domain_bridge`` YAML and registers each
+``(topic, from_domain, to_domain)`` rule through the ioctl wrapper.
+
+Run this once, before any application node for the bridged topics starts: the
+kmod rejects a rule once an endpoint exists in either domain. The tool is
+standalone and idempotent (the kmod folds duplicate rules), so it can run from
+a boot-time one-shot, a launch file, or by hand. It is independent of the
+discovery agent, which is observability-only and never registers rules.
+"""
+import argparse
+import ctypes
+import os
+import sys
+
+import yaml
+
+from . import domain_bridge_config
+
+
+def _load_add_rule_symbol():
+    """Load the ioctl wrapper and return the bound add_agnocast_domain_bridge_rule."""
+    lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
+    lib.add_agnocast_domain_bridge_rule.argtypes = [
+        ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32]
+    lib.add_agnocast_domain_bridge_rule.restype = ctypes.c_int
+    return lib.add_agnocast_domain_bridge_rule
+
+
+def main(argv=None) -> int:
+    """Register every rule in the config; return non-zero if any is rejected."""
+    parser = argparse.ArgumentParser(
+        description='Register Agnocast domain bridge rules with the kernel module.')
+    parser.add_argument(
+        '--config',
+        default=os.environ.get(domain_bridge_config.CONFIG_ENV),
+        help='path to the domain_bridge YAML '
+             f'(default: ${domain_bridge_config.CONFIG_ENV})')
+    args = parser.parse_args(argv)
+
+    if not args.config:
+        parser.error(
+            f'no config given; pass --config or set {domain_bridge_config.CONFIG_ENV}')
+
+    try:
+        rules = domain_bridge_config.load_domain_bridge_rules(args.config)
+    except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
+        print(f'error: cannot load {args.config}: {e}', file=sys.stderr)
+        return 1
+
+    add_rule = _load_add_rule_symbol()
+    failures = 0
+    for topic, from_domain, to_domain in rules:
+        if add_rule(topic.encode('utf-8'), from_domain, to_domain) == 0:
+            print(f'registered: {topic} {from_domain}->{to_domain}')
+            continue
+        # A non-zero return most likely means an endpoint for the topic already
+        # exists in one of the domains; the rule must precede every node.
+        failures += 1
+        print(
+            f'error: failed to register {topic} {from_domain}->{to_domain}; '
+            'was a publisher/subscriber already started?', file=sys.stderr)
+
+    if failures:
+        print(f'error: {failures} of {len(rules)} rule(s) rejected', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
