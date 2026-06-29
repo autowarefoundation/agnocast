@@ -1224,14 +1224,15 @@ int agnocast_ioctl_get_subscriber_num(
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
 
-  // The caller is a publisher in wrapper->domain_id; count only the subscribers
-  // it actually delivers to. For a one-way bridge rule this excludes the
-  // opposite-domain subscribers; for ungrouped topics every subscriber qualifies.
+  // Match ROS 2's get_subscription_count: report only same-domain subscribers.
+  // A bridge rule still delivers cross-domain (see the publish/receive paths),
+  // but a publisher does not count subscribers in another domain. Ungrouped
+  // topics hold only one domain, so this is a no-op for them.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
-    if (!domain_delivery_allowed(wrapper->topic, wrapper->domain_id, sub_info->domain_id)) {
+    if (sub_info->domain_id != wrapper->domain_id) {
       continue;
     }
     if (sub_info->is_bridge) {
@@ -1326,15 +1327,16 @@ int agnocast_ioctl_get_publisher_num(
 
   ioctl_ret->ret_ros2_publisher_num = wrapper->topic->ros2_publisher_num;
 
-  // The caller is a subscriber in wrapper->domain_id; count only the publishers
-  // that actually deliver to it. For a one-way bridge rule this excludes the
-  // opposite-domain publishers; for ungrouped topics every publisher qualifies.
+  // Match ROS 2's get_publisher_count: report only same-domain publishers.
+  // A bridge rule still delivers cross-domain (see the publish/receive paths),
+  // but a subscriber does not count publishers in another domain. Ungrouped
+  // topics hold only one domain, so this is a no-op for them.
   uint32_t publisher_num = 0;
   struct publisher_info * pub_info;
   int bkt_pub;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub, pub_info, node)
   {
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
+    if (pub_info->domain_id != wrapper->domain_id) {
       continue;
     }
     publisher_num++;

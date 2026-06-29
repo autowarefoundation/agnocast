@@ -227,49 +227,50 @@ void test_case_domain_bridge_exit_frees_shared_struct(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(TOPIC_NAME, current->nsproxy->ipc_ns, 2), 0);
 }
 
-// A publisher's subscriber count must include only the subscribers it delivers to:
-// same-domain ones always, opposite-domain ones only in the rule's direction. With
-// a 1 -> 2 rule, a domain-2 publisher reaches the domain-2 subscriber but not the
-// domain-1 one.
+// A publisher reports only same-domain subscribers, matching ROS 2's
+// get_subscription_count. With a 1 -> 2 rule a domain-1 publisher still delivers
+// to the domain-2 subscriber, but must not count it.
 void test_case_domain_bridge_get_subscriber_num_filtered(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
 
-  setup_process_in_domain(test, current->tgid, 2);
+  setup_process_in_domain(test, current->tgid, 1);
   add_publisher_for(test, current->tgid);
-  setup_process_in_domain(test, 1002, 2);
-  add_subscriber_for(test, 1002);
   setup_process_in_domain(test, 1001, 1);
   add_subscriber_for(test, 1001);
+  setup_process_in_domain(test, 1002, 2);
+  add_subscriber_for(test, 1002);
 
   union ioctl_get_subscriber_num_args args;
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_get_subscriber_num(TOPIC_NAME, current->nsproxy->ipc_ns, current->tgid, &args),
     0);
+  // Only the domain-1 subscriber is counted; the cross-domain (domain-2) one is not.
   KUNIT_EXPECT_EQ(test, args.ret_other_process_subscriber_num, (uint32_t)1);
   KUNIT_EXPECT_EQ(test, args.ret_same_process_subscriber_num, (uint32_t)0);
 }
 
-// A subscriber's publisher count must include only the publishers that deliver to
-// it. With a 1 -> 2 rule, a domain-1 subscriber sees the domain-1 publisher but not
-// the domain-2 one (2 -> 1 is not allowed).
+// A subscriber reports only same-domain publishers, matching ROS 2's
+// get_publisher_count. With a 1 -> 2 rule a domain-2 subscriber still receives
+// from the domain-1 publisher, but must not count it.
 void test_case_domain_bridge_get_publisher_num_filtered(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns), 0);
 
-  setup_process_in_domain(test, current->tgid, 1);
+  setup_process_in_domain(test, current->tgid, 2);
   add_subscriber_for(test, current->tgid);
-  setup_process_in_domain(test, 1000, 1);
+  setup_process_in_domain(test, 1000, 2);
   add_publisher_for(test, 1000);
-  setup_process_in_domain(test, 1001, 2);
+  setup_process_in_domain(test, 1001, 1);
   add_publisher_for(test, 1001);
 
   union ioctl_get_publisher_num_args args;
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_get_publisher_num(TOPIC_NAME, current->nsproxy->ipc_ns, &args), 0);
+  // Only the domain-2 publisher is counted; the cross-domain (domain-1) one is not.
   KUNIT_EXPECT_EQ(test, args.ret_publisher_num, (uint32_t)1);
 }
 
