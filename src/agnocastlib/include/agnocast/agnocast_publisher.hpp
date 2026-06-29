@@ -6,26 +6,16 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <fcntl.h>
 #include <mqueue.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <cstring>
-#include <functional>
 #include <mutex>
-#include <queue>
-#include <thread>
 
 namespace agnocast
 {
@@ -102,33 +92,7 @@ protected:
   template <typename NodeT>
   rclcpp::QoS init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const bool is_bridge)
-  {
-    if (options.do_always_ros2_publish) {
-      RCLCPP_ERROR(
-        logger,
-        "The 'do_always_ros2_publish' option is deprecated. "
-        "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
-    }
-
-    topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
-
-    auto node_parameters = node->get_node_parameters_interface();
-    const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::PublisherQosParametersTraits{})
-        : qos;
-
-    validate_publisher_qos(actual_qos);
-
-    const std::string node_name = node->get_fully_qualified_name();
-    id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
-    generate_gid();
-
-    return actual_qos;
-  }
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
 public:
   PublisherBase() = default;
@@ -166,14 +130,21 @@ public:
   }
 };
 
-// Internal implementation — users should use agnocast::Publisher<MessageT> instead.
-template <typename MessageT, typename BridgeRegistrationPolicy>
-class BasicPublisher : public PublisherBase
+/**
+ * @brief Mirrors `rclcpp::Publisher` semantics: the topic type is supplied as a template
+ * type argument `MessageT`. It allocates a memory region for a message using
+ * borrow_loaned_message() and publishes it via zero-copy IPC using publish().
+ *
+ * @tparam MessageT ROS message type.
+ */
+AGNOCAST_PUBLIC
+template <typename MessageT>
+class Publisher : public PublisherBase
 {
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options, const bool is_bridge)
+    const PublisherOptions & options, const PublisherRole role)
   {
     // Gated to message types only — service types pulled in by
     // BasicService<ServiceT> have no rosidl message name. The empty string
@@ -183,22 +154,17 @@ class BasicPublisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
-    const rclcpp::QoS actual_qos =
-      this->init_base(node, topic_name, type_name, qos, options, is_bridge);
-
-    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
-
-    return actual_qos;
+    return this->init_base(node, topic_name, type_name, qos, options, role);
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicPublisher<MessageT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<Publisher<MessageT>>;
 
-  BasicPublisher(
+  Publisher(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options, const bool is_bridge = false)
+    const PublisherOptions & options, const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, is_bridge);
+    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
@@ -207,11 +173,12 @@ public:
       topic_name_.c_str(), actual_qos.depth());
   }
 
-  BasicPublisher(
+  Publisher(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options = PublisherOptions{})
+    const PublisherOptions & options = PublisherOptions{},
+    const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, false);
+    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
@@ -321,18 +288,5 @@ public:
   AGNOCAST_PUBLIC
   void publish(const rclcpp::SerializedMessage & serialized_msg);
 };
-
-struct AgnocastToRosPubsubRegistrationPolicy;
-
-/**
- * @brief The user-facing Agnocast publisher type.
- * Alias for `BasicPublisher<MessageT>`. Use this type (not BasicPublisher directly) when declaring
- * publisher variables.
- * @tparam MessageT  ROS message type.
- */
-AGNOCAST_PUBLIC
-template <typename MessageT>
-using Publisher =
-  agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosPubsubRegistrationPolicy>;
 
 }  // namespace agnocast

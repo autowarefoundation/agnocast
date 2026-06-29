@@ -3,6 +3,7 @@
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/detail/qos_parameters.hpp"
 
 #include <rclcpp/typesupport_helpers.hpp>
 #include <rosidl_runtime_cpp/message_initialization.hpp>
@@ -201,6 +202,57 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
   return get_subscriber_count_args.ret_same_process_subscriber_num;
 }
 
+template <typename NodeT>
+rclcpp::QoS PublisherBase::init_base(
+  NodeT * node, const std::string & topic_name, const std::string & type_name,
+  const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role)
+{
+  if (options.do_always_ros2_publish) {
+    RCLCPP_ERROR(
+      logger,
+      "The 'do_always_ros2_publish' option is deprecated. "
+      "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
+  }
+
+  topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
+
+  auto node_parameters = node->get_node_parameters_interface();
+  const rclcpp::QoS actual_qos = !options.qos_overriding_options.get_policy_kinds().empty()
+                                   ? rclcpp::detail::declare_qos_parameters(
+                                       options.qos_overriding_options, node_parameters, topic_name_,
+                                       qos, rclcpp::detail::PublisherQosParametersTraits{})
+                                   : qos;
+
+  validate_publisher_qos(actual_qos);
+
+  const bool is_bridge = (role == PublisherRole::BridgeInternal);
+  const std::string node_name = node->get_fully_qualified_name();
+  id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
+  generate_gid();
+
+  if (role == PublisherRole::Default) {
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    } else {
+      RCLCPP_ERROR(
+        logger,
+        "A2R bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
+  }
+
+  return actual_qos;
+}
+
+template rclcpp::QoS PublisherBase::init_base<rclcpp::Node>(
+  rclcpp::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
+  const PublisherOptions &, PublisherRole);
+template rclcpp::QoS PublisherBase::init_base<agnocast::Node>(
+  agnocast::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
+  const PublisherOptions &, PublisherRole);
+
 void PublisherBase::generate_gid()
 {
   constexpr size_t kPidOffset = 2;
@@ -286,16 +338,7 @@ rclcpp::QoS GenericPublisher::constructor_impl(
   members_ = static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(
     introspection_handle->data);
 
-  const bool is_bridge = (role == PublisherRole::BridgeInternal);
-  const rclcpp::QoS actual_qos =
-    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
-
-  if (role == PublisherRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, topic_type, BridgeDirection::AGNOCAST_TO_ROS2);
-  }
-
-  return actual_qos;
+  return this->init_base(node, topic_name, topic_type, qos, options, role);
 }
 
 GenericPublisher::GenericPublisher(
