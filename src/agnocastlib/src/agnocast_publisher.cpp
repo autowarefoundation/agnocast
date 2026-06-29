@@ -259,6 +259,39 @@ PublisherBase::~PublisherBase()
   }
 }
 
+TypeErasedPublisher::TypeErasedPublisher(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const bool is_bridge)
+{
+  const rclcpp::QoS actual_qos =
+    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
+    topic_name_.c_str(), actual_qos.depth());
+}
+
+TypeErasedPublisher::TypeErasedPublisher(
+  agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const bool is_bridge)
+{
+  const rclcpp::QoS actual_qos =
+    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
+    actual_qos.depth());
+}
+
+ipc_shared_ptr<void> TypeErasedPublisher::borrow_loaned_message(size_t size)
+{
+  increment_borrowed_publisher_num();
+  void * ptr = ::operator new(size);
+  return ipc_shared_ptr<void>(ptr, topic_name_.c_str(), id_);
+}
+
 template <typename NodeT>
 rclcpp::QoS GenericPublisher::constructor_impl(
   NodeT * node, const std::string & topic_name, const std::string & topic_type,
