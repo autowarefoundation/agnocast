@@ -47,7 +47,8 @@ bool service_is_ready_core(const std::string & service_name)
 }
 
 bool wait_for_service_nanoseconds(
-  const rclcpp::Context::SharedPtr & context, const std::string & service_name, nanoseconds timeout)
+  const std::function<bool()> & check_context_ok, const std::string & service_name,
+  nanoseconds timeout)
 {
   auto start = steady_clock::now();
   if (service_is_ready_core(service_name)) {
@@ -61,10 +62,7 @@ bool wait_for_service_nanoseconds(
   nanoseconds time_to_wait =
     timeout > nanoseconds(0) ? timeout - (steady_clock::now() - start) : nanoseconds::max();
   do {
-    // TODO(Koichi98): agnocast::ok is planned to be implemented.
-    // For standalone agnocast nodes (without rclcpp::init()), context->is_valid() returns false,
-    // so we skip the rclcpp::ok() check in that case.
-    if ((context && context->is_valid()) ? !rclcpp::ok(context) : false) {
+    if (!check_context_ok()) {
       return false;
     }
     nanoseconds interval = std::min(time_to_wait, duration_cast<nanoseconds>(100ms));

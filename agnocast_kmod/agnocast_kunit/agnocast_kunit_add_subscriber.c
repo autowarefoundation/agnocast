@@ -17,8 +17,60 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
+}
+
+static void setup_process_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
+{
+  union ioctl_add_process_args add_process_args;
+  int ret =
+    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+}
+
+static int add_pubsub_pair(
+  struct kunit * test, const pid_t pub_pid, const pid_t sub_pid, const uint32_t qos_depth)
+{
+  union ioctl_add_publisher_args add_publisher_args;
+  int ret = agnocast_ioctl_add_publisher(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
+    IS_BRIDGE, &add_publisher_args);
+  if (ret < 0) return ret;
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  return agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, sub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
+    QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, &add_subscriber_args);
+}
+
+// A publisher and subscriber with the same topic name but different ROS_DOMAIN_ID
+// must produce two distinct topic wrappers (ROS 2 domain isolation).
+void test_case_add_subscriber_domain_isolation(struct kunit * test)
+{
+  const pid_t pub_pid = 2000;
+  const pid_t sub_pid = 2001;
+  setup_process_domain(test, pub_pid, 0);
+  setup_process_domain(test, sub_pid, 1);
+
+  KUNIT_ASSERT_EQ(test, add_pubsub_pair(test, pub_pid, sub_pid, 1), 0);
+
+  // Two wrappers: (TOPIC_NAME, ipc_ns, domain=0) and (TOPIC_NAME, ipc_ns, domain=1).
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 2);
+}
+
+// A publisher and subscriber in the same domain on the same topic share one
+// wrapper (unchanged behavior).
+void test_case_add_subscriber_same_domain_shared(struct kunit * test)
+{
+  const pid_t pub_pid = 2002;
+  const pid_t sub_pid = 2003;
+  setup_process_domain(test, pub_pid, 0);
+  setup_process_domain(test, sub_pid, 0);
+
+  KUNIT_ASSERT_EQ(test, add_pubsub_pair(test, pub_pid, sub_pid, 1), 0);
+
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
 }
 
 void test_case_add_subscriber_normal(struct kunit * test)

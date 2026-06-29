@@ -2,9 +2,11 @@
 #pragma once
 #include <kunit/test.h>
 
-#define TEST_CASES_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN                  \
-  KUNIT_CASE(test_case_check_and_request_bridge_shutdown_when_alone), \
-    KUNIT_CASE(test_case_check_and_request_bridge_shutdown_when_others_exist)
+#define TEST_CASES_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN                           \
+  KUNIT_CASE(test_case_check_and_request_bridge_shutdown_when_alone),          \
+    KUNIT_CASE(test_case_check_and_request_bridge_shutdown_when_others_exist), \
+    KUNIT_CASE(test_case_check_and_request_bridge_shutdown_per_domain)
 
 void test_case_check_and_request_bridge_shutdown_when_alone(struct kunit * test);
 void test_case_check_and_request_bridge_shutdown_when_others_exist(struct kunit * test);
+void test_case_check_and_request_bridge_shutdown_per_domain(struct kunit * test);

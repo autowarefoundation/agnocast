@@ -39,6 +39,7 @@ union ioctl_add_process_args {
   struct
   {
     bool is_performance_bridge_manager;
+    uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
   {
@@ -310,6 +311,10 @@ union ioctl_topic_list_args {
   struct
   {
     uint64_t topic_name_buffer_addr;
+    // Parallel array of uint32 domain_ids, one per returned topic name. The same
+    // topic name can appear in multiple domains, so the caller pairs name[i] with
+    // domain_id[i] to disambiguate. Pass 0 to skip domain output.
+    uint64_t domain_id_buffer_addr;
     uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
@@ -340,6 +345,9 @@ union ioctl_topic_info_args {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
     uint32_t topic_info_ret_buffer_size;
+    // Which domain's endpoints to return. A topic name can exist in multiple
+    // domains; the caller selects one (paired with get_topic_list output).
+    uint32_t domain_id;
   };
   uint32_t ret_topic_info_ret_num;
 };
@@ -400,7 +408,7 @@ int agnocast_ioctl_take_msg(
 
 int agnocast_ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
-  union ioctl_add_process_args * ioctl_ret);
+  const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,

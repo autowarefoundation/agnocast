@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -17,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -26,7 +28,7 @@ namespace agnocast
 
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
-  const rclcpp::Context::SharedPtr & context, const std::string & service_name,
+  const std::function<bool()> & check_context_ok, const std::string & service_name,
   std::chrono::nanoseconds timeout);
 
 extern int agnocast_fd;
@@ -103,8 +105,8 @@ private:
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   std::string node_name_;
-  rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
   std::string service_name_;
+  std::function<bool()> check_context_ok_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
@@ -114,8 +116,15 @@ private:
     rclcpp::CallbackGroup::SharedPtr group)
   {
     node_name_ = node->get_fully_qualified_name();
-    node_base_ = node->get_node_base_interface();
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
+
+    check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
+      if constexpr (std::is_same_v<agnocast::Node, NodeT>) {
+        return agnocast::ok();
+      } else {
+        return rclcpp::ok(context);
+      }
+    };
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -193,12 +202,12 @@ public:
    *  @param timeout Maximum duration to wait (-1 = wait forever).
    *  @return True if service became available, false on timeout. */
   AGNOCAST_PUBLIC
-  template <typename RepT, typename RatioT>
+  template <typename RepT = int64_t, typename RatioT = std::milli>
   bool wait_for_service(
-    std::chrono::duration<RepT, RatioT> timeout = std::chrono::nanoseconds(-1)) const
+    std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
   {
     return wait_for_service_nanoseconds(
-      node_base_->get_context(), service_name_,
+      check_context_ok_, service_name_,
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
 

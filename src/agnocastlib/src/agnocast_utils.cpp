@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <system_error>
 
 namespace agnocast
@@ -89,6 +90,23 @@ static std::string performance_domain_suffix()
     return "";
   }
   return "_d" + std::string(domain_id);
+}
+
+uint32_t get_ros_domain_id()
+{
+  const char * domain_id_env = getenv("ROS_DOMAIN_ID");
+  if (domain_id_env == nullptr || *domain_id_env == '\0') {
+    return 0;
+  }
+  char * end = nullptr;
+  errno = 0;
+  const uint64_t value = std::strtoul(domain_id_env, &end, 10);
+  // Out-of-range values would silently wrap into an unintended domain (e.g. 0),
+  // breaking isolation, so reject them rather than truncate.
+  if (*end != '\0' || errno != 0 || value > std::numeric_limits<uint32_t>::max()) {
+    return 0;
+  }
+  return static_cast<uint32_t>(value);
 }
 
 std::string create_mq_name_for_bridge(const pid_t pid)

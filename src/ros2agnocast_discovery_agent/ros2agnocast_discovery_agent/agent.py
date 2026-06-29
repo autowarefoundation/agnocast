@@ -5,15 +5,17 @@ Reads the local Agnocast state via the existing NS-scoped ioctl wrapper
 ``/_agnocast_discovery`` so other namespaces and ECUs running ros2agnocast
 tooling can observe and make bridge generation decisions.
 
-One daemon process is intended to run per IPC namespace. To make duplicate
+One daemon process is intended to run per (IPC namespace, ROS_DOMAIN_ID):
+gossip is published on the agent's DDS domain, so a namespace shared by
+launches in different domains needs one agent per domain. To make duplicate
 launches (e.g. one node spawning the agent and another ``ros2 launch``
 session also trying to spawn one) safe, the agent acquires an
-``flock(2)``-based singleton lock on a per-IPC-namespace file before
-starting; subsequent instances detect the held lock and exit cleanly
-(code 0), leaving exactly one live agent per namespace. Emitting a single
-agent per launch tree is the launch side's responsibility; this lock is
-the cross-invocation safety net for when separate launches target the
-same namespace.
+``flock(2)``-based singleton lock on a per-(namespace, domain) file before
+starting; subsequent instances in the same (namespace, domain) detect the
+held lock and exit cleanly (code 0), leaving exactly one live agent per
+(namespace, domain). Emitting a single agent per launch tree is the launch
+side's responsibility; this lock is the cross-invocation safety net for when
+separate launches target the same (namespace, domain).
 """
 
 import ctypes
@@ -81,17 +83,24 @@ def _load_ioctl_wrapper():
     """Load libagnocast_ioctl_wrapper.so and set argtypes for the symbols we use."""
     lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
 
-    lib.get_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_topics.argtypes = [
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_uint32)),
+    ]
     lib.get_agnocast_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
     lib.free_agnocast_topics.argtypes = [
         ctypes.POINTER(ctypes.POINTER(ctypes.c_char)),
         ctypes.c_int,
     ]
     lib.free_agnocast_topics.restype = None
+    lib.free_agnocast_topic_domains.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+    lib.free_agnocast_topic_domains.restype = None
 
-    lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_sub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(TopicInfoRet)
-    lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_pub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(TopicInfoRet)
     lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(TopicInfoRet)]
     lib.free_agnocast_topic_info_ret.restype = None
@@ -124,16 +133,28 @@ def _ioctl_to_endpoint(
     return ep
 
 
-def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
+def read_local_topics(
+        lib, registry: TypeRegistryReader | None = None,
+        own_domain_id: int | None = None) -> list:
     """Snapshot the current namespace's Agnocast topics via the ioctl wrapper.
 
     Returns a list of AgnocastTopic msgs. The ioctl returns only the caller's
     IPC namespace, so the daemon process just being inside that namespace is
     sufficient to scope the result. The optional ``registry`` argument
     supplies the type names and pids that the ioctl does not expose.
+
+    When ``own_domain_id`` is given, only topics in that domain are returned.
+    Each agent is per-(IPC namespace, domain) and gossips on its own DDS domain,
+    so it must report only its own domain's topics; otherwise it would leak
+    other domains' endpoints onto its channel and let its bridge decider issue
+    requests for domains it does not own.
     """
     topic_count = ctypes.c_int()
-    topic_names_ptr = lib.get_agnocast_topics(ctypes.byref(topic_count))
+    # The wrapper allocates the domain array (sized to match the name buffer) and
+    # returns it here; we own it and free it below.
+    domain_ids_ptr = ctypes.POINTER(ctypes.c_uint32)()
+    topic_names_ptr = lib.get_agnocast_topics(
+        ctypes.byref(topic_count), ctypes.pointer(domain_ids_ptr))
     topics = []
     if not topic_names_ptr:
         return topics
@@ -142,15 +163,22 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
         for i in range(topic_count.value):
             topic_name_b = ctypes.cast(topic_names_ptr[i], ctypes.c_char_p).value
             topic_name = topic_name_b.decode('utf-8', errors='replace')
+            # The same topic name can occur once per domain; each row is a
+            # distinct (name, domain) pair that becomes its own AgnocastTopic.
+            domain_id = domain_ids_ptr[i]
+            if own_domain_id is not None and domain_id != own_domain_id:
+                continue
 
             agnocast_topic = AgnocastTopic()
             agnocast_topic.topic_name = topic_name
             agnocast_topic.type_name = ''
-            agnocast_topic.domain_id = 0
+            agnocast_topic.domain_id = domain_id
             agnocast_topic.publishers = _collect_endpoints(
-                lib.get_agnocast_pub_nodes, lib, topic_name_b, topic_name, 'pub', registry)
+                lib.get_agnocast_pub_nodes, lib, topic_name_b, topic_name, domain_id, 'pub',
+                registry)
             agnocast_topic.subscribers = _collect_endpoints(
-                lib.get_agnocast_sub_nodes, lib, topic_name_b, topic_name, 'sub', registry)
+                lib.get_agnocast_sub_nodes, lib, topic_name_b, topic_name, domain_id, 'sub',
+                registry)
             # Type name comes from the tmpfs registry; any registered
             # endpoint on this topic carries the same type (ROS 2
             # invariant), so the first non-empty one wins.
@@ -161,6 +189,7 @@ def read_local_topics(lib, registry: TypeRegistryReader | None = None) -> list:
             topics.append(agnocast_topic)
     finally:
         lib.free_agnocast_topics(topic_names_ptr, topic_count.value)
+        lib.free_agnocast_topic_domains(domain_ids_ptr)
 
     return topics
 
@@ -179,10 +208,10 @@ def _resolve_topic_type(
 
 
 def _collect_endpoints(
-        getter, lib, topic_name_b: bytes, topic_name: str, role: str,
+        getter, lib, topic_name_b: bytes, topic_name: str, domain_id: int, role: str,
         registry: TypeRegistryReader | None = None) -> list:
     count = ctypes.c_int()
-    array = getter(topic_name_b, ctypes.byref(count))
+    array = getter(topic_name_b, ctypes.byref(count), domain_id)
     endpoints = []
     if not array:
         return endpoints
@@ -213,14 +242,31 @@ def _read_ipc_ns_inode() -> int:
     return os.stat(SELF_IPC_NS_PATH).st_ino
 
 
-def _singleton_lock_path(ipc_ns_inode: int) -> str:
-    """Return the singleton lock-file path for this IPC namespace.
+def _read_ros_domain_id() -> int:
+    """Return ROS_DOMAIN_ID from the environment (0 if unset, empty, or
+    unparsable), matching ROS 2's default and the kmod's get_ros_domain_id."""
+    raw = os.environ.get('ROS_DOMAIN_ID')
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
 
-    Co-located with the rest of Agnocast tmpfs state so a container
-    overriding ``AGNOCAST_TMPFS_DIR`` keeps the lock under the same root.
+
+def _singleton_lock_path(ipc_ns_inode: int, domain_id: int) -> str:
+    """Return the singleton lock-file path for this (IPC namespace, domain).
+
+    Keyed by both the IPC namespace and ROS_DOMAIN_ID: gossip is published on
+    the agent's DDS domain, so launches sharing a namespace but using different
+    domains each need their own agent and must not deduplicate against each
+    other.
+
+    Co-located with the rest of Agnocast tmpfs state so a container overriding
+    ``AGNOCAST_TMPFS_DIR`` keeps the lock under the same root.
     """
     root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
-    return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}.lock')
+    return os.path.join(root, f'agnocast_discovery_agent_{ipc_ns_inode}_d{domain_id}.lock')
 
 
 class LockStatus(Enum):
@@ -240,9 +286,9 @@ class SingletonLockAttempt:
     file: IO | None = None
 
 
-def _try_acquire_singleton_lock(ipc_ns_inode: int) -> SingletonLockAttempt:
-    """Try to take an exclusive ``flock(2)`` on the per-IPC-namespace lock file."""
-    lock_path = _singleton_lock_path(ipc_ns_inode)
+def _try_acquire_singleton_lock(ipc_ns_inode: int, domain_id: int) -> SingletonLockAttempt:
+    """Try to take an exclusive ``flock(2)`` on the per-(IPC namespace, domain) lock file."""
+    lock_path = _singleton_lock_path(ipc_ns_inode, domain_id)
     try:
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
     except OSError as e:
@@ -300,13 +346,14 @@ class DiscoveryAgent(Node):
         self._host_uuid = _read_host_uuid()
         self._host_hostname = socket.gethostname()
         self._ipc_ns_inode = _read_ipc_ns_inode()
-        # Multiple agents may run on one ECU (one per IPC NS); disambiguate.
+        self._domain_id = _read_ros_domain_id()
+        # Multiple agents may run on one ECU (one per (IPC NS, domain)); disambiguate.
         host_short = self._host_uuid.replace('-', '')[:8]
         # Force use_sim_time=False so the 1 Hz timer + clock reads are
         # wall-clock regardless of /clock; sim-time playback would otherwise
         # stretch the publish cadence past the liveliness lease window.
         super().__init__(
-            f'agnocast_discovery_agent_{host_short}_{self._ipc_ns_inode}',
+            f'agnocast_discovery_agent_{host_short}_{self._ipc_ns_inode}_d{self._domain_id}',
             parameter_overrides=[Parameter('use_sim_time', value=False)],
         )
         self._lib = _load_ioctl_wrapper()
@@ -376,7 +423,7 @@ class DiscoveryAgent(Node):
         msg.host_uuid = self._host_uuid
         msg.host_hostname = self._host_hostname
         msg.ipc_ns_inode = self._ipc_ns_inode
-        msg.topics = read_local_topics(self._lib, self._registry)
+        msg.topics = read_local_topics(self._lib, self._registry, self._domain_id)
         return msg
 
     def _on_remote_state(self, msg: AgnocastDaemonState) -> None:
@@ -400,11 +447,12 @@ def main(argv=None) -> int:
     # launch emits one agent per tree, so a held lock always means a separate
     # launch/run — never a same-tree sibling — which exiting can't affect.
     ipc_ns_inode = _read_ipc_ns_inode()
-    lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode)
+    domain_id = _read_ros_domain_id()
+    lock_attempt = _try_acquire_singleton_lock(ipc_ns_inode, domain_id)
     if lock_attempt.status == LockStatus.HELD:
         sys.stderr.write(
             'agnocast_discovery_agent: another instance is already running in this '
-            f'IPC namespace (inode={ipc_ns_inode}); exiting.\n')
+            f'IPC namespace (inode={ipc_ns_inode}, domain={domain_id}); exiting.\n')
         return 0
     if lock_attempt.status == LockStatus.ERROR:
         # Don't masquerade as "already running" — propagate failure so

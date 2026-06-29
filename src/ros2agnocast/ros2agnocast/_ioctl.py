@@ -33,14 +33,17 @@ def _load_lib() -> Optional[ctypes.CDLL]:
         lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
     except OSError:
         return None
-    lib.get_agnocast_topics.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_topics.argtypes = [
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_uint32))]
     lib.get_agnocast_topics.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
     lib.free_agnocast_topics.argtypes = [
         ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
     lib.free_agnocast_topics.restype = None
-    lib.get_agnocast_sub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_sub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_sub_nodes.restype = ctypes.POINTER(_TopicInfoRet)
-    lib.get_agnocast_pub_nodes.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+    lib.get_agnocast_pub_nodes.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_uint32]
     lib.get_agnocast_pub_nodes.restype = ctypes.POINTER(_TopicInfoRet)
     lib.free_agnocast_topic_info_ret.argtypes = [ctypes.POINTER(_TopicInfoRet)]
     lib.free_agnocast_topic_info_ret.restype = None
@@ -59,10 +62,10 @@ def _endpoint_from_topic_info_ret(tir: _TopicInfoRet) -> AgnocastEndpoint:
 
 
 @contextmanager
-def _endpoints(lib, fn, topic_name: str):
+def _endpoints(lib, fn, topic_name: str, domain_id: int = 0):
     """Yield a list[AgnocastEndpoint] for one topic; free the ctypes buffer on exit."""
     count = ctypes.c_int()
-    arr = fn(topic_name.encode('utf-8'), ctypes.byref(count))
+    arr = fn(topic_name.encode('utf-8'), ctypes.byref(count), domain_id)
     try:
         if not arr:
             yield []
@@ -100,7 +103,11 @@ def self_ns_snapshot() -> Optional[AgnocastDaemonState]:
     state.topics = []
 
     topic_count = ctypes.c_int()
-    topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count))
+    # TODO: make the CLI domain-aware. It currently queries only the default
+    # domain (0) -- pass a real domain_ids array here and use each topic's
+    # stamped domain for get_agnocast_{pub,sub}_nodes below, instead of
+    # hardcoding 0. For now we only keep the ABI in sync.
+    topic_array = lib.get_agnocast_topics(ctypes.byref(topic_count), None)
     try:
         for i in range(topic_count.value):
             tname = ctypes.cast(topic_array[i], ctypes.c_char_p).value.decode('utf-8')
@@ -108,9 +115,9 @@ def self_ns_snapshot() -> Optional[AgnocastDaemonState]:
             t.topic_name = tname
             t.type_name = ''
             t.domain_id = 0
-            with _endpoints(lib, lib.get_agnocast_pub_nodes, tname) as pubs:
+            with _endpoints(lib, lib.get_agnocast_pub_nodes, tname, 0) as pubs:
                 t.publishers = pubs
-            with _endpoints(lib, lib.get_agnocast_sub_nodes, tname) as subs:
+            with _endpoints(lib, lib.get_agnocast_sub_nodes, tname, 0) as subs:
                 t.subscribers = subs
             state.topics.append(t)
     finally:
