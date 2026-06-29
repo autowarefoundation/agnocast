@@ -1,4 +1,5 @@
 #include "agnocast/agnocast.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/typesupport_helpers.hpp"
@@ -21,9 +22,9 @@ SubscriptionBase::SubscriptionBase(
   validate_ld_preload();
 }
 
-union ioctl_add_subscriber_args SubscriptionBase::initialize(
+void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const std::string & node_name, const std::string & type_name)
+  SubscriptionRole role, const std::string & node_name, const std::string & type_name)
 {
   // Announce to the per-IPC-namespace discovery agent before the kmod call so
   // the registry line is in place whenever a later snapshot sees the
@@ -42,14 +43,27 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   add_subscriber_args.qos_is_reliable = qos.reliability() == rclcpp::ReliabilityPolicy::Reliable;
   add_subscriber_args.is_take_sub = is_take_sub;
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
-  add_subscriber_args.is_bridge = is_bridge;
+  add_subscriber_args.is_bridge = (role == SubscriptionRole::BridgeInternal);
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
-  return add_subscriber_args;
+  id_ = add_subscriber_args.ret_id;
+
+  if (role == SubscriptionRole::Default) {
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    } else {
+      RCLCPP_ERROR(
+        logger,
+        "R2A bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
+  }
 }
 
 uint32_t get_publisher_count_core(const std::string & topic_name)
@@ -158,16 +172,7 @@ rclcpp::QoS GenericSubscription::constructor_impl(
 
   const std::string node_name = node->get_fully_qualified_name();
 
-  const bool is_bridge = (role == SubscriptionRole::BridgeInternal);
-  union ioctl_add_subscriber_args add_subscriber_args = initialize(
-    actual_qos, false, options.ignore_local_publications, is_bridge, node_name, topic_type);
-
-  id_ = add_subscriber_args.ret_id;
-
-  if (role == SubscriptionRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, topic_type, BridgeDirection::ROS2_TO_AGNOCAST);
-  }
+  initialize(actual_qos, false, options.ignore_local_publications, role, node_name, topic_type);
 
   mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
 

@@ -28,7 +28,7 @@ extern struct device * agnocast_device;
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
 //   1. global_htables_rwsem   (this file)
-//   2. topic_rwsem            (per-topic, in struct topic_wrapper)
+//   2. topic->rwsem           (per-topic, in struct topic_struct)
 //   3. mempool_lock           (agnocast_memory_allocator.c)
 //
 // Global rwsem for hashtables (topic_hashtable, proc_info_htable, bridge_htable)
@@ -124,6 +124,8 @@ struct topic_struct
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
+  // Per-topic rwsem: read for read-only ops, write for publish/receive/modify.
+  struct rw_semaphore rwsem;
 };
 
 struct topic_wrapper
@@ -134,9 +136,7 @@ struct topic_wrapper
   // ROS_DOMAIN_ID are distinct wrappers and do not match (ROS 2 domain isolation).
   uint32_t domain_id;
   char * key;
-  struct rw_semaphore
-    topic_rwsem;  // Per-topic rwsem: read for read-only ops, write for publish/receive/modify
-  struct topic_struct topic;
+  struct topic_struct * topic;
   struct hlist_node node;
 };
 

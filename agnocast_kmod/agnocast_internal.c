@@ -28,7 +28,7 @@ static void pre_handler_subscriber_exit(
   struct subscriber_info * sub_info;
   int bkt_sub_info;
   struct hlist_node * tmp_sub_info;
-  hash_for_each_safe(wrapper->topic.sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
+  hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
   {
     if (sub_info->pid != pid) continue;
 
@@ -69,7 +69,7 @@ static void pre_handler_subscriber_exit(
       continue;
     }
 
-    struct rb_root * root = &wrapper->topic.entries;
+    struct rb_root * root = &wrapper->topic->entries;
     struct rb_node * node = rb_first(root);
     while (node) {
       struct entry_node * en = rb_entry(node, struct entry_node, node);
@@ -83,7 +83,7 @@ static void pre_handler_subscriber_exit(
       bool publisher_exited = false;
       struct publisher_info * pub_info;
       uint32_t hash_val = hash_min(en->publisher_id, PUB_INFO_HASH_BITS);
-      hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
+      hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
           const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
@@ -112,7 +112,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
   struct publisher_info * pub_info;
   int bkt_pub_info;
   struct hlist_node * tmp_pub_info;
-  hash_for_each_safe(wrapper->topic.pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
+  hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
   {
     if (pub_info->pid != pid) continue;
 
@@ -120,7 +120,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
     // Publisher-side handles do not participate in reference counting, so we don't need
     // to remove publisher references. Just clean up entries that have no subscriber references.
-    struct rb_root * root = &wrapper->topic.entries;
+    struct rb_root * root = &wrapper->topic->entries;
     struct rb_node * node = rb_first(root);
     while (node) {
       struct entry_node * en = rb_entry(node, struct entry_node, node);
@@ -147,7 +147,7 @@ int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper)
   int count = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     count++;
   }
@@ -159,7 +159,7 @@ int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper)
   int count = 0;
   struct publisher_info * pub_info;
   int bkt_pub_info;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     count++;
   }
@@ -199,7 +199,7 @@ void agnocast_free_exit_subscription_list(struct process_info * proc_info)
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
 {
-  rb_erase(&en->node, &wrapper->topic.entries);
+  rb_erase(&en->node, &wrapper->topic->entries);
   kfree(en);
 }
 
@@ -306,6 +306,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
       agnocast_get_size_sub_info_htable(wrapper) == 0) {
       hash_del(&wrapper->node);
       kfree(wrapper->key);
+      kfree(wrapper->topic);
       kfree(wrapper);
     }
   }

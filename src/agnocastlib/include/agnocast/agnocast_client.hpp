@@ -26,8 +26,6 @@
 namespace agnocast
 {
 
-struct NoBridgeRegistrationPolicy;
-
 bool service_is_ready_core(const std::string & service_name);
 bool wait_for_service_nanoseconds(
   const std::function<bool()> & check_context_ok, const std::string & service_name,
@@ -100,8 +98,8 @@ private:
     }
   };
 
-  using ServiceRequestPublisher = BasicPublisher<RequestT, NoBridgeRegistrationPolicy>;
-  using ServiceResponseSubscriber = BasicSubscription<ResponseT, NoBridgeRegistrationPolicy>;
+  using ServiceRequestPublisher = Publisher<RequestT>;
+  using ServiceResponseSubscriber = Subscription<ResponseT>;
 
   std::atomic<int64_t> next_sequence_number_;
   std::mutex seqno2_response_call_info_mtx_;
@@ -133,7 +131,8 @@ private:
 
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
-      node, create_service_request_topic_name(service_name_), qos, pub_options);
+      node, create_service_request_topic_name(service_name_), qos, pub_options,
+      PublisherRole::AgnocastOnly);
 
     auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -159,7 +158,8 @@ private:
     SubscriptionOptions options{group};
     std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-      node, topic_name, qos, std::move(subscriber_callback), options);
+      node, topic_name, qos, std::move(subscriber_callback), options,
+      SubscriptionRole::AgnocastOnly);
   }
 
 public:

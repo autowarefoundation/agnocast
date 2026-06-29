@@ -10,21 +10,14 @@
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#include <fcntl.h>
 #include <mqueue.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace agnocast
@@ -111,9 +104,9 @@ class SubscriptionBase
 protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;
-  union ioctl_add_subscriber_args initialize(
+  void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-    const bool is_bridge, const std::string & node_name, const std::string & type_name);
+    SubscriptionRole role, const std::string & node_name, const std::string & type_name);
 
 public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
@@ -140,9 +133,18 @@ public:
   }
 };
 
-// Internal implementation — users should use agnocast::Subscription<MessageT> instead.
-template <typename MessageT, typename BridgeRegistrationPolicy>
-class BasicSubscription : public SubscriptionBase
+/**
+ * @brief Agnocast subscription for a compile-time known message type.
+ *
+ * Delivers messages via a callback that is invoked each time a publisher
+ * writes to the topic. Allocate instances with
+ * `agnocast::create_subscription<MessageT>()` or construct directly.
+ *
+ * @tparam MessageT  ROS message type.
+ */
+AGNOCAST_PUBLIC
+template <typename MessageT>
+class Subscription : public SubscriptionBase
 {
   std::pair<mqd_t, std::string> mq_subscription_;
   uint32_t callback_info_id_;
@@ -151,7 +153,7 @@ class BasicSubscription : public SubscriptionBase
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, Func && callback,
     rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
-    const bool is_bridge)
+    SubscriptionRole role)
   {
     const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
     rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
@@ -172,11 +174,7 @@ class BasicSubscription : public SubscriptionBase
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    union ioctl_add_subscriber_args add_subscriber_args = initialize(
-      actual_qos, false, options.ignore_local_publications, is_bridge, node_name, type_name);
-
-    id_ = add_subscriber_args.ret_id;
-    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
+    initialize(actual_qos, false, options.ignore_local_publications, role, node_name, type_name);
 
     mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
 
@@ -189,12 +187,12 @@ class BasicSubscription : public SubscriptionBase
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicSubscription<MessageT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<Subscription<MessageT>>;
 
   template <typename Func>
-  BasicSubscription(
+  Subscription(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
-    agnocast::SubscriptionOptions options, const bool is_bridge = false)
+    agnocast::SubscriptionOptions options, SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
@@ -203,7 +201,7 @@ public:
     const char * callback_symbol = tracetools::get_symbol(callback);
 
     const rclcpp::QoS actual_qos =
-      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, is_bridge);
+      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, role);
 
     {
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
@@ -217,9 +215,10 @@ public:
   }
 
   template <typename Func>
-  BasicSubscription(
+  Subscription(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    Func && callback, agnocast::SubscriptionOptions options)
+    Func && callback, agnocast::SubscriptionOptions options,
+    SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
@@ -228,7 +227,7 @@ public:
     const char * callback_symbol = tracetools::get_symbol(callback);
 
     const rclcpp::QoS actual_qos =
-      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, false);
+      constructor_impl(node, qos, std::forward<Func>(callback), callback_group, options, role);
 
     {
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
@@ -240,7 +239,7 @@ public:
     }
   }
 
-  ~BasicSubscription()
+  ~Subscription()
   {
     // Remove from callback info map to prevent stale references on re-subscription and to avoid
     // fd reuse conflicts. When mq_close() is called in remove_mq(), the OS may later reuse the
@@ -255,9 +254,17 @@ public:
   }
 };
 
-// Internal implementation — users should use agnocast::TakeSubscription<MessageT> instead.
-template <typename MessageT, typename BridgeRegistrationPolicy>
-class BasicTakeSubscription : public SubscriptionBase
+/**
+ * @brief Agnocast polling take-subscription for a compile-time known message type.
+ *
+ * Does not use a callback; the caller retrieves the latest message by calling
+ * take(). Use PollingSubscriber<MessageT> for a higher-level wrapper.
+ *
+ * @tparam MessageT  ROS message type.
+ */
+AGNOCAST_PUBLIC
+template <typename MessageT>
+class TakeSubscription : public SubscriptionBase
 {
 private:
   // Cached pointer from the most recent take(allow_same_message=true) call.
@@ -268,7 +275,8 @@ private:
 
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
-    NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options)
+    NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options,
+    SubscriptionRole role)
   {
     const bool override_qos = options.qos_overriding_options.get_policy_kinds().size() > 0;
     rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
@@ -289,24 +297,21 @@ private:
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    union ioctl_add_subscriber_args add_subscriber_args =
-      initialize(actual_qos, true, options.ignore_local_publications, false, node_name, type_name);
-
-    id_ = add_subscriber_args.ret_id;
-    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
+    initialize(actual_qos, true, options.ignore_local_publications, role, node_name, type_name);
 
     return actual_qos;
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<TakeSubscription<MessageT>>;
 
-  BasicTakeSubscription(
+  TakeSubscription(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options);
+    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options, role);
 
     {
       auto default_cbg = node->get_node_base_interface()->get_default_callback_group();
@@ -321,12 +326,13 @@ public:
     }
   }
 
-  BasicTakeSubscription(
+  TakeSubscription(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options);
+    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options, role);
 
     {
       auto default_cbg = get_default_callback_group_for_tracepoint(node);
@@ -413,29 +419,40 @@ public:
   }
 };
 
-// Internal implementation — users should use agnocast::PollingSubscriber<MessageT> instead.
-template <typename MessageT, typename BridgeRegistrationPolicy>
-class BasicPollingSubscriber
+/**
+ * @brief Agnocast polling subscriber for a compile-time known message type.
+ *
+ * Wraps TakeSubscription<MessageT> and exposes a simple take_data() API
+ * that always returns the most recent message (or an empty pointer if nothing
+ * has been published yet).
+ *
+ * @tparam MessageT  ROS message type.
+ */
+AGNOCAST_PUBLIC
+template <typename MessageT>
+class PollingSubscriber
 {
-  typename BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>::SharedPtr subscriber_;
+  typename TakeSubscription<MessageT>::SharedPtr subscriber_;
 
 public:
-  using SharedPtr = std::shared_ptr<BasicPollingSubscriber<MessageT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<PollingSubscriber<MessageT>>;
 
-  explicit BasicPollingSubscriber(
+  explicit PollingSubscriber(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
-    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
   {
-    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>(
-      node, topic_name, qos, options);
+    subscriber_ =
+      std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options, role);
   };
 
-  explicit BasicPollingSubscriber(
+  explicit PollingSubscriber(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1},
-    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions())
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
+    SubscriptionRole role = SubscriptionRole::Default)
   {
-    subscriber_ = std::make_shared<BasicTakeSubscription<MessageT, BridgeRegistrationPolicy>>(
-      node, topic_name, qos, options);
+    subscriber_ =
+      std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options, role);
   };
 
   /// @deprecated Use take_data() instead.
@@ -543,31 +560,5 @@ public:
   // (forward-declared in this header via agnocast_callback_info.hpp).
   ~GenericSubscription();
 };
-
-struct RosToAgnocastPubsubRegistrationPolicy;
-
-/// @brief The user-facing event-driven subscription type.
-/// Alias for `BasicSubscription<MessageT>`. Use this type (not BasicSubscription directly) when
-/// declaring subscription variables.
-AGNOCAST_PUBLIC
-template <typename MessageT>
-using Subscription =
-  agnocast::BasicSubscription<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
-
-/// @brief The user-facing polling take-subscription type.
-/// Alias for `BasicTakeSubscription<MessageT>`. Use this type (not BasicTakeSubscription directly)
-/// when declaring take-subscription variables.
-AGNOCAST_PUBLIC
-template <typename MessageT>
-using TakeSubscription =
-  agnocast::BasicTakeSubscription<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
-
-/// @brief The user-facing polling subscriber type.
-/// Alias for `BasicPollingSubscriber<MessageT>`. Use this type (not BasicPollingSubscriber
-/// directly) when declaring polling subscriber variables.
-AGNOCAST_PUBLIC
-template <typename MessageT>
-using PollingSubscriber =
-  agnocast::BasicPollingSubscriber<MessageT, agnocast::RosToAgnocastPubsubRegistrationPolicy>;
 
 }  // namespace agnocast
