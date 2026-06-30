@@ -137,6 +137,15 @@ rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnoc
   return node->get_node_base_interface()->get_default_callback_group();
 }
 
+TypeErasedSubscription::~TypeErasedSubscription()
+{
+  {
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info.erase(callback_info_id_);
+  }
+  remove_mq(mq_subscription_);
+}
+
 TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string & topic_type)
 {
   TypeSupportBundle result;

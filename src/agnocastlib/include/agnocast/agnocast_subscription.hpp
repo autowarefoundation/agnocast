@@ -464,6 +464,102 @@ public:
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
 };
 
+class TypeErasedSubscription : public SubscriptionBase
+{
+  std::pair<mqd_t, std::string> mq_subscription_;
+  uint32_t callback_info_id_;
+
+  template <typename NodeT, typename Func>
+  rclcpp::QoS constructor_impl(
+    NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos, Func && callback,
+    rclcpp::CallbackGroup::SharedPtr callback_group, agnocast::SubscriptionOptions options,
+    SubscriptionRole role)
+  {
+    const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
+    rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+      override_qos ? node->get_node_parameters_interface() : nullptr;
+    const rclcpp::QoS actual_qos =
+      override_qos ? rclcpp::detail::declare_qos_parameters(
+                       options.qos_overriding_options, node_parameters, topic_name_, qos,
+                       rclcpp::detail::SubscriptionQosParametersTraits{})
+                   : qos;
+
+    validate_subscription_qos(actual_qos);
+
+    const std::string node_name = node->get_fully_qualified_name();
+
+    initialize(actual_qos, false, options.ignore_local_publications, role, node_name, topic_type);
+
+    mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
+
+    const bool is_transient_local =
+      actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+    callback_info_id_ = agnocast::register_callback<void>(
+      std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq,
+      std::move(callback_group));
+
+    return actual_qos;
+  }
+
+public:
+  using SharedPtr = std::shared_ptr<TypeErasedSubscription>;
+
+  template <typename Func>
+  TypeErasedSubscription(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback, agnocast::SubscriptionOptions options,
+    SubscriptionRole role)
+  : SubscriptionBase(node, topic_name)
+  {
+    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
+
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
+    const rclcpp::QoS actual_qos = constructor_impl(
+      node, topic_type, qos, std::forward<Func>(callback), callback_group, options, role);
+
+    {
+      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(
+          node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
+        callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol,
+        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
+    }
+  }
+
+  template <typename Func>
+  TypeErasedSubscription(
+    agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback, agnocast::SubscriptionOptions options,
+    SubscriptionRole role)
+  : SubscriptionBase(node, topic_name)
+  {
+    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
+
+    const void * callback_addr = static_cast<const void *>(&callback);
+    const char * callback_symbol = tracetools::get_symbol(callback);
+
+    const rclcpp::QoS actual_qos = constructor_impl(
+      node, topic_type, qos, std::forward<Func>(callback), callback_group, options, role);
+
+    {
+      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      TRACEPOINT(
+        agnocast_subscription_init, static_cast<const void *>(this),
+        static_cast<const void *>(get_node_base_address(node)), callback_addr,
+        static_cast<const void *>(callback_group.get()), callback_symbol, topic_name_.c_str(),
+        actual_qos.depth(), pid_callback_info_id);
+    }
+  }
+
+  ~TypeErasedSubscription();
+};
+
+// TOOD(bdm-k): Incorporate TypeErasedSubscription into GenericSubscription to increase code reuse.
+
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
 /// as a runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
 /// template argument. The typesupport library is loaded eagerly in the
