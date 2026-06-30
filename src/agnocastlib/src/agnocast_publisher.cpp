@@ -373,11 +373,6 @@ GenericPublisher::GenericPublisher(
 : TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
   load_type_support(topic_type);
-
-  if (role == PublisherRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, topic_type, BridgeDirection::AGNOCAST_TO_ROS2);
-  }
 }
 
 GenericPublisher::GenericPublisher(
@@ -386,11 +381,6 @@ GenericPublisher::GenericPublisher(
 : TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
   load_type_support(topic_type);
-
-  if (role == PublisherRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, topic_type, BridgeDirection::AGNOCAST_TO_ROS2);
-  }
 }
 
 void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
