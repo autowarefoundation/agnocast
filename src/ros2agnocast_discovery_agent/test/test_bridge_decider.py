@@ -176,7 +176,11 @@ def test_decide_collapses_duplicates_across_remotes():
 def test_serialize_matches_cpp_struct_size():
     req = BridgeRequest('/x', 'std_msgs/msg/Int32', DIRECTION_AGNOCAST_TO_ROS2,
                         10, False, True)
-    assert len(serialize_request(req)) == 528
+    msg = serialize_request(req)
+    assert len(msg) == 528
+    # First uint32 must be BridgeMsgType::DaemonPubSub (=2)
+    (tag,) = struct.unpack_from('=I', msg, 0)
+    assert tag == 2
 
 
 def test_serialize_nul_terminates_truncated_topic():

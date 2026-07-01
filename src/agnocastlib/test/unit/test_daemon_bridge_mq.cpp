@@ -54,6 +54,13 @@ TEST(DaemonBridgeMqTest, DaemonPayloadWireLayout)
   EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_is_reliable), 521u);
 }
 
+TEST(DaemonBridgeMqTest, BridgeMsgTypeNumeric)
+{
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::PubSub), 0u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::Service), 1u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonPubSub), 2u);
+}
+
 TEST(DaemonBridgeMqTest, BridgeMsgWireLayout)
 {
   EXPECT_EQ(offsetof(agnocast::BridgeMsg, type), 0u);
