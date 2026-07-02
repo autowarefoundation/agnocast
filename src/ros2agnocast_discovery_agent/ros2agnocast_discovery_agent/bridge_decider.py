@@ -12,8 +12,8 @@ The request is sent as a ``BridgeMsg`` (type=DaemonPubSub) to the per-namespace
 bridge_manager over an abstract-namespace UNIX domain socket
 (``\\0agnocast_bridge_manager_<ipc_ns_inode>[_d<domain>]``).
 The struct layout is mirrored here so the daemon stays decoupled from
-libagnocast's C++ headers; ``agnocast_mq.hpp`` owns the source of truth and a
-test asserts the size stays in sync.
+libagnocast's C++ headers; ``agnocast_bridge_msg.hpp`` owns the source of
+truth and a test asserts the size stays in sync.
 """
 
 from dataclasses import dataclass

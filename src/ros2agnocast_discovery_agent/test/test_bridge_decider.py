@@ -3,7 +3,7 @@
 These need neither the kmod, DDS, nor a POSIX MQ: ``decide_bridges`` is pure
 logic, and the wire format is checked against the hand-built byte layout that
 mirrors a Daemon-variant ``BridgeMsg`` (4-byte tag + 524-byte payload = 528
-bytes) in ``agnocast_mq.hpp``.
+bytes) in ``agnocast_bridge_msg.hpp``.
 """
 
 import struct

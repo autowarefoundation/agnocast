@@ -1,7 +1,7 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_ipc_event_loop.hpp"
 
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
 
 #include <utility>
 #include <vector>

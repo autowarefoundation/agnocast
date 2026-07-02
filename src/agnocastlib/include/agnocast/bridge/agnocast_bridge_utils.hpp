@@ -1,7 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
