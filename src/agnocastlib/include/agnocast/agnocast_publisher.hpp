@@ -243,7 +243,7 @@ public:
 /**
  * @brief A type-erased Agnocast publisher.
  *
- * There are four differences between this and BasicPublisher:
+ * There are four differences between this and Publisher:
  *
  * 1. borrow_loaned_message() takes a size and returns an ipc_shared_ptr<void> that points to a
  *    shared memory block of the requested size.
