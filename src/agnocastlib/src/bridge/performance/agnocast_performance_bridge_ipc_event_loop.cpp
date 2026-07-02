@@ -15,7 +15,7 @@ PerformanceBridgeIpcEventLoop::PerformanceBridgeIpcEventLoop(const rclcpp::Logge
     // 1. MQ Name
     create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID),
     // 2. Message Size
-    PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE,
+    BRIDGE_MQ_MESSAGE_SIZE,
     // 3. Block Signals
     {SIGTERM, SIGINT},
     // 4. Ignore Signals

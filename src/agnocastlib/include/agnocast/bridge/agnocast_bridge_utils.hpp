@@ -58,7 +58,7 @@ rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t p
 // Rebuild a QoS profile from the fields a daemon cross-NS request carries. The
 // daemon has no local endpoint to query, so reliability / durability / depth are
 // reconstructed from the request rather than from the kernel.
-rclcpp::QoS daemon_request_qos(const MqMsgDaemonBridge & req);
+rclcpp::QoS daemon_request_qos(const BridgeMsgDaemonPubSubPayload & req);
 PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name);
 SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_name);
 bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & topic_name);
@@ -71,12 +71,15 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
 /// @brief A builder class for creating bridge registration messages.
 ///
 /// It detects errors such as string truncation when copying string fields, and
-/// `build_performance_message()` returns the error reason. However, it does not check whether
+/// `build_message()` returns the error reason. However, it does not check whether
 /// the computed message as a whole is valid. It's the caller's responsibility to invoke a correct
 /// set of setters to build a valid message.
 class BridgeRegistrationMsgBuilder
 {
-  MqMsgPerformanceBridge msg_{};
+  BridgeMsgPubSubPayload pubsub_{};
+  BridgeMsgServicePayload service_{};
+  BridgeDirection direction_{BridgeDirection::ROS2_TO_AGNOCAST};
+  bool is_service_{false};
   bool failed_;
   std::string reason_;
 
@@ -97,7 +100,7 @@ public:
   BridgeRegistrationMsgBuilder & set_shadow_node_identity(
     const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
-  std::pair<MqMsgPerformanceBridge, std::string> build_performance_message();
+  std::pair<BridgeMsg, std::string> build_message();
 };
 
 template <typename MapT>
