@@ -32,26 +32,3 @@ The restrictions of the naming are
 
 The first rule is satisfied because all topic names start with `/`.
 To satisfy the second rule, all the occurrence of `/` in topic names are replaced for `_`.
-
-## How message queue is used in Agnocast Bridge?
-
-The message queue is also used for communication between Agnocast processes and Bridge Manager processes. When an Agnocast publisher or subscriber is created, it sends a bridge request to the Bridge Manager via message queue.
-
-The message queue is used as follows:
-
-- The first Agnocast process spawns a global Bridge Manager that opens `/agnocast_bridge_manager@-1` (optionally with a `_d<ROS_DOMAIN_ID>` suffix when `ROS_DOMAIN_ID` is set) as a receiver.
-- All Agnocast processes send bridge requests to this shared message queue.
-- Upon receiving the request, the Bridge Manager creates the appropriate bridge if conditions are met.
-
-The message definition is:
-
-```cpp
-struct BridgeMsg {
-  BridgeMsgType type;  // PubSub, Service, or DaemonPubSub
-  union {
-    BridgeMsgPubSubPayload pubsub;
-    BridgeMsgServicePayload service;
-    BridgeMsgDaemonPubSubPayload daemon_pubsub;
-  } payload;
-};
-```

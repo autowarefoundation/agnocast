@@ -8,8 +8,6 @@
 namespace agnocast
 {
 
-inline constexpr pid_t PERFORMANCE_BRIDGE_VIRTUAL_PID = -1;
-
 inline constexpr size_t SERVICE_NAME_BUFFER_SIZE = 256;
 inline constexpr size_t MESSAGE_TYPE_BUFFER_SIZE = 256;
 inline constexpr size_t SERVICE_TYPE_BUFFER_SIZE = 256;
@@ -69,13 +67,11 @@ struct BridgeMsg
   } payload;
 };
 
-constexpr int64_t BRIDGE_MQ_MAX_MESSAGES = 256;
-constexpr int64_t BRIDGE_MQ_MESSAGE_SIZE = sizeof(BridgeMsg);
-constexpr mode_t BRIDGE_MQ_PERMS = 0600;
+constexpr int64_t BRIDGE_MSG_MAX_SIZE = sizeof(BridgeMsg);
 
 // Wire size of a BridgeMsg carrying a specific payload variant: the tag plus
-// just the active variant's bytes. Used both for `mq_send` and for sizing
-// auxiliary buffers.
+// just the active variant's bytes. Used both to size the datagram sent over
+// the abstract-namespace UDS transport and to size auxiliary buffers.
 template <typename PayloadT>
 constexpr size_t bridge_msg_wire_size()
 {

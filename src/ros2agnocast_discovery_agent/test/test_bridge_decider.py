@@ -199,26 +199,28 @@ def test_serialize_packs_direction_qos_at_expected_offsets():
     assert (direction, depth, transient, reliable) == (DIRECTION_ROS2_TO_AGNOCAST, 7, 1, 1)
 
 
-def test_dispatch_targets_per_namespace_mq(monkeypatch):
+def test_dispatch_targets_per_namespace_uds(monkeypatch):
     from ros2agnocast_discovery_agent import bridge_decider as bd
     sent = []
-    monkeypatch.setattr(bd, 'send_request', lambda mq, payload: sent.append(mq) or None)
+    monkeypatch.setattr(bd, 'send_request', lambda addr, payload: sent.append(addr) or None)
 
     req = BridgeRequest('/x', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True)
-    dispatch_requests([req])
+    dispatch_requests([req], ipc_ns_inode=12345)
 
-    assert all(name.startswith('/agnocast_bridge_manager@-1') for name in sent)
-    assert len(sent) == 1
+    assert sent == ['\x00agnocast_bridge_manager_12345']
 
 
-def test_dispatch_routes_to_per_domain_mq(monkeypatch):
+def test_dispatch_routes_to_per_domain_uds(monkeypatch):
     from ros2agnocast_discovery_agent import bridge_decider as bd
     sent = []
-    monkeypatch.setattr(bd, 'send_request', lambda mq, payload: sent.append(mq) or None)
+    monkeypatch.setattr(bd, 'send_request', lambda addr, payload: sent.append(addr) or None)
 
     dispatch_requests([
         BridgeRequest('/a', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=0),
         BridgeRequest('/b', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=5),
-    ])
+    ], ipc_ns_inode=12345)
 
-    assert sent == ['/agnocast_bridge_manager@-1', '/agnocast_bridge_manager@-1_d5']
+    assert sent == [
+        '\x00agnocast_bridge_manager_12345',
+        '\x00agnocast_bridge_manager_12345_d5',
+    ]
