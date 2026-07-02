@@ -6,6 +6,8 @@
 #include "rclcpp/version.h"
 #include "rcpputils/shared_library.hpp"
 
+#include <sys/eventfd.h>
+
 namespace agnocast
 {
 
@@ -34,6 +36,18 @@ void SubscriptionBase::initialize(
       topic_name_, type_name, "sub", node_name);
   }
 
+  // Non-take subscribers get an eventfd that the kernel signals on each publish; take subscribers
+  // poll and need no notification fd.
+  int efd = -1;
+  if (!is_take_sub) {
+    efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (efd == -1) {
+      RCLCPP_ERROR(logger, "eventfd creation failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+  }
+
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
   add_subscriber_args.node_name = {node_name.c_str(), node_name.size()};
@@ -44,15 +58,18 @@ void SubscriptionBase::initialize(
   add_subscriber_args.is_take_sub = is_take_sub;
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
   add_subscriber_args.is_bridge = (role == SubscriptionRole::BridgeInternal);
+  add_subscriber_args.eventfd = efd;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
+    if (efd >= 0) {
+      close(efd);
+    }
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
   id_ = add_subscriber_args.ret_id;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-  mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
+  notify_eventfd_ = efd;
 
   if (role == SubscriptionRole::Default) {
     if (!type_name.empty()) {
@@ -124,44 +141,10 @@ uint32_t get_publisher_count_core(const std::string & topic_name)
   return count + ros2_count;
 }
 
-mqd_t open_mq_for_subscription(
-  const std::string & topic_name, const topic_local_id_t subscriber_id,
-  std::pair<mqd_t, std::string> & mq_subscription)
+void close_notify_eventfd(int notify_eventfd)
 {
-  std::string mq_name = create_mq_name_for_agnocast_publish(topic_name, subscriber_id);
-  struct mq_attr attr = {};
-  attr.mq_flags = 0;                        // Blocking queue
-  attr.mq_msgsize = sizeof(MqMsgAgnocast);  // Maximum message size
-  attr.mq_curmsgs = 0;  // Number of messages currently in the queue (not set by mq_open)
-  attr.mq_maxmsg = 1;
-
-  const int mq_mode = 0666;
-  mqd_t mq = mq_open(mq_name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK, mq_mode, &attr);
-  if (mq == -1) {
-    RCLCPP_ERROR_STREAM(
-      logger, "mq_open failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
-                                           << ", mq_name='" << mq_name
-                                           << "'): " << strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-  mq_subscription = std::make_pair(mq, mq_name);
-
-  return mq;
-}
-
-void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription)
-{
-  /* The message queue is destroyed after all the publisher processes close it. */
-  if (mq_close(mq_subscription.first) == -1) {
-    RCLCPP_ERROR_STREAM(
-      logger,
-      "mq_close failed for mq_name='" << mq_subscription.second << "': " << strerror(errno));
-  }
-  if (mq_unlink(mq_subscription.second.c_str()) == -1) {
-    RCLCPP_ERROR_STREAM(
-      logger,
-      "mq_unlink failed for mq_name='" << mq_subscription.second << "': " << strerror(errno));
+  if (notify_eventfd >= 0) {
+    close(notify_eventfd);
   }
 }
 
@@ -194,12 +177,11 @@ rclcpp::QoS GenericSubscription::constructor_impl(
 {
   const rclcpp::QoS actual_qos = init_base(node, qos, topic_type, false, options, role);
 
-  mqd_t mq = open_mq_for_subscription(mq_topic_name_, id_, mq_subscription_);
-
   const bool is_transient_local =
     actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   callback_info_id_ = agnocast::register_generic_callback(
-    std::move(callback), topic_name_, id_, is_transient_local, mq, std::move(callback_group));
+    std::move(callback), topic_name_, id_, is_transient_local, notify_eventfd_,
+    std::move(callback_group));
 
   return actual_qos;
 }
@@ -207,15 +189,15 @@ rclcpp::QoS GenericSubscription::constructor_impl(
 GenericSubscription::~GenericSubscription()
 {
   // Remove from callback info map to prevent stale references on re-subscription and to avoid
-  // fd reuse conflicts. When mq_close() is called in remove_mq(), the OS may later reuse the
-  // same fd number for a new subscription. If the old entry remains in id2_callback_info,
-  // adding the new fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still
-  // associates that fd number with the stale entry.
+  // fd reuse conflicts. When the eventfd is closed below, the OS may later reuse the same fd
+  // number for a new subscription. If the old entry remains in id2_callback_info, adding the new
+  // fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still associates that fd number
+  // with the stale entry.
   {
     std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
     id2_callback_info.erase(callback_info_id_);
   }
-  remove_mq(mq_subscription_);
+  close_notify_eventfd(notify_eventfd_);
 }
 
 template rclcpp::QoS GenericSubscription::constructor_impl<rclcpp::Node>(

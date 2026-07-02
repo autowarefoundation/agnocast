@@ -208,7 +208,7 @@ static int insert_subscriber_info(
   struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
   const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
-  struct subscriber_info ** new_info)
+  struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
 {
   int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
@@ -261,6 +261,7 @@ static int insert_subscriber_info(
   (*new_info)->ignore_local_publications = ignore_local_publications;
   (*new_info)->need_mmap_update = true;
   (*new_info)->is_bridge = is_bridge;
+  (*new_info)->notify_ctx = notify_ctx;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
@@ -710,9 +711,20 @@ int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret)
+  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret)
 {
   int ret;
+  struct eventfd_ctx * notify_ctx = NULL;
+
+  // For non-take subscribers, acquire an eventfd context for publish notification.
+  // eventfd < 0 means no notification (used in kunit tests).
+  if (!is_take_sub && eventfd >= 0) {
+    notify_ctx = eventfd_ctx_fdget(eventfd);
+    if (IS_ERR(notify_ctx)) {
+      dev_warn(agnocast_device, "eventfd_ctx_fdget failed.\n");
+      return PTR_ERR(notify_ctx);
+    }
+  }
 
   down_write(&global_htables_rwsem);
 
@@ -725,17 +737,18 @@ int agnocast_ioctl_add_subscriber(
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
     wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
-    is_take_sub, ignore_local_publications, is_bridge, &sub_info);
+    is_take_sub, ignore_local_publications, is_bridge, notify_ctx, &sub_info);
   if (ret < 0) {
     goto unlock;
   }
 
   ioctl_ret->ret_id = sub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
 unlock:
   up_write(&global_htables_rwsem);
+  if (ret < 0 && notify_ctx) {
+    eventfd_ctx_put(notify_ctx);
+  }
   return ret;
 }
 
@@ -762,8 +775,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;
@@ -863,19 +874,18 @@ static int release_msgs_to_meet_depth(
 
 int agnocast_ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
-  uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret)
+  const uint64_t msg_virtual_address, union ioctl_publish_msg_args * ioctl_ret)
 {
   int ret = 0;
 
-  if (subscriber_ids_buffer_size != MAX_SUBSCRIBER_NUM) {
-    dev_warn(
-      agnocast_device,
-      "subscriber_ids_buffer_size must be MAX_SUBSCRIBER_NUM (%d), but got %u. "
-      "(%s)\n",
-      MAX_SUBSCRIBER_NUM, subscriber_ids_buffer_size, __func__);
-    return -EINVAL;
-  }
+  // Subscriber eventfds are collected under topic_rwsem, then signaled after releasing it (see the
+  // collection loop below). Declared here so the early-error `goto unlock_all` paths reach the
+  // signal loop with notify_num == 0 (a no-op).
+  struct eventfd_ctx * notify_ctx_stack[NOTIFY_CTX_STACK_SIZE];
+  struct eventfd_ctx ** notify_ctxs = notify_ctx_stack;
+  bool notify_ctxs_allocated = false;
+  bool notify_within_lock = false;  // Fallback when the stack is exceeded AND heap alloc fails
+  uint32_t notify_num = 0;
 
   down_read(&global_htables_rwsem);
 
@@ -928,18 +938,54 @@ int agnocast_ioctl_publish_msg(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
+    // Cross-domain (bridge) delivery direction still gates the eventfd path.
     if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
       continue;
-    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+
+    subscriber_num++;
+
+    if (!sub_info->notify_ctx) continue;
+
+    if (notify_within_lock) {
+      agnocast_eventfd_signal(sub_info->notify_ctx);
       continue;
     }
-    subscriber_ids_out[subscriber_num] = sub_info->id;
-    subscriber_num++;
+
+    if (notify_num < NOTIFY_CTX_STACK_SIZE || notify_ctxs_allocated) {
+      notify_ctxs[notify_num++] = sub_info->notify_ctx;
+    } else {
+      // Stack is full but heap not yet allocated: promote to a heap buffer sized to the topic.
+      uint32_t sub_count = agnocast_get_size_sub_info_htable(wrapper);
+      struct eventfd_ctx ** heap = kcalloc(sub_count, sizeof(*heap), GFP_ATOMIC);
+      if (heap) {
+        notify_ctxs_allocated = true;
+        memcpy(heap, notify_ctx_stack, notify_num * sizeof(*heap));
+        notify_ctxs = heap;
+        notify_ctxs[notify_num++] = sub_info->notify_ctx;
+      } else {
+        // Heap allocation failed: fall back to signaling within the lock.
+        notify_within_lock = true;
+        agnocast_eventfd_signal(sub_info->notify_ctx);
+      }
+    }
   }
   ioctl_ret->ret_subscriber_num = subscriber_num;
 
 unlock_all:
   up_write(&wrapper->topic->rwsem);
+
+  // Signal collected eventfds outside topic_rwsem (still under global_htables_rwsem read lock, so
+  // the contexts stay valid: subscriber removal takes the global write lock). Doing it here rather
+  // than under topic_rwsem avoids blocking concurrent publish/receive/take on high-fanout topics,
+  // since each eventfd_signal() costs ~100-200 ns.
+  for (uint32_t i = 0; i < notify_num; i++) {
+    agnocast_eventfd_signal(notify_ctxs[i]);
+  }
+  if (notify_ctxs_allocated) {
+    kfree(notify_ctxs);
+  }
+
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1953,6 +1999,9 @@ int agnocast_ioctl_remove_subscriber(
   }
 
   hash_del(&sub_info->node);
+  if (sub_info->notify_ctx) {
+    eventfd_ctx_put(sub_info->notify_ctx);
+  }
   kfree(sub_info->node_name);
   kfree(sub_info);
 
@@ -2541,7 +2590,7 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   ret = agnocast_ioctl_add_subscriber(
     topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
     sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, &sub_args);
+    sub_args.is_bridge, sub_args.eventfd, &sub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
@@ -2647,36 +2696,9 @@ static long publish_msg_cmd(union ioctl_publish_msg_args __user * arg)
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &publish_msg_args.topic_name);
   if (ret) return ret;
 
-  // Allocate kernel buffer for subscriber IDs
-  uint32_t buffer_size = publish_msg_args.subscriber_ids_buffer_size;
-  if (buffer_size != MAX_SUBSCRIBER_NUM) {
-    return -EINVAL;
-  }
-  topic_local_id_t * subscriber_ids_buf =
-    kcalloc(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
-  if (!subscriber_ids_buf) {
-    return -ENOMEM;
-  }
-
-  uint64_t subscriber_ids_buffer_addr = publish_msg_args.subscriber_ids_buffer_addr;
-
   ret = agnocast_ioctl_publish_msg(
     topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
-    subscriber_ids_buf, buffer_size, &publish_msg_args);
-
-  if (ret == 0) {
-    // Copy subscriber IDs to user-space buffer
-    uint32_t copy_count = min(publish_msg_args.ret_subscriber_num, buffer_size);
-    if (copy_count > 0) {
-      if (copy_to_user(
-            (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
-            copy_count * sizeof(topic_local_id_t))) {
-        kfree(subscriber_ids_buf);
-        return -EFAULT;
-      }
-    }
-  }
-  kfree(subscriber_ids_buf);
+    &publish_msg_args);
 
   if (ret == 0) {
     if (copy_to_user(arg, &publish_msg_args, sizeof(publish_msg_args))) return -EFAULT;

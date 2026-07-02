@@ -46,7 +46,7 @@ bool serialize_message(
 
 uint32_t register_erased_callback(
   TypeErasedCallback callback, MessageCreator message_creator, const std::string & topic_name,
-  const topic_local_id_t subscriber_id, const bool is_transient_local, mqd_t mqdes,
+  const topic_local_id_t subscriber_id, const bool is_transient_local, int notify_eventfd,
   rclcpp::CallbackGroup::SharedPtr callback_group)
 {
   uint32_t callback_info_id = allocate_callback_info_id();
@@ -57,7 +57,7 @@ uint32_t register_erased_callback(
       topic_name,
       subscriber_id,
       is_transient_local,
-      mqdes,
+      notify_eventfd,
       std::move(callback_group),
       std::move(callback),
       std::move(message_creator)};
@@ -70,7 +70,8 @@ uint32_t register_erased_callback(
 
 uint32_t register_generic_callback(
   TypeErasedCallback callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
-  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
+  const bool is_transient_local, int notify_eventfd,
+  rclcpp::CallbackGroup::SharedPtr callback_group)
 {
   auto message_creator = [](
                            void * ptr, const std::string & topic_name,
@@ -81,7 +82,7 @@ uint32_t register_generic_callback(
 
   return register_erased_callback(
     std::move(callback), std::move(message_creator), topic_name, subscriber_id, is_transient_local,
-    mqdes, std::move(callback_group));
+    notify_eventfd, std::move(callback_group));
 }
 
 void receive_and_execute_message(
@@ -219,7 +220,7 @@ void SubscriptionEventHandler::prepare_epoll(
     struct epoll_event ev = {};
     ev.events = EPOLLIN;
     ev.data.u64 = pack_epoll_data(EpollEventType::Subscription, callback_info_id);
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.mqdes, &ev) == -1) {
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.notify_eventfd, &ev) == -1) {
       RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
       close(agnocast_fd);
       exit(EXIT_FAILURE);
@@ -253,15 +254,14 @@ void SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
     callback_info = it->second;
   }
 
-  MqMsgAgnocast mq_msg = {};
-
-  // non-blocking
-  auto ret =
-    mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
+  // Drain the eventfd counter; the value is unused (the fd is a pure wakeup, like the MQ it
+  // replaces). The eventfd is EFD_NONBLOCK, so a spurious/coalesced wake returns EAGAIN.
+  uint64_t counter = 0;
+  const ssize_t ret = read(callback_info.notify_eventfd, &counter, sizeof(counter));
   if (ret < 0) {
     if (errno != EAGAIN) {
       RCLCPP_ERROR_STREAM(
-        logger, "mq_receive failed for topic '"
+        logger, "eventfd read failed for topic '"
                   << callback_info.topic_name << "' (subscriber_id=" << callback_info.subscriber_id
                   << "): " << strerror(errno));
       close(agnocast_fd);

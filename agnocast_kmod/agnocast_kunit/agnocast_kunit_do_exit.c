@@ -11,8 +11,6 @@
 
 static const pid_t PID_BASE = 1000;
 
-static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
-
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const uint32_t QOS_DEPTH = 1;
@@ -67,7 +65,7 @@ static topic_local_id_t setup_one_subscriber_on_topic(
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -89,8 +87,7 @@ static uint64_t setup_one_entry(
 {
   union ioctl_publish_msg_args publish_msg_args;
   int ret = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
-    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, &publish_msg_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_TRUE(

@@ -92,7 +92,7 @@ struct CallbackInfo
   std::string topic_name;
   topic_local_id_t subscriber_id;
   bool is_transient_local;
-  mqd_t mqdes;
+  int notify_eventfd;
   rclcpp::CallbackGroup::SharedPtr callback_group;
   TypeErasedCallback callback;
   MessageCreator message_creator;
@@ -189,13 +189,14 @@ TypeErasedCallback get_erased_generic_callback(Func && callback, TypeSupportBund
 
 uint32_t register_erased_callback(
   TypeErasedCallback callback, MessageCreator message_creator, const std::string & topic_name,
-  topic_local_id_t subscriber_id, bool is_transient_local, mqd_t mqdes,
+  topic_local_id_t subscriber_id, bool is_transient_local, int notify_eventfd,
   rclcpp::CallbackGroup::SharedPtr callback_group);
 
 template <typename MessageT, typename Func>
 uint32_t register_callback(
   Func && callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
-  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
+  const bool is_transient_local, int notify_eventfd,
+  rclcpp::CallbackGroup::SharedPtr callback_group)
 {
   // NOTE: ipc_shared_ptr<MessageT> and ipc_shared_ptr<MessageT>&& make no difference in the
   // assertion expression below, but we go with ipc_shared_ptr<MessageT>&&.
@@ -216,12 +217,12 @@ uint32_t register_callback(
 
   return register_erased_callback(
     std::move(erased_callback), std::move(message_creator), topic_name, subscriber_id,
-    is_transient_local, mqdes, std::move(callback_group));
+    is_transient_local, notify_eventfd, std::move(callback_group));
 }
 
 uint32_t register_generic_callback(
   TypeErasedCallback callback, const std::string & topic_name, topic_local_id_t subscriber_id,
-  bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group);
+  bool is_transient_local, int notify_eventfd, rclcpp::CallbackGroup::SharedPtr callback_group);
 
 void receive_and_execute_message(
   uint32_t callback_info_id, pid_t my_pid, const CallbackInfo & callback_info,
