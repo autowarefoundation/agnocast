@@ -58,7 +58,7 @@ struct BridgeMsg
   } payload;
 };
 
-constexpr int64_t BRIDGE_MSG_MAX_SIZE = sizeof(BridgeMsg);
+constexpr size_t BRIDGE_MSG_MAX_SIZE = sizeof(BridgeMsg);
 
 // Wire size of a BridgeMsg carrying a specific payload variant: the tag plus
 // just the active variant's bytes. Used both to size the datagram sent over

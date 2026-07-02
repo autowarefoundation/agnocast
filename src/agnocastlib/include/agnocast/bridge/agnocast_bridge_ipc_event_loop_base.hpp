@@ -36,7 +36,7 @@ public:
   using SocketCallback = std::function<std::string()>;
 
   IpcEventLoopBase(
-    const rclcpp::Logger & logger, const std::string & uds_addr, long max_msg_size,
+    const rclcpp::Logger & logger, const std::string & uds_addr, std::size_t max_msg_size,
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
 
   virtual ~IpcEventLoopBase();
@@ -64,7 +64,7 @@ private:
 
   int listener_fd_ = -1;
   std::string uds_addr_;
-  long max_msg_size_;
+  std::vector<uint8_t> recv_buf_;
 
   MessageCallback message_cb_;
   SignalCallback signal_cb_;
@@ -85,9 +85,9 @@ private:
 };
 
 inline IpcEventLoopBase::IpcEventLoopBase(
-  const rclcpp::Logger & logger, const std::string & uds_addr, long max_msg_size,
+  const rclcpp::Logger & logger, const std::string & uds_addr, std::size_t max_msg_size,
   const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore)
-: logger_(logger), uds_addr_(uds_addr), max_msg_size_(max_msg_size)
+: logger_(logger), uds_addr_(uds_addr), recv_buf_(max_msg_size)
 {
   try {
     setup_listener();
@@ -218,9 +218,8 @@ inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
 
 inline void IpcEventLoopBase::drain_listener()
 {
-  std::vector<uint8_t> buf(static_cast<size_t>(max_msg_size_));
   while (true) {
-    ssize_t n = recv(listener_fd_, buf.data(), buf.size(), 0);
+    ssize_t n = recv(listener_fd_, recv_buf_.data(), recv_buf_.size(), 0);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) break;
       if (errno == EINTR) continue;
@@ -228,7 +227,7 @@ inline void IpcEventLoopBase::drain_listener()
       break;
     }
     if (message_cb_) {
-      message_cb_(buf.data(), static_cast<size_t>(n));
+      message_cb_(recv_buf_.data(), static_cast<size_t>(n));
     }
   }
 }
