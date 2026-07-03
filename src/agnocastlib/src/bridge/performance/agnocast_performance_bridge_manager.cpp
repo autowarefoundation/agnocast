@@ -92,6 +92,9 @@ void PerformanceBridgeManager::worker_loop()
     }
 
     for (const auto & msg : batch) {
+      if (shutdown_requested_.load(std::memory_order_relaxed)) {
+        break;
+      }
       dispatch_bridge_message(msg);
     }
 
@@ -135,6 +138,10 @@ void PerformanceBridgeManager::start_worker_thread()
 
 void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t size)
 {
+  if (shutdown_requested_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
   if (size < offsetof(BridgeMsg, payload)) {
     RCLCPP_WARN(
       logger_,
@@ -179,11 +186,20 @@ void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t 
       return;
   }
 
+  constexpr size_t PENDING_MSGS_WARN_THRESHOLD = 2000;
+  bool exceeded_threshold = false;
   {
     std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
     pending_msgs_.push_back(msg);
+    exceeded_threshold = pending_msgs_.size() > PENDING_MSGS_WARN_THRESHOLD;
   }
   pending_msgs_cv_.notify_one();
+
+  if (exceeded_threshold) {
+    RCLCPP_WARN_ONCE(
+      logger_, "Pending bridge message backlog exceeded %zu; worker thread may not be keeping up.",
+      PENDING_MSGS_WARN_THRESHOLD);
+  }
 }
 
 void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
