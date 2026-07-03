@@ -339,7 +339,7 @@ ipc_shared_ptr<void> TypeErasedPublisher::borrow_loaned_message(size_t size)
 {
   increment_borrowed_publisher_num();
   void * ptr = ::operator new(size);
-  return ipc_shared_ptr<void>(ptr, topic_name_.c_str(), id_);
+  return ipc_shared_ptr<void>(ptr, topic_name_, id_);
 }
 
 void GenericPublisher::load_type_support(const std::string & topic_type)

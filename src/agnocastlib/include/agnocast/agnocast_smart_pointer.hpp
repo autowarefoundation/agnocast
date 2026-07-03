@@ -382,6 +382,8 @@ public:
     }
 
     ptr_ = nullptr;
+    // Suppress false positive from clang-tidy: atomic reference counting ensures no leak.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     control_ = nullptr;
   }
 };
