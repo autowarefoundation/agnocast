@@ -237,11 +237,12 @@ protected:
 
 TEST_F(AgnocastTypeErasedPublisherTest, test_cancel)
 {
-  // Arrarnge
+  // Arrange
   agnocast::ipc_shared_ptr<void> message = dummy_publisher->borrow_loaned_message(4);
-  bool deleter_invoked = false;
-  auto deleter = [&deleter_invoked](void * p) {
-    deleter_invoked = true;
+  void * message_ptr = message.get();
+  void * delete_ptr = nullptr;
+  auto deleter = [&delete_ptr](void * p) {
+    delete_ptr = p;
     ::operator delete(p);
   };
 
@@ -251,7 +252,8 @@ TEST_F(AgnocastTypeErasedPublisherTest, test_cancel)
   // Assert
   EXPECT_EQ(publish_core_mock_called_count, 0);
   EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
-  EXPECT_TRUE(deleter_invoked);
+  EXPECT_NE(message_ptr, nullptr);
+  EXPECT_EQ(delete_ptr, message_ptr);
 }
 
 // =========================================

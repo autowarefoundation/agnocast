@@ -278,11 +278,13 @@ public:
       exit(EXIT_FAILURE);
     }
 
+    void * delete_ptr = message.get();
+
     message.invalidate_all_references();
 
     decrement_borrowed_publisher_num();
 
-    deleter(message.get());
+    deleter(delete_ptr);
 
     message.reset();
   }
