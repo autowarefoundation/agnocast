@@ -46,12 +46,12 @@ The message queue is used as follows:
 The message definition is:
 
 ```cpp
-struct MqMsgPerformanceBridge {
-  char message_type[256];     // e.g., "std_msgs/msg/String"
-  BridgeTargetInfo target;    // topic name, target ID
-  BridgeDirection direction;  // ROS2_TO_AGNOCAST or AGNOCAST_TO_ROS2
+struct BridgeMsg {
+  BridgeMsgType type;  // PubSub, Service, or DaemonPubSub
+  union {
+    BridgeMsgPubSubPayload pubsub;
+    BridgeMsgServicePayload service;
+    BridgeMsgDaemonPubSubPayload daemon_pubsub;
+  } payload;
 };
 ```
-
-> [!NOTE]
-> The struct is named `MqMsgPerformanceBridge` for historical reasons. Before the bridge implementation was unified, this message format was specific to the "Performance Bridge" as opposed to the "Standard Bridge". The Standard Bridge has since been removed, but the struct name has been kept as-is to minimize churn.

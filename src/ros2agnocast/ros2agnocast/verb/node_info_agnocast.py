@@ -44,7 +44,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
         with NodeStrategy(None) as node:
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
             bridge_roles = collect_bridge_roles(snapshots)
 
             def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):

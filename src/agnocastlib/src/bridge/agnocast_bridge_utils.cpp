@@ -82,7 +82,7 @@ rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t p
                                                     : rclcpp::DurabilityPolicy::Volatile);
 }
 
-rclcpp::QoS daemon_request_qos(const MqMsgDaemonBridge & req)
+rclcpp::QoS daemon_request_qos(const BridgeMsgDaemonPubSubPayload & req)
 {
   return rclcpp::QoS(req.qos_depth)
     .durability(
@@ -305,13 +305,13 @@ int BridgeRegistrationMsgBuilder::checked_snprintf(
 BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_direction(
   BridgeDirection direction)
 {
-  msg_.direction = direction;
+  direction_ = direction;
   return *this;
 }
 
 BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_is_service(bool is_service)
 {
-  msg_.is_service = is_service;
+  is_service_ = is_service;
   return *this;
 }
 
@@ -319,15 +319,15 @@ BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_message_type(
   const char * message_type)
 {
   checked_snprintf(
-    "message_type", static_cast<char *>(msg_.pubsub_target.message_type), MESSAGE_TYPE_BUFFER_SIZE,
-    "%s", message_type);
+    "message_type", static_cast<char *>(pubsub_.message_type), MESSAGE_TYPE_BUFFER_SIZE, "%s",
+    message_type);
   return *this;
 }
 
 BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_topic_name(const char * topic_name)
 {
   checked_snprintf(
-    "topic_name", static_cast<char *>(msg_.pubsub_target.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
+    "topic_name", static_cast<char *>(pubsub_.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
     topic_name);
   return *this;
 }
@@ -335,7 +335,7 @@ BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_topic_name(cons
 BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_pubsub_target_id(
   topic_local_id_t target_id)
 {
-  msg_.pubsub_target.target_id = target_id;
+  pubsub_.target_id = target_id;
   return *this;
 }
 
@@ -343,8 +343,8 @@ BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_type(
   const char * service_type)
 {
   checked_snprintf(
-    "service_type", static_cast<char *>(msg_.srv_target.service_type), SERVICE_TYPE_BUFFER_SIZE,
-    "%s", service_type);
+    "service_type", static_cast<char *>(service_.service_type), SERVICE_TYPE_BUFFER_SIZE, "%s",
+    service_type);
   return *this;
 }
 
@@ -352,15 +352,15 @@ BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_name(
   const char * service_name)
 {
   checked_snprintf(
-    "service_name", static_cast<char *>(msg_.srv_target.service_name), SERVICE_NAME_BUFFER_SIZE,
-    "%s", service_name);
+    "service_name", static_cast<char *>(service_.service_name), SERVICE_NAME_BUFFER_SIZE, "%s",
+    service_name);
   return *this;
 }
 
 BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_shadow_node_identity(
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
-  msg_.srv_target.create_shadow_node = shadow_node_identity.has_value();
+  service_.create_shadow_node = shadow_node_identity.has_value();
 
   const char * shadow_node_namespace =
     shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "";
@@ -368,19 +368,28 @@ BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_shadow_node_ide
     shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "";
 
   checked_snprintf(
-    "shadow_node_namespace", static_cast<char *>(msg_.srv_target.shadow_node_namespace),
+    "shadow_node_namespace", static_cast<char *>(service_.shadow_node_namespace),
     NODE_NAME_BUFFER_SIZE, "%s", shadow_node_namespace);
   checked_snprintf(
-    "shadow_node_name", static_cast<char *>(msg_.srv_target.shadow_node_name),
-    NODE_NAME_BUFFER_SIZE, "%s", shadow_node_name);
+    "shadow_node_name", static_cast<char *>(service_.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_name);
 
   return *this;
 }
 
-std::pair<MqMsgPerformanceBridge, std::string>
-BridgeRegistrationMsgBuilder::build_performance_message()
+std::pair<BridgeMsg, std::string> BridgeRegistrationMsgBuilder::build_message()
 {
-  return {msg_, failed_ ? std::move(reason_) : std::string{}};
+  BridgeMsg msg{};
+  if (is_service_) {
+    msg.type = BridgeMsgType::Service;
+    service_.direction = direction_;
+    msg.payload.service = service_;
+  } else {
+    msg.type = BridgeMsgType::PubSub;
+    pubsub_.direction = direction_;
+    msg.payload.pubsub = pubsub_;
+  }
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
 }
 
 }  // namespace agnocast

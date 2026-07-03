@@ -24,7 +24,7 @@ class ListAgnocastVerb(VerbExtension):
         with NodeStrategy(None) as node:
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
             bridge_roles = collect_bridge_roles(snapshots)
 
             def divide_ros2_topic_into_pubsub(topic_names):

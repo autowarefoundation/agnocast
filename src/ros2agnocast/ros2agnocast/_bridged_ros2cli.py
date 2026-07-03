@@ -75,7 +75,7 @@ def resolve_type_name(topic_name: str, gossip_timeout: float):
         if not type_name:
             # If not found, fall back to /_agnocast_discovery to look up the Agnocast topic.
             snapshots, used_fallback = collect_announcements_with_fallback(proxy_node, timeout_sec=gossip_timeout)
-            warn_if_using_fallback(proxy_node, used_fallback, gossip_timeout)
+            warn_if_using_fallback(proxy_node, used_fallback, gossip_timeout, snapshots)
             type_name = next(
                 (topic.type_name
                  for snap in snapshots

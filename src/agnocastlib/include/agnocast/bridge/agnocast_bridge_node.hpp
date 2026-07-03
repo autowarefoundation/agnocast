@@ -78,14 +78,13 @@ struct RosToAgnocastServiceRegistrationPolicy
   }
 };
 
-template <typename MsgStruct>
-void send_mq_message(
-  const std::string & mq_name, const MsgStruct & msg, long msg_size_limit,
+inline void send_mq_message(
+  const std::string & mq_name, const BridgeMsg & msg, size_t send_size,
   const rclcpp::Logger & logger)
 {
   struct mq_attr attr = {};
-  attr.mq_maxmsg = PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES;
-  attr.mq_msgsize = msg_size_limit;
+  attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
+  attr.mq_msgsize = BRIDGE_MQ_MESSAGE_SIZE;
 
   mqd_t mq =
     mq_open(mq_name.c_str(), O_CREAT | O_WRONLY | O_NONBLOCK | O_CLOEXEC, BRIDGE_MQ_PERMS, &attr);
@@ -103,7 +102,7 @@ void send_mq_message(
   int send_result = -1;
   int last_errno = 0;
   for (int retry = 0; retry <= BRIDGE_MQ_SEND_MAX_RETRIES; ++retry) {
-    send_result = mq_send(mq, reinterpret_cast<const char *>(&msg), sizeof(msg), 0);
+    send_result = mq_send(mq, reinterpret_cast<const char *>(&msg), send_size, 0);
     if (send_result == 0) break;
     last_errno = errno;
     if (last_errno != EAGAIN) break;
@@ -132,7 +131,7 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
                          .set_message_type(message_type_name.c_str())
                          .set_topic_name(topic_name.c_str())
                          .set_pubsub_target_id(id)
-                         .build_performance_message();
+                         .build_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(
       logger, "Failed to build performance pubsub bridge registration: %s", reason.c_str());
@@ -141,7 +140,7 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
   }
 
   std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-  send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);
+  send_mq_message(mq_name, msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
 }
 
 template <typename ServiceT>
@@ -159,7 +158,7 @@ void send_performance_service_bridge_registration(
                          .set_service_type(service_type_name.c_str())
                          .set_service_name(service_name.c_str())
                          .set_shadow_node_identity(shadow_node_identity)
-                         .build_performance_message();
+                         .build_message();
   if (!reason.empty()) {
     RCLCPP_ERROR(
       logger, "Failed to build performance service bridge registration: %s", reason.c_str());
@@ -168,7 +167,7 @@ void send_performance_service_bridge_registration(
   }
 
   std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-  send_mq_message(mq_name, msg, PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE, logger);
+  send_mq_message(mq_name, msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger);
 }
 
 }  // namespace agnocast
