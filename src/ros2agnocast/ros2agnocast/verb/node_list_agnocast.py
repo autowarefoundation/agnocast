@@ -36,7 +36,7 @@ class ListAgnocastVerb(VerbExtension):
         with NodeStrategy(None) as node:
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
 
             # Get node names which contains Agnocast topics from gossip.
             agnocast_node_name = all_nodes(snapshots)

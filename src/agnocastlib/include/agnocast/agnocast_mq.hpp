@@ -25,39 +25,31 @@ struct MqMsgROS2Publish
   bool should_terminate;
 };
 
-struct PubsubBridgeTargetInfoWithType
+enum class BridgeMsgType : uint32_t {
+  PubSub = 0,
+  Service = 1,
+  DaemonPubSub = 2,
+};
+
+struct BridgeMsgPubSubPayload
 {
   char message_type[MESSAGE_TYPE_BUFFER_SIZE];
   char topic_name[TOPIC_NAME_BUFFER_SIZE];
   topic_local_id_t target_id;
+  BridgeDirection direction;
 };
 
-struct ServiceBridgeTargetInfoWithType
+struct BridgeMsgServicePayload
 {
   char service_type[SERVICE_TYPE_BUFFER_SIZE];
   char service_name[SERVICE_NAME_BUFFER_SIZE];
   bool create_shadow_node;
+  BridgeDirection direction;
   char shadow_node_namespace[NODE_NAME_BUFFER_SIZE];
   char shadow_node_name[NODE_NAME_BUFFER_SIZE];
 };
 
-struct MqMsgPerformanceBridge
-{
-  union {
-    PubsubBridgeTargetInfoWithType pubsub_target;
-    ServiceBridgeTargetInfoWithType srv_target;
-  };
-  BridgeDirection direction;
-  bool is_service;
-};
-
-// Cross-IPC-namespace bridge request from the per-NS daemon to a same-NS
-// bridge_manager. The daemon holds no process-local factory pointers, so it
-// names the target by topic (standard mode reuses the factory the manager
-// already cached from this process's intra-NS requests) and by type
-// (performance mode resolves a plugin). QoS is sent explicitly since the
-// bridge_manager cannot query the originating endpoint's QoS on its own.
-struct MqMsgDaemonBridge
+struct BridgeMsgDaemonPubSubPayload
 {
   char topic_name[TOPIC_NAME_BUFFER_SIZE];
   char type_name[MESSAGE_TYPE_BUFFER_SIZE];
@@ -67,19 +59,27 @@ struct MqMsgDaemonBridge
   bool qos_is_reliable;
 };
 
-constexpr int64_t PERFORMANCE_BRIDGE_MQ_MAX_MESSAGES = 256;
-// The discovery agent bursts one request per (cross-NS topic, direction) each tick,
-// so a shallow queue would throttle startup convergence to a few bridges per second.
-// The bridge_manager already opens the 256-deep performance MQ, so matching it needs
-// no extra fs.mqueue.msg_max headroom.
-constexpr int64_t DAEMON_BRIDGE_MQ_MAX_MESSAGES = 256;
-constexpr int64_t PERFORMANCE_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgPerformanceBridge);
-constexpr int64_t DAEMON_BRIDGE_MQ_MESSAGE_SIZE = sizeof(MqMsgDaemonBridge);
+struct BridgeMsg
+{
+  BridgeMsgType type;
+  union Payload {
+    BridgeMsgPubSubPayload pubsub;
+    BridgeMsgServicePayload service;
+    BridgeMsgDaemonPubSubPayload daemon_pubsub;
+  } payload;
+};
+
+constexpr int64_t BRIDGE_MQ_MAX_MESSAGES = 256;
+constexpr int64_t BRIDGE_MQ_MESSAGE_SIZE = sizeof(BridgeMsg);
 constexpr mode_t BRIDGE_MQ_PERMS = 0600;
 
-// Standard mode: one MQ per user process, `/agnocast_daemon_bridge@<pid>`.
-// Performance mode: one MQ per IPC namespace, `/agnocast_daemon_bridge_perf`.
-inline constexpr const char * DAEMON_BRIDGE_MQ_PREFIX = "/agnocast_daemon_bridge";
-inline constexpr const char * PERFORMANCE_DAEMON_BRIDGE_MQ_NAME = "/agnocast_daemon_bridge_perf";
+// Wire size of a BridgeMsg carrying a specific payload variant: the tag plus
+// just the active variant's bytes. Used both for `mq_send` and for sizing
+// auxiliary buffers.
+template <typename PayloadT>
+constexpr size_t bridge_msg_wire_size()
+{
+  return offsetof(BridgeMsg, payload) + sizeof(PayloadT);
+}
 
 }  // namespace agnocast
