@@ -95,9 +95,8 @@ std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name);
 uint64_t agnocast_get_timestamp();
 
-// Create a dummy callback group for agnocast::Node tracepoint use.
-// Defined in .cpp to avoid circular inclusion between agnocast_publisher/subscription.hpp and
-// agnocast_node.hpp.
+// Returns a pointer to the inner node handle that can be used for the TRACEPOINT macro.
 const void * get_node_base_address(agnocast::Node * node);
+const void * get_node_base_address(rclcpp::Node * node);
 
 }  // namespace agnocast
