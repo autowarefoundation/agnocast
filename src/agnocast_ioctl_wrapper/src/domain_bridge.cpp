@@ -10,15 +10,17 @@
 
 extern "C" {
 
-// Register a domain bridge rule with the kmod so it relays the topic between
-// from_domain and to_domain within this process's IPC namespace. Returns 0 on
-// success, -1 on failure.
+// Register a domain bridge rule with the kmod so it relays the topic from
+// (topic_name_from, from_domain) to (topic_name_to, to_domain) within this
+// process's IPC namespace. The two names may differ (rename) or be equal (plain
+// bridge). Returns 0 on success, -1 on failure.
 int add_agnocast_domain_bridge_rule(
-  const char * topic_name, uint32_t from_domain, uint32_t to_domain)
+  const char * topic_name_from, const char * topic_name_to, uint32_t from_domain,
+  uint32_t to_domain)
 {
-  // Exported C symbol: guard the pointer so a null from a caller returns an
+  // Exported C symbol: guard the pointers so a null from a caller returns an
   // error instead of segfaulting in strlen() below.
-  if (topic_name == nullptr) {
+  if (topic_name_from == nullptr || topic_name_to == nullptr) {
     errno = EINVAL;
     return -1;
   }
@@ -34,10 +36,8 @@ int add_agnocast_domain_bridge_rule(
   }
 
   ioctl_add_domain_bridge_args args = {};
-  // Same-name bridge: source and target names are identical here. The distinct-target
-  // (rename) path is wired through the two-name form in a later PR.
-  args.topic_name_from = {topic_name, strlen(topic_name)};
-  args.topic_name_to = {topic_name, strlen(topic_name)};
+  args.topic_name_from = {topic_name_from, strlen(topic_name_from)};
+  args.topic_name_to = {topic_name_to, strlen(topic_name_to)};
   args.from_domain = from_domain;
   args.to_domain = to_domain;
 

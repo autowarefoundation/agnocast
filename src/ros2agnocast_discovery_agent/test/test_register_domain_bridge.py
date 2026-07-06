@@ -12,10 +12,11 @@ class FakeAddRule:
         self.calls = []
         self._codes = codes or {}
 
-    def __call__(self, topic, from_domain, to_domain):
-        name = topic.decode('utf-8')
-        self.calls.append((name, from_domain, to_domain))
-        return self._codes.get(name, 0)
+    def __call__(self, from_topic, to_topic, from_domain, to_domain):
+        from_name = from_topic.decode('utf-8')
+        to_name = to_topic.decode('utf-8')
+        self.calls.append((from_name, to_name, from_domain, to_domain))
+        return self._codes.get(from_name, 0)
 
 
 def _write_config(tmp_path, text):
@@ -35,7 +36,17 @@ def test_registers_every_rule(tmp_path, monkeypatch):
     monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
     cfg = _write_config(tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
     assert register_domain_bridge.main(['--config', cfg]) == 0
-    assert fake.calls == [('chatter', 1, 2)]
+    assert fake.calls == [('chatter', 'chatter', 1, 2)]
+
+
+def test_registers_remapped_rule_with_both_names(tmp_path, monkeypatch):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
+    cfg = _write_config(
+        tmp_path,
+        'from_domain: 1\nto_domain: 2\ntopics:\n  /in_sub/chatter:\n    remap: /chatter\n')
+    assert register_domain_bridge.main(['--config', cfg]) == 0
+    assert fake.calls == [('/in_sub/chatter', '/chatter', 1, 2)]
 
 
 def test_returns_nonzero_when_a_rule_is_rejected(tmp_path, monkeypatch):
@@ -69,4 +80,4 @@ def test_config_path_falls_back_to_env(tmp_path, monkeypatch):
     cfg = _write_config(tmp_path, 'from_domain: 3\nto_domain: 4\ntopics:\n  image:\n')
     monkeypatch.setenv(CONFIG_ENV, cfg)
     assert register_domain_bridge.main([]) == 0
-    assert fake.calls == [('image', 3, 4)]
+    assert fake.calls == [('image', 'image', 3, 4)]
