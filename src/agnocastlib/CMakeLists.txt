@@ -157,7 +157,8 @@ if(BUILD_TESTING)
     test/unit/test_type_registry_writer.cpp
     test/unit/test_agnocast_generic_callback.cpp
     test/unit/test_agnocast_generic_publisher.cpp
-    test/unit/test_daemon_bridge_mq.cpp)
+    test/unit/test_daemon_bridge_uds.cpp
+    test/unit/test_agnocast_bridge_uds.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)

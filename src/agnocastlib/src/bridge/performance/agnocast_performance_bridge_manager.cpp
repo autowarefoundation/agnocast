@@ -3,15 +3,16 @@
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
-#include <mqueue.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 
 namespace agnocast
 {
@@ -55,7 +56,8 @@ void PerformanceBridgeManager::run()
 
   start_ros_execution();
 
-  event_loop_.set_mq_handler([this](int fd) { this->on_mq_request(fd); });
+  event_loop_.set_message_handler(
+    [this](const void * data, std::size_t size) { this->on_bridge_message(data, size); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
   event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
 
@@ -98,33 +100,25 @@ void PerformanceBridgeManager::start_ros_execution()
   });
 }
 
-void PerformanceBridgeManager::on_mq_request(int fd)
+void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t size)
 {
-  BridgeMsg msg{};
-
-  ssize_t bytes_read = mq_receive(fd, reinterpret_cast<char *>(&msg), sizeof(msg), nullptr);
-  if (bytes_read < 0) {
-    if (errno != EAGAIN) {
-      RCLCPP_WARN_STREAM(
-        logger_, "mq_receive failed for mq_name='" << event_loop_.get_mq_name() << "' (fd=" << fd
-                                                   << "): " << strerror(errno));
-    }
-    return;
-  }
-
-  if (static_cast<size_t>(bytes_read) < offsetof(BridgeMsg, payload)) {
+  if (size < offsetof(BridgeMsg, payload)) {
     RCLCPP_WARN(
       logger_,
-      "bridge msg too small to carry a discriminator: got %zd bytes, expected at least %zu",
-      bytes_read, offsetof(BridgeMsg, payload));
+      "bridge msg too small to carry a discriminator: got %zu bytes, expected at least %zu", size,
+      offsetof(BridgeMsg, payload));
     return;
   }
 
+  BridgeMsg msg{};
+  const size_t copy_size = std::min(size, sizeof(BridgeMsg));
+  std::memcpy(&msg, data, copy_size);
+
   const auto validate_variant_size = [&](size_t expected) -> bool {
-    if (static_cast<size_t>(bytes_read) < expected) {
+    if (size < expected) {
       RCLCPP_WARN(
-        logger_, "bridge msg (type=%u) truncated: got %zd bytes, expected at least %zu",
-        static_cast<uint32_t>(msg.type), bytes_read, expected);
+        logger_, "bridge msg (type=%u) truncated: got %zu bytes, expected at least %zu",
+        static_cast<uint32_t>(msg.type), size, expected);
       return false;
     }
     return true;

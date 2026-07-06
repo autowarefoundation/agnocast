@@ -28,7 +28,11 @@ class _TopicInfoRet(ctypes.Structure):
 
 
 def _load_lib() -> Optional[ctypes.CDLL]:
-    """Return the configured ioctl wrapper, or None on absent kmod."""
+    """Return the ioctl wrapper CDLL, or None if its shared library is missing.
+
+    This does not depend on the kmod: when the library loads but the kmod is
+    absent, the ioctls still succeed and simply return empty results.
+    """
     try:
         lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
     except OSError:

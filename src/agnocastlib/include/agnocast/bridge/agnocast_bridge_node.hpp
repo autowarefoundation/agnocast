@@ -1,15 +1,15 @@
 #pragma once
 
 #include "agnocast/agnocast_client.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
+#include "agnocast/bridge/agnocast_bridge_uds.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -78,47 +78,6 @@ struct RosToAgnocastServiceRegistrationPolicy
   }
 };
 
-inline void send_mq_message(
-  const std::string & mq_name, const BridgeMsg & msg, size_t send_size,
-  const rclcpp::Logger & logger)
-{
-  struct mq_attr attr = {};
-  attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
-  attr.mq_msgsize = BRIDGE_MQ_MESSAGE_SIZE;
-
-  mqd_t mq =
-    mq_open(mq_name.c_str(), O_CREAT | O_WRONLY | O_NONBLOCK | O_CLOEXEC, BRIDGE_MQ_PERMS, &attr);
-
-  if (mq == (mqd_t)-1) {
-    RCLCPP_ERROR(
-      logger, "mq_open failed for name '%s': %s (errno: %d)", mq_name.c_str(), strerror(errno),
-      errno);
-    return;
-  }
-
-  constexpr int BRIDGE_MQ_SEND_MAX_RETRIES = 100;
-  constexpr useconds_t BRIDGE_MQ_SEND_RETRY_INTERVAL_US = 100000;  // 100ms
-
-  int send_result = -1;
-  int last_errno = 0;
-  for (int retry = 0; retry <= BRIDGE_MQ_SEND_MAX_RETRIES; ++retry) {
-    send_result = mq_send(mq, reinterpret_cast<const char *>(&msg), send_size, 0);
-    if (send_result == 0) break;
-    last_errno = errno;
-    if (last_errno != EAGAIN) break;
-    if (retry < BRIDGE_MQ_SEND_MAX_RETRIES) {
-      usleep(BRIDGE_MQ_SEND_RETRY_INTERVAL_US);
-    }
-  }
-  if (send_result < 0) {
-    RCLCPP_ERROR(
-      logger, "mq_send failed for name '%s': %s (errno: %d)", mq_name.c_str(), strerror(last_errno),
-      last_errno);
-  }
-
-  mq_close(mq);
-}
-
 inline void send_performance_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction)
@@ -139,8 +98,8 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
     exit(EXIT_FAILURE);
   }
 
-  std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-  send_mq_message(mq_name, msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
+  const std::string uds_addr = create_uds_addr_for_bridge();
+  send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
 }
 
 template <typename ServiceT>
@@ -166,8 +125,8 @@ void send_performance_service_bridge_registration(
     exit(EXIT_FAILURE);
   }
 
-  std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-  send_mq_message(mq_name, msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger);
+  const std::string uds_addr = create_uds_addr_for_bridge();
+  send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger);
 }
 
 }  // namespace agnocast
