@@ -241,6 +241,85 @@ public:
 };
 
 /**
+ * @brief A type-erased Agnocast publisher.
+ *
+ * There are four differences between this and Publisher:
+ *
+ * 1. borrow_loaned_message() takes a size and returns an ipc_shared_ptr<void> that points to a
+ *    shared memory block of the requested size.
+ * 2. publish() takes a deleter as well as the message. Because the message is type-erased, the
+ *    publisher cannot know how to free it, so the caller must provide a deleter.
+ * 3. If a user decides not to publish a borrowed message, they must call cancel_message() with a
+ *    deleter to free the memory.
+ * 4. The constructor is just a thin wrapper around init_base(). As this class is intended for
+ *    internal use only, flexibility is prioritized.
+ */
+class TypeErasedPublisher : public PublisherBase
+{
+public:
+  using SharedPtr = std::shared_ptr<TypeErasedPublisher>;
+
+  TypeErasedPublisher(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+
+  TypeErasedPublisher(
+    agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+
+  ipc_shared_ptr<void> borrow_loaned_message(size_t size);
+
+  template <typename Deleter>
+  void cancel_message(ipc_shared_ptr<void> && message, Deleter && deleter)
+  {
+    if (!message || topic_name_ != message.get_topic_name()) {
+      RCLCPP_ERROR(logger, "Invalid message to cancel.");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    void * delete_ptr = message.get();
+
+    message.invalidate_all_references();
+
+    decrement_borrowed_publisher_num();
+
+    deleter(delete_ptr);
+
+    message.reset();
+  }
+
+  template <typename Deleter>
+  void publish(ipc_shared_ptr<void> && message, Deleter && deleter)
+  {
+    if (!message || topic_name_ != message.get_topic_name()) {
+      RCLCPP_ERROR(logger, "Invalid message to publish.");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(message.get());
+
+    message.invalidate_all_references();
+
+    decrement_borrowed_publisher_num();
+
+    union ioctl_publish_msg_args publish_msg_args;
+    {
+      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
+      publish_msg_args = publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
+    }
+
+    for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
+      void * release_ptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);
+      deleter(release_ptr);
+    }
+
+    message.reset();
+  }
+};
+
+/**
  * @brief Mirrors `rclcpp::GenericPublisher` semantics: the topic type is supplied as a
  * runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
  * template argument. The typesupport library is loaded eagerly in the
@@ -250,7 +329,7 @@ public:
  * and are deserialized into Agnocast shared memory within the `publish()` call.
  */
 AGNOCAST_PUBLIC
-class GenericPublisher : public PublisherBase
+class GenericPublisher : public TypeErasedPublisher
 {
   // Keeps the dynamically loaded typesupport and introspection shared libraries
   // (.so) alongside their handles for the lifetime of the publisher.
@@ -259,10 +338,7 @@ class GenericPublisher : public PublisherBase
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
   const rosidl_typesupport_introspection_cpp::MessageMembers * members_{nullptr};
 
-  template <typename NodeT>
-  rclcpp::QoS constructor_impl(
-    NodeT * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role);
+  void load_type_support(const std::string & topic_type);
 
 public:
   using SharedPtr = std::shared_ptr<GenericPublisher>;

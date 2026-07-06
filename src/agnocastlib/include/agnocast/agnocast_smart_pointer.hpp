@@ -44,6 +44,8 @@ constexpr int64_t ENTRY_ID_NOT_ASSIGNED = -1;
 template <typename MessageT>
 class Publisher;
 
+class TypeErasedPublisher;
+
 namespace detail
 {
 
@@ -101,9 +103,11 @@ AGNOCAST_PUBLIC
 template <typename T>
 class ipc_shared_ptr
 {
-  // Allow Publisher to call invalidate_all_references()
+  // Allow Publisher and TypeErasedPublisher to call invalidate_all_references()
   template <typename MessageT>
   friend class Publisher;
+
+  friend class TypeErasedPublisher;
 
   // Allow converting constructors to access private members of ipc_shared_ptr<U>
   template <typename U>
@@ -299,7 +303,8 @@ public:
   /// by publish().
   /// @return Reference to the managed message.
   AGNOCAST_PUBLIC
-  T & operator*() const noexcept
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U & operator*() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
       std::fprintf(
@@ -316,7 +321,8 @@ public:
   /// invalidated by publish().
   /// @return Pointer to the managed message.
   AGNOCAST_PUBLIC
-  T * operator->() const noexcept
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U * operator->() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
       std::fprintf(
@@ -361,12 +367,23 @@ public:
         // Publisher side, last reference, not published: delete the memory.
         // This handles the case where borrow_loaned_message() was called but publish() was not.
         decrement_borrowed_publisher_num();
-        delete ptr_;
+        if constexpr (!std::is_void_v<T>) {
+          delete ptr_;
+        } else {
+          std::fprintf(
+            stderr,
+            "[agnocast] FATAL: Type-erased message was dropped before being published.\n"
+            "This is not allowed because there is no well-defined way to free a type-erased "
+            "message.\n");
+          std::terminate();
+        }
       }
       delete control_;
     }
 
     ptr_ = nullptr;
+    // Suppress false positive from clang-tidy: atomic reference counting ensures no leak.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     control_ = nullptr;
   }
 };

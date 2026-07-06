@@ -56,6 +56,8 @@ BridgeMode get_bridge_mode()
 {
   return BridgeMode::Off;  // Skip MQ sending in tests
 }
+
+PublisherBase::~PublisherBase() = default;
 }  // namespace agnocast
 
 // =========================================
@@ -209,6 +211,52 @@ TEST_F(AgnocastPublisherTest, test_multiple_borrows_mixed_publish_and_drop)
 }
 
 // =========================================
+// TypeErasedPublisher tests
+// =========================================
+
+class AgnocastTypeErasedPublisherTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    rclcpp::init(0, nullptr);
+    node = std::make_shared<rclcpp::Node>("dummy_node");
+    dummy_publisher = std::make_shared<agnocast::TypeErasedPublisher>(
+      node.get(), "/dummy", "/std_msgs/msg/Int32", rclcpp::QoS{10}, agnocast::PublisherOptions{},
+      agnocast::PublisherRole::Default);
+
+    publish_core_mock_called_count = 0;
+    mock_borrowed_publisher_num = 0;
+  }
+
+  void TearDown() override { rclcpp::shutdown(); }
+
+  std::shared_ptr<rclcpp::Node> node;
+  std::shared_ptr<agnocast::TypeErasedPublisher> dummy_publisher;
+};
+
+TEST_F(AgnocastTypeErasedPublisherTest, test_cancel)
+{
+  // Arrange
+  agnocast::ipc_shared_ptr<void> message = dummy_publisher->borrow_loaned_message(4);
+  void * message_ptr = message.get();
+  void * delete_ptr = nullptr;
+  auto deleter = [&delete_ptr](void * p) {
+    delete_ptr = p;
+    ::operator delete(p);
+  };
+
+  // Act
+  dummy_publisher->cancel_message(std::move(message), deleter);
+
+  // Assert
+  EXPECT_EQ(publish_core_mock_called_count, 0);
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+  EXPECT_NE(message_ptr, nullptr);
+  EXPECT_EQ(delete_ptr, message_ptr);
+}
+
+// =========================================
 // ipc_shared_ptr tests
 // =========================================
 
@@ -253,6 +301,18 @@ TEST_F(AgnocastSmartPointerTest, reset_nullptr)
 
   // Assert
   EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+}
+
+void drop_unpublished_void_message(const std::string & tn, topic_local_id_t pubsub_id)
+{
+  void * ptr = ::operator new(4);
+  agnocast::ipc_shared_ptr<void> sut{ptr, tn, pubsub_id, ENTRY_ID_NOT_ASSIGNED};
+  return;
+}
+
+TEST_F(AgnocastSmartPointerTest, reset_void)
+{
+  EXPECT_DEATH(drop_unpublished_void_message(dummy_tn, dummy_pubsub_id), "");
 }
 
 TEST_F(AgnocastSmartPointerTest, copy_constructor_normal)
