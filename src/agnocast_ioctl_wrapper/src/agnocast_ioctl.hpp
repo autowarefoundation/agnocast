@@ -82,7 +82,9 @@ struct ioctl_get_version_args
 // Mirrors agnocast_kmod/agnocast.h so _IOW encodes the same size.
 struct ioctl_add_domain_bridge_args
 {
-  struct name_info topic_name;
+  // topic_name_from / topic_name_to may differ (rename); equal for a plain bridge.
+  struct name_info topic_name_from;
+  struct name_info topic_name_to;
   uint32_t from_domain;
   uint32_t to_domain;
 };
