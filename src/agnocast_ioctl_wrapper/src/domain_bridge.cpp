@@ -34,7 +34,10 @@ int add_agnocast_domain_bridge_rule(
   }
 
   ioctl_add_domain_bridge_args args = {};
-  args.topic_name = {topic_name, strlen(topic_name)};
+  // Same-name bridge: source and target names are identical here. The distinct-target
+  // (rename) path is wired through the two-name form in a later PR.
+  args.topic_name_from = {topic_name, strlen(topic_name)};
+  args.topic_name_to = {topic_name, strlen(topic_name)};
   args.from_domain = from_domain;
   args.to_domain = to_domain;
 

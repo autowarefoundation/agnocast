@@ -62,7 +62,8 @@ static void remove_all_domain_rules(void)
   hash_for_each_safe(domain_rule_htable, bkt, tmp, rule, node)
   {
     hash_del(&rule->node);
-    kfree(rule->topic_name);
+    kfree(rule->topic_name_a);
+    kfree(rule->topic_name_b);
     kfree(rule);
   }
 }

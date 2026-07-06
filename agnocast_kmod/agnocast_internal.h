@@ -187,7 +187,11 @@ extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 // on adding one.
 struct domain_bridge_rule
 {
-  char * topic_name;
+  // Per-domain topic names. Equal when the rule does not rename; a rename pairs
+  // topic_name_a@domain_a with topic_name_b@domain_b. Delivery stays zero-copy
+  // either way -- only the two wrappers' keys differ.
+  char * topic_name_a;
+  char * topic_name_b;
   const struct ipc_namespace * ipc_ns;
   uint32_t domain_a;  // canonical ordering: domain_a < domain_b
   uint32_t domain_b;
