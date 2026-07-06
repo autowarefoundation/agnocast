@@ -63,7 +63,7 @@ inline int create_bridge_uds_listener(const std::string & addr)
 }
 
 // Send `data`/`size` as a single datagram to `addr`.
-// Retries on ECONNREFUSED/ENOENT/EAGAIN/EWOULDBLOCK/ENOBUFS up to
+// Retries on ECONNREFUSED/EAGAIN/EWOULDBLOCK/ENOBUFS up to
 // BRIDGE_UDS_SEND_MAX_RETRIES * BRIDGE_UDS_SEND_RETRY_INTERVAL_US.
 inline bool send_bridge_uds_message(
   const std::string & addr, const void * data, size_t size, const rclcpp::Logger & logger)
@@ -93,8 +93,8 @@ inline bool send_bridge_uds_message(
     if (send_result >= 0) break;
     last_errno = errno;
     if (
-      last_errno != ECONNREFUSED && last_errno != ENOENT && last_errno != EAGAIN &&
-      last_errno != EWOULDBLOCK && last_errno != ENOBUFS) {
+      last_errno != ECONNREFUSED && last_errno != EAGAIN && last_errno != EWOULDBLOCK &&
+      last_errno != ENOBUFS) {
       break;
     }
     if (retry < BRIDGE_UDS_SEND_MAX_RETRIES) {
