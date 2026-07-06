@@ -2,7 +2,6 @@
 
 #include "agnocast/agnocast_callback_info.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
@@ -13,12 +12,9 @@
 #include <mqueue.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace agnocast
 {
@@ -538,12 +534,10 @@ public:
   ~TypeErasedSubscription();
 };
 
-// TOOD(bdm-k): Incorporate TypeErasedSubscription into GenericSubscription to increase code reuse.
-
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
 /// as a runtime string (e.g. "std_msgs/msg/String") rather than a compile-time
-/// template argument. The typesupport library is loaded eagerly in the
-/// constructor and held for the subscription's lifetime.
+/// template argument. The typesupport library is loaded eagerly and held by the
+/// subscription callback.
 ///
 /// Messages are delivered to the callback as serialized data, outside of Agnocast shared memory.
 ///
@@ -552,20 +546,60 @@ public:
 ///   - `void(std::unique_ptr<rclcpp::SerializedMessage>)` (and `const` / `const`-T variants)
 ///   - `void(rclcpp::SerializedMessage &)` (and `const` variants)
 AGNOCAST_PUBLIC
-class GenericSubscription : public SubscriptionBase
+class GenericSubscription : public TypeErasedSubscription
 {
-  std::pair<mqd_t, std::string> mq_subscription_;
-  uint32_t callback_info_id_;
-  /// Keeps the dynamically loaded typesupport .so and its handle together for our lifetime.
-  TypeSupportBundle type_support_;
+  struct TypeSupportBundle
+  {
+    std::shared_ptr<rcpputils::SharedLibrary> library;
+    const rosidl_message_type_support_t * handle{nullptr};
+  };
 
   static TypeSupportBundle load_typesupport_impl(const std::string & topic_type);
 
-  template <typename NodeT>
-  rclcpp::QoS constructor_impl(
-    NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos,
-    TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
-    const agnocast::SubscriptionOptions & options, SubscriptionRole role);
+  static bool serialize_message(
+    const void * raw, const rosidl_message_type_support_t * type_support,
+    rclcpp::SerializedMessage & out);
+
+  template <typename Func>
+  static auto get_subscription_callback(Func && callback, const std::string & topic_type)
+  {
+    using F = std::decay_t<Func>;
+    static_assert(
+      std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>> ||
+        std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>> ||
+        std::is_invocable_v<F, rclcpp::SerializedMessage &>,
+      "This callback type cannot be handled as a GenericCallback. "
+      "Callback must be invocable with one of the following arguments "
+      "(or any types implicitly convertible from them, e.g., const variants): "
+      "std::unique_ptr<rclcpp::SerializedMessage>, "
+      "std::shared_ptr<rclcpp::SerializedMessage>, or "
+      "rclcpp::SerializedMessage &.");
+
+    TypeSupportBundle ts_bundle = load_typesupport_impl(topic_type);
+
+    return [callback = std::forward<Func>(callback),
+            ts_bundle = std::move(ts_bundle)](ipc_shared_ptr<void> && message) {
+      if constexpr (std::is_invocable_v<F, std::shared_ptr<rclcpp::SerializedMessage>>) {
+        auto serialized = std::make_shared<rclcpp::SerializedMessage>();
+        if (!serialize_message(message.get(), ts_bundle.handle, *serialized)) {
+          return;
+        }
+        callback(std::move(serialized));
+      } else if constexpr (std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>>) {
+        auto serialized = std::make_unique<rclcpp::SerializedMessage>();
+        if (!serialize_message(message.get(), ts_bundle.handle, *serialized)) {
+          return;
+        }
+        callback(std::move(serialized));
+      } else {
+        rclcpp::SerializedMessage serialized;
+        if (!serialize_message(message.get(), ts_bundle.handle, serialized)) {
+          return;
+        }
+        callback(serialized);
+      }
+    };
+  }
 
 public:
   using SharedPtr = std::shared_ptr<GenericSubscription>;
@@ -576,29 +610,10 @@ public:
     const rclcpp::QoS & qos, Func && callback,
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
     SubscriptionRole role = SubscriptionRole::Default)
-  : SubscriptionBase(node, topic_name)
+  : TypeErasedSubscription(
+      node, topic_name, topic_type, qos,
+      get_subscription_callback(std::forward<Func>(callback), topic_type), options, role)
   {
-    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
-
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
-
-    type_support_ = load_typesupport_impl(topic_type);
-    TypeErasedCallback erased =
-      get_erased_generic_callback(std::forward<Func>(callback), type_support_);
-
-    const rclcpp::QoS actual_qos =
-      constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
-
-    {
-      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
-      TRACEPOINT(
-        agnocast_subscription_init, static_cast<const void *>(this),
-        static_cast<const void *>(
-          node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-        callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol,
-        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
-    }
   }
 
   template <typename Func>
@@ -607,34 +622,11 @@ public:
     const rclcpp::QoS & qos, Func && callback,
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions(),
     SubscriptionRole role = SubscriptionRole::Default)
-  : SubscriptionBase(node, topic_name)
+  : TypeErasedSubscription(
+      node, topic_name, topic_type, qos,
+      get_subscription_callback(std::forward<Func>(callback), topic_type), options, role)
   {
-    rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
-
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
-
-    type_support_ = load_typesupport_impl(topic_type);
-    TypeErasedCallback erased =
-      get_erased_generic_callback(std::forward<Func>(callback), type_support_);
-
-    const rclcpp::QoS actual_qos =
-      constructor_impl(node, topic_type, qos, std::move(erased), callback_group, options, role);
-
-    {
-      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
-      TRACEPOINT(
-        agnocast_subscription_init, static_cast<const void *>(this),
-        static_cast<const void *>(get_node_base_address(node)), callback_addr,
-        static_cast<const void *>(callback_group.get()), callback_symbol, topic_name_.c_str(),
-        actual_qos.depth(), pid_callback_info_id);
-    }
   }
-
-  // Destructor defined in .cpp so that ~shared_ptr<rcpputils::SharedLibrary>
-  // (held inside TypeSupportBundle) sees the complete SharedLibrary type
-  // (forward-declared in this header via agnocast_callback_info.hpp).
-  ~GenericSubscription();
 };
 
 }  // namespace agnocast
