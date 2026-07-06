@@ -8,6 +8,9 @@
 #include "agnocast/agnocast_utils.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/serialized_message.hpp"
+#include "rcpputils/shared_library.hpp"
+#include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
 #include <mqueue.h>
 #include <unistd.h>
@@ -494,18 +497,21 @@ class GenericSubscription : public Subscription<void>
         if (!serialize_message(message.get(), ts_bundle.handle, *serialized)) {
           return;
         }
+        message.reset();
         callback(std::move(serialized));
       } else if constexpr (std::is_invocable_v<F, std::unique_ptr<rclcpp::SerializedMessage>>) {
         auto serialized = std::make_unique<rclcpp::SerializedMessage>();
         if (!serialize_message(message.get(), ts_bundle.handle, *serialized)) {
           return;
         }
+        message.reset();
         callback(std::move(serialized));
       } else {
         rclcpp::SerializedMessage serialized;
         if (!serialize_message(message.get(), ts_bundle.handle, serialized)) {
           return;
         }
+        message.reset();
         callback(serialized);
       }
     };

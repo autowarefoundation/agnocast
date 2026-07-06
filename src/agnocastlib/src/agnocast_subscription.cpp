@@ -5,6 +5,9 @@
 #include "rclcpp/version.h"
 #include "rcpputils/shared_library.hpp"
 
+#include <rmw/rmw.h>
+#include <rmw/serialized_message.h>
+
 namespace agnocast
 {
 
