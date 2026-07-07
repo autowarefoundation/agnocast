@@ -278,7 +278,7 @@ int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
   }
 
   state_ = ServiceBridgeState::A2R;
-  entity_ = entity;
+  entity_ = std::move(entity);
   shadow_node_ = nullptr;
   return 0;
 }
