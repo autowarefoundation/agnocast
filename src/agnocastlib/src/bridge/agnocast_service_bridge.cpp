@@ -35,6 +35,14 @@ const char * ServiceBridgeItem::get_error_string()
 std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
   const std::pair<std::string, std::string> & identity)
 {
+  auto checked_rcl_node_options_fini = [](rcl_node_options_t * options) {
+    if (rcl_node_options_fini(options) != RCL_RET_OK) {
+      RCUTILS_LOG_ERROR_NAMED(
+        "agnocast_bridge", "Failed to fini node options: %s", rcl_get_error_string().str);
+      rcl_reset_error();
+    }
+  };
+
   auto it = g_shadow_nodes.find(identity);
   if (it != g_shadow_nodes.end()) {
     auto shadow_node = it->second.lock();
@@ -51,7 +59,7 @@ std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
   if (rcl_parse_arguments(0, nullptr, options.allocator, &(options.arguments)) != RCL_RET_OK) {
     rcl_reset_error();
     set_error_string("Failed to parse arguments while creating shadow node");
-    rcl_node_options_fini(&options);
+    checked_rcl_node_options_fini(&options);
     return nullptr;
   }
 
@@ -63,7 +71,7 @@ std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
         rcl_reset_error();
       }
     }
-    delete node;
+    delete node;  // NOLINT(cppcoreguidelines-owning-memory)
   };
   auto node = std::shared_ptr<rcl_node_t>(new rcl_node_t{}, del);
 
@@ -72,11 +80,11 @@ std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
     RCL_RET_OK) {
     rcl_reset_error();
     set_error_string("Failed to initialize shadow node");
-    rcl_node_options_fini(&options);
+    checked_rcl_node_options_fini(&options);
     return nullptr;
   }
 
-  rcl_node_options_fini(&options);
+  checked_rcl_node_options_fini(&options);
   g_shadow_nodes[identity] = node;
   return node;
 }
@@ -170,11 +178,8 @@ bool ServiceBridgeItem::agno_service_exists()
 {
   // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
   // directly without using get_service_qos() as a probe.
-  rclcpp::QoS qos{10};
-  if (get_agno_service_qos(qos) != 0) {
-    return false;
-  }
-  return true;
+  rclcpp::QoS qos = rclcpp::ServicesQoS();
+  return get_agno_service_qos(qos) == 0;
 }
 
 // Returns false if there is no target Agnocast client or if an error occurs while checking it (the
@@ -209,7 +214,7 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
       service_name_.c_str());
   }
 
-  rclcpp::QoS service_qos{10};
+  rclcpp::QoS service_qos = rclcpp::ServicesQoS();
   if (get_agno_service_qos(service_qos) != 0) {
     return -1;
   }
