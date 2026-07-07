@@ -126,20 +126,20 @@ int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
 
 // Returns false if the target ROS 2 service does not exist or if an exception occurs while checking
 // it (the reason will be set in the error string).
-bool ServiceBridgeItem::ros2_service_exists(const BridgeManagerContext & ctx)
+bool ServiceBridgeItem::ros2_service_exists(const ServiceBridgeDeps & deps)
 {
   try {
     bool exists = false;
 
 #if RCLCPP_VERSION_MAJOR >= 28
-    exists = ctx.container_node->count_services(this->service_name_) > 0;
+    exists = deps.container_node->count_services(this->service_name_) > 0;
 #else
     // NOTE(bdm-k): A potential performance enhancement would be to use the ROS 2 client in the
     // bridge entity whenever it is available.
-    const auto node_names = ctx.container_node->get_node_names();
+    const auto node_names = deps.container_node->get_node_names();
     for (const auto & full_name : node_names) {
       const auto [ns, name] = split_full_node_name(full_name);
-      const auto srvs = ctx.container_node->get_service_names_and_types_by_node(name, ns);
+      const auto srvs = deps.container_node->get_service_names_and_types_by_node(name, ns);
 
       if (srvs.find(service_name_) != srvs.end()) {
         exists = true;
@@ -196,12 +196,12 @@ bool ServiceBridgeItem::agno_client_exists()
 // Creates and starts the R2A bridge. Relevant configuration members must be set beforehand.
 // Returns 0 on success, -1 on error (the error string will be set). On error, it is guaranteed
 // that the stateful members are not modified.
-int ServiceBridgeItem::start_r2a_bridge(const BridgeManagerContext & ctx)
+int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 {
   // Warn if the target service already exists in ROS 2.
-  if (ros2_service_exists(ctx)) {
+  if (ros2_service_exists(deps)) {
     RCLCPP_WARN(
-      ctx.logger,
+      deps.logger,
       "Found a ROS 2 service with the same name while creating the R2A service bridge: '%s'",
       service_name_.c_str());
   }
@@ -220,10 +220,10 @@ int ServiceBridgeItem::start_r2a_bridge(const BridgeManagerContext & ctx)
   }
 
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && ctx.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.performance_loader != nullptr) {
     try {
-      entity = ctx.performance_loader->create_r2a_service_bridge(
-        ctx.container_node, service_name_, *service_type_, service_qos);
+      entity = deps.performance_loader->create_r2a_service_bridge(
+        deps.container_node, service_name_, *service_type_, service_qos);
     } catch (const std::exception & e) {
       set_error_string(e.what());
       return -1;
@@ -250,13 +250,13 @@ int ServiceBridgeItem::start_r2a_bridge(const BridgeManagerContext & ctx)
 // Creates and starts the A2R bridge. Relevant configuration members must be set beforehand.
 // Returns 0 on success, -1 on error (the error string will be set). On error, it is guaranteed
 // that the stateful members are not modified.
-int ServiceBridgeItem::start_a2r_bridge(const BridgeManagerContext & ctx)
+int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 {
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && ctx.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.performance_loader != nullptr) {
     try {
-      entity = ctx.performance_loader->create_a2r_service_bridge(
-        ctx.container_node, service_name_, *service_type_, rclcpp::ServicesQoS());
+      entity = deps.performance_loader->create_a2r_service_bridge(
+        deps.container_node, service_name_, *service_type_, rclcpp::ServicesQoS());
     } catch (const std::exception & e) {
       set_error_string(e.what());
       return -1;
@@ -301,21 +301,21 @@ void ServiceBridgeItem::update_configuration(const BridgeMsgServicePayload & pay
   }
 }
 
-void ServiceBridgeItem::check_and_update_r2a(const BridgeManagerContext & ctx)
+void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 {
   if (agno_service_exists()) {
     return;
   }
 
   RCLCPP_WARN(
-    ctx.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
+    deps.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
   if (entity_.srv_cb_group) {
-    ctx.executor->stop_callback_group(entity_.srv_cb_group);
+    deps.executor->stop_callback_group(entity_.srv_cb_group);
   }
   if (entity_.client_cb_group) {
-    ctx.executor->stop_callback_group(entity_.client_cb_group);
+    deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 
   state_ = ServiceBridgeState::PENDING;
@@ -327,21 +327,21 @@ void ServiceBridgeItem::check_and_update_r2a(const BridgeManagerContext & ctx)
   }
 }
 
-void ServiceBridgeItem::check_and_update_a2r(const BridgeManagerContext & ctx)
+void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 {
-  if (ros2_service_exists(ctx)) {
+  if (ros2_service_exists(deps)) {
     return;
   }
 
   RCLCPP_WARN(
-    ctx.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
+    deps.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
   if (entity_.srv_cb_group) {
-    ctx.executor->stop_callback_group(entity_.srv_cb_group);
+    deps.executor->stop_callback_group(entity_.srv_cb_group);
   }
   if (entity_.client_cb_group) {
-    ctx.executor->stop_callback_group(entity_.client_cb_group);
+    deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 
   state_ = ServiceBridgeState::PENDING;
@@ -349,21 +349,21 @@ void ServiceBridgeItem::check_and_update_a2r(const BridgeManagerContext & ctx)
   shadow_node_ = nullptr;
 }
 
-void ServiceBridgeItem::check_and_update_pending(const BridgeManagerContext & ctx)
+void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
   if (may_start_r2a_bridge_ && agno_service_exists()) {
-    if (start_r2a_bridge(ctx) != 0) {
+    if (start_r2a_bridge(deps) != 0) {
       RCLCPP_WARN(
-        ctx.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
+        deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
         get_error_string());
     }
     return;
   }
 
-  if (may_start_a2r_bridge_ && ros2_service_exists(ctx)) {
-    if (start_a2r_bridge(ctx) != 0) {
+  if (may_start_a2r_bridge_ && ros2_service_exists(deps)) {
+    if (start_a2r_bridge(deps) != 0) {
       RCLCPP_WARN(
-        ctx.logger, "Failed to start A2R service bridge for '%s': %s", service_name_.c_str(),
+        deps.logger, "Failed to start A2R service bridge for '%s': %s", service_name_.c_str(),
         get_error_string());
     }
     return;
@@ -371,24 +371,24 @@ void ServiceBridgeItem::check_and_update_pending(const BridgeManagerContext & ct
 
   if (!agno_client_exists()) {
     RCLCPP_WARN(
-      ctx.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
+      deps.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
       get_error_string());
 
     state_ = ServiceBridgeState::NONE;
   }
 }
 
-void ServiceBridgeItem::check_and_update(const BridgeManagerContext & ctx)
+void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
 {
   switch (state_) {
     case ServiceBridgeState::PENDING:
-      check_and_update_pending(ctx);
+      check_and_update_pending(deps);
       break;
     case ServiceBridgeState::R2A:
-      check_and_update_r2a(ctx);
+      check_and_update_r2a(deps);
       break;
     case ServiceBridgeState::A2R:
-      check_and_update_a2r(ctx);
+      check_and_update_a2r(deps);
       break;
     default:
       break;
@@ -396,14 +396,14 @@ void ServiceBridgeItem::check_and_update(const BridgeManagerContext & ctx)
 }
 
 void ServiceBridgeItem::handle_request_with_direction(
-  BridgeDirection direction, const BridgeManagerContext & ctx)
+  BridgeDirection direction, const ServiceBridgeDeps & deps)
 {
   switch (direction) {
     case BridgeDirection::ROS2_TO_AGNOCAST:
       if (state_ == ServiceBridgeState::NONE || state_ == ServiceBridgeState::PENDING) {
-        if (start_r2a_bridge(ctx) != 0) {
+        if (start_r2a_bridge(deps) != 0) {
           RCLCPP_WARN(
-            ctx.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
+            deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
             get_error_string());
         }
       }
@@ -417,10 +417,10 @@ void ServiceBridgeItem::handle_request_with_direction(
 }
 
 void ServiceBridgeItem::handle_request(
-  const BridgeMsgServicePayload & payload, const BridgeManagerContext & ctx)
+  const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps)
 {
   update_configuration(payload);
-  handle_request_with_direction(payload.direction, ctx);
+  handle_request_with_direction(payload.direction, deps);
 }
 
 }  // namespace agnocast

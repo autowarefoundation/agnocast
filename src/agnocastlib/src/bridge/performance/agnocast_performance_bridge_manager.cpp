@@ -130,7 +130,7 @@ void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t 
         return;
       }
       const auto & payload = msg.payload.service;
-      BridgeManagerContext ctx{container_node_, executor_, logger_, loader_};
+      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
       std::string service_name = static_cast<const char *>(payload.service_name);
       ServiceBridgeItem sb_item;
 
@@ -140,7 +140,7 @@ void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t 
         active_service_bridges_.erase(it);
       }
 
-      sb_item.handle_request(payload, ctx);
+      sb_item.handle_request(payload, deps);
       if (sb_item.state() != ServiceBridgeState::NONE) {
         active_service_bridges_.emplace(service_name, std::move(sb_item));
       }
@@ -374,8 +374,8 @@ void PerformanceBridgeManager::check_and_update_service_bridges()
 {
   auto it = active_service_bridges_.begin();
   while (it != active_service_bridges_.end()) {
-    BridgeManagerContext ctx{container_node_, executor_, logger_, loader_};
-    it->second.check_and_update(ctx);
+    ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+    it->second.check_and_update(deps);
 
     if (it->second.state() != ServiceBridgeState::NONE) {
       ++it;

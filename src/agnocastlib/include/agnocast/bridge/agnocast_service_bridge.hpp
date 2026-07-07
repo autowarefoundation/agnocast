@@ -14,7 +14,7 @@
 namespace agnocast
 {
 
-struct BridgeManagerContext
+struct ServiceBridgeDeps
 {
   rclcpp::Node::SharedPtr container_node;
   std::shared_ptr<CallbackIsolatedAgnocastExecutor> executor;
@@ -49,28 +49,28 @@ class ServiceBridgeItem
 
   int get_agno_service_qos(rclcpp::QoS & qos);
 
-  bool ros2_service_exists(const BridgeManagerContext & ctx);
+  bool ros2_service_exists(const ServiceBridgeDeps & deps);
   bool agno_service_exists();
   bool agno_client_exists();
 
-  int start_r2a_bridge(const BridgeManagerContext & ctx);
-  int start_a2r_bridge(const BridgeManagerContext & ctx);
+  int start_r2a_bridge(const ServiceBridgeDeps & deps);
+  int start_a2r_bridge(const ServiceBridgeDeps & deps);
 
   void update_configuration(const BridgeMsgServicePayload & payload);
 
-  void check_and_update_r2a(const BridgeManagerContext & ctx);
-  void check_and_update_a2r(const BridgeManagerContext & ctx);
-  void check_and_update_pending(const BridgeManagerContext & ctx);
+  void check_and_update_r2a(const ServiceBridgeDeps & deps);
+  void check_and_update_a2r(const ServiceBridgeDeps & deps);
+  void check_and_update_pending(const ServiceBridgeDeps & deps);
 
-  void handle_request_with_direction(BridgeDirection direction, const BridgeManagerContext & ctx);
+  void handle_request_with_direction(BridgeDirection direction, const ServiceBridgeDeps & deps);
 
 public:
   ServiceBridgeState state() const { return state_; }
   const std::string & service_name() const { return service_name_; }
 
-  void check_and_update(const BridgeManagerContext & ctx);
+  void check_and_update(const ServiceBridgeDeps & deps);
 
-  void handle_request(const BridgeMsgServicePayload & payload, const BridgeManagerContext & ctx);
+  void handle_request(const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps);
 };
 
 }  // namespace agnocast
