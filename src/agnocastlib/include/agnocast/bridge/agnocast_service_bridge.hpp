@@ -26,6 +26,8 @@ enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem
 {
+  std::string error_string_;
+
   // Stateful members.
   ServiceBridgeState state_ = ServiceBridgeState::NONE;
   ServiceBridgeEntity entity_ = {nullptr, nullptr, nullptr};
@@ -38,18 +40,18 @@ class ServiceBridgeItem
   bool may_start_r2a_bridge_ = false;
   bool may_start_a2r_bridge_ = false;
 
-  static void set_error_string(const std::string & error_string);
-  static const char * get_error_string();
+  void set_error_string(const char * error_string);
+  const char * get_error_string();
 
-  static std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
+  std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
     const std::pair<std::string, std::string> & identity);
   static void erase_expired_shadow_node(const std::pair<std::string, std::string> & identity);
 
-  int get_agno_service_qos(rclcpp::QoS & qos) const;
+  int get_agno_service_qos(rclcpp::QoS & qos);
 
-  bool ros2_service_exists(const BridgeManagerContext & ctx) const;
-  bool agno_service_exists() const;
-  bool agno_client_exists() const;
+  bool ros2_service_exists(const BridgeManagerContext & ctx);
+  bool agno_service_exists();
+  bool agno_client_exists();
 
   int start_r2a_bridge(const BridgeManagerContext & ctx);
   int start_a2r_bridge(const BridgeManagerContext & ctx);
