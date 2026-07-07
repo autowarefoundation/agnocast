@@ -62,7 +62,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
   return factory(std::move(node), topic_name, qos);
 }
 
-PerformanceServiceBridgeResult PerformanceBridgeLoader::create_r2a_service_bridge(
+ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
   const rclcpp::QoS & qos)
 {
@@ -72,6 +72,19 @@ PerformanceServiceBridgeResult PerformanceBridgeLoader::create_r2a_service_bridg
   }
 
   auto factory = reinterpret_cast<R2AServiceBridgeFactory>(symbol);
+  return factory(std::move(node), service_name, qos);
+}
+
+ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
+  const rclcpp::QoS & qos)
+{
+  void * symbol = get_bridge_factory_symbol(service_type, "create_a2r_service_bridge", true);
+  if (symbol == nullptr) {
+    return {nullptr, nullptr, nullptr};
+  }
+
+  auto factory = reinterpret_cast<A2RServiceBridgeFactory>(symbol);
   return factory(std::move(node), service_name, qos);
 }
 

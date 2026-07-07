@@ -33,9 +33,9 @@ static constexpr size_t DEFAULT_QOS_DEPTH = 10;
 inline void send_performance_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction);
-template <typename ServiceT>
-void send_performance_service_bridge_registration(
-  const std::string & service_name, BridgeDirection direction,
+inline void send_performance_service_bridge_registration_by_type_name(
+  const std::string & service_type_name, const std::string & service_name,
+  BridgeDirection direction,
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
 
 inline void register_pubsub_bridge_by_type_name(
@@ -48,35 +48,6 @@ inline void register_pubsub_bridge_by_type_name(
       topic_name, id, message_type, direction);
   }
 }
-
-template <typename ServiceT>
-void register_service_bridge_core(
-  const std::string & service_name, BridgeDirection direction,
-  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
-{
-  auto bridge_mode = get_bridge_mode();
-  if (bridge_mode == BridgeMode::On) {
-    send_performance_service_bridge_registration<ServiceT>(
-      service_name, direction, shadow_node_identity);
-  }
-}
-
-// Policy for agnocast::Service.
-// Registers a bridge that forwards requests from ROS 2 to Agnocast (R2A).
-struct RosToAgnocastServiceRegistrationPolicy
-{
-  template <typename NodeT, typename ServiceT>
-  static void register_bridge(NodeT * node, const std::string & service_name)
-  {
-    std::optional<std::pair<std::string, std::string>> shadow_node_identity{std::nullopt};
-    if constexpr (std::is_same_v<std::remove_cv_t<NodeT>, agnocast::Node>) {
-      shadow_node_identity =
-        std::make_pair(std::string(node->get_namespace()), std::string(node->get_name()));
-    }
-    register_service_bridge_core<ServiceT>(
-      service_name, BridgeDirection::ROS2_TO_AGNOCAST, shadow_node_identity);
-  }
-};
 
 inline void send_performance_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
@@ -102,14 +73,12 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
   send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
 }
 
-template <typename ServiceT>
-void send_performance_service_bridge_registration(
-  const std::string & service_name, BridgeDirection direction,
+inline void send_performance_service_bridge_registration_by_type_name(
+  const std::string & service_type_name, const std::string & service_name,
+  BridgeDirection direction,
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
   static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_registrar");
-
-  const std::string service_type_name = rosidl_generator_traits::name<ServiceT>();
 
   auto [msg, reason] = BridgeRegistrationMsgBuilder()
                          .set_direction(direction)
