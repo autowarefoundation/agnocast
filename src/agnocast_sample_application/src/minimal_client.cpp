@@ -27,6 +27,7 @@ int main(int argc, char * argv[])
     if (!rclcpp::ok()) {
       RCLCPP_ERROR(node->get_logger(), "Interrupted while waiting for the service. Exiting.");
       spin_thread.join();
+      rclcpp::shutdown();
       return 0;
     }
     RCLCPP_INFO(node->get_logger(), "Service not available, waiting again...");
