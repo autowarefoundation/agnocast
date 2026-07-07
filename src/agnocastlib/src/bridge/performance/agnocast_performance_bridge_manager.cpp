@@ -372,9 +372,10 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
 
 void PerformanceBridgeManager::check_and_update_service_bridges()
 {
+  ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+
   auto it = active_service_bridges_.begin();
   while (it != active_service_bridges_.end()) {
-    ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
     it->second.check_and_update(deps);
 
     if (it->second.state() != ServiceBridgeState::NONE) {
