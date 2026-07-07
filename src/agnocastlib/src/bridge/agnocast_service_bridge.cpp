@@ -51,6 +51,7 @@ std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
   if (rcl_parse_arguments(0, nullptr, options.allocator, &(options.arguments)) != RCL_RET_OK) {
     rcl_reset_error();
     set_error_string("Failed to parse arguments while creating shadow node");
+    rcl_node_options_fini(&options);
     return nullptr;
   }
 
@@ -71,9 +72,11 @@ std::shared_ptr<rcl_node_t> ServiceBridgeItem::find_or_create_shadow_node(
     RCL_RET_OK) {
     rcl_reset_error();
     set_error_string("Failed to initialize shadow node");
+    rcl_node_options_fini(&options);
     return nullptr;
   }
 
+  rcl_node_options_fini(&options);
   g_shadow_nodes[identity] = node;
   return node;
 }
