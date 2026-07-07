@@ -278,6 +278,13 @@ struct ioctl_set_ros2_publisher_num_args
   uint32_t ros2_publisher_num;
 };
 
+struct ioctl_add_domain_bridge_args
+{
+  struct name_info topic_name;
+  uint32_t from_domain;
+  uint32_t to_domain;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -301,6 +308,7 @@ struct ioctl_set_ros2_publisher_num_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#define AGNOCAST_ADD_DOMAIN_BRIDGE_CMD _IOW(0xA6, 28, struct ioctl_add_domain_bridge_args)
 
 // ================================================
 // ros2cli ioctls
@@ -442,6 +450,10 @@ int agnocast_ioctl_add_bridge(
 int agnocast_ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name, uint32_t from_domain, uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns);
+
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 
 int agnocast_ioctl_get_topic_subscriber_info(
@@ -514,4 +526,11 @@ int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
+bool agnocast_get_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
+  uint32_t * domain_b, bool * a_to_b, bool * b_to_a);
+// Returns the shared topic_struct's wrapper refcount for the wrapper in domain_id,
+// or 0 if no such wrapper exists. Used to observe domain-bridge grouping.
+int agnocast_topic_wrapper_refcnt(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id);
 #endif

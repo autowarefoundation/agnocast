@@ -80,6 +80,9 @@ extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 struct publisher_info
 {
   topic_local_id_t id;
+  // The endpoint's ROS domain. Equals the owning wrapper's domain; carried per
+  // endpoint because grouped wrappers share one htable holding both domains.
+  uint32_t domain_id;
   pid_t pid;
   char * node_name;
   uint32_t qos_depth;
@@ -92,6 +95,8 @@ struct publisher_info
 struct subscriber_info
 {
   topic_local_id_t id;
+  // The endpoint's ROS domain (see publisher_info::domain_id).
+  uint32_t domain_id;
   pid_t pid;
   uint32_t qos_depth;
   bool qos_is_transient_local;
@@ -115,6 +120,8 @@ static inline long copy_name_from_user(char * dst, size_t dst_size, const struct
   return 0;
 }
 
+struct domain_bridge_rule;
+
 struct topic_struct
 {
   struct rb_root entries;
@@ -126,6 +133,13 @@ struct topic_struct
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
   // Per-topic rwsem: read for read-only ops, write for publish/receive/modify.
   struct rw_semaphore rwsem;
+  // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
+  // bridge rule groups two domains' wrappers onto one entry/id space. The struct
+  // is freed only when the last referencing wrapper is dropped.
+  uint32_t wrapper_refcnt;
+  // The domain bridge rule covering this topic, or NULL if none. Cached here so
+  // the publish/receive hot path can check delivery direction without a lookup.
+  const struct domain_bridge_rule * rule;
 };
 
 struct topic_wrapper
@@ -165,9 +179,30 @@ struct bridge_info
 
 extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
+// A domain bridge rule relays one topic between two ROS domains within one IPC
+// namespace. The pair is stored canonically (domain_a < domain_b) with the enabled
+// direction(s) in a_to_b / b_to_a. See agnocast_ioctl_add_domain_bridge for the rules
+// on adding one.
+struct domain_bridge_rule
+{
+  char * topic_name;
+  const struct ipc_namespace * ipc_ns;
+  uint32_t domain_a;  // canonical ordering: domain_a < domain_b
+  uint32_t domain_b;
+  bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
+  bool b_to_a;
+  struct hlist_node node;
+};
+
+extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 
 int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper);
+
+// True if the (possibly shared) topic_struct holds any endpoint in this wrapper's
+// own domain. Used to decide when to drop a single wrapper of a grouped pair.
+bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper);
 
 bool agnocast_is_referenced(struct entry_node * en);
 
@@ -176,6 +211,11 @@ struct process_info * agnocast_find_process_info(const pid_t pid);
 void agnocast_free_exit_subscription_list(struct process_info * proc_info);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
+
+// Unlink a wrapper and free it. The shared topic_struct (its rbtree and the
+// struct itself) is freed only when the last referencing wrapper is dropped, so
+// a grouped partner keeps working until it too is released.
+void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 

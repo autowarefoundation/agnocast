@@ -83,7 +83,7 @@ void validate_ld_preload();
 uint32_t get_ros_domain_id();
 std::string create_mq_name_for_agnocast_publish(
   const std::string & topic_name, const topic_local_id_t id);
-std::string create_mq_name_for_bridge(const pid_t pid);
+std::string create_uds_addr_for_bridge();
 std::string create_shm_name(const pid_t pid);
 // Return the inode number of the calling process's IPC namespace
 // (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the

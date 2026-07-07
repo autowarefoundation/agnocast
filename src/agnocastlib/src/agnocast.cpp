@@ -204,11 +204,6 @@ void poll_for_unlink()
         const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
         shm_unlink(shm_name.c_str());
 
-        // We don't need to call mq_unlink for non BridgeManager processes. However, we do it for
-        // all exited processes to avoid the complexity of checking the process type.
-        const std::string mq_name = create_mq_name_for_bridge(get_exit_process_args.ret_pid);
-        mq_unlink(mq_name.c_str());
-
         // Unlink subscription MQs that the exited process owned
         for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
           // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
@@ -221,11 +216,6 @@ void poll_for_unlink()
     } while (get_exit_process_args.ret_pid > 0);
 
     if (get_exit_process_args.ret_daemon_should_exit) {
-      auto bridge_mode = get_bridge_mode();
-      if (bridge_mode == BridgeMode::On) {
-        const std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-        mq_unlink(mq_name.c_str());
-      }
       break;
     }
   }

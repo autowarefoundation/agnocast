@@ -414,7 +414,8 @@ class DiscoveryAgent(Node):
         remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
         requests = bridge_decider.decide_bridges(local_state, remote_states)
         if requests:
-            bridge_decider.dispatch_requests(requests, logger=self.get_logger())
+            bridge_decider.dispatch_requests(
+                requests, self._ipc_ns_inode, logger=self.get_logger())
 
     def build_state(self) -> AgnocastDaemonState:
         msg = AgnocastDaemonState()

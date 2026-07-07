@@ -1,13 +1,12 @@
 #pragma once
 
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_uds.hpp"
 
 #include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
@@ -17,6 +16,8 @@
 #include <array>
 #include <cerrno>
 #include <csignal>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -30,12 +31,12 @@ namespace agnocast
 class IpcEventLoopBase
 {
 public:
-  using EventCallback = std::function<void(int)>;
+  using MessageCallback = std::function<void(const void * data, std::size_t size)>;
   using SignalCallback = std::function<void()>;
   using SocketCallback = std::function<std::string()>;
 
   IpcEventLoopBase(
-    const rclcpp::Logger & logger, const std::string & mq_name, long mq_msg_size,
+    const rclcpp::Logger & logger, const std::string & uds_addr, std::size_t max_msg_size,
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
 
   virtual ~IpcEventLoopBase();
@@ -45,11 +46,11 @@ public:
 
   bool spin_once(int timeout_ms);
 
-  void set_mq_handler(EventCallback cb);
+  void set_message_handler(MessageCallback cb);
   void set_signal_handler(SignalCallback cb);
   void set_socket_handler(SocketCallback cb);
 
-  const std::string & get_mq_name() const { return mq_name_; }
+  const std::string & get_uds_addr() const { return uds_addr_; }
 
 protected:
   rclcpp::Logger logger_;
@@ -61,36 +62,35 @@ private:
   int signal_fd_ = -1;
   int socket_fd_ = -1;
 
-  mqd_t mq_fd_ = (mqd_t)-1;
-  std::string mq_name_;
+  int listener_fd_ = -1;
+  std::string uds_addr_;
+  std::vector<uint8_t> recv_buf_;
 
-  long mq_msg_size_;
-
-  EventCallback mq_cb_;
+  MessageCallback message_cb_;
   SignalCallback signal_cb_;
   SocketCallback socket_cb_;
 
-  void setup_mq();
+  void setup_listener();
   void setup_signals(
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
   void setup_socket();
   void setup_epoll();
   void cleanup_resources();
 
-  mqd_t create_and_open_mq(const std::string & name) const;
   void add_fd_to_epoll(int fd, const std::string & label) const;
+  void drain_listener();
 
   static void ignore_signals_impl(const std::vector<int> & signals);
   static sigset_t block_signals_impl(const std::vector<int> & signals);
 };
 
 inline IpcEventLoopBase::IpcEventLoopBase(
-  const rclcpp::Logger & logger, const std::string & mq_name, long mq_msg_size,
+  const rclcpp::Logger & logger, const std::string & uds_addr, std::size_t max_msg_size,
   const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore)
-: logger_(logger), mq_name_(mq_name), mq_msg_size_(mq_msg_size)
+: logger_(logger), uds_addr_(uds_addr), recv_buf_(max_msg_size)
 {
   try {
-    setup_mq();
+    setup_listener();
     setup_signals(signals_to_block, signals_to_ignore);
     setup_socket();
     setup_epoll();
@@ -123,10 +123,8 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
   }
   for (int event_index = 0; event_index < event_count; ++event_index) {
     int fd = events[event_index].data.fd;
-    if (fd == mq_fd_) {
-      if (mq_cb_) {
-        mq_cb_(fd);
-      }
+    if (fd == listener_fd_) {
+      drain_listener();
     } else if (fd == signal_fd_) {
       struct signalfd_siginfo fdsi
       {
@@ -139,7 +137,7 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
       int client_fd = accept4(socket_fd_, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
       if (client_fd == -1) {
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-          RCLCPP_WARN(logger_, "accept4 on socket failed: %s", strerror(errno));
+          RCLCPP_WARN(logger_, "accept4 on debug socket failed: %s", strerror(errno));
         }
       } else {
         handle_socket(client_fd);
@@ -190,7 +188,7 @@ inline void IpcEventLoopBase::handle_socket(int client_fd)
       } else if (errno == EINTR) {
         // EINTR is harmless; retry without counting it as a failure
       } else {
-        RCLCPP_WARN(logger_, "send on socket failed: %s", strerror(errno));
+        RCLCPP_WARN(logger_, "send on debug socket failed: %s", strerror(errno));
         return;
       }
     }
@@ -198,14 +196,14 @@ inline void IpcEventLoopBase::handle_socket(int client_fd)
 
   if (sent < response.size()) {
     RCLCPP_WARN(
-      logger_, "send on socket incomplete after retries: sent %zu of %zu bytes", sent,
+      logger_, "send on debug socket incomplete after retries: sent %zu of %zu bytes", sent,
       response.size());
   }
 }
 
-inline void IpcEventLoopBase::set_mq_handler(EventCallback cb)
+inline void IpcEventLoopBase::set_message_handler(MessageCallback cb)
 {
-  mq_cb_ = std::move(cb);
+  message_cb_ = std::move(cb);
 }
 
 inline void IpcEventLoopBase::set_signal_handler(SignalCallback cb)
@@ -218,9 +216,25 @@ inline void IpcEventLoopBase::set_socket_handler(SocketCallback cb)
   socket_cb_ = std::move(cb);
 }
 
-inline void IpcEventLoopBase::setup_mq()
+inline void IpcEventLoopBase::drain_listener()
 {
-  mq_fd_ = create_and_open_mq(mq_name_);
+  while (true) {
+    ssize_t n = recv(listener_fd_, recv_buf_.data(), recv_buf_.size(), 0);
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+      if (errno == EINTR) continue;
+      RCLCPP_WARN(logger_, "bridge UDS recv() failed: %s", strerror(errno));
+      break;
+    }
+    if (message_cb_) {
+      message_cb_(recv_buf_.data(), static_cast<size_t>(n));
+    }
+  }
+}
+
+inline void IpcEventLoopBase::setup_listener()
+{
+  listener_fd_ = create_bridge_uds_listener(uds_addr_);
 }
 
 inline void IpcEventLoopBase::setup_signals(
@@ -303,27 +317,11 @@ inline void IpcEventLoopBase::setup_epoll()
     throw std::runtime_error("epoll_create1 failed: " + std::string(strerror(errno)));
   }
 
-  add_fd_to_epoll(mq_fd_, "MQ");
+  add_fd_to_epoll(listener_fd_, "BridgeUDS");
   add_fd_to_epoll(signal_fd_, "Signal");
   if (socket_fd_ != -1) {
-    add_fd_to_epoll(socket_fd_, "Socket");
+    add_fd_to_epoll(socket_fd_, "DebugSocket");
   }
-}
-
-inline mqd_t IpcEventLoopBase::create_and_open_mq(const std::string & name) const
-{
-  struct mq_attr attr = {};
-  attr.mq_maxmsg = BRIDGE_MQ_MAX_MESSAGES;
-  attr.mq_msgsize = mq_msg_size_;
-
-  mqd_t fd =
-    mq_open(name.c_str(), O_CREAT | O_RDONLY | O_NONBLOCK | O_CLOEXEC, BRIDGE_MQ_PERMS, &attr);
-
-  if (fd == -1) {
-    throw std::system_error(errno, std::generic_category(), "MQ open failed: " + name);
-  }
-
-  return fd;
 }
 
 inline void IpcEventLoopBase::add_fd_to_epoll(int fd, const std::string & label) const
@@ -379,7 +377,7 @@ inline void IpcEventLoopBase::cleanup_resources()
 
   if (socket_fd_ != -1) {
     if (close(socket_fd_) == -1) {
-      RCLCPP_WARN(logger_, "Failed to close socket_fd: %s", strerror(errno));
+      RCLCPP_WARN(logger_, "Failed to close debug socket_fd: %s", strerror(errno));
     }
     socket_fd_ = -1;
   }
@@ -391,17 +389,11 @@ inline void IpcEventLoopBase::cleanup_resources()
     signal_fd_ = -1;
   }
 
-  if (mq_fd_ != -1) {
-    if (mq_close(mq_fd_) == -1) {
-      RCLCPP_WARN_STREAM(
-        logger_, "Failed to close mq_fd for mq_name='" << mq_name_ << "': " << strerror(errno));
+  if (listener_fd_ != -1) {
+    if (close(listener_fd_) == -1) {
+      RCLCPP_WARN(logger_, "Failed to close bridge UDS listener_fd: %s", strerror(errno));
     }
-    mq_fd_ = -1;
-
-    if (mq_unlink(mq_name_.c_str()) == -1 && errno != ENOENT) {
-      RCLCPP_WARN_STREAM(
-        logger_, "Failed to unlink mq for mq_name='" << mq_name_ << "': " << strerror(errno));
-    }
+    listener_fd_ = -1;
   }
 }
 

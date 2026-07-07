@@ -7,40 +7,11 @@ static void remove_all_topics(void)
   struct hlist_node * tmp;
   int bkt;
 
+  // release frees the shared topic_struct (rbtree + pub/sub tables) once its
+  // last wrapper goes; for a grouped pair that is the second wrapper.
   hash_for_each_safe(topic_hashtable, bkt, tmp, wrapper, node)
   {
-    struct rb_root * root = &wrapper->topic->entries;
-    struct rb_node * node = rb_first(root);
-    while (node) {
-      struct entry_node * en = rb_entry(node, struct entry_node, node);
-      node = rb_next(node);
-      agnocast_remove_entry_node(wrapper, en);
-    }
-
-    struct publisher_info * pub_info;
-    int bkt_pub_info;
-    struct hlist_node * tmp_pub_info;
-    hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
-    {
-      hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
-    }
-
-    struct subscriber_info * sub_info;
-    int bkt_sub_info;
-    struct hlist_node * tmp_sub_info;
-    hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
-    {
-      hash_del(&sub_info->node);
-      kfree(sub_info->node_name);
-      kfree(sub_info);
-    }
-
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+    agnocast_release_topic_wrapper(wrapper);
   }
 }
 
@@ -71,6 +42,19 @@ static void remove_all_bridge_info(void)
   }
 }
 
+static void remove_all_domain_rules(void)
+{
+  struct domain_bridge_rule * rule;
+  int bkt;
+  struct hlist_node * tmp;
+  hash_for_each_safe(domain_rule_htable, bkt, tmp, rule, node)
+  {
+    hash_del(&rule->node);
+    kfree(rule->topic_name);
+    kfree(rule);
+  }
+}
+
 // Called during module unload. Not an ioctl function, so we manage locks here directly.
 void agnocast_exit_free_data(void)
 {
@@ -78,6 +62,7 @@ void agnocast_exit_free_data(void)
   remove_all_topics();
   remove_all_process_info();
   remove_all_bridge_info();
+  remove_all_domain_rules();
   up_write(&global_htables_rwsem);
 }
 
