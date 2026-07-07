@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace agnocast
 {
@@ -75,7 +76,11 @@ void PerformanceBridgeManager::run()
 
 void PerformanceBridgeManager::start_ros_execution()
 {
-  std::string node_name = "agnocast_bridge_node_performance";
+  std::string node_name =
+    "agnocast_bridge_node_performance_" + std::to_string(self_ipc_ns_inode_);
+  if (const char * ros_domain_id = std::getenv("ROS_DOMAIN_ID")) {
+    node_name += "_d" + std::string(ros_domain_id);
+  }
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
   // We must not use single-threaded executors because of how service bridges work. Service bridges
