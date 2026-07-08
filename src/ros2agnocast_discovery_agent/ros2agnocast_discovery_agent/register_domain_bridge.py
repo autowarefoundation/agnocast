@@ -44,10 +44,14 @@ def main(argv=None) -> int:
             f'no config given; pass --config or set {domain_bridge_config.CONFIG_ENV}')
 
     try:
-        rules = domain_bridge_config.load_domain_bridge_rules(args.config)
+        rules, skipped = domain_bridge_config.load_domain_bridge_rules(args.config)
     except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
         print(f'error: cannot load {args.config}: {e}', file=sys.stderr)
         return 1
+
+    for topic in skipped:
+        print(f'warning: skipping {topic}: no from_domain/to_domain resolved '
+              '(set them at the top level or on the topic)', file=sys.stderr)
 
     add_rule = _load_add_rule_symbol()
     failures = 0
@@ -55,12 +59,12 @@ def main(argv=None) -> int:
         if add_rule(topic.encode('utf-8'), from_domain, to_domain) == 0:
             print(f'registered: {topic} {from_domain}->{to_domain}')
             continue
-        # A non-zero return most likely means an endpoint for the topic already
-        # exists in one of the domains; the rule must precede every node.
+        # The wrapper prints the specific errno to stderr just above; the usual
+        # cause is that an endpoint already exists, since a rule must precede
+        # every node in either domain.
         failures += 1
-        print(
-            f'error: failed to register {topic} {from_domain}->{to_domain}; '
-            'was a publisher/subscriber already started?', file=sys.stderr)
+        print(f'error: failed to register {topic} {from_domain}->{to_domain}',
+              file=sys.stderr)
 
     if failures:
         print(f'error: {failures} of {len(rules)} rule(s) rejected', file=sys.stderr)

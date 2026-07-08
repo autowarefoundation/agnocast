@@ -16,7 +16,7 @@ topics:
   chatter:
     type: std_msgs/msg/String
 """
-    assert parse_domain_bridge_config(text) == [('chatter', 1, 2)]
+    assert parse_domain_bridge_config(text) == ([('chatter', 1, 2)], [])
 
 
 def test_per_topic_domains_override_top_level():
@@ -30,23 +30,26 @@ topics:
     from_domain: 3
     to_domain: 4
 """
-    rules = parse_domain_bridge_config(text)
+    rules, skipped = parse_domain_bridge_config(text)
     assert ('chatter', 1, 2) in rules
     assert ('special', 3, 4) in rules
+    assert skipped == []
 
 
-def test_topic_without_resolvable_domain_pair_is_skipped():
+def test_topic_without_resolvable_domain_pair_is_reported_as_skipped():
     text = """
 topics:
   chatter:
     type: std_msgs/msg/String
 """
-    assert parse_domain_bridge_config(text) == []
+    rules, skipped = parse_domain_bridge_config(text)
+    assert rules == []
+    assert skipped == ['chatter']
 
 
 def test_empty_or_topicless_config_yields_no_rules():
-    assert parse_domain_bridge_config('') == []
-    assert parse_domain_bridge_config('topics:') == []
+    assert parse_domain_bridge_config('') == ([], [])
+    assert parse_domain_bridge_config('topics:') == ([], [])
 
 
 def test_non_integer_domain_raises():
@@ -115,4 +118,4 @@ to_domain: 2
 topics:
   chatter:
 """
-    assert parse_domain_bridge_config(text) == [('chatter', 1, 2)]
+    assert parse_domain_bridge_config(text) == ([('chatter', 1, 2)], [])

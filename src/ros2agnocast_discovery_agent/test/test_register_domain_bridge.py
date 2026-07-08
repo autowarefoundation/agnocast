@@ -45,6 +45,16 @@ def test_returns_nonzero_when_a_rule_is_rejected(tmp_path, monkeypatch):
     assert register_domain_bridge.main(['--config', cfg]) == 1
 
 
+def test_skipped_topic_is_reported(tmp_path, monkeypatch, capsys):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
+    # No domains resolve for 'chatter', so it is skipped rather than registered.
+    cfg = _write_config(tmp_path, 'topics:\n  chatter:\n')
+    assert register_domain_bridge.main(['--config', cfg]) == 0
+    assert fake.calls == []
+    assert 'skipping chatter' in capsys.readouterr().err
+
+
 def test_returns_nonzero_on_unreadable_config(tmp_path, monkeypatch):
     monkeypatch.setattr(
         register_domain_bridge, '_load_add_rule_symbol',
