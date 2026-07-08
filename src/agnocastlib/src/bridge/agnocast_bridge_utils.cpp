@@ -1,6 +1,7 @@
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -248,6 +249,14 @@ bool is_agnocast_service_alive(const std::string & service_name, std::string & r
   }
 }
 
+std::pair<std::string, std::string> split_full_node_name(const std::string & fqn)
+{
+  const auto pos = fqn.find_last_of('/');
+  std::string ns = (pos == 0) ? "/" : fqn.substr(0, pos);
+  std::string name = fqn.substr(pos + 1);
+  return {std::move(ns), std::move(name)};
+}
+
 BridgeRegistrationMsgBuilder::BridgeRegistrationMsgBuilder() : failed_(false)
 {
 }
@@ -390,6 +399,17 @@ std::pair<BridgeMsg, std::string> BridgeRegistrationMsgBuilder::build_message()
     msg.payload.pubsub = pubsub_;
   }
   return {msg, failed_ ? std::move(reason_) : std::string{}};
+}
+
+void register_service_bridge(
+  const std::string & service_type, const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
+{
+  if (get_bridge_mode() != BridgeMode::On) {
+    return;
+  }
+  send_performance_service_bridge_registration_by_type_name(
+    service_type, service_name, direction, shadow_node_identity);
 }
 
 }  // namespace agnocast

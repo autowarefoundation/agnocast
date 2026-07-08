@@ -27,7 +27,11 @@ public:
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
-  PerformanceServiceBridgeResult create_r2a_service_bridge(
+  ServiceBridgeEntity create_r2a_service_bridge(
+    rclcpp::Node::SharedPtr node, const std::string & service_name,
+    const std::string & service_type, const rclcpp::QoS & qos);
+
+  ServiceBridgeEntity create_a2r_service_bridge(
     rclcpp::Node::SharedPtr node, const std::string & service_name,
     const std::string & service_type, const rclcpp::QoS & qos);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/bridge/agnocast_service_bridge.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
@@ -40,22 +41,10 @@ private:
     std::chrono::steady_clock::time_point forced_until;
   };
 
-  struct R2AServiceBridgeItem
-  {
-    PerformanceServiceBridgeResult result;
-    std::shared_ptr<rcl_node_t> shadow_node;
-
-    R2AServiceBridgeItem(
-      PerformanceServiceBridgeResult && result, std::shared_ptr<rcl_node_t> && shadow_node)
-    : result(std::move(result)), shadow_node(std::move(shadow_node))
-    {
-    }
-  };
-
   rclcpp::Logger logger_;
   uint64_t self_ipc_ns_inode_;
   PerformanceBridgeIpcEventLoop event_loop_;
-  PerformanceBridgeLoader loader_;
+  std::shared_ptr<PerformanceBridgeLoader> loader_;
 
   std::shared_ptr<rclcpp::Node> container_node_;
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
@@ -71,7 +60,7 @@ private:
   std::unordered_map<std::string, DaemonForcedRequest> daemon_forced_r2a_;
   std::unordered_map<std::string, DaemonForcedRequest> daemon_forced_a2r_;
 
-  std::unordered_map<std::string, R2AServiceBridgeItem> active_r2a_service_bridges_;
+  std::unordered_map<std::string, ServiceBridgeItem> active_service_bridges_;
 
   void start_ros_execution();
 
@@ -88,7 +77,7 @@ private:
 
   void check_and_create_pubsub_bridges();
   void check_and_remove_pubsub_bridges();
-  void check_and_remove_service_bridges();
+  void check_and_update_service_bridges();
   void check_and_remove_request_cache();
   void check_and_request_shutdown();
 
@@ -97,9 +86,6 @@ private:
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
     BridgeDirection direction);
   static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
-
-  void create_service_bridge_if_needed(
-    const BridgeMsgServicePayload & target, BridgeDirection direction);
 };
 
 }  // namespace agnocast
