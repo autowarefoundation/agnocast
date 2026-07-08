@@ -44,6 +44,8 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PUB_INFO_HASH_BITS 3
 #define SUB_INFO_HASH_BITS 5
 #define PROC_INFO_HASH_BITS 10
+// At most one agent per (IPC namespace, domain), so the table is tiny.
+#define DISCOVERY_AGENT_HASH_BITS 4
 
 // Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
 // the daemon successfully copies the data to user-space.
@@ -195,6 +197,27 @@ struct domain_bridge_rule
 };
 
 extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+
+// The discovery agent's liveness, owned by the kmod so the fork gate and the
+// singleton claim share one source of truth (no userspace flock). Hashed by pid
+// (removal and is_agnocast_pid() are by pid); a (ns, domain) lookup scans. Unlike
+// process_info there is no `exited` flag: the entry is removed the moment the
+// agent exits, so "registered" always means "alive".
+struct discovery_agent_info
+{
+  pid_t pid;
+  const struct ipc_namespace * ipc_ns;
+  uint32_t domain_id;
+  struct hlist_node node;
+  struct rcu_head rcu_head;  // read from the atomic sched_process_exit path via is_agnocast_pid()
+};
+
+extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+
+// Both require global_htables_rwsem held (read for find, write for remove).
+struct discovery_agent_info * agnocast_find_discovery_agent(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+void agnocast_remove_discovery_agent_by_pid(const pid_t pid);
 
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 

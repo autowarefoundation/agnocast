@@ -656,7 +656,7 @@ int agnocast_ioctl_add_process(
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
   ioctl_ret->ret_performance_bridge_daemon_exist =
     has_alive_performance_bridge_manager(ipc_ns, domain_id);
-  ioctl_ret->ret_discovery_agent_exist = (get_alive_process_num_in_domain(ipc_ns, domain_id) > 0);
+  ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
   if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
     goto unlock;
@@ -2361,12 +2361,89 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   return 0;
 }
 
-// The agent is not a registered Agnocast process, so it passes its own ROS_DOMAIN_ID.
+// Caller holds global_htables_rwsem (read). Scans because the table is keyed by pid.
+struct discovery_agent_info * agnocast_find_discovery_agent(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+{
+  struct discovery_agent_info * agent;
+  int bkt;
+  hash_for_each(discovery_agent_htable, bkt, agent, node)
+  {
+    if (ipc_eq(agent->ipc_ns, ipc_ns) && agent->domain_id == domain_id) {
+      return agent;
+    }
+  }
+  return NULL;
+}
+
+// The agent is not a registered Agnocast process, so it passes its own pid + ROS_DOMAIN_ID.
+//
+// commit == false: read-only idle poll; userspace counts consecutive idle polls before exiting.
+// commit == true: the atomic exit gate. Deregister iff the domain is truly empty, under the same
+// write lock add_process takes -- so either a starting process is counted first and vetoes the
+// exit (ret_should_exit = false), or the agent deregisters first and that process then spawns a
+// replacement. Neither ordering leaves live processes without an agent.
 int agnocast_ioctl_discovery_agent_should_exit(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_should_exit)
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id, const bool commit,
+  bool * ret_should_exit)
+{
+  if (!commit) {
+    down_read(&global_htables_rwsem);
+    *ret_should_exit = (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0);
+    up_read(&global_htables_rwsem);
+    return 0;
+  }
+
+  down_write(&global_htables_rwsem);
+  if (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0) {
+    agnocast_remove_discovery_agent_by_pid(pid);
+    *ret_should_exit = true;
+  } else {
+    *ret_should_exit = false;
+  }
+  up_write(&global_htables_rwsem);
+  return 0;
+}
+
+// Atomic singleton claim; replaces the userspace flock. The first caller for a (ns, domain) wins
+// and is recorded; a later caller loses (ret_already_exists = true) and must exit.
+int agnocast_ioctl_add_discovery_agent(
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id,
+  struct ioctl_add_discovery_agent_args * ioctl_ret)
+{
+  int ret = 0;
+  // Deterministic default so the -ENOMEM path never returns a stale flag to userspace.
+  ioctl_ret->ret_already_exists = false;
+  down_write(&global_htables_rwsem);
+
+  if (agnocast_find_discovery_agent(ipc_ns, domain_id)) {
+    ioctl_ret->ret_already_exists = true;
+    goto unlock;
+  }
+
+  struct discovery_agent_info * agent = kmalloc(sizeof(struct discovery_agent_info), GFP_KERNEL);
+  if (!agent) {
+    ret = -ENOMEM;
+    goto unlock;
+  }
+  agent->pid = pid;
+  agent->ipc_ns = ipc_ns;
+  agent->domain_id = domain_id;
+  INIT_HLIST_NODE(&agent->node);
+  hash_add_rcu(discovery_agent_htable, &agent->node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS));
+
+unlock:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+// Read-only liveness query for the CLI status verb. Now that the kmod owns agent liveness, this
+// is the authoritative "is the agent alive?" signal (replacing the userspace flock probe).
+int agnocast_ioctl_discovery_agent_exists(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists)
 {
   down_read(&global_htables_rwsem);
-  *ret_should_exit = (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0);
+  *ret_exists = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
   up_read(&global_htables_rwsem);
   return 0;
 }
@@ -3012,13 +3089,39 @@ static long notify_bridge_shutdown_cmd(void)
 static long discovery_agent_should_exit_cmd(
   struct ioctl_discovery_agent_should_exit_args __user * arg)
 {
+  const pid_t pid = current->tgid;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
   struct ioctl_discovery_agent_should_exit_args args;
   if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
 
-  int ret =
-    agnocast_ioctl_discovery_agent_should_exit(ipc_ns, args.domain_id, &args.ret_should_exit);
+  int ret = agnocast_ioctl_discovery_agent_should_exit(
+    pid, ipc_ns, args.domain_id, args.commit, &args.ret_should_exit);
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return ret;
+}
+
+static long add_discovery_agent_cmd(struct ioctl_add_discovery_agent_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_add_discovery_agent_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  int ret = agnocast_ioctl_add_discovery_agent(pid, ipc_ns, args.domain_id, &args);
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return ret;
+}
+
+static long discovery_agent_exists_cmd(struct ioctl_discovery_agent_exists_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_discovery_agent_exists_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  int ret = agnocast_ioctl_discovery_agent_exists(ipc_ns, args.domain_id, &args.ret_exists);
   if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
   return ret;
 }
@@ -3084,6 +3187,10 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
     case AGNOCAST_DISCOVERY_AGENT_SHOULD_EXIT_CMD:
       return discovery_agent_should_exit_cmd(
         (struct ioctl_discovery_agent_should_exit_args __user *)arg);
+    case AGNOCAST_ADD_DISCOVERY_AGENT_CMD:
+      return add_discovery_agent_cmd((struct ioctl_add_discovery_agent_args __user *)arg);
+    case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
+      return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     default:
       return -EINVAL;
   }
@@ -3162,6 +3269,21 @@ int agnocast_get_alive_proc_num(void)
       count++;
     }
   }
+  return count;
+}
+
+int agnocast_get_discovery_agent_num(void)
+{
+  int count = 0;
+  struct discovery_agent_info * agent;
+  int bkt;
+  // Serialize against the exit path's hash_del_rcu()+kfree_rcu(), which runs under the write lock.
+  down_read(&global_htables_rwsem);
+  hash_for_each(discovery_agent_htable, bkt, agent, node)
+  {
+    count++;
+  }
+  up_read(&global_htables_rwsem);
   return count;
 }
 
