@@ -4,14 +4,12 @@ The verb itself talks to /proc and DDS, but the small helpers and the verdict
 logic are exercised here with tmp dirs and patched checks.
 """
 
-import fcntl
 import os
 import tempfile
 from argparse import Namespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from ros2agnocast.verb import agnocast_discovery_daemon_status as ds
-from ros2agnocast_discovery_agent import agent as discovery_agent
 
 
 # --- type_registry: informational description (no OK/NG) --------------------
@@ -60,56 +58,44 @@ def test_describe_type_registry_stale_pid_noted():
         assert 'no Agnocast process has registered yet' in detail
 
 
-# --- daemon process: probe the agent's singleton flock ----------------------
+# --- daemon process: query the kmod agent registry -------------------------
 
-def test_check_daemon_process_missing_lock_is_ng():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, reason = ds._check_daemon_process(424242, 0)
-        assert ok is False
-        assert 'no singleton lock file' in reason
-
-
-def test_check_daemon_process_free_lock_is_ng():
-    """Lock file exists but nobody holds it -> no live agent."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ns_inode = 424242
-        domain_id = 0
-        open(os.path.join(
-            tmpdir, f'agnocast_discovery_agent_{ns_inode}_d{domain_id}.lock'), 'w').close()
-        with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-            ok, reason = ds._check_daemon_process(ns_inode, domain_id)
-        assert ok is False
-        assert 'free' in reason
+def _patch_exists(ret):
+    """Patch the ioctl wrapper so agnocast_discovery_agent_exists returns ``ret``."""
+    lib = MagicMock()
+    lib.agnocast_discovery_agent_exists.return_value = ret
+    return patch('ctypes.CDLL', return_value=lib)
 
 
-def test_check_daemon_process_held_lock_is_ok():
-    """A held flock (as the real agent holds it) -> OK. A non-zero domain also
-    proves the domain is part of the probed path."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ns_inode = 424242
-        domain_id = 2
-        lock_path = os.path.join(
-            tmpdir, f'agnocast_discovery_agent_{ns_inode}_d{domain_id}.lock')
-        holder = open(lock_path, 'w')
-        try:
-            fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with patch.dict(os.environ, {'AGNOCAST_TMPFS_DIR': tmpdir}):
-                ok, reason = ds._check_daemon_process(ns_inode, domain_id)
-            assert ok is True
-            assert 'holds the singleton lock' in reason
-        finally:
-            holder.close()
+def test_check_daemon_process_registered_is_ok():
+    with _patch_exists(1):
+        ok, reason = ds._check_daemon_process(0)
+    assert ok is True
+    assert 'registered in the kmod' in reason
 
 
-# --- path helpers -----------------------------------------------------------
+def test_check_daemon_process_not_registered_is_ng():
+    with _patch_exists(0):
+        ok, reason = ds._check_daemon_process(3)
+    assert ok is False
+    assert 'no agent registered' in reason
 
-def test_singleton_lock_path_honors_agnocast_tmpfs_dir(monkeypatch):
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/run/custom')
-    assert ds._singleton_lock_path(7, 2) == '/run/custom/agnocast_discovery_agent_7_d2.lock'
 
-    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
-    assert ds._singleton_lock_path(7, 0) == '/dev/shm/agnocast_discovery_agent_7_d0.lock'
+def test_check_daemon_process_kmod_error_is_ng():
+    """A negative ioctl return (module unloaded / ioctl failure) reads as not-running."""
+    with _patch_exists(-1):
+        ok, reason = ds._check_daemon_process(0)
+    assert ok is False
+    assert 'kmod query failed' in reason
+
+
+def test_check_daemon_process_missing_symbol_is_ng():
+    """An older/mismatched wrapper lacking the symbol reads as NG, not a CLI traceback."""
+    lib = MagicMock(spec=[])  # any attribute access raises AttributeError, like an absent export
+    with patch('ctypes.CDLL', return_value=lib):
+        ok, reason = ds._check_daemon_process(0)
+    assert ok is False
+    assert 'version skew' in reason
 
 
 def test_read_ros_domain_id(monkeypatch):
@@ -121,16 +107,6 @@ def test_read_ros_domain_id(monkeypatch):
     assert ds._read_ros_domain_id() == 5
     monkeypatch.setenv('ROS_DOMAIN_ID', 'notanint')
     assert ds._read_ros_domain_id() == 0
-
-
-def test_singleton_lock_path_matches_agent(monkeypatch):
-    """The verb must probe the exact file the agent locks. The path is duplicated
-    in two packages, so this cross-checks them to catch drift (e.g. the domain
-    suffix added by the per-(namespace, domain) agent change)."""
-    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
-    for ns_inode, domain_id in [(7, 0), (4026531839, 2), (12345, 7)]:
-        assert ds._singleton_lock_path(ns_inode, domain_id) == \
-            discovery_agent._singleton_lock_path(ns_inode, domain_id)
 
 
 def test_type_registry_base_honors_agnocast_tmpfs_dir(monkeypatch):
@@ -164,7 +140,7 @@ def _run_main(proc, gossip, verbose=False):
 
 
 def test_verdict_running(capsys):
-    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+    rc = _run_main(proc=(True, 'registered in the kmod (domain 0)'),
                    gossip=(True, 'snapshot received on /_agnocast_discovery'))
     out = capsys.readouterr().out
     assert rc == 0
@@ -172,16 +148,16 @@ def test_verdict_running(capsys):
 
 
 def test_verdict_not_running_skips_gossip(capsys):
-    rc = _run_main(proc=(False, 'singleton lock is free (/x.lock)'), gossip=None)
+    rc = _run_main(proc=(False, 'no agent registered in the kmod (domain 0)'), gossip=None)
     out = capsys.readouterr().out
     assert rc == 1
     assert 'NG. The discovery agent is not running.' in out
     # The per-check reason is diagnostic detail, not shown by default.
-    assert 'singleton lock is free' not in out
+    assert 'no agent registered' not in out
 
 
 def test_verdict_running_but_not_publishing(capsys):
-    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+    rc = _run_main(proc=(True, 'registered in the kmod (domain 0)'),
                    gossip=(False, 'no snapshot on /_agnocast_discovery within 3.0s'))
     out = capsys.readouterr().out
     assert rc == 1
@@ -191,18 +167,18 @@ def test_verdict_running_but_not_publishing(capsys):
 
 def test_default_output_is_verdict_only(capsys):
     """Default output carries no inode header, type_registry, or per-check reason."""
-    _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+    _run_main(proc=(True, 'registered in the kmod (domain 0)'),
               gossip=(True, 'snapshot received on /_agnocast_discovery'))
     out = capsys.readouterr().out
     assert out.strip() == 'OK. The discovery agent is running.'
 
 
 def test_verbose_shows_inode_checks_and_type_registry(capsys):
-    rc = _run_main(proc=(True, 'holds the singleton lock (/x.lock)'),
+    rc = _run_main(proc=(True, 'registered in the kmod (domain 0)'),
                    gossip=(True, 'snapshot received on /_agnocast_discovery'), verbose=True)
     out = capsys.readouterr().out
     assert rc == 0
     assert 'IPC namespace inode: 4026531839' in out
     assert 'type_registry: 2 live registration(s)' in out
-    assert 'holds the singleton lock' in out  # per-check reason shown in --verbose
+    assert 'registered in the kmod' in out  # per-check reason shown in --verbose
     assert 'OK. The discovery agent is running.' in out
