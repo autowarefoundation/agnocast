@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -33,16 +34,20 @@ bool wait_for_service_nanoseconds(
 
 extern int agnocast_fd;
 
-/**
- * @brief Service client for zero-copy Agnocast service communication.
- * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
- */
-AGNOCAST_PUBLIC
+enum class ClientRole : uint8_t {
+  /// User-created client; issues an A2R bridge request.
+  Default,
+  /// Used by the bridge plugin's own client; no bridge request is issued.
+  /// Not intended for direct use by application code.
+  AgnocastOnly,
+};
+
+// Internal implementation - users should use agnocast::Client<ServiceT> instead.
 template <typename ServiceT>
-class Client
+class BasicClient
 {
 public:
-  using SharedPtr = std::shared_ptr<Client<ServiceT>>;
+  using SharedPtr = std::shared_ptr<BasicClient<ServiceT>>;
 
   /// Future that resolves to the service response. Returned by async_send_request() (no-callback
   /// overload).
@@ -113,7 +118,7 @@ private:
   template <typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
-    rclcpp::CallbackGroup::SharedPtr group)
+    rclcpp::CallbackGroup::SharedPtr group, ClientRole role)
   {
     node_name_ = node->get_fully_qualified_name();
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
@@ -160,21 +165,27 @@ private:
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
       node, topic_name, qos, std::move(subscriber_callback), options,
       SubscriptionRole::AgnocastOnly);
+
+    if (role == ClientRole::Default) {
+      register_service_bridge(
+        rosidl_generator_traits::name<ServiceT>(), service_name_, BridgeDirection::AGNOCAST_TO_ROS2,
+        std::nullopt);
+    }
   }
 
 public:
-  Client(
+  BasicClient(
     rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
-    rclcpp::CallbackGroup::SharedPtr group)
+    rclcpp::CallbackGroup::SharedPtr group, ClientRole role = ClientRole::Default)
   {
-    constructor_impl(node, service_name, qos_arg, group);
+    constructor_impl(node, service_name, qos_arg, group, role);
   }
 
-  Client(
+  BasicClient(
     agnocast::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
-    rclcpp::CallbackGroup::SharedPtr group)
+    rclcpp::CallbackGroup::SharedPtr group, ClientRole role = ClientRole::Default)
   {
-    constructor_impl(node, service_name, qos_arg, group);
+    constructor_impl(node, service_name, qos_arg, group, role);
   }
 
   /** @brief Allocate a request message in shared memory.
@@ -257,5 +268,14 @@ public:
     return FutureAndRequestId(std::move(future), seqno);
   }
 };
+
+/**
+ * @brief Service client for zero-copy Agnocast service communication. The service/client API is
+ * experimental and may change in future versions.
+ * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
+ */
+AGNOCAST_PUBLIC
+template <typename ServiceT>
+using Client = BasicClient<ServiceT>;
 
 }  // namespace agnocast

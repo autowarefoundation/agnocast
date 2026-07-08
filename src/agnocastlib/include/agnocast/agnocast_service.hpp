@@ -17,10 +17,17 @@
 namespace agnocast
 {
 
+enum class ServiceRole : uint8_t {
+  /// User-created service; issues an R2A bridge request.
+  Default,
+  /// Used by the bridge plugin's own service; no bridge request is issued.
+  /// Not intended for direct use by application code.
+  AgnocastOnly,
+};
+
 // Internal implementation - users should use agnocast::Service<ServiceT> instead.
-template <typename ServiceT, typename BridgeRegistrationPolicy>
-class BasicService
-: public std::enable_shared_from_this<BasicService<ServiceT, BridgeRegistrationPolicy>>
+template <typename ServiceT>
+class BasicService : public std::enable_shared_from_this<BasicService<ServiceT>>
 {
 private:
   // TODO(bdm-k): Consider supporting callbacks that take lvalue references.
@@ -31,10 +38,9 @@ private:
   {
   };
   template <typename Func>
-  struct is_deferred_cb
-  : std::bool_constant<std::is_invocable_v<
-      std::decay_t<Func>, std::shared_ptr<BasicService<ServiceT, BridgeRegistrationPolicy>>,
-      ipc_shared_ptr<typename ServiceT::Request> &&>>
+  struct is_deferred_cb : std::bool_constant<std::is_invocable_v<
+                            std::decay_t<Func>, std::shared_ptr<BasicService<ServiceT>>,
+                            ipc_shared_ptr<typename ServiceT::Request> &&>>
   {
   };
 
@@ -118,7 +124,7 @@ private:
   template <typename Func, typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, Func && callback,
-    rclcpp::CallbackGroup::SharedPtr group)
+    rclcpp::CallbackGroup::SharedPtr group, ServiceRole role)
   {
     static_assert(
       is_basic_cb<Func>::value || is_deferred_cb<Func>::value,
@@ -143,28 +149,39 @@ private:
         SubscriptionRole::AgnocastOnly);
     }
 
-    BridgeRegistrationPolicy::template register_bridge<NodeT, ServiceT>(node, service_name_);
+    if (role == ServiceRole::Default) {
+      std::optional<std::pair<std::string, std::string>> shadow_node_identity{std::nullopt};
+      if constexpr (std::is_same_v<std::remove_cv_t<NodeT>, agnocast::Node>) {
+        shadow_node_identity =
+          std::make_pair(std::string(node->get_namespace()), std::string(node->get_name()));
+      }
+      register_service_bridge(
+        rosidl_generator_traits::name<ServiceT>(), service_name_, BridgeDirection::ROS2_TO_AGNOCAST,
+        shadow_node_identity);
+    }
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicService<ServiceT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<BasicService<ServiceT>>;
 
   template <typename Func>
   BasicService(
     rclcpp::Node * node, const std::string & service_name, Func && callback,
-    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group)
+    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
+    ServiceRole role = ServiceRole::Default)
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile())
   {
-    constructor_impl(node, service_name, std::forward<Func>(callback), group);
+    constructor_impl(node, service_name, std::forward<Func>(callback), group, role);
   }
 
   template <typename Func>
   BasicService(
     agnocast::Node * node, const std::string & service_name, Func && callback,
-    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group)
+    const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
+    ServiceRole role = ServiceRole::Default)
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile())
   {
-    constructor_impl(node, service_name, std::forward<Func>(callback), group);
+    constructor_impl(node, service_name, std::forward<Func>(callback), group, role);
   }
 
   /**
@@ -211,8 +228,6 @@ public:
   }
 };
 
-struct RosToAgnocastServiceRegistrationPolicy;
-
 /**
  * @brief The user-facing Agnocast service server.
  * Alias for `BasicService<ServiceT>`. Use this type (not BasicService directly) when declaring
@@ -221,6 +236,6 @@ struct RosToAgnocastServiceRegistrationPolicy;
  */
 AGNOCAST_PUBLIC
 template <typename ServiceT>
-using Service = BasicService<ServiceT, RosToAgnocastServiceRegistrationPolicy>;
+using Service = BasicService<ServiceT>;
 
 }  // namespace agnocast

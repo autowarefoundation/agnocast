@@ -10,20 +10,19 @@
 
 #include "@(header_path)"
 
-extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge_@(snake_type_name)(
-  rclcpp::Node::SharedPtr node,
-  const std::string & service_name,
+extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
+  rclcpp::Node::SharedPtr node, const std::string & service_name,
   const rclcpp::QoS & qos /*QoS for the target Agnocast service*/)
 {
   using ServiceT = @(cpp_type);
+  using AgnoClient = agnocast::BasicClient<ServiceT>;
 
-  auto srv_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cb_group =
-    node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
-  auto agno_client = agnocast::create_client<ServiceT>(
-    node.get(), service_name, qos, client_cb_group);
+  // AgnocastOnly: this client is the bridge's own endpoint and must not itself request a bridge.
+  auto agno_client = std::make_shared<AgnoClient>(
+    node.get(), service_name, qos, client_cb_group, agnocast::ClientRole::AgnocastOnly);
 
   auto ros_srv = node->create_service<ServiceT>(
     service_name,
@@ -50,4 +49,45 @@ extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge_@(snake_type
 #endif
 
   return {ros_srv, srv_cb_group, client_cb_group};
+}
+
+extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos)
+{
+  using ServiceT = @(cpp_type);
+  using AgnoService = agnocast::BasicService<ServiceT>;
+
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  auto ros_client =
+#if RCLCPP_VERSION_MAJOR >= 28
+    node->create_client<ServiceT>(service_name, qos, client_cb_group);
+#else
+    node->create_client<ServiceT>(service_name, qos.get_rmw_qos_profile(), client_cb_group);
+#endif
+
+  auto agno_srv = std::make_shared<AgnoService>(
+    node.get(), service_name,
+    [ros_client](
+      typename AgnoService::SharedPtr service_handle,
+      agnocast::ipc_shared_ptr<typename ServiceT::Request> && agno_req) {
+      auto ros_req = std::make_shared<typename ServiceT::Request>();
+      *ros_req = *agno_req;
+
+      ros_client->async_send_request(
+        ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
+                   typename rclcpp::Client<ServiceT>::SharedFuture future) {
+          auto ros_res = future.get();
+          auto agno_res = service_handle->borrow_loaned_response(agno_req);
+          *agno_res = *ros_res;
+          // Resort to pointer copying because a mutable lambda can't be used here.
+          auto agno_req_movable = agno_req;
+          service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+        });
+    },
+    // AgnocastOnly: this service is the bridge's own endpoint and must not itself request a bridge.
+    qos, srv_cb_group, agnocast::ServiceRole::AgnocastOnly);
+
+  return {agno_srv, srv_cb_group, client_cb_group};
 }

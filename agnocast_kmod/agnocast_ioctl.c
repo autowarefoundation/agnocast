@@ -74,6 +74,45 @@ static struct topic_wrapper * find_topic_for_current(
   return find_topic(topic_name, ipc_ns, get_current_domain_id());
 }
 
+static struct domain_bridge_rule * find_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns);
+
+// If a domain bridge rule pairs this domain with another whose wrapper already
+// exists, return that partner's topic_struct so the new wrapper can share it.
+static struct topic_struct * find_grouped_topic_struct(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
+{
+  const struct domain_bridge_rule * rule = find_domain_rule(topic_name, ipc_ns);
+  if (!rule) return NULL;
+
+  uint32_t partner_domain;
+  if (domain_id == rule->domain_a) {
+    partner_domain = rule->domain_b;
+  } else if (domain_id == rule->domain_b) {
+    partner_domain = rule->domain_a;
+  } else {
+    return NULL;
+  }
+
+  struct topic_wrapper * partner = find_topic(topic_name, ipc_ns, partner_domain);
+  return partner ? partner->topic : NULL;
+}
+
+// Whether a publication in pub_domain may be delivered to a subscriber in
+// sub_domain within this topic_struct. Same domain is always allowed; crossing
+// domains requires a rule permitting that direction (from_domain -> to_domain).
+static bool domain_delivery_allowed(
+  const struct topic_struct * topic, uint32_t pub_domain, uint32_t sub_domain)
+{
+  if (pub_domain == sub_domain) return true;
+
+  const struct domain_bridge_rule * rule = topic->rule;
+  if (!rule) return false;
+  if (pub_domain == rule->domain_a && sub_domain == rule->domain_b) return rule->a_to_b;
+  if (pub_domain == rule->domain_b && sub_domain == rule->domain_a) return rule->b_to_a;
+  return false;
+}
+
 static int add_topic(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
@@ -91,36 +130,43 @@ static int add_topic(
     return -ENOMEM;
   }
 
-  (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
-  if (!(*wrapper)->topic) {
-    dev_warn(
-      agnocast_device,
-      "Failed to allocate topic_struct for a new topic (topic_name=%s) by kmalloc. (%s)\n",
-      topic_name, __func__);
-    kfree(*wrapper);
-    return -ENOMEM;
-  }
-
-  (*wrapper)->ipc_ns = ipc_ns;
-  (*wrapper)->domain_id = domain_id;
   (*wrapper)->key = kstrdup(topic_name, GFP_KERNEL);
   if (!(*wrapper)->key) {
     dev_warn(
       agnocast_device, "Failed to add a new topic (topic_name=%s) by kstrdup. (%s)\n", topic_name,
       __func__);
-    kfree((*wrapper)->topic);
     kfree(*wrapper);
     return -ENOMEM;
   }
+  (*wrapper)->ipc_ns = ipc_ns;
+  (*wrapper)->domain_id = domain_id;
 
-  init_rwsem(&(*wrapper)->topic->rwsem);
-  (*wrapper)->topic->entries = RB_ROOT;
-  hash_init((*wrapper)->topic->pub_info_htable);
-  hash_init((*wrapper)->topic->sub_info_htable);
-  (*wrapper)->topic->current_pubsub_id = 0;
-  (*wrapper)->topic->current_entry_id = 0;
-  (*wrapper)->topic->ros2_subscriber_num = 0;
-  (*wrapper)->topic->ros2_publisher_num = 0;
+  struct topic_struct * grouped = find_grouped_topic_struct(topic_name, ipc_ns, domain_id);
+  if (grouped) {
+    (*wrapper)->topic = grouped;
+    grouped->wrapper_refcnt++;
+  } else {
+    (*wrapper)->topic = kmalloc(sizeof(struct topic_struct), GFP_KERNEL);
+    if (!(*wrapper)->topic) {
+      dev_warn(
+        agnocast_device,
+        "Failed to allocate topic_struct for a new topic (topic_name=%s) by kmalloc. (%s)\n",
+        topic_name, __func__);
+      kfree((*wrapper)->key);
+      kfree(*wrapper);
+      return -ENOMEM;
+    }
+    init_rwsem(&(*wrapper)->topic->rwsem);
+    (*wrapper)->topic->entries = RB_ROOT;
+    hash_init((*wrapper)->topic->pub_info_htable);
+    hash_init((*wrapper)->topic->sub_info_htable);
+    (*wrapper)->topic->current_pubsub_id = 0;
+    (*wrapper)->topic->current_entry_id = 0;
+    (*wrapper)->topic->ros2_subscriber_num = 0;
+    (*wrapper)->topic->ros2_publisher_num = 0;
+    (*wrapper)->topic->wrapper_refcnt = 1;
+    (*wrapper)->topic->rule = find_domain_rule(topic_name, ipc_ns);
+  }
   hash_add(topic_hashtable, &(*wrapper)->node, get_topic_hash(topic_name));
 
   dev_dbg(agnocast_device, "Topic (topic_name=%s) added. (%s)\n", topic_name, __func__);
@@ -195,6 +241,7 @@ static int insert_subscriber_info(
   wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
+  (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = subscriber_pid;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
@@ -297,6 +344,7 @@ static int insert_publisher_info(
   wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
+  (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = publisher_pid;
   (*new_info)->node_name = node_name_copy;
   (*new_info)->qos_depth = qos_depth;
@@ -499,6 +547,12 @@ static int set_publisher_shm_info(
   hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
     if (subscriber_pid == pub_info->pid) {
+      continue;
+    }
+
+    // A subscriber only reads from publishers that deliver to it; a one-way
+    // bridge rule can exclude opposite-domain publishers, so skip mapping them.
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
       continue;
     }
 
@@ -861,6 +915,8 @@ int agnocast_ioctl_publish_msg(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->is_take_sub) continue;
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
+      continue;
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
       continue;
     }
@@ -942,6 +998,10 @@ static int receive_msg_core(
     }
 
     if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
       continue;
     }
 
@@ -1086,6 +1146,10 @@ int agnocast_ioctl_take_msg(
       continue;
     }
 
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+      continue;
+    }
+
     candidate_en = en;
     searched_count++;
   }
@@ -1160,10 +1224,17 @@ int agnocast_ioctl_get_subscriber_num(
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
 
+  // Match ROS 2's get_subscription_count: report only same-domain subscribers.
+  // A bridge rule still delivers cross-domain (see the publish/receive paths),
+  // but a publisher does not count subscribers in another domain. Ungrouped
+  // topics hold only one domain, so this is a no-op for them.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
+    if (sub_info->domain_id != wrapper->domain_id) {
+      continue;
+    }
     if (sub_info->is_bridge) {
       ioctl_ret->ret_a2r_bridge_exist = true;
     }
@@ -1254,18 +1325,26 @@ int agnocast_ioctl_get_publisher_num(
 
   down_read(&wrapper->topic->rwsem);
 
-  ioctl_ret->ret_publisher_num = agnocast_get_size_pub_info_htable(wrapper);
   ioctl_ret->ret_ros2_publisher_num = wrapper->topic->ros2_publisher_num;
 
+  // Match ROS 2's get_publisher_count: report only same-domain publishers.
+  // A bridge rule still delivers cross-domain (see the publish/receive paths),
+  // but a subscriber does not count publishers in another domain. Ungrouped
+  // topics hold only one domain, so this is a no-op for them.
+  uint32_t publisher_num = 0;
   struct publisher_info * pub_info;
   int bkt_pub;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub, pub_info, node)
   {
+    if (pub_info->domain_id != wrapper->domain_id) {
+      continue;
+    }
+    publisher_num++;
     if (pub_info->is_bridge) {
       ioctl_ret->ret_r2a_bridge_exist = true;
-      break;
     }
   }
+  ioctl_ret->ret_publisher_num = publisher_num;
 
   struct subscriber_info * sub_info;
   int bkt_sub;
@@ -1607,10 +1686,12 @@ int agnocast_ioctl_get_topic_subscriber_info(
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
-  // Count actual subscribers first
+  // Count actual subscribers first. The htable may be shared with a bridged
+  // domain, so only count endpoints in the requested domain.
   uint32_t subscriber_num = 0;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
     subscriber_num++;
   }
 
@@ -1636,6 +1717,8 @@ int agnocast_ioctl_get_topic_subscriber_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
+
     if (!sub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
@@ -1693,10 +1776,12 @@ int agnocast_ioctl_get_topic_publisher_info(
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
 
-  // Count actual publishers first
+  // Count actual publishers first. The htable may be shared with a bridged
+  // domain, so only count endpoints in the requested domain.
   uint32_t publisher_num = 0;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
     publisher_num++;
   }
 
@@ -1722,6 +1807,8 @@ int agnocast_ioctl_get_topic_publisher_info(
   uint32_t idx = 0;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
+
     if (!pub_info->node_name) {
       kvfree(topic_info_mem);
       ret = -EFAULT;
@@ -1906,21 +1993,8 @@ int agnocast_ioctl_remove_subscriber(
     }
   }
 
-  if (
-    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-    agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic->entries);
-    while (n) {
-      struct entry_node * en = rb_entry(n, struct entry_node, node);
-      n = rb_next(n);
-      rb_erase(&en->node, &wrapper->topic->entries);
-      kfree(en);
-    }
-
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+  if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+    agnocast_release_topic_wrapper(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 
@@ -1978,20 +2052,8 @@ int agnocast_ioctl_remove_publisher(
     }
   }
 
-  if (
-    agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-    agnocast_get_size_sub_info_htable(wrapper) == 0) {
-    struct rb_node * n = rb_first(&wrapper->topic->entries);
-    while (n) {
-      struct entry_node * en = rb_entry(n, struct entry_node, node);
-      n = rb_next(n);
-      agnocast_remove_entry_node(wrapper, en);
-    }
-
-    hash_del(&wrapper->node);
-    kfree(wrapper->key);
-    kfree(wrapper->topic);
-    kfree(wrapper);
+  if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+    agnocast_release_topic_wrapper(wrapper);
     dev_dbg(agnocast_device, "Topic %s removed (empty).\n", topic_name);
   }
 
@@ -2095,6 +2157,89 @@ int agnocast_ioctl_add_bridge(
   dev_info(
     agnocast_device, "Bridge (topic=%s) added. pid=%d, r2a=%d, a2r=%d.\n", topic_name, pid,
     br_info->has_r2a, br_info->has_a2r);
+
+unlock:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+static struct domain_bridge_rule * find_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns)
+{
+  struct domain_bridge_rule * rule;
+  uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
+  hash_for_each_possible(domain_rule_htable, rule, node, hash_val)
+  {
+    if (ipc_ns == rule->ipc_ns && strcmp(rule->topic_name, topic_name) == 0) {
+      return rule;
+    }
+  }
+  return NULL;
+}
+
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  int ret = 0;
+
+  if (from_domain == to_domain) return -EINVAL;
+
+  // Store the pair canonically (domain_a < domain_b), keeping direction only as the
+  // a_to_b / b_to_a flags: grouping (find_grouped_topic_struct) cares only about the pair,
+  // while direction is enforced at delivery (domain_delivery_allowed).
+  const uint32_t lo = from_domain < to_domain ? from_domain : to_domain;
+  const uint32_t hi = from_domain < to_domain ? to_domain : from_domain;
+  const bool lo_to_hi = (from_domain == lo);
+
+  down_write(&global_htables_rwsem);
+
+  struct domain_bridge_rule * existing = find_domain_rule(topic_name, ipc_ns);
+  if (existing) {
+    // Re-declaring the same pair just adds the reverse direction. A third domain on a
+    // topic is rejected: the current implementation supports exactly one domain pair per
+    // topic (no fan-out such as 1->2 and 1->3 on the same topic). This is the one place
+    // that enforces it.
+    // TODO: support >2 domains per topic by storing a domain group instead of a fixed
+    // pair and grouping N wrappers onto one topic_struct.
+    if (existing->domain_a != lo || existing->domain_b != hi) {
+      ret = -EBUSY;
+      goto unlock;
+    }
+    existing->a_to_b |= lo_to_hi;
+    existing->b_to_a |= !lo_to_hi;
+    goto unlock;
+  }
+
+  // Grouping merges the two domains' id and entry_id spaces, which is only safe
+  // before either side has allocated any; reject if an endpoint already joined.
+  if (find_topic(topic_name, ipc_ns, from_domain) || find_topic(topic_name, ipc_ns, to_domain)) {
+    ret = -EBUSY;
+    goto unlock;
+  }
+
+  struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
+  if (!rule) {
+    ret = -ENOMEM;
+    goto unlock;
+  }
+  rule->topic_name = kstrdup(topic_name, GFP_KERNEL);
+  if (!rule->topic_name) {
+    kfree(rule);
+    ret = -ENOMEM;
+    goto unlock;
+  }
+  rule->ipc_ns = ipc_ns;
+  rule->domain_a = lo;
+  rule->domain_b = hi;
+  rule->a_to_b = lo_to_hi;
+  rule->b_to_a = !lo_to_hi;
+  INIT_HLIST_NODE(&rule->node);
+  hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, topic_name, strlen(topic_name)));
+
+  dev_info(
+    agnocast_device, "Domain bridge rule added (topic=%s, %u->%u).\n", topic_name, from_domain,
+    to_domain);
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -2737,6 +2882,22 @@ static long add_bridge_cmd(struct ioctl_add_bridge_args __user * arg)
   return ret;
 }
 
+static long add_domain_bridge_cmd(struct ioctl_add_domain_bridge_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_add_domain_bridge_args domain_bridge_args;
+  if (copy_from_user(&domain_bridge_args, arg, sizeof(domain_bridge_args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret =
+    copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &domain_bridge_args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_add_domain_bridge(
+    topic_name_buf, domain_bridge_args.from_domain, domain_bridge_args.to_domain, ipc_ns);
+}
+
 static long remove_bridge_cmd(struct ioctl_remove_bridge_args __user * arg)
 {
   int ret = 0;
@@ -2861,6 +3022,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return add_bridge_cmd((struct ioctl_add_bridge_args __user *)arg);
     case AGNOCAST_REMOVE_BRIDGE_CMD:
       return remove_bridge_cmd((struct ioctl_remove_bridge_args __user *)arg);
+    case AGNOCAST_ADD_DOMAIN_BRIDGE_CMD:
+      return add_domain_bridge_cmd((struct ioctl_add_domain_bridge_args __user *)arg);
     case AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD:
       return check_and_request_bridge_shutdown_cmd(
         (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg);
@@ -3098,6 +3261,33 @@ pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_na
     return br_info->pid;
   }
   return -1;
+}
+
+bool agnocast_get_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
+  uint32_t * domain_b, bool * a_to_b, bool * b_to_a)
+{
+  down_read(&global_htables_rwsem);
+  const struct domain_bridge_rule * rule = find_domain_rule(topic_name, ipc_ns);
+  bool found = rule != NULL;
+  if (found) {
+    *domain_a = rule->domain_a;
+    *domain_b = rule->domain_b;
+    *a_to_b = rule->a_to_b;
+    *b_to_a = rule->b_to_a;
+  }
+  up_read(&global_htables_rwsem);
+  return found;
+}
+
+int agnocast_topic_wrapper_refcnt(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
+{
+  down_read(&global_htables_rwsem);
+  const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, domain_id);
+  int refcnt = wrapper ? (int)wrapper->topic->wrapper_refcnt : 0;
+  up_read(&global_htables_rwsem);
+  return refcnt;
 }
 
 #endif

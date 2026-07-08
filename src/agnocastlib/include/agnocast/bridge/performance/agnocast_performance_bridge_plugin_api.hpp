@@ -10,11 +10,11 @@ struct PerformancePubsubBridgeResult
   rclcpp::CallbackGroup::SharedPtr callback_group;
 };
 
-struct PerformanceServiceBridgeResult
+struct ServiceBridgeEntity
 {
   std::shared_ptr<void> entity_handle;
-  rclcpp::CallbackGroup::SharedPtr ros_srv_cb_group;
-  rclcpp::CallbackGroup::SharedPtr agno_client_cb_group;
+  rclcpp::CallbackGroup::SharedPtr srv_cb_group;
+  rclcpp::CallbackGroup::SharedPtr client_cb_group;
 };
 
 extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
@@ -23,10 +23,14 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
 extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & qos);
 
-extern "C" PerformanceServiceBridgeResult create_r2a_service_bridge(
+extern "C" ServiceBridgeEntity create_r2a_service_bridge(
+  rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos);
+
+extern "C" ServiceBridgeEntity create_a2r_service_bridge(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos);
 
 using R2APubsubBridgeFactory = decltype(&create_r2a_pubsub_bridge);
 using A2RPubsubBridgeFactory = decltype(&create_a2r_pubsub_bridge);
 
 using R2AServiceBridgeFactory = decltype(&create_r2a_service_bridge);
+using A2RServiceBridgeFactory = decltype(&create_a2r_service_bridge);
