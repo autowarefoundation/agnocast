@@ -47,6 +47,7 @@ union ioctl_add_process_args {
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
     bool ret_performance_bridge_daemon_exist;
+    bool ret_discovery_agent_exist;
   };
 };
 
@@ -266,6 +267,35 @@ struct ioctl_check_and_request_bridge_shutdown_args
   bool ret_should_shutdown;
 };
 
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_discovery_agent_should_exit_args
+{
+  uint32_t domain_id;
+  // false: read-only idle poll (userspace counts consecutive idle polls before exiting).
+  // true: atomic exit gate -- deregister iff the domain is truly empty, serialized against
+  // add_process so a process racing in vetoes the exit instead of being orphaned.
+  bool commit;
+  bool ret_should_exit;
+};
+
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_already_exists;  // true: another agent already owns this (ns, domain); caller must exit
+};
+
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_discovery_agent_exists_args
+{
+  uint32_t domain_id;
+  bool
+    ret_exists;  // whether an agent is registered for this (ns, domain); read-only liveness query
+};
+
 struct ioctl_set_ros2_subscriber_num_args
 {
   struct name_info topic_name;
@@ -309,6 +339,11 @@ struct ioctl_add_domain_bridge_args
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DOMAIN_BRIDGE_CMD _IOW(0xA6, 28, struct ioctl_add_domain_bridge_args)
+#define AGNOCAST_DISCOVERY_AGENT_SHOULD_EXIT_CMD \
+  _IOWR(0xA6, 29, struct ioctl_discovery_agent_should_exit_args)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD \
+  _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
 
 // ================================================
 // ros2cli ioctls
@@ -484,6 +519,17 @@ int agnocast_ioctl_set_ros2_publisher_num(
 
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid);
 
+int agnocast_ioctl_discovery_agent_should_exit(
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id, const bool commit,
+  bool * ret_should_exit);
+
+int agnocast_ioctl_add_discovery_agent(
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id,
+  struct ioctl_add_discovery_agent_args * ioctl_ret);
+
+int agnocast_ioctl_discovery_agent_exists(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
+
 int agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
   struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
@@ -506,6 +552,7 @@ int agnocast_increment_message_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 int agnocast_get_alive_proc_num(void);
+int agnocast_get_discovery_agent_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
 int64_t agnocast_get_latest_received_entry_id(
