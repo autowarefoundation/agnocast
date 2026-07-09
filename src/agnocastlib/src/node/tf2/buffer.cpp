@@ -32,6 +32,7 @@
 #include "agnocast/node/tf2/buffer.hpp"
 
 #include "agnocast/node/agnocast_context.hpp"
+#include "rclcpp/utilities.hpp"
 #include "rclcpp/version.h"
 
 #include <sstream>
@@ -113,7 +114,9 @@ bool Buffer::canTransform(
     clock_->now() < start_time + rclcpp_timeout &&
     !canTransform(target_frame, source_frame, time, std::chrono::nanoseconds::zero(), errstr) &&
     (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
-    agnocast::ok()) {
+    // Poll while the live runtime is up: agnocast::ok() for AgnocastOnly (rclcpp uninit),
+    // rclcpp::ok() for rclcpp mode (agnocast uninit).
+    (agnocast::ok() || rclcpp::ok())) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
@@ -150,7 +153,7 @@ bool Buffer::canTransform(
            target_frame, target_time, source_frame, source_time, fixed_frame,
            std::chrono::nanoseconds::zero(), errstr) &&
          (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
-         agnocast::ok()) {
+         (agnocast::ok() || rclcpp::ok())) {  // live-runtime guard; see 3-arg overload above
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
