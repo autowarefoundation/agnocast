@@ -706,6 +706,14 @@ unlock:
   return ret;
 }
 
+// The topic name a topic's endpoints notify on. Endpoints of a bridged (incl. renamed) topic share
+// one topic_struct but keep their own per-domain names, so return the rule's canonical name -- a
+// publisher and a renamed subscriber then derive the same publish-notification MQ name.
+static const char * notify_mq_topic_name(const struct topic_wrapper * wrapper)
+{
+  return wrapper->topic->rule ? wrapper->topic->rule->topic_name_a : wrapper->key;
+}
+
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
@@ -731,6 +739,7 @@ int agnocast_ioctl_add_subscriber(
   }
 
   ioctl_ret->ret_id = sub_info->id;
+  strscpy(ioctl_ret->ret_mq_topic_name, notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -760,6 +769,7 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
+  strscpy(ioctl_ret->ret_mq_topic_name, notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;

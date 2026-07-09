@@ -53,7 +53,7 @@ void decrement_borrowed_publisher_num()
 
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge, const std::string & type_name)
+  const bool is_bridge, const std::string & type_name, std::string & out_mq_topic_name)
 {
   validate_ld_preload();
 
@@ -76,12 +76,15 @@ topic_local_id_t initialize_publisher(
     exit(EXIT_FAILURE);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+  out_mq_topic_name = pub_args.ret_mq_topic_name;
   return pub_args.ret_id;
 }
 
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle /* for CARET */, const std::string & topic_name,
-  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address,
+  const std::string & mq_topic_name, const topic_local_id_t publisher_id,
+  const uint64_t msg_virtual_address,
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs)
 {
   std::array<topic_local_id_t, MAX_SUBSCRIBER_NUM> subscriber_ids_buffer{};
@@ -115,7 +118,7 @@ union ioctl_publish_msg_args publish_core(
       // later.
       std::get<1>(t) = true;
     } else {
-      const std::string mq_name = create_mq_name_for_agnocast_publish(topic_name, subscriber_id);
+      const std::string mq_name = create_mq_name_for_agnocast_publish(mq_topic_name, subscriber_id);
       mq = mq_open(mq_name.c_str(), O_WRONLY | O_NONBLOCK);
       if (mq == -1) {
         // Right after a subscriber is added, its message queue has not been created yet. Therefore,
@@ -227,7 +230,8 @@ rclcpp::QoS PublisherBase::init_base(
 
   const bool is_bridge = (role == PublisherRole::BridgeInternal);
   const std::string node_name = node->get_fully_qualified_name();
-  id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
+  id_ =
+    initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name, mq_topic_name_);
   generate_gid();
 
   if (role == PublisherRole::Default) {

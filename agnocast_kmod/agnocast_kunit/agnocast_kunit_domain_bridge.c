@@ -419,3 +419,35 @@ void test_case_domain_bridge_rename_multi_publisher(struct kunit * test)
   KUNIT_EXPECT_EQ(test, publish_args.ret_subscriber_num, (uint32_t)1);
   KUNIT_EXPECT_EQ(test, subscriber_ids_buf[0], sub_d2);
 }
+
+void test_case_domain_bridge_rename_notify_uses_canonical_name(struct kunit * test)
+{
+  // Both endpoints of a renamed pair must derive the same publish-notification MQ name -- the
+  // pair's canonical (domain_a) name -- even though they publish/subscribe under different
+  // per-domain names. Otherwise the userspace publisher and the renamed subscriber open different
+  // MQs and the subscriber is never notified.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  union ioctl_add_publisher_args pub_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_publisher(
+      RN_SRC, current->nsproxy->ipc_ns, "/kunit_node", current->tgid, 1, false, false, &pub_args),
+    0);
+
+  setup_process_in_domain(test, 1001, 2);
+  union ioctl_add_subscriber_args sub_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_subscriber(
+      RN_DST, current->nsproxy->ipc_ns, "/kunit_node", 1001, 1, false, true, false, false, false,
+      &sub_args),
+    0);
+
+  // domain_a is the lower domain (1), so the canonical name is RN_SRC: the publisher on RN_SRC@1
+  // and the renamed subscriber on RN_DST@2 both report RN_SRC as their notification MQ topic.
+  KUNIT_EXPECT_STREQ(test, pub_args.ret_mq_topic_name, RN_SRC);
+  KUNIT_EXPECT_STREQ(test, sub_args.ret_mq_topic_name, RN_SRC);
+}

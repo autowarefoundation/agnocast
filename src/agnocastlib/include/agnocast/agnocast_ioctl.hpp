@@ -85,6 +85,10 @@ union ioctl_add_subscriber_args {
   struct
   {
     topic_local_id_t ret_id;
+    // Topic name to use for the publish-notification MQ: the requested topic for a plain topic, or
+    // the domain-bridge pair's canonical name for a bridged (incl. renamed) topic, so a publisher
+    // and a renamed subscriber sharing one topic_struct derive the same MQ name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -103,6 +107,8 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
+    // See ioctl_add_subscriber_args::ret_mq_topic_name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
