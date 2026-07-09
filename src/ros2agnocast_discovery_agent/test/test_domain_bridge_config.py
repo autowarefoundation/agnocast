@@ -60,6 +60,18 @@ topics:
     assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
 
 
+def test_non_string_topic_key_without_remap_is_coerced():
+    # A non-string YAML key (here an integer) with no `remap` must not trip the remap
+    # string check; both names default to the coerced source name.
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  123:
+"""
+    assert parse_domain_bridge_config(text) == ([('123', '123', 1, 2)], [])
+
+
 def test_non_string_remap_raises():
     text = """
 from_domain: 1

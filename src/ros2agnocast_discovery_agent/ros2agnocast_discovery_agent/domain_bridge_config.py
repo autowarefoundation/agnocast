@@ -65,7 +65,9 @@ def parse_domain_bridge_config(text):
         if from_domain is None or to_domain is None:
             skipped.append(str(topic_name))
             continue
-        to_topic = spec.get('remap', topic_name)
+        # Default to the source name (coerced like from_topic below), so a non-string YAML key
+        # without a remap doesn't trip the "'remap' must be a string" check.
+        to_topic = spec.get('remap', str(topic_name))
         if not isinstance(to_topic, str):
             raise ValueError(f"'remap' for topic {topic_name!r} must be a string")
         rules.append(
