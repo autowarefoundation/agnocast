@@ -1,6 +1,5 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
-#include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/typesupport_helpers.hpp"
 #include "rclcpp/version.h"
@@ -26,14 +25,6 @@ void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
   SubscriptionRole role, const std::string & node_name, const std::string & type_name)
 {
-  // Announce to the per-IPC-namespace discovery agent before the kmod call so
-  // the registry line is in place whenever a later snapshot sees the
-  // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
-  if (!type_name.empty()) {
-    internal::TypeRegistryWriter::instance().register_type(
-      topic_name_, type_name, "sub", node_name);
-  }
-
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
   add_subscriber_args.node_name = {node_name.c_str(), node_name.size()};

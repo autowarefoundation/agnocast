@@ -31,9 +31,8 @@ The verdict is driven by two internal checks:
     "running but not publishing" when ``gossip`` is NG.
 
 ``--verbose`` additionally prints the IPC namespace inode, the ROS_DOMAIN_ID,
-each check's result, and a ``type_registry`` line (how many live Agnocast processes have
-registered). None of those affect the exit code — they are context, not part
-of the verdict.
+and each check's result. None of those affect the exit code — they are context,
+not part of the verdict.
 
 Exit code: 0 when the agent is running (gossip OK), 1 otherwise.
 """
@@ -50,12 +49,6 @@ from ros2agnocast.discovery import (
     GOSSIP_TOPIC,
     warn_if_gossip_timeout_overridden,
 )
-
-
-def _type_registry_base() -> str:
-    """Resolve the tmpfs root, honoring ``AGNOCAST_TMPFS_DIR`` like the writer."""
-    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
-    return os.path.join(root, 'agnocast_type_registry')
 
 
 def _self_ipc_ns_inode():
@@ -127,44 +120,6 @@ def _check_gossip(my_ns_inode, timeout_sec):
     return False, f'no snapshot on {GOSSIP_TOPIC} within {timeout_sec}s'
 
 
-def _describe_type_registry(my_ns_inode) -> str:
-    """Return a one-line description of the tmpfs type registry.
-
-    This is *informational*, not a liveness signal: an empty or absent
-    registry just means no Agnocast publisher/subscriber has registered in
-    this namespace yet, which is normal and not an agent fault. So it returns
-    a plain description (no OK/NG) of how many live registrations exist. Stale
-    ``<pid>.txt`` files (process gone) are counted separately and don't count
-    as live.
-    """
-    ns_dir = os.path.join(_type_registry_base(), str(my_ns_inode))
-    if not os.path.isdir(ns_dir):
-        return f'no Agnocast process has registered yet ({ns_dir} absent)'
-
-    live = 0
-    stale = 0
-    for name in os.listdir(ns_dir):
-        if not name.endswith('.txt'):
-            continue
-
-        pid_str = name[:-len('.txt')]
-        if not pid_str.isdigit():
-            continue
-
-        if os.path.exists(f'/proc/{pid_str}'):
-            live += 1
-        else:
-            stale += 1
-
-    if live:
-        detail = f'{live} live registration(s) in {ns_dir}'
-    else:
-        detail = f'no Agnocast process has registered yet in {ns_dir}'
-    if stale:
-        detail += f' ({stale} stale <pid>.txt awaiting daemon cleanup)'
-    return detail
-
-
 class DiscoveryDaemonStatusVerb(VerbExtension):
     """Check the current IPC namespace's Agnocast discovery agent liveness."""
 
@@ -172,8 +127,8 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
         add_gossip_timeout_arg(parser)
         parser.add_argument(
             '-v', '--verbose', action='store_true',
-            help='also print the IPC namespace inode, each internal check, and '
-                 'the type_registry info line (none affect the exit code)')
+            help='also print the IPC namespace inode and each internal check '
+                 '(neither affects the exit code)')
 
     def main(self, *, args):
         warn_if_gossip_timeout_overridden(args)
@@ -196,7 +151,6 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
                 print('  gossip:        skipped (agent not running)')
             else:
                 print(f'  gossip:        {"OK" if gossip_ok else "NG"} ({gossip_reason})')
-            print(f'  type_registry: {_describe_type_registry(my_ns_inode)}')
             print('')
 
         # Default output is the verdict only — the per-check reasons are

@@ -1,7 +1,6 @@
 #include "agnocast/agnocast_publisher.hpp"
 
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
-#include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 
@@ -56,13 +55,6 @@ topic_local_id_t initialize_publisher(
   const bool is_bridge, const std::string & type_name)
 {
   validate_ld_preload();
-
-  // Announce to the per-IPC-namespace discovery agent before the kmod call so
-  // the registry line is in place whenever a later snapshot sees the
-  // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
-  if (!type_name.empty()) {
-    internal::TypeRegistryWriter::instance().register_type(topic_name, type_name, "pub", node_name);
-  }
 
   union ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {topic_name.c_str(), topic_name.size()};
