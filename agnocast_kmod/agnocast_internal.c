@@ -24,6 +24,14 @@ int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
+// The topic name a topic's endpoints notify on. Endpoints of a bridged (incl. renamed) topic share
+// one topic_struct but keep their own per-domain names, so return the rule's canonical name -- a
+// publisher and a renamed subscriber then derive the same publish-notification MQ name.
+const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper)
+{
+  return wrapper->topic->rule ? wrapper->topic->rule->topic_name_a : wrapper->key;
+}
+
 static void pre_handler_subscriber_exit(
   struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)
 {
@@ -47,7 +55,8 @@ static void pre_handler_subscriber_exit(
       struct exit_subscription_entry * exit_entry =
         kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
       if (exit_entry) {
-        strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
+        strscpy(
+          exit_entry->topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
         exit_entry->subscriber_id = subscriber_id;
         list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
         proc_info->exit_subscription_count++;

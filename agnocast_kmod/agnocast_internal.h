@@ -233,6 +233,10 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 
 bool agnocast_is_referenced(struct entry_node * en);
 
+// The canonical topic name whose publish-notification MQ this wrapper's endpoints use. Shared
+// between registration (returned to userspace) and exit cleanup so both derive the same MQ name.
+const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper);
+
 struct process_info * agnocast_find_process_info(const pid_t pid);
 
 void agnocast_free_exit_subscription_list(struct process_info * proc_info);
