@@ -164,7 +164,7 @@ void GenericService::send_response(rmw_request_id_t & req_id, std::shared_ptr<vo
     return;
   }
   if (ret != RCL_RET_OK) {
-    ::rclcpp::exceptions::throw_from_rcl_error(ret, "failed to send rensponse");
+    ::rclcpp::exceptions::throw_from_rcl_error(ret, "failed to send response");
   }
 }
 
