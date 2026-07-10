@@ -5,6 +5,8 @@
 
 #include <kunit/test.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const char * NODE_NAME_WITH_SUFFIX = "/kunit_test_node_extra";
@@ -28,8 +30,8 @@ void test_case_get_node_sub_topics_exact_match(struct kunit * test)
   setup_process(test, PID);
 
   ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, PID, QOS_DEPTH, false, false,
+    false, false, IS_BRIDGE, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   // copy_to_user inside ioctl_get_node_subscriber_topics returns -EFAULT in KUnit (kernel thread)
@@ -49,8 +51,8 @@ void test_case_get_node_sub_topics_prefix_no_match(struct kunit * test)
   setup_process(test, PID);
 
   ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME_WITH_SUFFIX, PID, QOS_DEPTH, false, false,
-    false, false, IS_BRIDGE, &add_sub_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME_WITH_SUFFIX, MESSAGE_TYPE, PID, QOS_DEPTH,
+    false, false, false, false, IS_BRIDGE, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
@@ -71,8 +73,8 @@ void test_case_get_node_sub_topics_buffer_size_exceeded(struct kunit * test)
   setup_process(test, PID);
 
   ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, PID, QOS_DEPTH, false, false,
+    false, false, IS_BRIDGE, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   // Set topic_name_buffer_size to 0 so the buffer cannot hold any entry.

@@ -87,6 +87,7 @@ struct publisher_info
   uint32_t domain_id;
   pid_t pid;
   char * node_name;
+  char * message_type;
   uint32_t qos_depth;
   bool qos_is_transient_local;
   uint32_t entries_num;
@@ -105,6 +106,7 @@ struct subscriber_info
   bool qos_is_reliable;
   int64_t latest_received_entry_id;
   char * node_name;
+  char * message_type;
   bool is_take_sub;
   bool ignore_local_publications;
   bool need_mmap_update;

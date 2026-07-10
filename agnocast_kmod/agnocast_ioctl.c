@@ -200,10 +200,10 @@ static struct subscriber_info * find_subscriber_info(
 }
 
 static int insert_subscriber_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
-  const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
-  struct subscriber_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * message_type,
+  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
+  const bool qos_is_reliable, const bool is_take_sub, bool ignore_local_publications,
+  const bool is_bridge, struct subscriber_info ** new_info)
 {
   int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
@@ -237,12 +237,20 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
+  char * message_type_copy = kstrdup(message_type, GFP_KERNEL);
+  if (!message_type_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
   (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = subscriber_pid;
+  (*new_info)->message_type = message_type_copy;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->qos_is_reliable = qos_is_reliable;
@@ -304,9 +312,9 @@ static struct publisher_info * find_publisher_info(
 }
 
 static int insert_publisher_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t publisher_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
-  struct publisher_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * message_type,
+  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
+  const bool is_bridge, struct publisher_info ** new_info)
 {
   int count = agnocast_get_size_pub_info_htable(wrapper);
   if (count == MAX_PUBLISHER_NUM) {
@@ -340,6 +348,13 @@ static int insert_publisher_info(
     return -ENOMEM;
   }
 
+  char * message_type_copy = kstrdup(message_type, GFP_KERNEL);
+  if (!message_type_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
@@ -347,6 +362,7 @@ static int insert_publisher_info(
   (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = publisher_pid;
   (*new_info)->node_name = node_name_copy;
+  (*new_info)->message_type = message_type_copy;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
@@ -703,9 +719,10 @@ unlock:
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret)
+  const char * message_type, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool qos_is_reliable, const bool is_take_sub,
+  const bool ignore_local_publications, const bool is_bridge,
+  union ioctl_add_subscriber_args * ioctl_ret)
 {
   int ret;
 
@@ -719,8 +736,8 @@ int agnocast_ioctl_add_subscriber(
 
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
-    wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
-    is_take_sub, ignore_local_publications, is_bridge, &sub_info);
+    wrapper, node_name, message_type, subscriber_pid, qos_depth, qos_is_transient_local,
+    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, &sub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -734,8 +751,9 @@ unlock:
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret)
+  const char * message_type, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret)
 {
   int ret;
 
@@ -749,7 +767,8 @@ int agnocast_ioctl_add_publisher(
 
   struct publisher_info * pub_info;
   ret = insert_publisher_info(
-    wrapper, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, &pub_info);
+    wrapper, node_name, message_type, publisher_pid, qos_depth, qos_is_transient_local, is_bridge,
+    &pub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -1732,6 +1751,8 @@ int agnocast_ioctl_get_topic_subscriber_info(
     struct topic_info_ret * temp_info = &topic_info_mem[idx];
 
     strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
+    strscpy(temp_info->message_type, sub_info->message_type, MESSAGE_TYPE_BUFFER_SIZE);
+    temp_info->pid = sub_info->pid;
     temp_info->qos_depth = sub_info->qos_depth;
     temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
     temp_info->qos_is_reliable = sub_info->qos_is_reliable;
@@ -1822,6 +1843,8 @@ int agnocast_ioctl_get_topic_publisher_info(
     struct topic_info_ret * temp_info = &topic_info_mem[idx];
 
     strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
+    strscpy(temp_info->message_type, pub_info->message_type, MESSAGE_TYPE_BUFFER_SIZE);
+    temp_info->pid = pub_info->pid;
     temp_info->qos_depth = pub_info->qos_depth;
     temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
     temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
@@ -1945,6 +1968,7 @@ int agnocast_ioctl_remove_subscriber(
 
   hash_del(&sub_info->node);
   kfree(sub_info->node_name);
+  kfree(sub_info->message_type);
   kfree(sub_info);
 
   if (!is_parameter_service_topic(topic_name)) {
@@ -1993,6 +2017,7 @@ int agnocast_ioctl_remove_subscriber(
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
       kfree(pub_info->node_name);
+      kfree(pub_info->message_type);
       kfree(pub_info);
     }
   }
@@ -2048,6 +2073,7 @@ int agnocast_ioctl_remove_publisher(
   if (pub_info->entries_num == 0) {
     hash_del(&pub_info->node);
     kfree(pub_info->node_name);
+    kfree(pub_info->message_type);
     kfree(pub_info);
 
     if (!is_parameter_service_topic(topic_name)) {
@@ -2510,16 +2536,20 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 
   char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
   char node_name_buf[NODE_NAME_BUFFER_SIZE];
+  char message_type_buf[MESSAGE_TYPE_BUFFER_SIZE];
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &sub_args.topic_name);
   if (ret) return ret;
 
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &sub_args.node_name);
   if (ret) return ret;
 
+  ret = copy_name_from_user(message_type_buf, sizeof(message_type_buf), &sub_args.message_type);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_subscriber(
-    topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
-    sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, &sub_args);
+    topic_name_buf, ipc_ns, node_name_buf, message_type_buf, pid, sub_args.qos_depth,
+    sub_args.qos_is_transient_local, sub_args.qos_is_reliable, sub_args.is_take_sub,
+    sub_args.ignore_local_publications, sub_args.is_bridge, &sub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
@@ -2537,15 +2567,19 @@ static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
 
   char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
   char node_name_buf[NODE_NAME_BUFFER_SIZE];
+  char message_type_buf[MESSAGE_TYPE_BUFFER_SIZE];
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &pub_args.topic_name);
   if (ret) return ret;
 
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &pub_args.node_name);
   if (ret) return ret;
 
+  ret = copy_name_from_user(message_type_buf, sizeof(message_type_buf), &pub_args.message_type);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_publisher(
-    topic_name_buf, ipc_ns, node_name_buf, pid, pub_args.qos_depth, pub_args.qos_is_transient_local,
-    pub_args.is_bridge, &pub_args);
+    topic_name_buf, ipc_ns, node_name_buf, message_type_buf, pid, pub_args.qos_depth,
+    pub_args.qos_is_transient_local, pub_args.is_bridge, &pub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &pub_args, sizeof(pub_args))) return -EFAULT;
   }
@@ -3400,6 +3434,35 @@ bool agnocast_is_in_publisher_htable(
     return false;
   }
   return true;
+}
+
+const char * agnocast_get_subscriber_message_type(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const topic_local_id_t subscriber_id)
+{
+  const struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    return NULL;
+  }
+  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
+  if (!sub_info) {
+    return NULL;
+  }
+  return sub_info->message_type;
+}
+
+const char * agnocast_get_publisher_message_type(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id)
+{
+  const struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    return NULL;
+  }
+  const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    return NULL;
+  }
+  return pub_info->message_type;
 }
 
 int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns)

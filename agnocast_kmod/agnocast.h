@@ -12,10 +12,11 @@
  * balance the number of calling ioctl and the overhead of copying data between user and kernel
  * space. */
 #define MAX_RECEIVE_NUM 10
-#define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
-#define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
-#define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
-#define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
+#define MAX_RELEASE_NUM 3             // Maximum number of entries that can be released at one ioctl
+#define NODE_NAME_BUFFER_SIZE 256     // Maximum length of node name: 256 characters
+#define TOPIC_NAME_BUFFER_SIZE 256    // Maximum length of topic name: 256 characters
+#define MESSAGE_TYPE_BUFFER_SIZE 512  // Maximum length of message type name: 512 characters
+#define VERSION_BUFFER_LEN 32         // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
 struct publisher_shm_info
@@ -56,6 +57,7 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info message_type;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
@@ -74,6 +76,7 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info message_type;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;
@@ -376,6 +379,8 @@ union ioctl_node_info_args {
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
+  char message_type[MESSAGE_TYPE_BUFFER_SIZE];
+  pid_t pid;
   uint32_t qos_depth;
   bool qos_is_transient_local;
   bool qos_is_reliable;
@@ -420,14 +425,16 @@ void agnocast_exit_device(void);
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
+  const char * message_type, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool qos_is_reliable, const bool is_take_sub,
+  const bool ignore_local_publications, const bool is_bridge,
+  union ioctl_add_subscriber_args * ioctl_ret);
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
+  const char * message_type, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret);
 
 int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
@@ -567,6 +574,12 @@ bool agnocast_is_in_subscriber_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id);
 bool agnocast_is_in_publisher_htable(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const topic_local_id_t publisher_id);
+const char * agnocast_get_subscriber_message_type(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const topic_local_id_t subscriber_id);
+const char * agnocast_get_publisher_message_type(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t publisher_id);
 int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns);

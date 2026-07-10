@@ -37,6 +37,7 @@ void SubscriptionBase::initialize(
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
   add_subscriber_args.node_name = {node_name.c_str(), node_name.size()};
+  add_subscriber_args.message_type = {type_name.c_str(), type_name.size()};
   add_subscriber_args.qos_depth = static_cast<uint32_t>(qos.depth());
   add_subscriber_args.qos_is_transient_local =
     qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;

@@ -7,6 +7,8 @@
 #include <kunit/test.h>
 #include <linux/delay.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const pid_t PID_BASE = 1000;
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
@@ -32,7 +34,7 @@ static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t pub
 {
   union ioctl_add_publisher_args add_publisher_args;
   int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, publisher_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -45,7 +47,7 @@ static topic_local_id_t setup_one_subscriber(struct kunit * test, const pid_t su
 {
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, subscriber_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
 

@@ -75,6 +75,7 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info message_type;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
@@ -96,6 +97,7 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info message_type;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;

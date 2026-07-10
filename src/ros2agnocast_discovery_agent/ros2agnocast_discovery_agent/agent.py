@@ -57,6 +57,7 @@ SELF_IPC_NS_PATH = '/proc/self/ns/ipc'
 # constants — they happen to share the value 256 today.
 NODE_NAME_BUFFER_SIZE = 256
 TOPIC_NAME_BUFFER_SIZE = 256
+MESSAGE_TYPE_BUFFER_SIZE = 512
 # How long a remote daemon's last snapshot may sit in _remote_states without
 # being refreshed before we drop it. Matches the gossip Liveliness lease so
 # DDS-side liveliness loss and local prune happen on the same timescale.
@@ -102,6 +103,8 @@ class TopicInfoRet(ctypes.Structure):
 
     _fields_ = [
         ('node_name', ctypes.c_char * NODE_NAME_BUFFER_SIZE),
+        ('message_type', ctypes.c_char * MESSAGE_TYPE_BUFFER_SIZE),
+        ('pid', ctypes.c_int32),
         ('qos_depth', ctypes.c_uint32),
         ('qos_is_transient_local', ctypes.c_bool),
         ('qos_is_reliable', ctypes.c_bool),

@@ -5,6 +5,8 @@
 
 #include <kunit/test.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static char * topic_name = "/kunit_test_topic";
 static char * node_name = "/kunit_test_node";
 static uint32_t qos_depth = 1;
@@ -29,7 +31,7 @@ static void setup_one_subscriber(
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
   *subscriber_id = add_subscriber_args.ret_id;
@@ -50,7 +52,7 @@ static void setup_one_publisher(
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
     qos_is_transient_local, is_bridge, &add_publisher_args);
   *publisher_id = add_publisher_args.ret_id;
 
@@ -74,8 +76,8 @@ static void setup_pub_sub_same_process(
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret_pub = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
-    is_bridge, &add_publisher_args);
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, common_pid, qos_depth,
+    qos_is_transient_local, is_bridge, &add_publisher_args);
 
   if (publisher_id) {
     *publisher_id = add_publisher_args.ret_id;
@@ -83,8 +85,9 @@ static void setup_pub_sub_same_process(
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret_sub = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth, qos_is_transient_local,
-    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, &add_subscriber_args);
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, common_pid, qos_depth,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
+    &add_subscriber_args);
 
   if (subscriber_id) {
     *subscriber_id = add_subscriber_args.ret_id;

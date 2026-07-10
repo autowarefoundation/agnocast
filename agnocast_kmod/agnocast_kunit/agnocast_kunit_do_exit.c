@@ -9,6 +9,8 @@
 #include <linux/mm.h>
 #include <linux/string.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const pid_t PID_BASE = 1000;
 
 static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
@@ -49,7 +51,7 @@ static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t pub
 {
   union ioctl_add_publisher_args add_publisher_args;
   int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, publisher_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -66,7 +68,7 @@ static topic_local_id_t setup_one_subscriber_on_topic(
 {
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    topic_name, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, subscriber_pid, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
 

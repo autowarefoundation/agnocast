@@ -67,6 +67,7 @@ topic_local_id_t initialize_publisher(
   union ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {topic_name.c_str(), topic_name.size()};
   pub_args.node_name = {node_name.c_str(), node_name.size()};
+  pub_args.message_type = {type_name.c_str(), type_name.size()};
   pub_args.qos_depth = qos.depth();
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;

@@ -3,6 +3,8 @@
 
 #include "../agnocast.h"
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static char * node_name = "/kunit_test_node";
 static uint32_t qos_depth = 10;
 static bool qos_is_transient_local = false;
@@ -22,7 +24,7 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
 

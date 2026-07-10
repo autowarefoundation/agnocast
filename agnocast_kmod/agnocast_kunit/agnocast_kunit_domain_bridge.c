@@ -6,6 +6,8 @@
 #include <kunit/test.h>
 #include <linux/delay.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 
 #define KUNIT_PUB_SHM_BUF_SIZE 4
@@ -28,7 +30,8 @@ static topic_local_id_t add_publisher_for(struct kunit * test, const pid_t pid)
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_publisher(
-      TOPIC_NAME, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, false, &args),
+      TOPIC_NAME, current->nsproxy->ipc_ns, "/kunit_node", MESSAGE_TYPE, pid, 1, false, false,
+      &args),
     0);
   return args.ret_id;
 }
@@ -39,8 +42,8 @@ static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, true, false, false, false,
-      &args),
+      TOPIC_NAME, current->nsproxy->ipc_ns, "/kunit_node", MESSAGE_TYPE, pid, 1, false, true, false,
+      false, false, &args),
     0);
   return args.ret_id;
 }

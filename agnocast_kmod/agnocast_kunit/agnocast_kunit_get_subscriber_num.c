@@ -3,6 +3,8 @@
 
 #include "../agnocast.h"
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 char * node_name = "/kunit_test_node";
 uint32_t qos_depth = 10;
 bool qos_is_transient_local = false;
@@ -23,7 +25,7 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
     &add_subscriber_args);
 
@@ -41,7 +43,7 @@ static void setup_one_subscriber_with_bridge(struct kunit * test, char * topic_n
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, subscriber_pid, qos_depth,
     qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, true,
     &add_subscriber_args);
 
@@ -59,7 +61,7 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
     qos_is_transient_local, is_bridge, &add_publisher_args);
 
   KUNIT_ASSERT_EQ(test, ret1, 0);
@@ -76,8 +78,9 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, intra_pid, qos_depth, qos_is_transient_local,
-    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, &add_subscriber_args);
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, intra_pid, qos_depth,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
+    &add_subscriber_args);
 
   KUNIT_ASSERT_TRUE(test, ret1 == 0 || ret1 == -EEXIST);
   KUNIT_ASSERT_EQ(test, ret2, 0);

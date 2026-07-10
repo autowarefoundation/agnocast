@@ -6,6 +6,8 @@
 
 #include <kunit/test.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const bool QOS_IS_TRANSIENT_LOCAL = false;
@@ -34,14 +36,15 @@ static int add_pubsub_pair(
 {
   union ioctl_add_publisher_args add_publisher_args;
   int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
-    IS_BRIDGE, &add_publisher_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, pub_pid, qos_depth,
+    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
   if (ret < 0) return ret;
 
   union ioctl_add_subscriber_args add_subscriber_args;
   return agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, sub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
-    QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, &add_subscriber_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, sub_pid, qos_depth,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    &add_subscriber_args);
 }
 
 // A publisher and subscriber with the same topic name but different ROS_DOMAIN_ID
@@ -85,7 +88,7 @@ void test_case_add_subscriber_normal(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
 
@@ -99,6 +102,11 @@ void test_case_add_subscriber_normal(struct kunit * test)
   KUNIT_EXPECT_TRUE(
     test, agnocast_is_in_subscriber_htable(
             TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id));
+  KUNIT_EXPECT_STREQ(
+    test,
+    agnocast_get_subscriber_message_type(
+      TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id),
+    MESSAGE_TYPE);
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
   KUNIT_EXPECT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
 }
@@ -113,14 +121,14 @@ void test_case_add_subscriber_too_many_subscribers(struct kunit * test)
   for (uint32_t i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
     union ioctl_add_subscriber_args add_subscriber_args;
     agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, subscriber_pid, qos_depth,
       QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
       &add_subscriber_args);
   }
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     &add_subscriber_args);
 

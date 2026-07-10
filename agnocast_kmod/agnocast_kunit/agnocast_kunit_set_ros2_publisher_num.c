@@ -3,6 +3,8 @@
 
 #include "../agnocast.h"
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static char * node_name = "/kunit_test_node";
 static uint32_t qos_depth = 10;
 static bool qos_is_transient_local = false;
@@ -19,7 +21,7 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
     qos_is_transient_local, is_bridge, &add_publisher_args);
 
   KUNIT_ASSERT_EQ(test, ret1, 0);

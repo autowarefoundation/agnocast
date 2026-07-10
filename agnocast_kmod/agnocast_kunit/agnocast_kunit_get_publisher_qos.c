@@ -5,6 +5,8 @@
 
 #include <kunit/test.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const pid_t PUBLISHER_PID = 1000;
@@ -27,8 +29,8 @@ static void verify_publisher_qos(struct kunit * test, bool is_transient)
   setup_process(test, PUBLISHER_PID);
 
   ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, is_transient,
-    IS_BRIDGE, &add_pub_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, PUBLISHER_PID, QOS_DEPTH,
+    is_transient, IS_BRIDGE, &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   ret = agnocast_ioctl_get_publisher_qos(
@@ -76,8 +78,8 @@ void test_case_error_publisher_not_found(struct kunit * test)
   setup_process(test, PUBLISHER_PID);
 
   ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, MESSAGE_TYPE, PUBLISHER_PID, QOS_DEPTH, false,
+    IS_BRIDGE, &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_local_id_t invalid_id = add_pub_args.ret_id + 999;

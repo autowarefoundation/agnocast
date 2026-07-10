@@ -5,6 +5,8 @@
 
 #include <kunit/test.h>
 
+static const char * MESSAGE_TYPE = "test_msgs/msg/Test";
+
 static const char * topic_name = "/kunit_test_topic";
 static const char * node_name = "/kunit_test_node";
 static const pid_t publisher_pid = 1000;
@@ -23,7 +25,7 @@ void test_case_add_publisher_normal(struct kunit * test)
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret1 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
     qos_is_transient_local, is_bridge, &add_publisher_args);
 
   KUNIT_EXPECT_EQ(test, ret1, 0);
@@ -35,6 +37,11 @@ void test_case_add_publisher_normal(struct kunit * test)
   KUNIT_EXPECT_TRUE(
     test, agnocast_is_in_publisher_htable(
             topic_name, current->nsproxy->ipc_ns, add_publisher_args.ret_id));
+  KUNIT_EXPECT_STREQ(
+    test,
+    agnocast_get_publisher_message_type(
+      topic_name, current->nsproxy->ipc_ns, add_publisher_args.ret_id),
+    MESSAGE_TYPE);
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
   KUNIT_EXPECT_TRUE(test, agnocast_is_in_topic_htable(topic_name, current->nsproxy->ipc_ns));
 }
@@ -53,7 +60,7 @@ void test_case_add_publisher_many(struct kunit * test)
   union ioctl_add_publisher_args add_publisher_args;
   for (int i = 0; i < publisher_num; i++) {
     ret1 = agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+      topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
       qos_is_transient_local, is_bridge, &add_publisher_args);
   }
 
@@ -81,7 +88,7 @@ void test_case_add_publisher_too_many(struct kunit * test)
   for (int i = 0; i < publisher_num; i++) {
     union ioctl_add_publisher_args add_publisher_args;
     ret1 = agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+      topic_name, current->nsproxy->ipc_ns, node_name, MESSAGE_TYPE, publisher_pid, qos_depth,
       qos_is_transient_local, is_bridge, &add_publisher_args);
   }
 
