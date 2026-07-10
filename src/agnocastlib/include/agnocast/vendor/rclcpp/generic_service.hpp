@@ -14,6 +14,9 @@
 //
 // This file has been modified from the original.
 
+// GenericService is not available in ROS 2 Humble/Jazzy, so it is vendored here to implement
+// Agnocast's service bridging feature.
+
 #pragma once
 
 #include <rclcpp/expand_topic_or_service_name.hpp>
