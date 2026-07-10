@@ -251,6 +251,11 @@ public:
   }
 };
 
+// NOTE on Subscription<void>:
+//   Subscription<void> is the subscription counterpart of TypeErasedPublisher. We do not create a
+//   separate TypeErasedSubscription class because it would share most of its code with
+//   Subscription<MessageT>, making a void specialization the cleaner choice.
+
 /**
  * @brief Agnocast polling take-subscription for a compile-time known message type.
  *
