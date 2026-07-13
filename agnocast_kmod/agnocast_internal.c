@@ -8,6 +8,7 @@ struct device * agnocast_device;
 DECLARE_RWSEM(global_htables_rwsem);
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
+DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
@@ -22,6 +23,14 @@ DECLARE_WAIT_QUEUE_HEAD(worker_wait);
 int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
+
+// The topic name a topic's endpoints notify on. Endpoints of a bridged (incl. renamed) topic share
+// one topic_struct but keep their own per-domain names, so return the rule's canonical name -- a
+// publisher and a renamed subscriber then derive the same publish-notification MQ name.
+const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper)
+{
+  return wrapper->topic->rule ? wrapper->topic->rule->topic_name_a : wrapper->key;
+}
 
 static void pre_handler_subscriber_exit(
   struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)
@@ -46,7 +55,8 @@ static void pre_handler_subscriber_exit(
       struct exit_subscription_entry * exit_entry =
         kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
       if (exit_entry) {
-        strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
+        strscpy(
+          exit_entry->topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
         exit_entry->subscriber_id = subscriber_id;
         list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
         proc_info->exit_subscription_count++;
@@ -305,10 +315,27 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
-// RCU-protected check: returns true if pid is registered in agnocast.
+// Caller holds global_htables_rwsem (write).
+void agnocast_remove_discovery_agent_by_pid(const pid_t pid)
+{
+  struct discovery_agent_info * agent;
+  struct hlist_node * tmp;
+  hash_for_each_possible_safe(
+    discovery_agent_htable, agent, tmp, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
+  {
+    if (agent->pid == pid) {
+      hash_del_rcu(&agent->node);
+      kfree_rcu(agent, rcu_head);
+      return;
+    }
+  }
+}
+
+// RCU-protected check: returns true if pid is a registered agnocast process or discovery agent.
 bool is_agnocast_pid(const pid_t pid)
 {
   struct process_info * proc_info;
+  struct discovery_agent_info * agent;
   bool found = false;
   rcu_read_lock();
   hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
@@ -316,6 +343,16 @@ bool is_agnocast_pid(const pid_t pid)
     if (proc_info->global_pid == pid) {
       found = true;
       break;
+    }
+  }
+  if (!found) {
+    hash_for_each_possible_rcu(
+      discovery_agent_htable, agent, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
+    {
+      if (agent->pid == pid) {
+        found = true;
+        break;
+      }
     }
   }
   rcu_read_unlock();
@@ -327,6 +364,10 @@ bool is_agnocast_pid(const pid_t pid)
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
   down_write(&global_htables_rwsem);
+
+  // The discovery agent is tracked outside proc_info and has no proc_info entry, so drain it
+  // here before the proc_info lookup (which would otherwise return early for the agent's pid).
+  agnocast_remove_discovery_agent_by_pid(pid);
 
   // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
   // have changed between then and now (e.g., the process was already cleaned up by a prior call).

@@ -53,6 +53,8 @@ void SubscriptionBase::initialize(
   }
 
   id_ = add_subscriber_args.ret_id;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+  mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
 
   if (role == SubscriptionRole::Default) {
     if (!type_name.empty()) {
