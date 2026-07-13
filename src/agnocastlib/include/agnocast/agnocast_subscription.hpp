@@ -104,6 +104,10 @@ class SubscriptionBase
 protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;
+  // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
+  // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
+  // and a renamed subscriber derive the same MQ name.
+  std::string mq_topic_name_;
   void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
     SubscriptionRole role, const std::string & node_name, const std::string & type_name);
@@ -170,7 +174,7 @@ class Subscription : public SubscriptionBase
 
     const rclcpp::QoS actual_qos = init_base(node, qos, type_name, false, options, role);
 
-    mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
+    mqd_t mq = open_mq_for_subscription(mq_topic_name_, id_, mq_subscription_);
 
     const bool is_transient_local =
       actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;

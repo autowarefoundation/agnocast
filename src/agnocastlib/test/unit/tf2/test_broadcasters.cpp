@@ -70,16 +70,17 @@ void decrement_borrowed_publisher_num()
 
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string &, const rclcpp::QoS & qos, const bool,
-  const std::string &)
+  const std::string &, std::string & out_mq_topic_name)
 {
   initialize_publisher_call_count++;
   last_initialized_topic_name = topic_name;
   last_initialized_qos = qos;
+  out_mq_topic_name = topic_name;  // non-bridged: the notification MQ uses the topic's own name
   return 0;
 }
 
 union ioctl_publish_msg_args publish_core(
-  const void *, const std::string & topic_name, const topic_local_id_t,
+  const void *, const std::string & topic_name, const std::string &, const topic_local_id_t,
   const uint64_t msg_virtual_address,
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> &)
 {

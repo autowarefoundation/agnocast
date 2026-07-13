@@ -51,6 +51,8 @@ void SubscriptionBase::initialize(
   }
 
   id_ = add_subscriber_args.ret_id;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+  mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
 
   if (role == SubscriptionRole::Default) {
     if (!type_name.empty()) {
@@ -192,7 +194,7 @@ rclcpp::QoS GenericSubscription::constructor_impl(
 {
   const rclcpp::QoS actual_qos = init_base(node, qos, topic_type, false, options, role);
 
-  mqd_t mq = open_mq_for_subscription(topic_name_, id_, mq_subscription_);
+  mqd_t mq = open_mq_for_subscription(mq_topic_name_, id_, mq_subscription_);
 
   const bool is_transient_local =
     actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;

@@ -63,6 +63,7 @@ union ioctl_add_process_args {
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
     bool ret_performance_bridge_daemon_exist;
+    bool ret_discovery_agent_exist;
   };
 };
 #pragma GCC diagnostic pop
@@ -84,6 +85,10 @@ union ioctl_add_subscriber_args {
   struct
   {
     topic_local_id_t ret_id;
+    // Topic name to use for the publish-notification MQ: the requested topic for a plain topic, or
+    // the domain-bridge pair's canonical name for a bridged (incl. renamed) topic, so a publisher
+    // and a renamed subscriber sharing one topic_struct derive the same MQ name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -102,6 +107,8 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
+    // See ioctl_add_subscriber_args::ret_mq_topic_name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop

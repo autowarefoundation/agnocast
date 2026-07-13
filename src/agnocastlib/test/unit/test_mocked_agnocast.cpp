@@ -40,12 +40,14 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string &, const std::string &, const rclcpp::QoS &, const bool, const std::string &)
+  const std::string & topic_name, const std::string &, const rclcpp::QoS &, const bool,
+  const std::string &, std::string & out_mq_topic_name)
 {
-  return 0;  // Dummy value
+  out_mq_topic_name = topic_name;  // non-bridged: the notification MQ uses the topic's own name
+  return 0;                        // Dummy value
 }
 union ioctl_publish_msg_args publish_core(
-  const void *, const std::string &, const topic_local_id_t, const uint64_t,
+  const void *, const std::string &, const std::string &, const topic_local_id_t, const uint64_t,
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> &)
 {
   publish_core_mock_called_count++;

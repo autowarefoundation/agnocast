@@ -20,10 +20,10 @@ Default output is a single one-line verdict — nothing else:
 
 The verdict is driven by two internal checks:
 
-  * **process** — the agent holds an exclusive ``flock(2)`` on its
-    per-(namespace, domain) singleton lock file for its whole lifetime, so we
-    probe that lock. The lock path encodes the IPC namespace and ROS_DOMAIN_ID,
-    so this needs no executable-path matching.
+  * **process** — the kmod holds a per-(ns, domain) discovery-agent
+    registry entry for the agent's whole lifetime, so we query it. The kmod
+    scopes the query to the caller's IPC namespace and the given domain, so
+    this needs no executable-path matching.
   * **gossip** — a snapshot from this IPC namespace is received on
     ``/_agnocast_discovery`` within the timeout. ``gossip`` OK implies
     ``process`` OK (an agent that publishes is alive), so it is the primary,
@@ -38,7 +38,7 @@ of the verdict.
 Exit code: 0 when the agent is running (gossip OK), 1 otherwise.
 """
 
-import fcntl
+import ctypes
 import os
 
 from ros2cli.node.strategy import NodeStrategy
@@ -65,7 +65,7 @@ def _self_ipc_ns_inode():
 def _read_ros_domain_id() -> int:
     """Return ROS_DOMAIN_ID from the environment (0 if unset, empty, or
     unparsable), matching ``ros2agnocast_discovery_agent.agent._read_ros_domain_id``
-    so this verb resolves the same domain the agent locked under.
+    so this verb resolves the same domain the agent runs under.
     """
     raw = os.environ.get('ROS_DOMAIN_ID')
     if not raw:
@@ -76,50 +76,30 @@ def _read_ros_domain_id() -> int:
         return 0
 
 
-def _singleton_lock_path(my_ns_inode, domain_id) -> str:
-    """Path of the agent's per-(IPC namespace, domain) singleton lock.
-
-    Must match ``_singleton_lock_path`` in
-    ``ros2agnocast_discovery_agent.agent``, including the ``AGNOCAST_TMPFS_DIR``
-    override and the ``_d<domain>`` suffix, so this verb probes the same file the
-    agent locks. The agent runs one instance per (namespace, domain), so the
-    domain is part of the path.
-    """
-    root = os.environ.get('AGNOCAST_TMPFS_DIR') or '/dev/shm'
-    return os.path.join(root, f'agnocast_discovery_agent_{my_ns_inode}_d{domain_id}.lock')
-
-
-def _check_daemon_process(my_ns_inode, domain_id):
+def _check_daemon_process(domain_id):
     """Return (ok, reason) for the daemon-liveness check.
 
-    The agent holds an exclusive ``flock(2)`` on its per-(namespace, domain) lock
-    file for its whole lifetime. We probe that lock with a non-blocking
-    ``LOCK_EX``: if we cannot take it, a live agent for this (namespace, domain)
-    is holding it. The kernel releases the lock when the holder dies, so a lock
-    we *can* take (or a missing file) means no live agent. ``reason`` is a short
-    phrase for the verdict breakdown, not a full sentence.
+    The kmod owns the discovery-agent registry -- one entry per (IPC namespace, domain), removed
+    the moment the agent exits -- so a read-only ioctl is the authoritative "is the agent alive?"
+    query for the current namespace and the given domain (no stale state). ``reason``
+    is a short phrase for the verdict breakdown, not a full sentence.
     """
-    lock_path = _singleton_lock_path(my_ns_inode, domain_id)
-    if not os.path.exists(lock_path):
-        return False, f'no singleton lock file ({lock_path})'
-
     try:
-        fd = os.open(lock_path, os.O_RDONLY | os.O_CLOEXEC)
+        lib = ctypes.CDLL('libagnocast_ioctl_wrapper.so')
     except OSError as e:
-        return False, f'cannot open lock {lock_path}: {e}'
-
+        return False, f'cannot load the ioctl wrapper: {e}'
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        # Could NOT take the lock -> a live agent is holding it.
-        return True, f'holds the singleton lock ({lock_path})'
-    except OSError as e:
-        return False, f'cannot probe lock {lock_path}: {e}'
-    finally:
-        os.close(fd)
-
-    # We took the lock (closing the fd above released it) -> nobody held it.
-    return False, f'singleton lock is free ({lock_path})'
+        lib.agnocast_discovery_agent_exists.argtypes = [ctypes.c_uint32]
+        lib.agnocast_discovery_agent_exists.restype = ctypes.c_int
+        ret = lib.agnocast_discovery_agent_exists(domain_id)
+    except AttributeError:
+        # Older/mismatched wrapper without the symbol: report NG instead of crashing the CLI.
+        return False, 'ioctl wrapper lacks agnocast_discovery_agent_exists (version skew?)'
+    if ret < 0:
+        return False, 'kmod query failed (is the agnocast module loaded?)'
+    if ret == 1:
+        return True, f'registered in the kmod (domain {domain_id})'
+    return False, f'no agent registered in the kmod (domain {domain_id})'
 
 
 def _check_gossip(my_ns_inode, timeout_sec):
@@ -201,7 +181,7 @@ class DiscoveryDaemonStatusVerb(VerbExtension):
         my_ns_inode = _self_ipc_ns_inode()
         my_domain_id = _read_ros_domain_id()
 
-        proc_ok, proc_reason = _check_daemon_process(my_ns_inode, my_domain_id)
+        proc_ok, proc_reason = _check_daemon_process(my_domain_id)
         # gossip is the end-to-end signal, but it only matters if a process is
         # up; skip its timeout wait when the agent clearly isn't running.
         if proc_ok:
