@@ -28,15 +28,15 @@ namespace
 
 std::string string_trim(std::string_view str_v)
 {
-  auto begin =
+  const auto * begin =
     std::find_if_not(str_v.begin(), str_v.end(), [](unsigned char ch) { return std::isspace(ch); });
-  auto end = std::find_if_not(str_v.rbegin(), str_v.rend(), [](unsigned char ch) {
-               return std::isspace(ch);
-             }).base();
+  const auto * end = std::find_if_not(str_v.rbegin(), str_v.rend(), [](unsigned char ch) {
+                       return std::isspace(ch);
+                     }).base();
   if (begin >= end) {
     return {};
   }
-  return std::string(begin, end);
+  return {begin, end};
 }
 
 std::tuple<std::string, std::string, std::string> extract_type_identifier(
@@ -53,7 +53,7 @@ std::tuple<std::string, std::string, std::string> extract_type_identifier(
   }
 
   std::string package_name = full_type.substr(0, sep_position_front);
-  std::string middle_module = "";
+  std::string middle_module;
   if (sep_position_back - sep_position_front > 0) {
     middle_module =
       full_type.substr(sep_position_front + 1, sep_position_back - sep_position_front - 1);
@@ -119,10 +119,10 @@ std::shared_ptr<void> GenericService::create_request()
 {
   void * request = new uint8_t[request_members_->size_of_];
   request_members_->init_function(request, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return std::shared_ptr<void>(request, [this](void * p) {
-    request_members_->fini_function(p);
-    delete[] reinterpret_cast<uint8_t *>(p);
-  });
+  return {request, [this](void * p) {
+            request_members_->fini_function(p);
+            delete[] static_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
+          }};
 }
 
 std::shared_ptr<rmw_request_id_t> GenericService::create_request_header()
@@ -145,10 +145,10 @@ std::shared_ptr<void> GenericService::create_response()
 {
   void * response = new uint8_t[response_members_->size_of_];
   response_members_->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return std::shared_ptr<void>(response, [this](void * p) {
-    response_members_->fini_function(p);
-    delete[] reinterpret_cast<uint8_t *>(p);
-  });
+  return {response, [this](void * p) {
+            response_members_->fini_function(p);
+            delete[] static_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
+          }};
 }
 
 void GenericService::send_response(rmw_request_id_t & req_id, std::shared_ptr<void> & response)
