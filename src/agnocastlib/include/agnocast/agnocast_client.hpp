@@ -402,7 +402,7 @@ public:
   }
 
   SharedFutureAndRequestId async_send_request(
-    ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> callback);
+    ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> && callback);
 
   FutureAndRequestId async_send_request(ipc_shared_ptr<void> && request);
 

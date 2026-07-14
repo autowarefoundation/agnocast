@@ -132,7 +132,7 @@ ipc_shared_ptr<void> GenericClient::borrow_loaned_request()
 }
 
 GenericClient::SharedFutureAndRequestId GenericClient::async_send_request(
-  ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> callback)
+  ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> && callback)
 {
   SharedFuture shared_future;
   auto generic_request_wrapper = GenericRequestWrapper(request_members_, std::move(request));
