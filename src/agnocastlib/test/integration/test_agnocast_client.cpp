@@ -5,7 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <future>
+#include <memory>
+#include <thread>
 
 using namespace std::chrono_literals;
 
