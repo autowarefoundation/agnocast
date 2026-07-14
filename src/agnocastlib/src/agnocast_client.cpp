@@ -147,7 +147,7 @@ GenericClient::SharedFutureAndRequestId GenericClient::async_send_request(
   publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
     GenericRequestWrapper::free(p, this->request_members_);
   });
-  return SharedFutureAndRequestId(std::move(shared_future), seqno);
+  return {std::move(shared_future), seqno};
 }
 
 GenericClient::FutureAndRequestId GenericClient::async_send_request(ipc_shared_ptr<void> && request)
@@ -165,7 +165,7 @@ GenericClient::FutureAndRequestId GenericClient::async_send_request(ipc_shared_p
   publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
     GenericRequestWrapper::free(p, this->request_members_);
   });
-  return FutureAndRequestId(std::move(future), seqno);
+  return {std::move(future), seqno};
 }
 
 void GenericClient::cancel_request(ipc_shared_ptr<void> && request)

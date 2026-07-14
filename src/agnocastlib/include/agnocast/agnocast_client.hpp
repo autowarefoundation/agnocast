@@ -305,8 +305,8 @@ private:
   typename Subscription<void>::SharedPtr subscriber_;
 
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_;
+  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_{nullptr};
+  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_{nullptr};
 
   void load_typesupport_impl(const std::string & service_type);
 
