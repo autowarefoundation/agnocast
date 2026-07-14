@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include "agnocast/agnocast_ioctl.hpp"  // NODE_NAME_BUFFER_SIZE
 #include "agnocast/agnocast_smart_pointer.hpp"
 
 namespace
@@ -83,8 +82,17 @@ public:
 
   ipc_shared_ptr<void> && take_request() && { return std::move(request_); }
 
+  /// @brief Allocate a wire-format request buffer in shared memory.
+  ///
+  /// The payload buffer is initialized via the introspection init function with
+  /// MessageInitialization::SKIP. The seqno number is uninitialized (garbage), and the node_name
+  /// string is default-constructed via placement new.
+  ///
+  /// @param request_members The introspection message members for the request type.
+  /// @param borrow_loaned_message A callable that allocates a buffer of the given size in shared
+  /// memory. In practice, this should be TypeErasedPublisher::borrow_loaned_message().
   template <typename Func>
-  static GenericRequestWrapper create(
+  static GenericRequestWrapper allocate(
     const rosidl_typesupport_introspection_cpp::MessageMembers * request_members,
     Func && borrow_loaned_message)
   {
@@ -101,6 +109,9 @@ public:
     return wrapper;
   }
 
+  /// @brief Free a wire-format request buffer in shared memory.
+  /// @param ptr Pointer to the request buffer.
+  /// @param request_members The introspection message members for the request type.
   static void free(
     void * ptr, const rosidl_typesupport_introspection_cpp::MessageMembers * request_members)
   {

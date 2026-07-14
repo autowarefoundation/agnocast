@@ -122,7 +122,7 @@ GenericClient::GenericClient(
 
 ipc_shared_ptr<void> GenericClient::borrow_loaned_request()
 {
-  auto generic_request_wrapper = GenericRequestWrapper::create(
+  auto generic_request_wrapper = GenericRequestWrapper::allocate(
     request_members_, [this](size_t size) { return publisher_->borrow_loaned_message(size); });
 
   generic_request_wrapper.node_name() = node_name_;
