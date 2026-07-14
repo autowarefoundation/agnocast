@@ -1,6 +1,5 @@
 #include "agnocast/agnocast_utils.hpp"
 
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
 #include <sys/stat.h>
@@ -80,10 +79,10 @@ std::string create_mq_name_for_agnocast_publish(
   return create_mq_name("/agnocast", topic_name, id);
 }
 
-// MQ-name suffix that scopes the per-IPC-namespace performance bridge by domain.
+// UDS-address suffix that scopes the per-IPC-namespace bridge listener by domain.
 // An unset OR empty ROS_DOMAIN_ID means "no domain" (no suffix), keeping this in
-// sync with the Python discovery agent (bridge_decider._performance_mq_name).
-static std::string performance_domain_suffix()
+// sync with the Python discovery agent (bridge_decider._bridge_uds_addr).
+static std::string bridge_domain_suffix()
 {
   const char * domain_id = getenv("ROS_DOMAIN_ID");
   if (domain_id == nullptr || *domain_id == '\0') {
@@ -109,21 +108,16 @@ uint32_t get_ros_domain_id()
   return static_cast<uint32_t>(value);
 }
 
-std::string create_mq_name_for_bridge(const pid_t pid)
+std::string create_uds_addr_for_bridge()
 {
-  std::string name = "/agnocast_bridge_manager@" + std::to_string(pid);
-  if (pid == PERFORMANCE_BRIDGE_VIRTUAL_PID) {
-    name += performance_domain_suffix();
-  }
-  return name;
-}
-
-std::string create_mq_name_for_daemon_bridge(const pid_t pid)
-{
-  if (pid == PERFORMANCE_BRIDGE_VIRTUAL_PID) {
-    return std::string(PERFORMANCE_DAEMON_BRIDGE_MQ_NAME) + performance_domain_suffix();
-  }
-  return std::string(DAEMON_BRIDGE_MQ_PREFIX) + "@" + std::to_string(pid);
+  // Abstract-namespace UDS address is prefixed with '\0' and its length is
+  // scoped by the socklen_t passed to bind()/sendto() (no trailing NUL).
+  std::string addr;
+  addr.push_back('\0');
+  addr += "agnocast_bridge_manager_";
+  addr += std::to_string(get_self_ipc_ns_inode());
+  addr += bridge_domain_suffix();
+  return addr;
 }
 
 uint64_t get_self_ipc_ns_inode()
@@ -162,6 +156,12 @@ uint64_t agnocast_get_timestamp()
 const void * get_node_base_address(agnocast::Node * node)
 {
   return static_cast<const void *>(node->get_node_base_interface().get());
+}
+
+const void * get_node_base_address(rclcpp::Node * node)
+{
+  return static_cast<const void *>(
+    node->get_node_base_interface()->get_shared_rcl_node_handle().get());
 }
 
 }  // namespace agnocast

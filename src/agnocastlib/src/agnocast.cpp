@@ -6,6 +6,7 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
 
 #include <dlfcn.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <mutex>
 #include <span>
+#include <string_view>
 #include <vector>
 
 extern "C" {
@@ -204,11 +206,6 @@ void poll_for_unlink()
         const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
         shm_unlink(shm_name.c_str());
 
-        // We don't need to call mq_unlink for non BridgeManager processes. However, we do it for
-        // all exited processes to avoid the complexity of checking the process type.
-        const std::string mq_name = create_mq_name_for_bridge(get_exit_process_args.ret_pid);
-        mq_unlink(mq_name.c_str());
-
         // Unlink subscription MQs that the exited process owned
         for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
           // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
@@ -221,11 +218,6 @@ void poll_for_unlink()
     } while (get_exit_process_args.ret_pid > 0);
 
     if (get_exit_process_args.ret_daemon_should_exit) {
-      auto bridge_mode = get_bridge_mode();
-      if (bridge_mode == BridgeMode::On) {
-        const std::string mq_name = create_mq_name_for_bridge(PERFORMANCE_BRIDGE_VIRTUAL_PID);
-        mq_unlink(mq_name.c_str());
-      }
       break;
     }
   }
@@ -245,6 +237,25 @@ void poll_for_bridge_manager()
     exit(EXIT_FAILURE);
   }
   exit(0);
+}
+
+// Forked into the pre-allocator child: must not allocate. execlp() with a literal
+// argv is malloc-free, unlike setenv() which may allocate before agnocast's TLSF
+// allocator is ready.
+void exec_discovery_agent()
+{
+  execlp(
+    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "discovery_agent", "--exit-when-idle",
+    static_cast<char *>(nullptr));
+  // execlp only returns on failure. This still runs in the pre-allocator forked child, so the
+  // failure path must be async-signal-safe and allocation-free: RCLCPP_ERROR / strerror / exit()
+  // may allocate or run atexit handlers before the TLSF allocator is ready. Use write() + _exit().
+  constexpr std::string_view err_msg = "[ERROR] [Agnocast] Failed to exec the discovery agent\n";
+  // Best-effort diagnostic -- we _exit next regardless; the assignment + cast just
+  // consume write()'s warn_unused_result without allocating or logging.
+  const ssize_t written = write(STDERR_FILENO, err_msg.data(), err_msg.size());
+  static_cast<void>(written);
+  _exit(EXIT_FAILURE);
 }
 
 struct semver
@@ -371,6 +382,15 @@ bool is_version_consistent(
   return true;
 }
 
+// Opt-out for deployments that manage the discovery agent themselves. getenv()
+// does not allocate, so this is safe before agnocast's allocator is ready.
+bool discovery_agent_auto_fork_disabled()
+{
+  const char * v = getenv("AGNOCAST_NO_DISCOVERY_AGENT");
+  return v != nullptr &&
+         (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0);
+}
+
 template <typename Func>
 pid_t spawn_daemon_process(Func && func)
 {
@@ -484,6 +504,14 @@ struct initialize_agnocast_result initialize_agnocast(
 
   if (should_spawn_bridge) {
     spawn_daemon_process([]() { poll_for_bridge_manager(); });
+  }
+
+  // The forked agent inherits this process's IPC namespace and ROS_DOMAIN_ID, and
+  // self-exits when the scope empties. A missing or unstartable agent is not fatal
+  // (the data plane does not depend on the observer); a fork() failure still is, as
+  // for the other daemons spawned here -- it means system-wide resource exhaustion.
+  if (!add_process_args.ret_discovery_agent_exist && !discovery_agent_auto_fork_disabled()) {
+    spawn_daemon_process([]() { exec_discovery_agent(); });
   }
 
   void * mempool_ptr =

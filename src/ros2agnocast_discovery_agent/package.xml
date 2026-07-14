@@ -19,6 +19,9 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>ros2agnocast_discovery_msgs</exec_depend>
   <exec_depend>agnocast_ioctl_wrapper</exec_depend>
+  <!-- Parsing the domain_bridge YAML; rosdep/bloom installs ignore setup.py's
+       install_requires, so the runtime dep must be declared here too. -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

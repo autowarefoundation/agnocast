@@ -1,0 +1,29 @@
+# Example systemd unit: register Agnocast domain bridge rules before applications.
+#
+# This is a REFERENCE, not an installed unit. Agnocast does not assume systemd
+# (see README.md). Copy it to /etc/systemd/system/, adjust the unit names,
+# paths, and target for your deployment, then `systemctl enable` it.
+#
+# What matters is the ordering (see README.md): register AFTER the kmod is
+# loaded and the config filesystem is mounted, and BEFORE any node that uses
+# the bridged topics starts. The dependencies below express exactly that.
+
+[Unit]
+Description=Register Agnocast domain bridge rules
+# /dev/agnocast must exist first. Point this at whatever loads the kmod.
+After=agnocast-kmod.service
+Requires=agnocast-kmod.service
+# The partition holding the config must be mounted before we read it.
+RequiresMountsFor=/etc/agnocast
+# Rules must be in place before any application node comes up.
+Before=my-robot-apps.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=AGNOCAST_DOMAIN_BRIDGE_CONFIG=/etc/agnocast/domain_bridge.yaml
+# Source ROS 2 and the workspace so `ros2 run` resolves, then register.
+ExecStart=/bin/bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 run ros2agnocast_discovery_agent register_domain_bridge'
+
+[Install]
+WantedBy=multi-user.target

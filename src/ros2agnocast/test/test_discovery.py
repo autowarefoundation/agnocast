@@ -178,22 +178,38 @@ def _plain_node(publishers=None):
 
 
 def test_warn_if_using_fallback_silent_when_no_fallback_or_timeout_zero(capsys):
-    warn_if_using_fallback(_plain_node(), used_fallback=False, timeout_sec=2.0)
-    warn_if_using_fallback(_plain_node(), used_fallback=True, timeout_sec=0)
+    warn_if_using_fallback(_plain_node(), used_fallback=False, timeout_sec=2.0, snapshots=[])
+    warn_if_using_fallback(_plain_node(), used_fallback=True, timeout_sec=0, snapshots=[])
     assert capsys.readouterr().err == ''
 
 
 def test_warn_if_using_fallback_says_no_agent_when_dds_sees_no_publisher(capsys):
+    # Local Agnocast state exists (a topic), but no agent is gossiping.
     warn_if_using_fallback(
-        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0)
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[_state('h', 1, topics=[_topic('/chatter')])])
     err = capsys.readouterr().err
     assert 'NOTE' in err
     assert 'no /_agnocast_discovery agent visible' in err
 
 
+def test_warn_if_using_fallback_silent_when_no_publisher_and_no_local_state(capsys):
+    # No agent and no local Agnocast: stay quiet rather than nag the many ros2 CLI
+    # invocations in namespaces without Agnocast. The ioctl fallback yields a single
+    # state with empty ``topics`` (not an empty list) when nothing is registered, so
+    # emptiness is judged by topics, not list length.
+    warn_if_using_fallback(
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[_state('h', 1)])
+    warn_if_using_fallback(
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0, snapshots=[])
+    assert capsys.readouterr().err == ''
+
+
 def test_warn_if_using_fallback_says_qos_or_pythonpath_when_publisher_visible(capsys):
     warn_if_using_fallback(
-        _plain_node(publishers=[MagicMock()]), used_fallback=True, timeout_sec=2.0)
+        _plain_node(publishers=[MagicMock()]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[])
     err = capsys.readouterr().err
     assert 'WARNING' in err
     assert 'falling back to ioctl' in err

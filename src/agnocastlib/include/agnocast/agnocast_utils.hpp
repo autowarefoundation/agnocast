@@ -83,11 +83,7 @@ void validate_ld_preload();
 uint32_t get_ros_domain_id();
 std::string create_mq_name_for_agnocast_publish(
   const std::string & topic_name, const topic_local_id_t id);
-std::string create_mq_name_for_bridge(const pid_t pid);
-// Name of the MQ a per-NS daemon uses to ask a bridge_manager to create a
-// cross-NS bridge. Standard mode keys on the owning user process's pid;
-// performance mode is per-NS (see impl).
-std::string create_mq_name_for_daemon_bridge(const pid_t pid);
+std::string create_uds_addr_for_bridge();
 std::string create_shm_name(const pid_t pid);
 // Return the inode number of the calling process's IPC namespace
 // (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the
@@ -99,9 +95,8 @@ std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name);
 uint64_t agnocast_get_timestamp();
 
-// Create a dummy callback group for agnocast::Node tracepoint use.
-// Defined in .cpp to avoid circular inclusion between agnocast_publisher/subscription.hpp and
-// agnocast_node.hpp.
+// Returns a pointer to the inner node handle that can be used for the TRACEPOINT macro.
 const void * get_node_base_address(agnocast::Node * node);
+const void * get_node_base_address(rclcpp::Node * node);
 
 }  // namespace agnocast

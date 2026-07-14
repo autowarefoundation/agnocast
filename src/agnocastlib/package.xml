@@ -48,6 +48,11 @@
   <!-- Uncomment when agnocast_heaphook is released from PPA -->
   <!-- <exec_depend>agnocast_heaphook</exec_depend> -->
 
+  <!-- initialize_agnocast() forks+execs `ros2 run ros2agnocast_discovery_agent discovery_agent`
+       (the auto-forked discovery agent), so the package must be present at runtime. Runtime-only,
+       so it does not affect build order. -->
+  <exec_depend>ros2agnocast_discovery_agent</exec_depend>
+
   <test_depend>ament_cmake_gmock</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

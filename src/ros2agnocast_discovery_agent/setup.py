@@ -11,9 +11,12 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/discovery_agent.launch.xml']),
-        ('lib/' + package_name, ['scripts/discovery_agent']),
+        ('share/' + package_name + '/systemd',
+            ['systemd/agnocast-domain-bridge.service.example', 'systemd/README.md']),
+        ('lib/' + package_name,
+            ['scripts/discovery_agent', 'scripts/register_domain_bridge']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
     extras_require={'test': ['pytest']},
     maintainer='Keita Morisaki, Takahiro Ishikawa-Aso, Koichi Imai, Takumi Jin',
@@ -27,6 +30,8 @@ setup(
     entry_points={
         'console_scripts': [
             'discovery_agent = ros2agnocast_discovery_agent.agent:main',
+            'register_domain_bridge = '
+            'ros2agnocast_discovery_agent.register_domain_bridge:main',
         ],
     },
 )
