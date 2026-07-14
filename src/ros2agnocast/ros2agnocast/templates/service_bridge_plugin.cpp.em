@@ -37,9 +37,7 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
         std::move(agno_req),
         [service_handle, request_header](typename agnocast::Client<ServiceT>::SharedFuture future) {
           auto agno_res = future.get();
-          typename ServiceT::Response ros_res;
-          ros_res = *agno_res;
-          service_handle->send_response(*request_header, ros_res);
+          service_handle->send_response(*request_header, *agno_res);
         });
     },
 #if RCLCPP_VERSION_MAJOR >= 28
