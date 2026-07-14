@@ -63,12 +63,12 @@ TEST_F(ClientTest, ServiceIsReadyReturnsCorrectValue)
 {
   auto client = create_client();
 
-  ASSERT_FALSE(client->service_is_ready())
+  EXPECT_FALSE(client->service_is_ready())
     << "service_is_ready() should return false before the service is created";
 
   auto service = create_service();
 
-  ASSERT_TRUE(client->service_is_ready())
+  EXPECT_TRUE(client->service_is_ready())
     << "service_is_ready() should return true after the service is created";
 }
 
@@ -79,12 +79,14 @@ TEST_F(ClientTest, WaitForServiceReturnsWhenServiceIsReady)
   // Give wait_for_service() a moment to start blocking.
   std::this_thread::sleep_for(100ms);
 
-  ASSERT_NE(future.wait_for(0ms), std::future_status::ready)
+  EXPECT_NE(future.wait_for(0ms), std::future_status::ready)
     << "wait_for_service() (indefinite) should block while the service is not ready";
 
   auto service = create_service();
 
-  ASSERT_TRUE(future.get()) << "wait_for_service() should return true after the service is created";
+  ASSERT_EQ(future.wait_for(1s), std::future_status::ready)
+    << "wait_for_service() should return promptly after the service is created";
+  EXPECT_TRUE(future.get()) << "wait_for_service() should return true after the service is created";
 }
 
 TEST_F(ClientTest, WaitForServiceTimesOutWhenNoService)
@@ -93,7 +95,7 @@ TEST_F(ClientTest, WaitForServiceTimesOutWhenNoService)
   auto future =
     std::async(std::launch::async, [&client]() { return client->wait_for_service(100ms); });
 
-  ASSERT_FALSE(future.get()) << "wait_for_service() should return false after the timeout";
+  EXPECT_FALSE(future.get()) << "wait_for_service() should return false after the timeout";
 }
 
 TEST_F(ClientTest, WaitForServiceReturnsOnShutdown)
@@ -105,7 +107,9 @@ TEST_F(ClientTest, WaitForServiceReturnsOnShutdown)
 
   rclcpp::shutdown();
 
-  ASSERT_FALSE(future.get()) << "wait_for_service() should return false on shutdown";
+  ASSERT_EQ(future.wait_for(1s), std::future_status::ready)
+    << "wait_for_service() should return promptly on shutdown";
+  EXPECT_FALSE(future.get()) << "wait_for_service() should return false on shutdown";
 }
 
 TEST_F(ClientTest, RequestIdIsUnique)
@@ -115,7 +119,8 @@ TEST_F(ClientTest, RequestIdIsUnique)
   auto request2 = client->borrow_loaned_request();
   auto future_and_request_id2 = client->async_send_request(std::move(request2));
   auto future_and_request_id1 = client->async_send_request(std::move(request1));
-  ASSERT_NE(future_and_request_id1.request_id, future_and_request_id2.request_id)
+  EXPECT_EQ(future_and_request_id1.request_id, 0) << "First request ID should be 0";
+  EXPECT_NE(future_and_request_id1.request_id, future_and_request_id2.request_id)
     << "Request IDs should be unique";
 }
 
@@ -166,5 +171,7 @@ TEST_F(AgnocastNodeClientTest, WaitForServiceReturnsOnShutdown)
 
   agnocast::shutdown();
 
-  ASSERT_FALSE(future.get()) << "wait_for_service() should return false on shutdown";
+  ASSERT_EQ(future.wait_for(1s), std::future_status::ready)
+    << "wait_for_service() should return promptly on shutdown";
+  EXPECT_FALSE(future.get()) << "wait_for_service() should return false on shutdown";
 }
