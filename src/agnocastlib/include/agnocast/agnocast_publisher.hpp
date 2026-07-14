@@ -246,6 +246,10 @@ public:
  *    deleter to free the memory.
  * 4. The constructor is just a thin wrapper around init_base(). As this class is intended for
  *    internal use only, flexibility is prioritized.
+ *
+ * NOTE: This is the publisher counterpart of Subscription<void>. This is not implemented as
+ * Publisher<void> because there is a clear semantic difference between a typed and type-erased
+ * publisher as described above.
  */
 class TypeErasedPublisher : public PublisherBase
 {

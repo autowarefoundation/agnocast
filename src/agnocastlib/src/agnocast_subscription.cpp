@@ -1,4 +1,3 @@
-#include "agnocast/agnocast.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
@@ -6,6 +5,8 @@
 #include "rclcpp/version.h"
 #include "rcpputils/shared_library.hpp"
 
+#include <rmw/rmw.h>
+#include <rmw/serialized_message.h>
 #include <sys/eventfd.h>
 
 namespace agnocast
@@ -153,7 +154,8 @@ rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnoc
   return node->get_node_base_interface()->get_default_callback_group();
 }
 
-TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string & topic_type)
+GenericSubscription::TypeSupportBundle GenericSubscription::load_typesupport_impl(
+  const std::string & topic_type)
 {
   TypeSupportBundle result;
   result.library = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
@@ -169,43 +171,18 @@ TypeSupportBundle GenericSubscription::load_typesupport_impl(const std::string &
   return result;
 }
 
-template <typename NodeT>
-rclcpp::QoS GenericSubscription::constructor_impl(
-  NodeT * node, const std::string & topic_type, const rclcpp::QoS & qos,
-  TypeErasedCallback callback, rclcpp::CallbackGroup::SharedPtr callback_group,
-  const agnocast::SubscriptionOptions & options, SubscriptionRole role)
+bool GenericSubscription::serialize_message(
+  const void * raw, const rosidl_message_type_support_t * type_support,
+  rclcpp::SerializedMessage & out)
 {
-  const rclcpp::QoS actual_qos = init_base(node, qos, topic_type, false, options, role);
-
-  const bool is_transient_local =
-    actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
-  callback_info_id_ = agnocast::register_generic_callback(
-    std::move(callback), topic_name_, id_, is_transient_local, notify_eventfd_,
-    std::move(callback_group));
-
-  return actual_qos;
-}
-
-GenericSubscription::~GenericSubscription()
-{
-  // Remove from callback info map to prevent stale references on re-subscription and to avoid
-  // fd reuse conflicts. When the eventfd is closed below, the OS may later reuse the same fd
-  // number for a new subscription. If the old entry remains in id2_callback_info, adding the new
-  // fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still associates that fd number
-  // with the stale entry.
-  {
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-    id2_callback_info.erase(callback_info_id_);
+  const rmw_ret_t ret = rmw_serialize(raw, type_support, &out.get_rcl_serialized_message());
+  if (ret != RMW_RET_OK) {
+    RCLCPP_ERROR(
+      logger, "rmw_serialize failed (rmw_ret=%d); skipping message", static_cast<int>(ret));
+    rmw_reset_error();
+    return false;
   }
-  close_notify_eventfd(notify_eventfd_);
+  return true;
 }
-
-template rclcpp::QoS GenericSubscription::constructor_impl<rclcpp::Node>(
-  rclcpp::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
-  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
-
-template rclcpp::QoS GenericSubscription::constructor_impl<agnocast::Node>(
-  agnocast::Node *, const std::string &, const rclcpp::QoS &, TypeErasedCallback,
-  rclcpp::CallbackGroup::SharedPtr, const agnocast::SubscriptionOptions &, SubscriptionRole);
 
 }  // namespace agnocast
