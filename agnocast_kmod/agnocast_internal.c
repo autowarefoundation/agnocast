@@ -61,6 +61,9 @@ static void pre_handler_subscriber_exit(
     }
 
     hash_del(&sub_info->node);
+    if (sub_info->notify_ctx) {
+      eventfd_ctx_put(sub_info->notify_ctx);
+    }
     kfree(sub_info->node_name);
     kfree(sub_info);
 
@@ -217,6 +220,9 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
     hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub, tmp_sub, sub_info, node)
     {
       hash_del(&sub_info->node);
+      if (sub_info->notify_ctx) {
+        eventfd_ctx_put(sub_info->notify_ctx);
+      }
       kfree(sub_info->node_name);
       kfree(sub_info);
     }
