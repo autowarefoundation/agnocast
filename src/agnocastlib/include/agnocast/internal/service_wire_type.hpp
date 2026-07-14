@@ -18,6 +18,15 @@
 
 #include "agnocast/agnocast_smart_pointer.hpp"
 
+#include <rosidl_runtime_cpp/message_initialization.hpp>
+#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <new>
+#include <string>
+
 namespace
 {
 

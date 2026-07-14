@@ -99,7 +99,7 @@ private:
   using ServiceRequestPublisher = Publisher<RequestT>;
   using ServiceResponseSubscriber = Subscription<ResponseT>;
 
-  std::atomic<int64_t> next_sequence_number_;
+  std::atomic<int64_t> next_sequence_number_{0};
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   std::string node_name_;
@@ -295,7 +295,7 @@ private:
     }
   };
 
-  std::atomic<int64_t> next_sequence_number_;
+  std::atomic<int64_t> next_sequence_number_{0};
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   std::string node_name_;
