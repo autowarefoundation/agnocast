@@ -223,6 +223,25 @@ def topics_of_node(
     return pubs, subs
 
 
+# Prefixes/namespaces for Agnocast-internal nodes. These are implementation
+# details (not application nodes), so list verbs hide them by default behind
+# ``-d/--debug``, same as the domain bridge nodes.
+BRIDGE_NODE_PREFIX = 'agnocast_bridge_node_'
+DISCOVERY_AGENT_NODE_PREFIX = 'agnocast_discovery_agent_'
+CIE_THREAD_CONFIGURATOR_NAMESPACE = '/agnocast_cie_thread_configurator/'
+
+
+def is_internal_node_name(node_name: str) -> bool:
+    """True for Agnocast-internal nodes (domain bridge, CIE thread configurator,
+    discovery agent) that should be hidden unless ``-d/--debug`` is given."""
+    name = node_name if node_name.startswith('/') else '/' + node_name
+    return (
+        name.startswith('/' + BRIDGE_NODE_PREFIX)
+        or name.startswith('/' + DISCOVERY_AGENT_NODE_PREFIX)
+        or name.startswith(CIE_THREAD_CONFIGURATOR_NAMESPACE)
+    )
+
+
 # Bridge-label states for the CLI verbs. Wording is shared so list/info stay
 # consistent.
 BRIDGE_ENABLED = 'enabled'

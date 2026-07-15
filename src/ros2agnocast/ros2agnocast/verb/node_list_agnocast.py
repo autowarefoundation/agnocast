@@ -7,6 +7,7 @@ from ros2agnocast.discovery import (
     add_gossip_timeout_arg,
     all_nodes,
     collect_announcements_with_fallback,
+    is_internal_node_name,
     warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
@@ -28,7 +29,8 @@ class ListAgnocastVerb(VerbExtension):
             help='Only display the number of nodes discovered')
         parser.add_argument(
             '-d', '--debug', action='store_true',
-            help='Include internal bridge nodes (agnocast_bridge_node_*) in the output')
+            help='Include internal nodes (domain bridge, CIE thread configurator, '
+                 'discovery agent) in the output')
         add_gossip_timeout_arg(parser)
 
     def main(self, *, args):
@@ -73,7 +75,7 @@ class ListAgnocastVerb(VerbExtension):
             ########################################################################
             merged_node_name = agnocast_node_name | ros2_node_name
             if not args.all and not args.debug:
-                merged_node_name = {node for node in merged_node_name if not node.startswith("/agnocast_bridge_node_")}
+                merged_node_name = {node for node in merged_node_name if not is_internal_node_name(node)}
             if args.count_nodes:
                 total_nodes = len(merged_node_name)
                 print(total_nodes)
