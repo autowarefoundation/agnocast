@@ -334,6 +334,9 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
     const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::ROS2_TO_AGNOCAST);
     if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
       if (r2a_it->second.callback_group) {
+        // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn
+        // the group mid-teardown.
+        executor_->remove_callback_group(r2a_it->second.callback_group);
         executor_->stop_callback_group(r2a_it->second.callback_group);
       }
       r2a_it = active_pubsub_r2a_bridges_.erase(r2a_it);
@@ -365,6 +368,9 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
     const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::AGNOCAST_TO_ROS2);
     if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
       if (a2r_it->second.callback_group) {
+        // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn
+        // the group mid-teardown.
+        executor_->remove_callback_group(a2r_it->second.callback_group);
         executor_->stop_callback_group(a2r_it->second.callback_group);
       }
       a2r_it = active_pubsub_a2r_bridges_.erase(a2r_it);
