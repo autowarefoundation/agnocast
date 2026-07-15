@@ -17,8 +17,11 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
   using ServiceT = @(cpp_type);
   using AgnoClient = agnocast::BasicClient<ServiceT>;
 
-  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
+  // agnocast entities below are created, so they are never classified before their agnocast
+  // subscriptions (created internally by the client/service) exist.
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   // AgnocastOnly: this client is the bridge's own endpoint and must not itself request a bridge.
   auto agno_client = std::make_shared<AgnoClient>(
@@ -57,8 +60,11 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
   using ServiceT = @(cpp_type);
   using AgnoService = agnocast::BasicService<ServiceT>;
 
-  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
+  // agnocast entities below are created, so they are never classified before their agnocast
+  // subscriptions (created internally by the client/service) exist.
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto ros_client =
 #if RCLCPP_VERSION_MAJOR >= 28
