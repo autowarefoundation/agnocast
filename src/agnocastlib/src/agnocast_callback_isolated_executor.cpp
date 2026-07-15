@@ -76,7 +76,12 @@ void CallbackIsolatedAgnocastExecutor::spin()
       auto agnocast_topics = agnocast::get_agnocast_topics_by_group(group);
       auto callback_group_id = agnocast::create_callback_group_id(group, node, agnocast_topics);
 
-      if (agnocast_topics.empty()) {
+      // A group needs an agnocast-capable executor if it owns any agnocast entity: subscription
+      // or timer.
+      const bool needs_agnocast_executor =
+        !agnocast_topics.empty() || agnocast::group_has_agnocast_timer(group);
+
+      if (!needs_agnocast_executor) {
         executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
         std::static_pointer_cast<rclcpp::executors::SingleThreadedExecutor>(executor)
           ->add_callback_group(group, node);
@@ -340,7 +345,8 @@ void CallbackIsolatedAgnocastExecutor::add_node(
   std::lock_guard<std::mutex> guard{mutex_};
 
   // Only auto_add==true groups are a real double-add here; auto_add==false groups are never picked
-  // up by the node scan, so their owning node being added later is fine. Mirrors add_callback_group().
+  // up by the node scan, so their owning node being added later is fine. Mirrors
+  // add_callback_group().
   for (const auto & weak_group_to_node : weak_groups_to_nodes_) {
     auto group = weak_group_to_node.first.lock();
 

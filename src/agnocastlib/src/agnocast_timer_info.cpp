@@ -335,6 +335,17 @@ void unregister_timer_info(uint32_t timer_id)
   id2_timer_info.erase(timer_id);
 }
 
+bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group)
+{
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+  for (const auto & [id, timer_info] : id2_timer_info) {
+    if (timer_info && timer_info->callback_group == group) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void TimerInfo::set_period(std::chrono::nanoseconds new_period)
 {
   // rcl_timer_exchange_period semantics.
