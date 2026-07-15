@@ -1,7 +1,7 @@
 use_agnocast_pub: true
 launch_pub_before_sub: true
-pub_qos_depth: 1
+pub_qos_depth: 10
 pub_transient_local: true
-sub_qos_depth: 1
+sub_qos_depth: 10
 sub_transient_local: true
 use_take_sub: true
