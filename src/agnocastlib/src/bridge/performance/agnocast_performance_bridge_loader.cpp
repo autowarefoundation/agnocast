@@ -238,6 +238,9 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(), agnocast::PublisherOptions{},
     agnocast::PublisherRole::BridgeInternal);
 
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists. Do not drop
+  // the false here; with the default (true) the manager's explicit add_callback_group would abort.
   auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   rclcpp::SubscriptionOptions opts;
   opts.ignore_local_publications = true;
@@ -275,6 +278,9 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_
     topic_name, message_type,
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists. Do not drop
+  // the false here; with the default (true) the manager's explicit add_callback_group would abort.
   auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   agnocast::SubscriptionOptions sub_opts;
   sub_opts.ignore_local_publications = true;
