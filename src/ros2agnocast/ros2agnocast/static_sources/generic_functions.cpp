@@ -5,7 +5,7 @@ PerformancePubsubBridgeResult create_r2a_generic_bridge(
   const std::string & type_name,
   std::function<void(std::shared_ptr<rclcpp::SerializedMessage>)> callback)
 {
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   rclcpp::SubscriptionOptions opts;
   opts.ignore_local_publications = true;
   opts.callback_group = cb_group;

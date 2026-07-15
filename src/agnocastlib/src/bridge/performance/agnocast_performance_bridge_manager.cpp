@@ -242,11 +242,19 @@ void PerformanceBridgeManager::activate_daemon_forced_bridge(
         RCLCPP_ERROR(
           logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
       }
+      if (result.callback_group) {
+        executor_->add_callback_group(
+          result.callback_group, container_node_->get_node_base_interface());
+      }
       active_pubsub_r2a_bridges_[topic_name] = result;
     } else {
       if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
         RCLCPP_ERROR(
           logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+      }
+      if (result.callback_group) {
+        executor_->add_callback_group(
+          result.callback_group, container_node_->get_node_base_interface());
       }
       active_pubsub_a2r_bridges_[topic_name] = result;
     }
@@ -480,11 +488,19 @@ void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
         }
+        if (result.callback_group) {
+          executor_->add_callback_group(
+            result.callback_group, container_node_->get_node_base_interface());
+        }
         active_pubsub_r2a_bridges_[topic_name] = result;
       } else {
         if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
           RCLCPP_ERROR(
             logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+        }
+        if (result.callback_group) {
+          executor_->add_callback_group(
+            result.callback_group, container_node_->get_node_base_interface());
         }
         active_pubsub_a2r_bridges_[topic_name] = result;
       }

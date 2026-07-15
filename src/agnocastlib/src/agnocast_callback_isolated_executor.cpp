@@ -127,6 +127,21 @@ void CallbackIsolatedAgnocastExecutor::spin()
 
     {
       std::lock_guard<std::mutex> guard{mutex_};
+
+      // Manually added groups have automatically_add_to_executor_with_node()==false, so the node
+      // scan below skips them; pick them up here or they never spawn.
+      for (const auto & weak_group_to_node : weak_groups_to_nodes_) {
+        auto group = weak_group_to_node.first.lock();
+        if (!group || group->get_associated_with_executor_atomic().load()) {
+          continue;
+        }
+        auto node = weak_group_to_node.second.lock();
+        if (!node) {
+          continue;
+        }
+        new_groups.emplace_back(group, node);
+      }
+
       for (const auto & weak_node : weak_nodes_) {
         auto node = weak_node.lock();
         if (!node) {
@@ -195,22 +210,26 @@ void CallbackIsolatedAgnocastExecutor::add_callback_group(
 
   std::lock_guard<std::mutex> guard{mutex_};
 
-  // Confirm that group_ptr does not refer to any of the callback groups held by nodes in
-  // weak_nodes_.
-  for (const auto & weak_node : weak_nodes_) {
-    auto n = weak_node.lock();
+  // A group with automatically_add_to_executor_with_node()==false is never picked up by add_node()
+  // (the node scans filter on that flag), so manually adding it is the only way to attach it, even
+  // when its owning node is already in weak_nodes_. Only reject a manually added group that its
+  // node would also add automatically, which would be a genuine double-add.
+  if (group_ptr->automatically_add_to_executor_with_node()) {
+    for (const auto & weak_node : weak_nodes_) {
+      auto n = weak_node.lock();
 
-    if (!n) {
-      continue;
-    }
-
-    if (n->callback_group_in_node(group_ptr)) {
-      RCLCPP_ERROR(
-        logger, "Callback group already exists in node: %s", n->get_fully_qualified_name());
-      if (agnocast_fd != -1) {
-        close(agnocast_fd);
+      if (!n) {
+        continue;
       }
-      exit(EXIT_FAILURE);
+
+      if (n->callback_group_in_node(group_ptr)) {
+        RCLCPP_ERROR(
+          logger, "Callback group already exists in node: %s", n->get_fully_qualified_name());
+        if (agnocast_fd != -1) {
+          close(agnocast_fd);
+        }
+        exit(EXIT_FAILURE);
+      }
     }
   }
 
