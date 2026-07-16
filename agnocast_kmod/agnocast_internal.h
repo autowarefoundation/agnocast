@@ -187,7 +187,11 @@ extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 // on adding one.
 struct domain_bridge_rule
 {
-  char * topic_name;
+  // Per-domain topic names. Equal when the rule does not rename; a rename pairs
+  // topic_name_a@domain_a with topic_name_b@domain_b. Delivery stays zero-copy
+  // either way -- only the two wrappers' keys differ.
+  char * topic_name_a;
+  char * topic_name_b;
   const struct ipc_namespace * ipc_ns;
   uint32_t domain_a;  // canonical ordering: domain_a < domain_b
   uint32_t domain_b;
@@ -228,6 +232,10 @@ int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper);
 bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper);
 
 bool agnocast_is_referenced(struct entry_node * en);
+
+// The canonical topic name whose publish-notification MQ this wrapper's endpoints use. Shared
+// between registration (returned to userspace) and exit cleanup so both derive the same MQ name.
+const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper);
 
 struct process_info * agnocast_find_process_info(const pid_t pid);
 

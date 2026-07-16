@@ -66,6 +66,10 @@ union ioctl_add_subscriber_args {
   struct
   {
     topic_local_id_t ret_id;
+    // Topic name to use for the publish-notification MQ. Equal to the requested topic for a plain
+    // topic, but for a domain-bridged (incl. renamed) topic it is the pair's canonical name, so a
+    // publisher and a renamed subscriber that share one topic_struct derive the same MQ name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 
@@ -81,6 +85,8 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
+    // See ioctl_add_subscriber_args::ret_mq_topic_name.
+    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 
@@ -310,7 +316,9 @@ struct ioctl_set_ros2_publisher_num_args
 
 struct ioctl_add_domain_bridge_args
 {
-  struct name_info topic_name;
+  // topic_name_from / topic_name_to may differ (rename); equal for a plain bridge.
+  struct name_info topic_name_from;
+  struct name_info topic_name_to;
   uint32_t from_domain;
   uint32_t to_domain;
 };
@@ -486,8 +494,8 @@ int agnocast_ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_add_domain_bridge(
-  const char * topic_name, uint32_t from_domain, uint32_t to_domain,
-  const struct ipc_namespace * ipc_ns);
+  const char * topic_name_from, const char * topic_name_to, uint32_t from_domain,
+  uint32_t to_domain, const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 
@@ -574,8 +582,8 @@ bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_names
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
 bool agnocast_get_domain_rule(
-  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t * domain_a,
-  uint32_t * domain_b, bool * a_to_b, bool * b_to_a);
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain,
+  uint32_t * domain_a, uint32_t * domain_b, bool * a_to_b, bool * b_to_a);
 // Returns the shared topic_struct's wrapper refcount for the wrapper in domain_id,
 // or 0 if no such wrapper exists. Used to observe domain-bridge grouping.
 int agnocast_topic_wrapper_refcnt(

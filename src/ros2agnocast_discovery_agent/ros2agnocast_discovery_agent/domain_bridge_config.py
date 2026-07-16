@@ -1,9 +1,10 @@
 """Parse a ROS 2 ``domain_bridge`` YAML into kmod rule tuples.
 
-The same YAML drives both the external ``domain_bridge`` node (cross-ECU, via DDS)
-and the daemon's kmod rule injection that opens same-IPC-namespace zero-copy
-cross-domain delivery. Only the topic name and domain pair matter here;
-``type`` and other fields are ignored.
+Each rule is ``(from_topic, to_topic, from_domain, to_domain)``. The same YAML
+drives both the external ``domain_bridge`` node (cross-ECU, via DDS) and the kmod
+rule injection that opens same-IPC-namespace zero-copy cross-domain delivery. The
+topic name, its ``remap`` target, and the domain pair matter here; ``type`` and
+other fields are ignored.
 """
 import yaml
 
@@ -26,15 +27,18 @@ def _as_domain_id(value):
 def parse_domain_bridge_config(text):
     """Return ``(rules, skipped)``.
 
-    ``rules`` is a list of ``(topic_name, from_domain, to_domain)`` tuples.
+    ``rules`` is a list of ``(from_topic, to_topic, from_domain, to_domain)``
+    tuples. ``to_topic`` is the per-topic ``remap`` target (same ``domain_bridge``
+    field the external node honors), or the source name when ``remap`` is absent.
     ``skipped`` lists the topic names dropped for lack of a resolvable domain
     pair, so the caller can surface them instead of dropping them silently.
     ``from_domain`` / ``to_domain`` are taken from the top level and may be
     overridden per topic.
 
     Raises ``ValueError`` / ``TypeError`` on a structurally malformed document
-    (non-mapping root, ``topics``, or topic spec) or an out-of-range domain id.
-    The daemon catches both and runs without rules rather than crashing.
+    (non-mapping root, ``topics``, or topic spec), a non-string ``remap``, or an
+    out-of-range domain id. The caller catches these and skips the config rather
+    than crashing.
     """
     doc = yaml.safe_load(text) or {}
     if not isinstance(doc, dict):
@@ -61,7 +65,13 @@ def parse_domain_bridge_config(text):
         if from_domain is None or to_domain is None:
             skipped.append(str(topic_name))
             continue
-        rules.append((str(topic_name), _as_domain_id(from_domain), _as_domain_id(to_domain)))
+        # Default to the source name (coerced like from_topic below), so a non-string YAML key
+        # without a remap doesn't trip the "'remap' must be a string" check.
+        to_topic = spec.get('remap', str(topic_name))
+        if not isinstance(to_topic, str):
+            raise ValueError(f"'remap' for topic {topic_name!r} must be a string")
+        rules.append(
+            (str(topic_name), to_topic, _as_domain_id(from_domain), _as_domain_id(to_domain)))
     return rules, skipped
 
 
