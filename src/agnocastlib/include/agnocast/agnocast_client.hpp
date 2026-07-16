@@ -262,6 +262,16 @@ public:
   }
 };
 
+/**
+ * @brief Generic service client for zero-copy Agnocast service communication.
+ *
+ * The service type is supplied as a runtime string rather than a compile-time template argument.
+ * If the given service type is invalid, the constructor will throw an exception.
+ *
+ * The basic usage is the same as agnocast::Client, except that if you decide not to send a loaned
+ * request, you must call cancel_request() to free the loaned request memory. Otherwise, the process
+ * will terminate.
+ */
 class GenericClient
 {
 public:
@@ -386,6 +396,9 @@ public:
     const rclcpp::CallbackGroup::SharedPtr & group = nullptr,
     ClientRole role = ClientRole::Default);
 
+  /// @brief Allocate a type-erased request message in shared memory.
+  /// @return Owned pointer to the request message in shared memory, which must be either sent via
+  /// async_send_request() or freed via cancel_request() later.
   ipc_shared_ptr<void> borrow_loaned_request();
 
   const char * get_service_name() const { return service_name_.c_str(); }
@@ -401,11 +414,22 @@ public:
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
 
+  /// @brief Send a request asynchronously and invoke a callback when the response arrives.
+  /// @param request Request from borrow_loaned_request(). Must be moved in.
+  /// @param callback Invoked with a SharedFuture when the response arrives. Call .get() to obtain
+  /// the response.
+  /// @return A SharedFutureAndRequestId containing the shared future and the sequence number of
+  /// the request.
   SharedFutureAndRequestId async_send_request(
     ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> && callback);
 
+  /// @brief Send a request asynchronously and return a future for the response.
+  /// @param request Request from borrow_loaned_request(). Must be moved in.
+  /// @return A FutureAndRequestId containing the future and the sequence number of the request.
   FutureAndRequestId async_send_request(ipc_shared_ptr<void> && request);
 
+  /// @brief Cancel a request that was not sent via async_send_request().
+  /// @param request Request from borrow_loaned_request(). Must be moved in.
   void cancel_request(ipc_shared_ptr<void> && request);
 };
 
