@@ -1,3 +1,5 @@
+import sys
+
 from ros2cli.node.strategy import add_arguments
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import get_node_names
@@ -66,7 +68,20 @@ class ListAgnocastVerb(VerbExtension):
                     return False
 
             # Get ros2 node names.
-            ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=args.all)
+            # The RMW layer can raise (e.g. "empty node name returned by the RMW
+            # layer" when a participant without a valid node name is present in the
+            # DDS graph). Don't let that abort the whole command: fall back to the
+            # Agnocast nodes gathered from gossip so the output is still useful.
+            try:
+                ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=args.all)
+            except Exception as e:
+                print(
+                    f'WARNING: failed to enumerate ROS 2 nodes ({e}); showing '
+                    'Agnocast nodes only. A participant with an empty node name may '
+                    'be present in the DDS graph; try '
+                    '`ros2 daemon stop && ros2 daemon start`.',
+                    file=sys.stderr)
+                ros2_node_name_list = []
             # Exclude shadow nodes so that the corresponding Agnocast nodes are listed with "(Agnocast enabled)"
             ros2_node_name = {n.full_name for n in ros2_node_name_list if not likely_shadow_node(n.full_name)}
 
