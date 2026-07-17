@@ -109,12 +109,16 @@ public:
   }
 };
 
-// Internal implementation - users should use agnocast::Client<ServiceT> instead.
+/**
+ * @brief Service client for zero-copy Agnocast service communication.
+ * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
+ */
+AGNOCAST_PUBLIC
 template <typename ServiceT>
-class BasicClient : public ClientBase
+class Client : public ClientBase
 {
 public:
-  using SharedPtr = std::shared_ptr<BasicClient<ServiceT>>;
+  using SharedPtr = std::shared_ptr<Client<ServiceT>>;
 
   /// Future that resolves to the service response. Returned by async_send_request() (no-callback
   /// overload).
@@ -207,14 +211,14 @@ private:
   }
 
 public:
-  BasicClient(
+  Client(
     rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group, ClientRole role = ClientRole::Default)
   {
     constructor_impl(node, service_name, qos_arg, group, role);
   }
 
-  BasicClient(
+  Client(
     agnocast::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group, ClientRole role = ClientRole::Default)
   {
@@ -411,14 +415,5 @@ public:
   /// @param request Request from borrow_loaned_request(). Must be moved in.
   void cancel_request(ipc_shared_ptr<void> && request);
 };
-
-/**
- * @brief Service client for zero-copy Agnocast service communication. The service/client API is
- * experimental and may change in future versions.
- * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
- */
-AGNOCAST_PUBLIC
-template <typename ServiceT>
-using Client = BasicClient<ServiceT>;
 
 }  // namespace agnocast
