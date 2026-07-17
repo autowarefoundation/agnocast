@@ -87,15 +87,18 @@ protected:
 public:
   /** @brief Return the resolved service name.
    *  @return Null-terminated service name string. */
+  AGNOCAST_PUBLIC
   const char * get_service_name() const { return service_name_.c_str(); }
 
   /** @brief Check if the service server is available.
    *  @return True if the service server is available. */
+  AGNOCAST_PUBLIC
   bool service_is_ready() const { return service_is_ready_core(service_name_); }
 
   /** @brief Block until the service is available or the timeout expires.
    *  @param timeout Maximum duration to wait (-1 = wait forever).
    *  @return True if service became available, false on timeout. */
+  AGNOCAST_PUBLIC
   template <typename RepT = int64_t, typename RatioT = std::milli>
   bool wait_for_service(
     std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
