@@ -43,9 +43,72 @@ enum class ClientRole : uint8_t {
   AgnocastOnly,
 };
 
+/// ResponseCallInfo template - parameterized on the response type.
+template <typename Response>
+struct ResponseCallInfo
+{
+  using SharedFuture = std::shared_future<ipc_shared_ptr<Response>>;
+
+  std::promise<ipc_shared_ptr<Response>> promise;
+  std::optional<SharedFuture> shared_future;
+  std::optional<std::function<void(SharedFuture)>> callback;
+
+  ResponseCallInfo() = default;
+
+  explicit ResponseCallInfo(std::function<void(SharedFuture)> && cb) : callback(std::move(cb))
+  {
+    shared_future = promise.get_future().share();
+  }
+};
+
+class ClientBase
+{
+protected:
+  std::atomic<int64_t> next_sequence_number_{0};
+  std::string node_name_;
+  std::string service_name_;
+  std::function<bool()> check_context_ok_;
+
+  template <typename NodeT>
+  void init_base(NodeT * node, const std::string & service_name)
+  {
+    node_name_ = node->get_fully_qualified_name();
+    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
+
+    check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
+      if constexpr (std::is_same_v<agnocast::Node, NodeT>) {
+        return agnocast::ok();
+      } else {
+        return rclcpp::ok(context);
+      }
+    };
+  }
+
+public:
+  /** @brief Return the resolved service name.
+   *  @return Null-terminated service name string. */
+  const char * get_service_name() const { return service_name_.c_str(); }
+
+  /** @brief Check if the service server is available.
+   *  @return True if the service server is available. */
+  bool service_is_ready() const { return service_is_ready_core(service_name_); }
+
+  /** @brief Block until the service is available or the timeout expires.
+   *  @param timeout Maximum duration to wait (-1 = wait forever).
+   *  @return True if service became available, false on timeout. */
+  template <typename RepT = int64_t, typename RatioT = std::milli>
+  bool wait_for_service(
+    std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
+  {
+    return wait_for_service_nanoseconds(
+      check_context_ok_, service_name_,
+      std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
+  }
+};
+
 // Internal implementation - users should use agnocast::Client<ServiceT> instead.
 template <typename ServiceT>
-class BasicClient
+class BasicClient : public ClientBase
 {
 public:
   using SharedPtr = std::shared_ptr<BasicClient<ServiceT>>;
@@ -81,30 +144,13 @@ public:
 private:
   using RequestT = ServiceRequestWrapper<ServiceT>;
   using ResponseT = ServiceResponseWrapper<ServiceT>;
-
-  struct ResponseCallInfo
-  {
-    std::promise<ipc_shared_ptr<typename ServiceT::Response>> promise;
-    std::optional<SharedFuture> shared_future;
-    std::optional<std::function<void(SharedFuture)>> callback;
-
-    ResponseCallInfo() = default;
-
-    explicit ResponseCallInfo(std::function<void(SharedFuture)> && cb) : callback(std::move(cb))
-    {
-      shared_future = promise.get_future().share();
-    }
-  };
+  using ResponseCallInfo = agnocast::ResponseCallInfo<typename ServiceT::Response>;
 
   using ServiceRequestPublisher = Publisher<RequestT>;
   using ServiceResponseSubscriber = Subscription<ResponseT>;
 
-  std::atomic<int64_t> next_sequence_number_{0};
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
-  std::string node_name_;
-  std::string service_name_;
-  std::function<bool()> check_context_ok_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
@@ -113,16 +159,7 @@ private:
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group, ClientRole role)
   {
-    node_name_ = node->get_fully_qualified_name();
-    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
-
-    check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
-      if constexpr (std::is_same_v<agnocast::Node, NodeT>) {
-        return agnocast::ok();
-      } else {
-        return rclcpp::ok(context);
-      }
-    };
+    init_base(node, service_name);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -192,29 +229,6 @@ public:
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
-  /** @brief Return the resolved service name.
-   *  @return Null-terminated service name string. */
-  AGNOCAST_PUBLIC
-  const char * get_service_name() const { return service_name_.c_str(); }
-
-  /** @brief Check if the service server is available.
-   *  @return True if the service server is available. */
-  AGNOCAST_PUBLIC
-  bool service_is_ready() const { return service_is_ready_core(service_name_); }
-
-  /** @brief Block until the service is available or the timeout expires.
-   *  @param timeout Maximum duration to wait (-1 = wait forever).
-   *  @return True if service became available, false on timeout. */
-  AGNOCAST_PUBLIC
-  template <typename RepT = int64_t, typename RatioT = std::milli>
-  bool wait_for_service(
-    std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
-  {
-    return wait_for_service_nanoseconds(
-      check_context_ok_, service_name_,
-      std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
-  }
-
   /** @brief Send a request asynchronously and invoke a callback when the response arrives.
    *  @param request Request from borrow_loaned_request(). Must be moved in.
    *  @param callback Invoked with a SharedFuture when the response arrives. Call future.get() to
@@ -272,7 +286,7 @@ public:
  * request, you must call cancel_request() to free the loaned request memory. Otherwise, the process
  * will terminate.
  */
-class GenericClient
+class GenericClient : public ClientBase
 {
 public:
   using SharedPtr = std::shared_ptr<GenericClient>;
@@ -291,26 +305,10 @@ public:
   };
 
 private:
-  struct ResponseCallInfo
-  {
-    std::promise<ipc_shared_ptr<void>> promise;
-    std::optional<SharedFuture> shared_future;
-    std::optional<std::function<void(SharedFuture)>> callback;
+  using ResponseCallInfo = agnocast::ResponseCallInfo<void>;
 
-    ResponseCallInfo() = default;
-
-    explicit ResponseCallInfo(std::function<void(SharedFuture)> && cb) : callback(std::move(cb))
-    {
-      shared_future = promise.get_future().share();
-    }
-  };
-
-  std::atomic<int64_t> next_sequence_number_{0};
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
-  std::string node_name_;
-  std::string service_name_;
-  std::function<bool()> check_context_ok_;
   typename TypeErasedPublisher::SharedPtr publisher_;
   typename Subscription<void>::SharedPtr subscriber_;
 
@@ -325,16 +323,7 @@ private:
     NodeT * node, const std::string & service_name, const std::string & service_type,
     const rclcpp::QoS & qos_arg, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
   {
-    node_name_ = node->get_fully_qualified_name();
-    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
-
-    check_context_ok_ = [context = node->get_node_base_interface()->get_context()]() {
-      if constexpr (std::is_same_v<agnocast::Node, NodeT>) {
-        return agnocast::ok();
-      } else {
-        return rclcpp::ok(context);
-      }
-    };
+    init_base(node, service_name);
 
     load_typesupport_impl(service_type);
 
@@ -400,19 +389,6 @@ public:
   /// @return Owned pointer to the request message in shared memory, which must be either sent via
   /// async_send_request() or freed via cancel_request() later.
   ipc_shared_ptr<void> borrow_loaned_request();
-
-  const char * get_service_name() const { return service_name_.c_str(); }
-
-  bool service_is_ready() const { return service_is_ready_core(service_name_); }
-
-  template <typename RepT = int64_t, typename RatioT = std::milli>
-  bool wait_for_service(
-    std::chrono::duration<RepT, RatioT> timeout = std::chrono::duration<RepT, RatioT>(-1)) const
-  {
-    return wait_for_service_nanoseconds(
-      check_context_ok_, service_name_,
-      std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
-  }
 
   /// @brief Send a request asynchronously and invoke a callback when the response arrives.
   /// @param request Request from borrow_loaned_request(). Must be moved in.
