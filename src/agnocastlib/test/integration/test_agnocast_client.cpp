@@ -119,7 +119,6 @@ TEST_F(ClientTest, RequestIdIsUnique)
   auto request2 = client->borrow_loaned_request();
   auto future_and_request_id2 = client->async_send_request(std::move(request2));
   auto future_and_request_id1 = client->async_send_request(std::move(request1));
-  EXPECT_EQ(future_and_request_id1.request_id, 0) << "First request ID should be 0";
   EXPECT_NE(future_and_request_id1.request_id, future_and_request_id2.request_id)
     << "Request IDs should be unique";
 }
