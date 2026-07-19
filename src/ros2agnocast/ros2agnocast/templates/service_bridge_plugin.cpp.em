@@ -37,9 +37,7 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
         std::move(agno_req),
         [service_handle, request_header](typename agnocast::Client<ServiceT>::SharedFuture future) {
           auto agno_res = future.get();
-          typename ServiceT::Response ros_res;
-          ros_res = *agno_res;
-          service_handle->send_response(*request_header, ros_res);
+          service_handle->send_response(*request_header, *agno_res);
         });
     },
 #if RCLCPP_VERSION_MAJOR >= 28
@@ -72,8 +70,7 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
     [ros_client](
       typename AgnoService::SharedPtr service_handle,
       agnocast::ipc_shared_ptr<typename ServiceT::Request> && agno_req) {
-      auto ros_req = std::make_shared<typename ServiceT::Request>();
-      *ros_req = *agno_req;
+      std::shared_ptr<typename ServiceT::Request> ros_req(agno_req.get(), [](void *) {});
 
       ros_client->async_send_request(
         ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
