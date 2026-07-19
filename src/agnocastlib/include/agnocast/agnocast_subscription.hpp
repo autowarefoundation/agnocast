@@ -121,6 +121,11 @@ public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
   SubscriptionBase(agnocast::Node * node, const std::string & topic_name);
 
+  /**
+   * @brief Return the fully-resolved topic name.
+   * @return Null-terminated topic name string.
+   */
+  AGNOCAST_PUBLIC
   const char * get_topic_name() const { return topic_name_.c_str(); }
 
   uint32_t get_publisher_count() const { return get_publisher_count_core(topic_name_); }
