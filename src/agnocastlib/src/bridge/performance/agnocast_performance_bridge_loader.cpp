@@ -217,6 +217,8 @@ void * PerformanceBridgeLoader::load_library_from_paths(
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const std::string & type_name, const std::string & symbol_name_prefix, bool is_service)
 {
+  // TODO(bdm-k): Remove the error paths for service bridges once we have an A2R generic service
+  // bridge implementation.
   const char * type_label = is_service ? "service" : "message";
   std::string snake_type = convert_type_to_snake_case(type_name);
   std::vector<std::string> lib_paths = generate_library_paths();
