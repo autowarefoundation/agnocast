@@ -55,7 +55,7 @@ add_library(agnocast SHARED
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp
-  src/vendor/rclcpp/generic_service.cpp)
+  src/vendor/rclcpp/generic_service.cpp src/vendor/rclcpp/generic_client.cpp)
 
 ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
 
