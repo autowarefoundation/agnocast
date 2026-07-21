@@ -392,7 +392,8 @@ public:
     const rclcpp::CallbackGroup::SharedPtr & group = nullptr,
     ClientRole role = ClientRole::Default);
 
-  /// @brief Allocate a type-erased request message in shared memory.
+  /// @brief Allocate a type-erased request message in shared memory. The message is initialized
+  /// via the introspection init function with MessageInitialization::SKIP.
   /// @return Owned pointer to the request message in shared memory, which must be either sent via
   /// async_send_request() or freed via cancel_request() later.
   ipc_shared_ptr<void> borrow_loaned_request();
