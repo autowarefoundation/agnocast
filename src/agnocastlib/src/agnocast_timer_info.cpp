@@ -338,12 +338,10 @@ void unregister_timer_info(uint32_t timer_id)
 bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group)
 {
   std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-  for (const auto & [id, timer_info] : id2_timer_info) {
-    if (timer_info && timer_info->callback_group == group) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(id2_timer_info.begin(), id2_timer_info.end(), [&group](const auto & entry) {
+    const auto & timer_info = entry.second;
+    return timer_info && timer_info->callback_group == group;
+  });
 }
 
 void TimerInfo::set_period(std::chrono::nanoseconds new_period)
