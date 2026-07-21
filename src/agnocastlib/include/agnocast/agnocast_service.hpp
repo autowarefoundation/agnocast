@@ -221,6 +221,17 @@ public:
   }
 };
 
+/**
+ * @brief Generic service server for zero-copy Agnocast service communication.
+ *
+ * The service type is supplied as a runtime string, rather than a compile-time template argument.
+ * If the given service type is invalid, the constructor will throw an exception.
+ *
+ * The usage is mostly the same as agnocast::Service. One difference is cancel_response(), which
+ * only exists in GenericService. This is relevant for deferred callbacks. The user must either call
+ * send_response() or cancel_response() for every response borrowed via borrow_loaned_response().
+ * Otherwise, the process will terminate.
+ */
 class GenericService : public std::enable_shared_from_this<GenericService>
 {
   template <typename Func>
