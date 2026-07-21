@@ -43,6 +43,9 @@ enum class ClientRole : uint8_t {
   AgnocastOnly,
 };
 
+namespace detail
+{
+
 /// ResponseCallInfo template - parameterized on the response type.
 template <typename Response>
 struct ResponseCallInfo
@@ -60,6 +63,8 @@ struct ResponseCallInfo
     shared_future = promise.get_future().share();
   }
 };
+
+}  // namespace detail
 
 class ClientBase
 {
@@ -151,7 +156,7 @@ public:
 private:
   using RequestT = ServiceRequestWrapper<ServiceT>;
   using ResponseT = ServiceResponseWrapper<ServiceT>;
-  using ResponseCallInfo = agnocast::ResponseCallInfo<typename ServiceT::Response>;
+  using ResponseCallInfo = detail::ResponseCallInfo<typename ServiceT::Response>;
 
   using ServiceRequestPublisher = Publisher<RequestT>;
   using ServiceResponseSubscriber = Subscription<ResponseT>;
@@ -312,7 +317,7 @@ public:
   };
 
 private:
-  using ResponseCallInfo = agnocast::ResponseCallInfo<void>;
+  using ResponseCallInfo = detail::ResponseCallInfo<void>;
 
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
