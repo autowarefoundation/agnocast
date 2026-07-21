@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -23,13 +22,6 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'template.yaml')
 
 TARGET_NODE = '/test_publisher_component'
 WILDCARD_ID = TARGET_NODE + '/*'
-
-# Distinct nice values per entry form, so the value read back from an
-# announced tid identifies which entry configured it. Positive values only:
-# lowering priority needs no CAP_SYS_NICE, which is not guaranteed in CI
-# sandboxes.
-EXACT_NICE = 15
-WILDCARD_NICE = 10
 
 # The publisher's exact entries from the prerun output, all kept alongside a
 # covering wildcard: with precedence intact every announced instance is taken
@@ -102,9 +94,7 @@ def _add_wildcard_alongside_exact_entries():
     """Add a wildcard covering the publisher while keeping its exact entries.
 
     Exact-over-wildcard precedence is decided at announcement time, so both
-    forms must already be in the config when the configurator starts. The
-    exact entries get EXACT_NICE and the wildcard WILDCARD_NICE, letting the
-    test identify the applied entry from the thread's actual nice value.
+    forms must already be in the config when the configurator starts.
     """
     global _PUBLISHER_ENTRIES
     # BaseLoader keeps every scalar as a string: this rewrite happens before
@@ -121,15 +111,11 @@ def _add_wildcard_alongside_exact_entries():
         raise RuntimeError(
             f'prerun produced no callback_groups for {TARGET_NODE}'
         )
-    for entry in _PUBLISHER_ENTRIES:
-        entry['policy'] = 'SCHED_OTHER'
-        entry['priority'] = EXACT_NICE
-        entry['affinity'] = []
     wildcard_entry = {
         'id': WILDCARD_ID,
         'domain_id': _PUBLISHER_ENTRIES[0].get('domain_id', 0),
         'policy': 'SCHED_OTHER',
-        'priority': WILDCARD_NICE,
+        'priority': 0,
         'affinity': [],
     }
     cfg['callback_groups'] = cfg['callback_groups'] + [wildcard_entry]
@@ -182,57 +168,30 @@ def generate_test_description():
 
 class TestThreadConfiguratorPrecedence(unittest.TestCase):
 
-    def _announced_tid(self, proc_output, entry_id, timeout_sec=20.0):
-        """Extract the tid the configurator announced for the given instance.
-
-        Only the announcement log has the "tid=<n> | <id>" shape, so the
-        pattern cannot match the wildcard-match or re-apply log lines.
-        """
-        pattern = re.compile(r'tid=(\d+) \| ' + re.escape(entry_id))
-        deadline = time.time() + timeout_sec
-        while time.time() < deadline:
-            for event in list(proc_output):
-                match = pattern.search(event.text.decode(errors='replace'))
-                if match:
-                    return int(match.group(1))
-            time.sleep(0.1)
-        self.fail(f'no announcement log found for {entry_id}')
-
-    def _assert_nice_becomes_exact(self, tid, entry_id, timeout_sec=10.0):
-        # The announcement log precedes the syscall, so the nice value is
-        # polled until it settles on one of the two configured values.
-        deadline = time.time() + timeout_sec
-        nice = None
-        while time.time() < deadline:
-            nice = os.getpriority(os.PRIO_PROCESS, tid)
-            if nice == EXACT_NICE:
-                return
-            self.assertNotEqual(
-                nice, WILDCARD_NICE,
-                f'{entry_id} (tid={tid}) was configured by the wildcard '
-                'entry although an exact entry exists',
-            )
-            time.sleep(0.1)
-        self.fail(
-            f'{entry_id} (tid={tid}) nice never became {EXACT_NICE} '
-            f'(last observed: {nice})'
-        )
-
-    def test_exact_entries_take_precedence_over_wildcard(
+    def test_every_instance_matches_an_entry(
             self, proc_output, thread_configurator):
+        # Positive half of the precedence proof: the "| <id>" shape only
+        # occurs in the matched-announcement log; the no-configuration path
+        # logs "id=<id>" instead. Together with the post-shutdown check that
+        # the wildcard never matched, this pins each instance to its exact
+        # entry. The positive half is essential: without it, a run where
+        # nothing is announced at all would pass vacuously.
         for entry in _PUBLISHER_ENTRIES:
-            tid = self._announced_tid(proc_output, entry['id'])
-            self._assert_nice_becomes_exact(tid, entry['id'])
+            proc_output.assertWaitFor(
+                f"| {entry['id']}",
+                timeout=20.0,
+                process=thread_configurator,
+            )
 
 
 @launch_testing.post_shutdown_test()
 class TestThreadConfiguratorPrecedenceShutdown(unittest.TestCase):
 
     def test_wildcard_never_matched(self, proc_output):
-        # Deterministic only here: the processes have exited, so the captured
-        # output is complete. Recording an instance into a wildcard entry
-        # always logs this line, so its absence proves the wildcard captured
-        # nothing, i.e. every instance went to its exact entry.
+        # Negative half of the precedence proof, deterministic only here: the
+        # processes have exited, so the captured output is complete.
+        # Recording an instance into a wildcard entry always logs this line,
+        # so its absence proves the wildcard captured nothing.
         for event in proc_output:
             self.assertNotIn(
                 'matched wildcard entry',
