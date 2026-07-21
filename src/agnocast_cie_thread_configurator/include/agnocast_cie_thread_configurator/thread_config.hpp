@@ -37,7 +37,7 @@ struct ThreadConfig
   bool applied = false;  // true once issue_syscalls() has succeeded
 
   // Whether this is a wildcard callback-group entry.
-  bool is_wildcard() const;
+  bool is_wildcard() const noexcept;
   // The "<node name>" part of a wildcard id: thread_str minus the trailing
   // "/*". Only meaningful when is_wildcard().
   std::string wildcard_prefix() const;

@@ -17,7 +17,7 @@ const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
 };
 
-bool ThreadConfig::is_wildcard() const
+bool ThreadConfig::is_wildcard() const noexcept
 {
   static constexpr std::string_view suffix = "/*";
   return thread_str.size() >= suffix.size() &&

@@ -413,9 +413,8 @@ void ThreadConfiguratorNode::callback_group_callback(
     config = it->second;
     already_seen = config->applied;
   } else {
-    const std::string node_part =
-      agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id);
-    auto wit = node_to_wildcard_config_.find(std::make_pair(domain_id, node_part));
+    auto wit = node_to_wildcard_config_.find(std::make_pair(
+      domain_id, agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id)));
     if (wit == node_to_wildcard_config_.end()) {
       RCLCPP_INFO(
         this->get_logger(),

@@ -137,6 +137,7 @@ if(BUILD_TESTING)
   add_launch_test(test/functional/test_thread_configurator_restart_launch.py TIMEOUT 120)
   add_launch_test(test/functional/test_thread_configurator_reapply_launch.py TIMEOUT 120)
   add_launch_test(test/functional/test_thread_configurator_wildcard_launch.py TIMEOUT 120)
+  add_launch_test(test/functional/test_thread_configurator_precedence_launch.py TIMEOUT 120)
 endif()
 
 ament_package()
