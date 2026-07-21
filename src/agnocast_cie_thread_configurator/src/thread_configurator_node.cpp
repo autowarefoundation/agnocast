@@ -433,8 +433,7 @@ void ThreadConfiguratorNode::callback_group_callback(
   if (already_seen) {
     // Always re-apply: the OS may reuse the same thread IDs after an application
     // restarts, so we cannot use thread_id equality to skip reconfiguration.
-    // "tracked", not "configured": for a wildcard instance already_seen only
-    // means the tid was recorded; its first syscall may have failed.
+    // "tracked", not "configured": a recorded wildcard tid's syscall may have failed.
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already tracked callback group "
@@ -550,13 +549,10 @@ void ThreadConfiguratorNode::on_reapply_config_request(
 
   // Carry known tids over from the existing state, same-form entries only:
   // exact entries carry thread_id, wildcard entries carry matched_tids. An
-  // entry that changed form (exact <-> wildcard) starts fresh and is picked up
-  // at the next announcement, i.e. when the target application restarts; in
-  // particular, "exact overrides wildcard" is decided at announcement time
-  // only, so an exact override added for an already-matched instance does not
-  // take effect on reapply. 'applied' is intentionally NOT carried: a syscall
-  // failure below must leave applied=false, not the stale 'true' that a
-  // verbatim carry-over would imply.
+  // entry that changed form (exact <-> wildcard) starts fresh and is only
+  // picked up at the next announcement (see ReapplyConfig.srv). 'applied' is
+  // intentionally NOT carried: a syscall failure below must leave
+  // applied=false, not the stale 'true' that a verbatim carry-over would imply.
   for (auto & cfg : new_cb) {
     if (cfg.is_wildcard()) {
       auto it = node_to_wildcard_config_.find(std::make_pair(cfg.domain_id, cfg.wildcard_prefix()));

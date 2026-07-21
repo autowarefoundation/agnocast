@@ -10,8 +10,8 @@
 # "<domain_id>:<full callback_group_id>" key per known matched instance in
 # applied/failed, and a single "<domain_id>:<node name>/*" key in skipped
 # while no instance has been announced yet. Instances are matched to entries
-# at announcement time only; reapply does not move instances between entries,
-# so an entry that changed form (exact <-> wildcard) starts over as skipped.
+# at announcement time only, so an entry that changed form (exact <-> wildcard)
+# starts over as skipped.
 bool success                       # true iff parse + per-entry validation passed
 string error_message               # parse / validation failure reason (empty on success)
 string[] applied_callback_groups   # syscalls succeeded; format "<domain_id>:<callback_group_id>"

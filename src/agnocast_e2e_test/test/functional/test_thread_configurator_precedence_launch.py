@@ -170,12 +170,11 @@ class TestThreadConfiguratorPrecedence(unittest.TestCase):
 
     def test_every_instance_matches_an_entry(
             self, proc_output, thread_configurator):
-        # Positive half of the precedence proof: the "| <id>" shape only
-        # occurs in the matched-announcement log; the no-configuration path
-        # logs "id=<id>" instead. Together with the post-shutdown check that
-        # the wildcard never matched, this pins each instance to its exact
-        # entry. The positive half is essential: without it, a run where
-        # nothing is announced at all would pass vacuously.
+        # Positive half of the precedence proof (the negative half is the
+        # post-shutdown wildcard-never-matched check): the "| <id>" shape
+        # only occurs in the matched-announcement log; the no-configuration
+        # path logs "id=<id>" instead. Without this half, a run announcing
+        # nothing at all would pass vacuously.
         for entry in _PUBLISHER_ENTRIES:
             proc_output.assertWaitFor(
                 f"| {entry['id']}",

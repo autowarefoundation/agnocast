@@ -387,8 +387,6 @@ TEST(ParseYaml, NonRosThreadNameEndingInSlashStarStaysExact)
 {
   // Wildcards are a callback_groups-only feature; non_ros_threads names are
   // opaque strings matched exactly, even when they happen to end in "/*".
-  // parse_yaml must accept such a name verbatim, unlike the equivalent
-  // callback-group id which would be treated as a wildcard pattern.
   auto y = yaml_from_str(R"YAML(
 callback_groups: []
 non_ros_threads:

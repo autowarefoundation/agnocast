@@ -27,19 +27,16 @@ struct ThreadConfig
   unsigned int period = 0;
   unsigned int deadline = 0;
 
-  // Full incoming callback_group_id -> last announced tid. Wildcard
-  // ("<node name>/*") callback-group entries only; unused by non_ros_threads.
-  // For a wildcard entry, `applied` means "at least one matched instance has
-  // been configured" and thread_id stays -1. std::map for deterministic
-  // iteration order in the reapply response arrays.
+  // Full incoming callback_group_id -> last announced tid; wildcard
+  // ("<node name>/*") entries only. For such entries `applied` means "at least
+  // one matched instance has been configured" and thread_id stays -1. std::map
+  // for deterministic iteration order in the reapply response arrays.
   std::map<std::string, int64_t> matched_tids;
 
   bool applied = false;  // true once issue_syscalls() has succeeded
 
-  // Whether this is a wildcard callback-group entry.
   bool is_wildcard() const noexcept;
-  // The "<node name>" part of a wildcard id: thread_str minus the trailing
-  // "/*". Only meaningful when is_wildcard().
+  // thread_str minus the trailing "/*"; only meaningful when is_wildcard().
   std::string wildcard_prefix() const;
 };
 
