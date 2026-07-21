@@ -361,8 +361,9 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
   auto ros_srv = agnocast::vendor_rclcpp::GenericService::create_generic_service(
     node.get(), service_name, service_type,
     [agno_client = std::move(agno_client), request_copier = get_copier(request_type)](
-      std::shared_ptr<agnocast::vendor_rclcpp::GenericService> service_handle,
-      std::shared_ptr<rmw_request_id_t> request_header, std::shared_ptr<void> ros_req) {
+      const std::shared_ptr<agnocast::vendor_rclcpp::GenericService> & service_handle,
+      const std::shared_ptr<rmw_request_id_t> & request_header,
+      const std::shared_ptr<void> & ros_req) {
       ipc_shared_ptr<void> agno_req = agno_client->borrow_loaned_request();
 
       // Copy the ROS 2 request into Agnocast shared memory (ipc_shared_ptr).
@@ -377,8 +378,8 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
 
       agno_client->async_send_request(
         std::move(agno_req),
-        [service_handle, request_header](agnocast::GenericClient::SharedFuture future) {
-          auto agno_res = future.get();
+        [service_handle, request_header](const agnocast::GenericClient::SharedFuture & future) {
+          const auto & agno_res = future.get();
 
           // Reuse Agnocast response payload directly as ROS response buffer.
           auto borrowed_ros_res = std::shared_ptr<void>(agno_res.get(), [](void *) { /* no-op */ });
