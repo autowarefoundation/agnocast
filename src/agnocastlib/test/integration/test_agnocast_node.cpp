@@ -1,5 +1,6 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "agnocast/node/agnocast_rosout.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/exceptions.hpp"
 #include "rclcpp/parameter.hpp"
@@ -157,4 +158,54 @@ TEST_F(AgnocastNodeConstructionTest, clock_thread_enabled_creates_clock_callback
 
   // The default callback group plus the dedicated clock callback group.
   EXPECT_EQ(count_callback_groups(node), 2u);
+}
+
+// =========================================
+// Per-node rosout publisher tests
+// =========================================
+
+class AgnocastNodeRosoutTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    const char * argv[] = {"test", "--ros-args", "--enable-rosout-logs"};
+    int argc = 3;
+    agnocast::init(argc, const_cast<char **>(argv));
+  }
+
+  void TearDown() override { agnocast::shutdown(); }
+};
+
+TEST_F(AgnocastNodeRosoutTest, each_node_registers_its_own_publisher)
+{
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 0u);
+
+  auto node_a = std::make_shared<agnocast::Node>("rosout_node_a");
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 1u);
+
+  auto node_b = std::make_shared<agnocast::Node>("rosout_node_b");
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 2u);
+}
+
+TEST_F(AgnocastNodeRosoutTest, destroying_node_removes_its_publisher)
+{
+  auto node_a = std::make_shared<agnocast::Node>("rosout_destroy_a");
+  auto node_b = std::make_shared<agnocast::Node>("rosout_destroy_b");
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 2u);
+
+  node_a.reset();
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 1u);
+
+  node_b.reset();
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 0u);
+}
+
+TEST_F(AgnocastNodeRosoutTest, no_rosout_flag_registers_no_publisher)
+{
+  agnocast::shutdown();
+  agnocast::init(0, nullptr);
+
+  auto node = std::make_shared<agnocast::Node>("rosout_no_flag_node");
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 0u);
 }

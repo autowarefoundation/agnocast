@@ -65,6 +65,9 @@ public:
     const std::string & node_name, const std::string & namespace_,
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
+  AGNOCAST_PUBLIC
+  ~Node();
+
   /// Return the name of the node.
   /// @return Node name.
   AGNOCAST_PUBLIC
@@ -573,8 +576,8 @@ public:
   template <typename DurationRepT, typename DurationT, typename CallbackT>
   [[deprecated(
     "Use the 3-argument Node::create_timer(period, callback, group) or "
-    "agnocast::create_timer() free function instead.")]]
-  typename GenericTimer<CallbackT>::SharedPtr create_timer(
+    "agnocast::create_timer() free function instead.")]] typename GenericTimer<CallbackT>::SharedPtr
+  create_timer(
     std::chrono::duration<DurationRepT, DurationT> period, CallbackT && callback,
     rclcpp::CallbackGroup::SharedPtr group, rclcpp::Clock::SharedPtr clock)
   {

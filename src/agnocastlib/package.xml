@@ -24,6 +24,7 @@
   <depend>libgoogle-glog-dev</depend>
   <depend>liblttng-ust-dev</depend>
   <depend>message_filters</depend>
+  <depend>rcl_interfaces</depend>
   <depend>rcl_yaml_param_parser</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>

@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_rosout.hpp"
 
 #include <rcl/time.h>
 
@@ -36,9 +37,23 @@ Node::Node(
     node_parameters_->start_parameter_services(this);
   }
 
+  // Set up per-node /rosout publisher if --enable-rosout-logs was specified.
+  // Must be after node_base_, node_topics_, and node_parameters_ are initialized
+  // (required by the publisher constructor).
+  if (g_context.is_rosout_enabled()) {
+    setup_rosout_handler(this, options.rosout_qos());
+  }
+
   TRACEPOINT(
     agnocast_node_init, static_cast<const void *>(node_base_.get()), this->get_name().c_str(),
     this->get_namespace().c_str());
+}
+
+Node::~Node()
+{
+  if (g_context.is_rosout_enabled()) {
+    teardown_rosout_handler(this);
+  }
 }
 
 }  // namespace agnocast

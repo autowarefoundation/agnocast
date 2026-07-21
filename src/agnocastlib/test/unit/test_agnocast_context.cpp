@@ -1,4 +1,5 @@
 #include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_rosout.hpp"
 
 #include <gtest/gtest.h>
 #include <rcl/logging.h>
@@ -90,4 +91,104 @@ TEST_F(AgnocastContextStdoutLogsTest, flag_after_double_dash_terminator_is_ignor
   const std::string output = testing::internal::GetCapturedStderr();
 
   EXPECT_FALSE(output.empty()) << "Flag after -- must be ignored; expected stdout output";
+}
+
+// =========================================
+// agnocast::Context --enable-rosout-logs tests
+// =========================================
+
+class AgnocastContextRosoutTest : public ::testing::Test
+{
+protected:
+  void SetUp() override { original_handler_ = rcutils_logging_get_output_handler(); }
+
+  void TearDown() override { rcutils_logging_set_output_handler(original_handler_); }
+
+  rcutils_logging_output_handler_t original_handler_;
+};
+
+TEST_F(AgnocastContextRosoutTest, enable_rosout_logs_sets_flag)
+{
+  const char * argv[] = {"program", "--ros-args", "--enable-rosout-logs"};
+  int argc = 3;
+  agnocast::Context ctx;
+
+  ctx.init(argc, argv);
+
+  EXPECT_TRUE(ctx.is_rosout_enabled());
+}
+
+TEST_F(AgnocastContextRosoutTest, no_flag_rosout_disabled)
+{
+  const char * argv[] = {"program", "--ros-args", "--log-level", "info"};
+  int argc = 4;
+  agnocast::Context ctx;
+
+  ctx.init(argc, argv);
+
+  EXPECT_FALSE(ctx.is_rosout_enabled());
+}
+
+TEST_F(AgnocastContextRosoutTest, flag_outside_ros_args_is_ignored)
+{
+  const char * argv[] = {"program", "--enable-rosout-logs", "--ros-args", "--log-level", "info"};
+  int argc = 5;
+  agnocast::Context ctx;
+
+  ctx.init(argc, argv);
+
+  EXPECT_FALSE(ctx.is_rosout_enabled());
+}
+
+TEST_F(AgnocastContextRosoutTest, flag_after_double_dash_is_ignored)
+{
+  const char * argv[] = {"program", "--ros-args", "--", "--enable-rosout-logs"};
+  int argc = 4;
+  agnocast::Context ctx;
+
+  ctx.init(argc, argv);
+
+  EXPECT_FALSE(ctx.is_rosout_enabled());
+}
+
+// =========================================
+// shutdown_rosout_handler tests
+// =========================================
+
+class ShutdownRosoutHandlerTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    original_handler_ = rcutils_logging_get_output_handler();
+    // Ensure a clean slate before each test
+    agnocast::shutdown_rosout_handler();
+  }
+
+  void TearDown() override
+  {
+    agnocast::shutdown_rosout_handler();
+    rcutils_logging_set_output_handler(original_handler_);
+  }
+
+  rcutils_logging_output_handler_t original_handler_;
+};
+
+TEST_F(ShutdownRosoutHandlerTest, shutdown_with_no_prior_setup_is_safe)
+{
+  // Should not crash or assert when called with an empty map and no handler installed
+  EXPECT_NO_THROW(agnocast::shutdown_rosout_handler());
+}
+
+TEST_F(ShutdownRosoutHandlerTest, shutdown_resets_publisher_count_to_zero)
+{
+  // publisher count starts at zero after a clean shutdown
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 0u);
+}
+
+TEST_F(ShutdownRosoutHandlerTest, repeated_shutdown_calls_are_idempotent)
+{
+  agnocast::shutdown_rosout_handler();
+  EXPECT_NO_THROW(agnocast::shutdown_rosout_handler());
+  EXPECT_EQ(agnocast::get_rosout_publisher_count(), 0u);
 }
