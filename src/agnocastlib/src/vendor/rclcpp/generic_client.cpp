@@ -59,7 +59,7 @@ GenericClient::GenericClient(
     &client_options);
   if (ret != RCL_RET_OK) {
     if (ret == RCL_RET_SERVICE_NAME_INVALID) {
-      auto rcl_node_handle = this->get_rcl_node_handle();
+      auto * rcl_node_handle = this->get_rcl_node_handle();
       // this will throw on any validation problem
       rcl_reset_error();
       rclcpp::expand_topic_or_service_name(
@@ -88,15 +88,15 @@ std::shared_ptr<void> GenericClient::create_response()
 {
   void * response = new uint8_t[response_members_->size_of_];
   response_members_->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return std::shared_ptr<void>(response, [this](void * p) {
-    response_members_->fini_function(p);
-    delete[] reinterpret_cast<uint8_t *>(p);
-  });
+  return {response, [this](void * p) {
+            response_members_->fini_function(p);
+            delete[] reinterpret_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
+          }};
 }
 
 std::shared_ptr<rmw_request_id_t> GenericClient::create_request_header()
 {
-  return std::shared_ptr<rmw_request_id_t>(new rmw_request_id_t);
+  return std::make_shared<rmw_request_id_t>();
 }
 
 void GenericClient::handle_response(
@@ -120,7 +120,7 @@ GenericClient::SharedFutureAndRequestId GenericClient::async_send_request(
 {
   GenericClient::Promise promise;
   auto shared_future = promise.get_future().share();
-  int64_t sequence_number;
+  int64_t sequence_number = 0;
 
   {
     std::lock_guard<std::mutex> lock(pending_requests_mutex_);
