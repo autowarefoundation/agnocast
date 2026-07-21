@@ -354,7 +354,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
   auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
   auto agno_client = std::make_shared<agnocast::GenericClient>(
-    node.get(), service_name, service_type, qos, client_cb_group);
+    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::AgnocastOnly);
 
   auto ros_srv = agnocast::vendor_rclcpp::GenericService::create_generic_service(
     node.get(), service_name, service_type,
