@@ -15,7 +15,7 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
   const rclcpp::QoS & qos /*QoS for the target Agnocast service*/)
 {
   using ServiceT = @(cpp_type);
-  using AgnoClient = agnocast::BasicClient<ServiceT>;
+  using AgnoClient = agnocast::Client<ServiceT>;
 
   auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
