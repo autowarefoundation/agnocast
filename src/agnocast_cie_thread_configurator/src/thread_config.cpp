@@ -5,6 +5,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -15,6 +16,23 @@ const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
 };
+
+bool ThreadConfig::is_wildcard() const
+{
+  static constexpr std::string_view suffix = "/*";
+  return thread_str.size() >= suffix.size() &&
+         thread_str.compare(thread_str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string ThreadConfig::wildcard_prefix() const
+{
+  return thread_str.substr(0, thread_str.size() - 2);
+}
+
+std::string extract_node_part(const std::string & callback_group_id)
+{
+  return callback_group_id.substr(0, callback_group_id.find('@'));
+}
 
 void parse_yaml(
   const YAML::Node & yaml, size_t default_domain_id,
@@ -33,6 +51,27 @@ void parse_yaml(
     auto & cfg = callback_groups_out[i];
 
     cfg.thread_str = cg["id"].as<std::string>();
+    if (cfg.thread_str.find('*') != std::string::npos) {
+      // A typo'd pattern silently treated as an exact id would never match,
+      // so any id containing '*' must be a well-formed "<node name>/*".
+      if (!cfg.is_wildcard()) {
+        throw std::runtime_error(
+          "Invalid id '" + cfg.thread_str +
+          "': '*' is only allowed as a trailing \"/*\" wildcard (e.g. /my_node/*)");
+      }
+      const std::string prefix = cfg.wildcard_prefix();
+      if (prefix.empty() || prefix.find('*') != std::string::npos) {
+        throw std::runtime_error(
+          "Invalid wildcard id '" + cfg.thread_str +
+          "': the part before \"/*\" must be a non-empty node name without '*'");
+      }
+      if (prefix.find('@') != std::string::npos) {
+        throw std::runtime_error(
+          "Invalid wildcard id '" + cfg.thread_str +
+          "': the part before \"/*\" must be a plain node name, not a full callback-group id "
+          "containing '@'");
+      }
+    }
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
     for (auto & cpu : cg["affinity"]) cfg.affinity.push_back(cpu.as<int>());
     cfg.policy = cg["policy"].as<std::string>();
