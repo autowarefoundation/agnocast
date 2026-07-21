@@ -112,6 +112,8 @@ public:
       check_context_ok_, service_name_,
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
+
+  virtual ~ClientBase() = default;
 };
 
 /**
