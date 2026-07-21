@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/internal/service_wire_type.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include <memory>
@@ -44,16 +45,8 @@ private:
   {
   };
 
-  // To avoid name conflicts, members of RequestT and ResponseT are given an underscore prefix.
-  struct RequestT : public ServiceT::Request
-  {
-    std::string _node_name;
-    int64_t _sequence_number;
-  };
-  struct ResponseT : public ServiceT::Response
-  {
-    int64_t _sequence_number;
-  };
+  using RequestT = ServiceRequestWrapper<ServiceT>;
+  using ResponseT = ServiceResponseWrapper<ServiceT>;
 
   using ServiceResponsePublisher = Publisher<ResponseT>;
   using ServiceRequestSubscriber = Subscription<RequestT>;
@@ -93,10 +86,10 @@ private:
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-      auto publisher = this->get_or_create_publisher_for(request->_node_name);
+      auto publisher = this->get_or_create_publisher_for(request->node_name);
 
       ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
-      response->_sequence_number = request->_sequence_number;
+      response->seqno = request->seqno;
 
       ipc_shared_ptr<typename ServiceT::Response> response_double(response);
 
@@ -202,7 +195,7 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
-    auto publisher = get_or_create_publisher_for(internal_request->_node_name);
+    auto publisher = get_or_create_publisher_for(internal_request->node_name);
     publisher->publish(std::move(internal_response));
   }
 
@@ -221,9 +214,9 @@ public:
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
-    auto publisher = get_or_create_publisher_for(internal_request->_node_name);
+    auto publisher = get_or_create_publisher_for(internal_request->node_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
-    response->_sequence_number = internal_request->_sequence_number;
+    response->seqno = internal_request->seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
   }
 };
