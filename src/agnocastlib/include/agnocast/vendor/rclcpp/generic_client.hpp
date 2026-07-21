@@ -17,6 +17,8 @@
 // GenericClient is not available in ROS 2 Humble, so it is vendored here to implement Agnocast's
 // service bridging feature.
 
+#pragma once
+
 #include <rclcpp/version.h>
 
 #if RCLCPP_VERSION_MAJOR < 28
