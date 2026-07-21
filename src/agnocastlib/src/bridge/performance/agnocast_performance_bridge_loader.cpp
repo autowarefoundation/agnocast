@@ -389,6 +389,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
     qos, srv_cb_group);
 
   return {ros_srv, srv_cb_group, client_cb_group};
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
 }  // namespace agnocast
