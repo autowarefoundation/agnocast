@@ -157,23 +157,6 @@ non_ros_threads:
   EXPECT_EQ(nrt[0].priority, 30);
 }
 
-TEST(ParseYaml, StripsTrailingWaitableSuffix)
-{
-  auto y = yaml_from_str(R"YAML(
-callback_groups:
-  - id: my_cbg@Waitable@Waitable
-    domain_id: 0
-    policy: SCHED_OTHER
-    priority: 0
-    affinity: []
-non_ros_threads: []
-)YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].thread_str, "my_cbg");
-}
-
 TEST(ParseYaml, ClearsOutputVectorsOnReparse)
 {
   auto y1 = yaml_from_str(R"YAML(

@@ -5,7 +5,6 @@
 
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -16,24 +15,6 @@ const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
 };
-
-namespace
-{
-// Backward compatibility: strip trailing "@Waitable" suffixes from a callback-group id.
-std::string remove_trailing_waitable(std::string s)
-{
-  static constexpr std::string_view suffix = "@Waitable";
-  const std::size_t suffix_size = suffix.size();
-  std::size_t s_size = s.size();
-  while (s_size >= suffix_size &&
-         std::char_traits<char>::compare(
-           s.data() + (s_size - suffix_size), suffix.data(), suffix_size) == 0) {
-    s_size -= suffix_size;
-  }
-  s.resize(s_size);
-  return s;
-}
-}  // namespace
 
 void parse_yaml(
   const YAML::Node & yaml, size_t default_domain_id,
@@ -51,7 +32,7 @@ void parse_yaml(
     const auto & cg = callback_groups[i];
     auto & cfg = callback_groups_out[i];
 
-    cfg.thread_str = remove_trailing_waitable(cg["id"].as<std::string>());
+    cfg.thread_str = cg["id"].as<std::string>();
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
     for (auto & cpu : cg["affinity"]) cfg.affinity.push_back(cpu.as<int>());
     cfg.policy = cg["policy"].as<std::string>();
