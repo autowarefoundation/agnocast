@@ -17,7 +17,10 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>agnocastlib</depend>
+  <depend>agnocast_gpu_shared_memory_daemon</depend>
   <depend>sensor_msgs</depend>
+
+  <test_depend>ament_cmake_gmock</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

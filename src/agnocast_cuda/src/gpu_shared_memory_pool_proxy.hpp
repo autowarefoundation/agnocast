@@ -1,66 +1,107 @@
-// Internal header — kept in src/ so it is NOT installed or visible to downstream packages.
-// The singleton instance of this class in a process communicates with the GpuSharedMemoryDaemon
-// to manage shared memory buffers for GPU transfers.
-// For client processes, GpuSharedMemoryPoolProxy forwards calls to the daemon and hides the IPC details,
-// which are different depending on the platform (dedicated GPU or integrated GPU).
-// This interface is implemented by backends.
+// Internal header — kept in src/ so it is NOT installed or visible downstream.
+//
+// Per-process client of the GpuSharedMemoryPoolDaemon. It connects over the Unix
+// domain socket, verifies the daemon's backend/GPU via the handshake, and imports
+// every slot's handles once at initialization so later allocate/free are cheap.
+//
+// This is a concrete class that DELEGATES all infrastructure-specific work
+// (importing handles, querying the local GPU) to an injected GpuClientBackend
+// (per TASK.md: "delegation, not inheritance"). A process uses the singleton
+// getInstance(); tests construct it directly with a mock backend + explicit socket.
 #pragma once
 
-#include "agnocast/gpu_transfer_backend.hpp"
+#include "agnocast_gpu_shared_memory_daemon/protocol.hpp"
+#include "gpu_client_backend.hpp"
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace agnocast::cuda
 {
 
-struct SlotHandle_st;
-using SlotHandle = SlotHandle_st;
+// Retry policy for allocate() when the daemon reports no free slot. The daemon
+// never blocks; the client retries here (see TASK.md / non-blocking daemon).
+struct AllocRetryPolicy
+{
+  int max_attempts = 1000;
+  std::chrono::microseconds delay{1000};  // 1 ms between attempts
+};
 
 class GpuSharedMemoryPoolProxy
 {
 public:
-  /** @brief Allocates memory on the GPU.
-   *  @param[out] device_ptr A pointer to the allocated GPU memory.
-   *  @param[in] size The size of the memory to allocate.
-   *  @return True if the allocation was successful, false otherwise.
-   */
-  virtual bool allocateMemory(void** device_ptr, size_t size) = 0;
+  // Dependency-injecting constructor. If socket_path is empty it is derived from
+  // the local GPU UUID at initialize() time. The backend must outlive the proxy.
+  explicit GpuSharedMemoryPoolProxy(
+    GpuClientBackend & backend, std::string socket_path = "",
+    AllocRetryPolicy retry_policy = AllocRetryPolicy{});
+  ~GpuSharedMemoryPoolProxy();
 
-  /** @brief Frees previously allocated GPU memory.
-   *  @param[in] device_ptr A pointer to the GPU memory to free.
-   */
-  virtual void freeMemory(void* device_ptr) = 0;
-
-protected:
-  // Singleton pattern
-  GpuSharedMemoryPoolProxy() = default;
   GpuSharedMemoryPoolProxy(const GpuSharedMemoryPoolProxy &) = delete;
   GpuSharedMemoryPoolProxy & operator=(const GpuSharedMemoryPoolProxy &) = delete;
-  virtual ~GpuSharedMemoryPoolProxy() = default;
 
-  /** @brief Establishes connection to the GpuSharedMemoryDaemon and imports the exported resource handles.
-   *  @return True if the initialization was successful, false otherwise.
-   *  @note Importing of the handles may take some time, so it should be done in process initialization phase.
-   */
-  virtual bool initialize() = 0;
+  // Lazily creates and initializes the process singleton (real CUDA backend,
+  // UUID-derived socket). Returns nullptr if initialization fails.
+  static GpuSharedMemoryPoolProxy * getInstance();
 
-  /** @brief Disconnects from the GpuSharedMemoryDaemon and releases all imported resource handles.
-   *  @note  Should be called during process shutdown to clean up resources.
-   */
+  // Connects, handshakes (verifying backend + GPU), lists and imports every slot.
+  // Returns false on failure. Call once (subsequent calls are no-ops returning
+  // the current state).
+  bool initialize();
 
-  virtual void finalize() = 0;
-  
-  /** @brief Allocates a slot in the shared memory pool.
-   *  @param[in] size The size of the slot to allocate.
-   *  @param[out] handle A reference to a SlotHandle that will be populated with the allocated slot's handle.
-   *  @param[in] non_blocking If false, the allocation will block until a slot becomes available.
-   * If true, the allocation will return immediately if no slot is available.
-   *  @return True if the allocation was successful, false otherwise.
-   */
-  virtual bool allocateSlot(size_t size, SlotHandle & handle, bool non_blocking = false) = 0;
+  // Releases all imported slots and closes the connection. Idempotent.
+  void finalize();
 
-  /** @brief Frees a previously allocated slot.
-   *  @param[in] handle The handle of the slot to free.
-   */
-  virtual void freeSlot(const SlotHandle & handle) = 0;
+  // Reserves a pooled slot of at least `size` bytes and returns its local device
+  // pointer. Retries per AllocRetryPolicy while the daemon reports no free slot.
+  // Returns false if unsatisfiable (too large) or unavailable after retries.
+  bool allocateMemory(void ** device_ptr, size_t size);
+
+  // Returns a pooled pointer previously handed out by allocateMemory(). No-op if
+  // the pointer is unknown to this proxy.
+  void freeMemory(void * device_ptr);
+
+  bool getSlotIdFromDevicePtr(void * device_ptr, std::uint32_t & slot_id);
+  bool getDevicePtrFromSlotId(std::uint32_t slot_id, void *& device_ptr);
+
+private:
+  struct ProxySlot
+  {
+    gpu_shared_memory_daemon::SlotDescriptor descriptor;
+    ImportedSlot imported;
+  };
+
+  // Socket lifecycle. daemonIOMutex_ must be held.
+  bool connectSocket();
+  void closeSocket();
+  bool handshakeAndImport();  // handshake + list + import all slots
+  void releaseImportedSlots();
+
+  // One request/response round-trip, reconnecting+reinitializing once on I/O
+  // error. daemonIOMutex_ must be held.
+  bool transact(
+    gpu_shared_memory_daemon::MessageType request_type,
+    const std::vector<std::uint8_t> & request_payload,
+    gpu_shared_memory_daemon::MessageType expected_response_type,
+    gpu_shared_memory_daemon::MessageHeader & response_header,
+    std::vector<std::uint8_t> & response_payload);
+
+  GpuClientBackend & backend_;
+  std::string socket_path_;
+  AllocRetryPolicy retry_policy_;
+
+  std::mutex daemonIOMutex_;        // serializes socket I/O
+  std::mutex slotManagementMutex_;  // guards the maps below
+
+  int socket_fd_ = -1;
+  bool initialized_ = false;
+
+  std::unordered_map<std::uint32_t, ProxySlot> slots_;  // by slot id
+  std::unordered_map<void *, std::uint32_t> device_ptr_to_slot_id_;
 };
 
 }  // namespace agnocast::cuda

@@ -11,7 +11,9 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(agnocastlib REQUIRED)
+find_package(agnocast_gpu_shared_memory_daemon REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(Threads REQUIRED)
 
 # ---- Runtime CUDA loading (no build-time CUDA dependency) ----
 #
@@ -40,14 +42,18 @@ add_library(agnocast_cuda SHARED
   src/vmm_backend.cpp
   src/nvscibuf_backend.cpp
   src/unified_memory_backend.cpp
-  src/get_backend.cpp)
+  src/get_backend.cpp
+  src/cuda_ipc_client_backend.cpp
+  src/gpu_shared_memory_pool_proxy.cpp
+  src/proxy_c_api.cpp)
 
 target_include_directories(agnocast_cuda PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
-ament_target_dependencies(agnocast_cuda agnocastlib sensor_msgs)
-target_link_libraries(agnocast_cuda ${CMAKE_DL_LIBS})
+ament_target_dependencies(agnocast_cuda
+  agnocastlib agnocast_gpu_shared_memory_daemon sensor_msgs)
+target_link_libraries(agnocast_cuda ${CMAKE_DL_LIBS} Threads::Threads)
 
 install(TARGETS agnocast_cuda
   EXPORT export_${PROJECT_NAME}
@@ -57,7 +63,7 @@ install(TARGETS agnocast_cuda
   INCLUDES DESTINATION include)
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(agnocastlib sensor_msgs)
+ament_export_dependencies(agnocastlib agnocast_gpu_shared_memory_daemon sensor_msgs)
 
 # Always install headers so downstream packages can use the type definitions
 # (e.g., cuda_message_tag.hpp is in agnocastlib, but types.hpp is here).
@@ -66,4 +72,20 @@ install(
   DESTINATION include)
 
 ament_export_include_directories(include)
+
+if(BUILD_TESTING)
+  # Linting follows the repository convention (clang-format via pre-commit),
+  # matching sibling packages; ament_lint_common is intentionally not wired here.
+  find_package(ament_cmake_gmock REQUIRED)
+
+  # The proxy is exercised against an in-process fake daemon over a real socket,
+  # with a mock client backend, so no GPU is required.
+  ament_add_gmock(test_${PROJECT_NAME}
+    test/test_gpu_shared_memory_pool_proxy.cpp
+    test/test_publish_window.cpp)
+  target_include_directories(test_${PROJECT_NAME} PRIVATE src)
+  target_link_libraries(test_${PROJECT_NAME} agnocast_cuda)
+  ament_target_dependencies(test_${PROJECT_NAME} agnocast_gpu_shared_memory_daemon)
+endif()
+
 ament_package()

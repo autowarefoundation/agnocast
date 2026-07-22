@@ -1,5 +1,5 @@
 // Unit tests for framed socket I/O, exercised over a socketpair (no accept loop).
-#include "socket_io.hpp"
+#include "agnocast_gpu_shared_memory_daemon/socket_io.hpp"
 
 #include <gtest/gtest.h>
 #include <sys/socket.h>

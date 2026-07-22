@@ -79,14 +79,31 @@ constexpr unsigned int cudaIpcMemLazyEnablePeerAccess = 0x01;
 using cudaDeviceAttr = int;
 constexpr cudaDeviceAttr cudaDevAttrIntegrated = 18;  // driver_types.h: cudaDevAttrIntegrated = 18
 
+// Opaque event handle (a pointer to a driver object) and its 64-byte IPC handle.
+using cudaEvent_t = void *;
+
+struct cudaIpcEventHandle_t
+{
+  char reserved[64];  // CUDA_IPC_HANDLE_SIZE = 64
+};
+
+// 16-byte device UUID, as returned by cudaDeviceGetUuid (append-only stable ABI).
+struct cudaUUID_t
+{
+  char bytes[16];
+};
+
 // ---------------------------------------------------------------------------
 // Function pointer types matching CUDA Runtime API signatures.
 // ---------------------------------------------------------------------------
 using cudaGetDevice_t = cudaError_t (*)(int *);
 using cudaDeviceGetAttribute_t = cudaError_t (*)(int *, cudaDeviceAttr, int);
+using cudaDeviceGetUuid_t = cudaError_t (*)(cudaUUID_t *, int);
 using cudaIpcGetMemHandle_t = cudaError_t (*)(cudaIpcMemHandle_t *, void *);
 using cudaIpcOpenMemHandle_t = cudaError_t (*)(void **, cudaIpcMemHandle_t, unsigned int);
 using cudaIpcCloseMemHandle_t = cudaError_t (*)(void *);
+using cudaIpcOpenEventHandle_t = cudaError_t (*)(cudaEvent_t *, cudaIpcEventHandle_t);
+using cudaEventDestroy_t = cudaError_t (*)(cudaEvent_t);
 using cudaFree_t = cudaError_t (*)(void *);
 using cudaGetErrorString_t = const char * (*)(cudaError_t);
 
@@ -113,9 +130,12 @@ public:
   // Callers use these like: CudartLoader::instance().cudaFree(ptr)
   cudaGetDevice_t cudaGetDevice;
   cudaDeviceGetAttribute_t cudaDeviceGetAttribute;
+  cudaDeviceGetUuid_t cudaDeviceGetUuid;
   cudaIpcGetMemHandle_t cudaIpcGetMemHandle;
   cudaIpcOpenMemHandle_t cudaIpcOpenMemHandle;
   cudaIpcCloseMemHandle_t cudaIpcCloseMemHandle;
+  cudaIpcOpenEventHandle_t cudaIpcOpenEventHandle;
+  cudaEventDestroy_t cudaEventDestroy;
   cudaFree_t cudaFree;
   cudaGetErrorString_t cudaGetErrorString;
 
@@ -150,9 +170,12 @@ private:
 
     load_symbol(cudaGetDevice, "cudaGetDevice");
     load_symbol(cudaDeviceGetAttribute, "cudaDeviceGetAttribute");
+    load_symbol(cudaDeviceGetUuid, "cudaDeviceGetUuid");
     load_symbol(cudaIpcGetMemHandle, "cudaIpcGetMemHandle");
     load_symbol(cudaIpcOpenMemHandle, "cudaIpcOpenMemHandle");
     load_symbol(cudaIpcCloseMemHandle, "cudaIpcCloseMemHandle");
+    load_symbol(cudaIpcOpenEventHandle, "cudaIpcOpenEventHandle");
+    load_symbol(cudaEventDestroy, "cudaEventDestroy");
     load_symbol(cudaFree, "cudaFree");
     load_symbol(cudaGetErrorString, "cudaGetErrorString");
   }

@@ -1,7 +1,7 @@
 #include "unix_socket_server.hpp"
 
+#include "agnocast_gpu_shared_memory_daemon/socket_io.hpp"
 #include "request_handler.hpp"
-#include "socket_io.hpp"
 
 #include <sys/socket.h>
 #include <sys/stat.h>

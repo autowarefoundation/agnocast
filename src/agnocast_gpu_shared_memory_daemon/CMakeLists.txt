@@ -64,7 +64,6 @@ target_link_libraries(gpu_shared_memory_pool PUBLIC yaml-cpp ${CMAKE_DL_LIBS})
 # Framed Unix-domain-socket I/O, the request handler, and the accept/serve loop.
 # ---------------------------------------------------------------------------
 add_library(gpu_daemon_server STATIC
-  daemon/socket_io.cpp
   daemon/request_handler.cpp
   daemon/unix_socket_server.cpp)
 target_include_directories(gpu_daemon_server PUBLIC

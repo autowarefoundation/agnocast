@@ -1,8 +1,8 @@
 // End-to-end test of the Unix-domain-socket server over a real socket, driven by a
 // client on the same host. Uses the mock backend, so it needs no GPU.
+#include "agnocast_gpu_shared_memory_daemon/socket_io.hpp"
 #include "gpu_shared_memory_pool.hpp"
 #include "mock_slot_backend.hpp"
-#include "socket_io.hpp"
 #include "unix_socket_server.hpp"
 
 #include <gtest/gtest.h>
