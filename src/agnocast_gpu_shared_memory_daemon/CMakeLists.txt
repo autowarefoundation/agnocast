@@ -11,6 +11,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Public header-only interface library.
@@ -57,6 +58,33 @@ target_include_directories(gpu_shared_memory_pool PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/daemon)
 target_link_libraries(gpu_shared_memory_pool PUBLIC yaml-cpp ${CMAKE_DL_LIBS})
 
+# ---------------------------------------------------------------------------
+# Internal daemon server library (not installed / not exported).
+#
+# Framed Unix-domain-socket I/O, the request handler, and the accept/serve loop.
+# ---------------------------------------------------------------------------
+add_library(gpu_daemon_server STATIC
+  daemon/socket_io.cpp
+  daemon/request_handler.cpp
+  daemon/unix_socket_server.cpp)
+target_include_directories(gpu_daemon_server PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/daemon)
+target_link_libraries(gpu_daemon_server PUBLIC gpu_shared_memory_pool Threads::Threads)
+
+# ---------------------------------------------------------------------------
+# Daemon executable.
+# ---------------------------------------------------------------------------
+add_executable(gpu_shared_memory_daemon daemon/main.cpp)
+target_link_libraries(gpu_shared_memory_daemon gpu_daemon_server)
+
+install(TARGETS gpu_shared_memory_daemon
+  RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+install(
+  DIRECTORY systemd/
+  DESTINATION share/${PROJECT_NAME}/systemd)
+
 if(BUILD_TESTING)
   # NOTE: Linting follows the repository convention (clang-format via
   # .pre-commit-config.yaml, using the repo .clang-format), matching sibling
@@ -70,9 +98,12 @@ if(BUILD_TESTING)
     test/test_protocol.cpp
     test/test_pool_config.cpp
     test/test_gpu_shared_memory_pool.cpp
-    test/test_pool_config_loader.cpp)
+    test/test_pool_config_loader.cpp
+    test/test_socket_io.cpp
+    test/test_request_handler.cpp
+    test/test_unix_socket_server.cpp)
   target_include_directories(test_${PROJECT_NAME} PRIVATE include daemon)
-  target_link_libraries(test_${PROJECT_NAME} gpu_shared_memory_pool)
+  target_link_libraries(test_${PROJECT_NAME} gpu_daemon_server)
 endif()
 
 ament_package()

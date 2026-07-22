@@ -1,81 +1,17 @@
 // Unit tests for GpuSharedMemoryPool using a mock backend, so all slot bookkeeping
-// (best-fit-by-size-class free list, blocking/non-blocking alloc, cleanup) is
-// exercised without a GPU.
+// (best-fit-by-size-class free list, non-blocking alloc, cleanup) is exercised
+// without a GPU.
 #include "gpu_shared_memory_pool.hpp"
+#include "mock_slot_backend.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <string>
 #include <vector>
 
 namespace proto = agnocast::gpu_shared_memory_daemon;
-
-namespace
-{
-
-// Records calls and hands out deterministic fake resources. Can be told to fail
-// on the Nth create_slot() to exercise the init-failure cleanup path.
-class MockSlotBackend : public proto::GpuSlotBackend
-{
-public:
-  proto::BackendType backend_type() const override { return proto::BackendType::kCudaIpc; }
-
-  bool initialize(std::string & gpu_uuid_out) override
-  {
-    initialize_calls++;
-    gpu_uuid_out = "GPU-mock-0001";
-    return initialize_result;
-  }
-
-  bool create_slot(std::size_t size, proto::AllocatedSlotResources & out) override
-  {
-    if (
-      fail_on_create_index >= 0 && create_calls == static_cast<std::size_t>(fail_on_create_index)) {
-      ++create_calls;
-      return false;
-    }
-    const auto tag = static_cast<std::uint8_t>(create_calls + 1);
-    out = proto::AllocatedSlotResources{};
-    out.device_ptr = reinterpret_cast<void *>(static_cast<std::uintptr_t>(create_calls + 1));
-    out.data_ready_event =
-      reinterpret_cast<void *>(static_cast<std::uintptr_t>(0x1000 + create_calls));
-    out.data_done_event =
-      reinterpret_cast<void *>(static_cast<std::uintptr_t>(0x2000 + create_calls));
-    out.mem_handle = {tag, static_cast<std::uint8_t>(size & 0xff)};
-    out.data_ready_event_handle = {static_cast<std::uint8_t>(0xa0 + tag)};
-    out.data_done_event_handle = {static_cast<std::uint8_t>(0xb0 + tag)};
-    ++create_calls;
-    return true;
-  }
-
-  void destroy_slot(proto::AllocatedSlotResources & resources) override
-  {
-    if (resources.device_ptr != nullptr) {
-      ++destroy_calls;
-    }
-    resources = proto::AllocatedSlotResources{};
-  }
-
-  bool initialize_result = true;
-  int fail_on_create_index = -1;  // -1 = never fail
-  std::size_t initialize_calls = 0;
-  std::size_t create_calls = 0;
-  std::size_t destroy_calls = 0;
-};
-
-// Config: class 0 = 1024 B x 2, class 1 = 4096 B x 3 (5 slots total).
-proto::PoolConfig two_class_config()
-{
-  proto::PoolConfig config;
-  config.size_classes = {
-    proto::SizeClassConfig{1024u, 2u},
-    proto::SizeClassConfig{4096u, 3u},
-  };
-  return config;
-}
-
-}  // namespace
+using proto::test::MockSlotBackend;
+using proto::test::two_class_config;
 
 TEST(GpuSharedMemoryPool, InitializeCreatesAllSlots)
 {
