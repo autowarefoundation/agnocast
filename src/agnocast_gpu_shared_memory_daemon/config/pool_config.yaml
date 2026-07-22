@@ -4,17 +4,17 @@
 # classes. An "alloc" request for N bytes is served from the smallest size class
 # whose slot_size_bytes >= N. All slots are allocated at daemon startup.
 #
+# This file describes ONLY pool geometry. It does NOT identify a GPU: which GPU a
+# daemon instance manages is decided at launch (e.g. the systemd instance sets
+# CUDA_VISIBLE_DEVICES). The daemon discovers the GPU UUID at runtime and derives
+# its Unix domain socket path from it, so the socket always matches the managed
+# GPU and no volatile UUID is hard-coded here.
+#
 # NOTE: These values are a first proposal (sized for typical Autoware camera
 # images and LiDAR point clouds) and are expected to be tuned. Parsing of this
 # file is added in a later step; until then the compiled-in defaults in
 # include/agnocast_gpu_shared_memory_daemon/pool_config.hpp are authoritative and
 # mirror the values below.
-
-# CUDA device this daemon instance manages (one daemon per GPU).
-gpu_device_id: 0
-
-# Unix domain socket the daemon listens on and proxies connect to.
-socket_path: /run/agnocast/gpu_shared_memory_daemon.sock
 
 # Size classes, sorted ascending by slot_size_bytes.
 # Total reserved GPU memory with these defaults: 416 MiB.

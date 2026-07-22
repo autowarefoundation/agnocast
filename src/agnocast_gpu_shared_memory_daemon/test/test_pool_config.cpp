@@ -7,13 +7,6 @@
 
 namespace proto = agnocast::gpu_shared_memory_daemon;
 
-TEST(PoolConfigDefaults, HasExpectedSocketAndDevice)
-{
-  const auto config = proto::default_pool_config();
-  EXPECT_EQ(config.gpu_device_id, 0);
-  EXPECT_EQ(config.socket_path, std::string(proto::kDefaultSocketPath));
-}
-
 TEST(PoolConfigDefaults, SizeClassesAreNonEmptyAndSortedAscending)
 {
   const auto config = proto::default_pool_config();

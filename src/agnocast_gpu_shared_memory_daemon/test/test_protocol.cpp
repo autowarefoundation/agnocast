@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <numeric>
+#include <string>
 #include <vector>
 
 namespace proto = agnocast::gpu_shared_memory_daemon;
@@ -12,11 +12,11 @@ namespace proto = agnocast::gpu_shared_memory_daemon;
 namespace
 {
 
-// Fills a handle blob with a deterministic, non-trivial byte pattern.
-proto::IpcHandleBlob make_blob(std::uint8_t seed)
+// Builds a variable-length handle blob of `len` bytes with a deterministic pattern.
+std::vector<std::uint8_t> make_blob(std::uint8_t seed, std::size_t len)
 {
-  proto::IpcHandleBlob blob{};
-  for (std::size_t i = 0; i < blob.size(); ++i) {
+  std::vector<std::uint8_t> blob(len);
+  for (std::size_t i = 0; i < len; ++i) {
     blob[i] = static_cast<std::uint8_t>(seed + i);
   }
   return blob;
@@ -142,6 +142,81 @@ TEST(ProtocolFreeResponse, RoundTrip)
   EXPECT_EQ(out.status, in.status);
 }
 
+TEST(ProtocolHandshakeResponse, RoundTrip)
+{
+  proto::HandshakeResponse in;
+  in.backend_type = static_cast<std::uint32_t>(proto::BackendType::kCudaIpc);
+  in.gpu_uuid = "GPU-01234567-89ab-cdef-0123-456789abcdef";
+
+  const auto bytes = proto::serialize_handshake_response(in);
+
+  proto::HandshakeResponse out;
+  ASSERT_TRUE(proto::deserialize_handshake_response(bytes.data(), bytes.size(), &out));
+  EXPECT_EQ(out.backend_type, in.backend_type);
+  EXPECT_EQ(out.gpu_uuid, in.gpu_uuid);
+}
+
+TEST(ProtocolHandshakeResponse, RoundTripEmptyUuid)
+{
+  proto::HandshakeResponse in;
+  in.backend_type = static_cast<std::uint32_t>(proto::BackendType::kUnknown);
+  in.gpu_uuid = "";
+
+  const auto bytes = proto::serialize_handshake_response(in);
+
+  proto::HandshakeResponse out;
+  ASSERT_TRUE(proto::deserialize_handshake_response(bytes.data(), bytes.size(), &out));
+  EXPECT_EQ(out.backend_type, in.backend_type);
+  EXPECT_TRUE(out.gpu_uuid.empty());
+}
+
+TEST(ProtocolHandshakeResponse, RejectsTruncatedInput)
+{
+  proto::HandshakeResponse in;
+  in.backend_type = static_cast<std::uint32_t>(proto::BackendType::kCudaIpc);
+  in.gpu_uuid = "GPU-abc";
+  const auto bytes = proto::serialize_handshake_response(in);
+
+  proto::HandshakeResponse out;
+  // Chop the last UUID byte: the declared string length exceeds the buffer.
+  EXPECT_FALSE(proto::deserialize_handshake_response(bytes.data(), bytes.size() - 1, &out));
+}
+
+TEST(ProtocolSlotDescriptor, RoundTripVariableLengthHandles)
+{
+  // Exercises unequal blob lengths, including a larger-than-CUDA NvSci-sized blob
+  // and an empty blob, to confirm handle size is not baked into the wire format.
+  proto::SlotDescriptor in;
+  in.slot_id = 3;
+  in.size_class_index = 1;
+  in.slot_size = 8ull * 1024ull * 1024ull;
+  in.mem_handle = make_blob(0x10, 64);         // CUDA-sized
+  in.data_ready_event = make_blob(0x20, 300);  // NvSci-sized (larger than 64)
+  in.data_done_event = make_blob(0x30, 0);     // empty
+
+  std::vector<std::uint8_t> buf;
+  proto::serialize_slot_descriptor(buf, in);
+
+  proto::SlotDescriptor out;
+  std::size_t offset = 0;
+  ASSERT_TRUE(proto::deserialize_slot_descriptor(buf.data(), buf.size(), &offset, &out));
+  EXPECT_EQ(offset, buf.size());
+  EXPECT_EQ(out.slot_id, in.slot_id);
+  EXPECT_EQ(out.size_class_index, in.size_class_index);
+  EXPECT_EQ(out.slot_size, in.slot_size);
+  EXPECT_EQ(out.mem_handle, in.mem_handle);
+  EXPECT_EQ(out.data_ready_event, in.data_ready_event);
+  EXPECT_EQ(out.data_done_event, in.data_done_event);
+}
+
+TEST(ProtocolSlotDescriptor, EmptyHandlesHitMinimumWireSize)
+{
+  proto::SlotDescriptor in;  // all handles empty
+  std::vector<std::uint8_t> buf;
+  proto::serialize_slot_descriptor(buf, in);
+  EXPECT_EQ(buf.size(), proto::kMinSlotDescriptorWireSize);
+}
+
 TEST(ProtocolListResponse, RoundTripEmpty)
 {
   proto::ListResponse in;
@@ -160,14 +235,13 @@ TEST(ProtocolListResponse, RoundTripMultipleSlots)
     slot.slot_id = i;
     slot.size_class_index = i % 2;
     slot.slot_size = (i + 1) * 1024ull * 1024ull;
-    slot.mem_handle = make_blob(static_cast<std::uint8_t>(i));
-    slot.data_ready_event = make_blob(static_cast<std::uint8_t>(i + 64));
-    slot.data_done_event = make_blob(static_cast<std::uint8_t>(i + 128));
+    slot.mem_handle = make_blob(static_cast<std::uint8_t>(i), 64);
+    slot.data_ready_event = make_blob(static_cast<std::uint8_t>(i + 64), 64 + i);
+    slot.data_done_event = make_blob(static_cast<std::uint8_t>(i + 128), 64);
     in.slots.push_back(slot);
   }
 
   const auto bytes = proto::serialize_list_response(in);
-  ASSERT_EQ(bytes.size(), 4 + in.slots.size() * proto::kSlotDescriptorWireSize);
 
   proto::ListResponse out;
   ASSERT_TRUE(proto::deserialize_list_response(bytes.data(), bytes.size(), &out));
@@ -187,12 +261,59 @@ TEST(ProtocolListResponse, RejectsTruncatedInput)
   proto::ListResponse in;
   proto::SlotDescriptor slot;
   slot.slot_id = 1;
+  slot.mem_handle = make_blob(0x01, 64);
   in.slots.push_back(slot);
   const auto bytes = proto::serialize_list_response(in);
 
   proto::ListResponse out;
   // Chop off the last byte: the declared slot cannot be fully read.
   EXPECT_FALSE(proto::deserialize_list_response(bytes.data(), bytes.size() - 1, &out));
+}
+
+TEST(ProtocolListResponse, RejectsImplausibleSlotCountWithoutOverAllocating)
+{
+  // Regression test for the unbounded reserve() bug: a frame that declares a huge
+  // slot count but carries almost no payload must be rejected up front, not trigger
+  // a multi-hundred-GiB speculative allocation.
+  std::vector<std::uint8_t> buf;
+  proto::detail::put_u32(buf, 0xffffffffu);  // count = ~4.29e9 slots
+  // No slot bytes follow (only a couple of stray bytes).
+  buf.push_back(0x00);
+  buf.push_back(0x00);
+
+  proto::ListResponse out;
+  EXPECT_FALSE(proto::deserialize_list_response(buf.data(), buf.size(), &out));
+  EXPECT_TRUE(out.slots.empty());
+}
+
+TEST(ProtocolListResponse, RejectsCountJustBeyondBuffer)
+{
+  // count is small enough not to overflow the division but still larger than the
+  // buffer can hold: exercises the exact boundary of the cap.
+  std::vector<std::uint8_t> buf;
+  proto::detail::put_u32(buf, 2u);  // claim 2 slots
+  // Provide only enough bytes for less than one minimal slot.
+  for (std::size_t i = 0; i < proto::kMinSlotDescriptorWireSize - 1; ++i) {
+    buf.push_back(0x00);
+  }
+
+  proto::ListResponse out;
+  EXPECT_FALSE(proto::deserialize_list_response(buf.data(), buf.size(), &out));
+}
+
+TEST(ProtocolVarBlob, RejectsImplausibleBlobLength)
+{
+  // A slot descriptor whose first handle declares a huge length but provides no
+  // bytes must be rejected without over-allocating.
+  std::vector<std::uint8_t> buf;
+  proto::detail::put_u32(buf, 0u);           // slot_id
+  proto::detail::put_u32(buf, 0u);           // size_class_index
+  proto::detail::put_u64(buf, 0u);           // slot_size
+  proto::detail::put_u32(buf, 0xffffffffu);  // mem_handle length, no data follows
+
+  proto::SlotDescriptor out;
+  std::size_t offset = 0;
+  EXPECT_FALSE(proto::deserialize_slot_descriptor(buf.data(), buf.size(), &offset, &out));
 }
 
 TEST(ProtocolFraming, HeaderPlusPayload)
@@ -216,4 +337,26 @@ TEST(ProtocolFraming, HeaderPlusPayload)
     framed.data() + proto::kHeaderWireSize, header.payload_size, &decoded));
   EXPECT_EQ(decoded.size, request.size);
   EXPECT_EQ(decoded.non_blocking, request.non_blocking);
+}
+
+TEST(ProtocolSocketPath, DerivesFromGpuUuid)
+{
+  EXPECT_EQ(
+    proto::socket_path_for_gpu("GPU-1234"),
+    std::string(proto::kSocketDir) + "/gpu_shared_memory_daemon.GPU-1234.sock");
+}
+
+TEST(ProtocolSocketPath, DistinctUuidsGiveDistinctPaths)
+{
+  EXPECT_NE(proto::socket_path_for_gpu("GPU-aaaa"), proto::socket_path_for_gpu("GPU-bbbb"));
+}
+
+TEST(ProtocolSocketPath, SanitizesUnsafeCharacters)
+{
+  // Composite MIG identifiers contain '/', which must not create extra path
+  // components; every unsafe character becomes '_'.
+  const auto path = proto::socket_path_for_gpu("MIG-GPU-abc/3/0");
+  EXPECT_EQ(
+    path, std::string(proto::kSocketDir) + "/gpu_shared_memory_daemon.MIG-GPU-abc_3_0.sock");
+  EXPECT_EQ(path.find("abc/3"), std::string::npos);
 }
