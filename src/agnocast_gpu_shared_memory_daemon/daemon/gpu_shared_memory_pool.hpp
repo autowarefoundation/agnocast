@@ -11,7 +11,6 @@
 #include "agnocast_gpu_shared_memory_daemon/protocol.hpp"
 #include "gpu_slot_backend.hpp"
 
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -46,10 +45,12 @@ public:
 
   // Reserves the smallest-size-class free slot whose capacity >= `size`, falling
   // through to larger classes if a class is exhausted. Writes the slot id on kOk.
-  //   kSizeTooLarge : no size class is large enough (never blocks; unsatisfiable).
-  //   kNoFreeSlot   : non_blocking and no fitting slot is free right now.
-  // When non_blocking is false and a fitting class exists, blocks until a slot frees.
-  Status allocate(std::size_t size, bool non_blocking, std::uint32_t & slot_id_out);
+  //   kSizeTooLarge : no size class is large enough.
+  //   kNoFreeSlot   : a fitting class exists but no slot in it is free right now.
+  // This ALWAYS returns immediately and NEVER blocks: a daemon that waits on a
+  // client request could stall forever and starve every other client. Callers
+  // that want blocking semantics retry on kNoFreeSlot on their own side.
+  Status allocate(std::size_t size, std::uint32_t & slot_id_out);
 
   // Returns a previously allocated slot to the pool. kInvalidSlot if the id is
   // unknown or the slot is not currently allocated.
@@ -78,7 +79,6 @@ private:
   std::string gpu_uuid_;
 
   mutable std::mutex mutex_;
-  std::condition_variable slot_freed_;
 
   std::vector<Slot> slots_;                                // indexed by slot_id
   std::vector<std::uint64_t> class_sizes_;                 // capacity per size class, ascending

@@ -107,55 +107,39 @@ std::size_t GpuSharedMemoryPool::first_fitting_class(std::size_t size) const
   return class_sizes_.size();
 }
 
-Status GpuSharedMemoryPool::allocate(
-  std::size_t size, bool non_blocking, std::uint32_t & slot_id_out)
+Status GpuSharedMemoryPool::allocate(std::size_t size, std::uint32_t & slot_id_out)
 {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
 
   const std::size_t first_class = first_fitting_class(size);
   if (first_class >= class_sizes_.size()) {
-    // No size class is large enough: unsatisfiable regardless of blocking.
+    // No size class is large enough: unsatisfiable.
     return Status::kSizeTooLarge;
   }
 
   // Best fit: try the smallest fitting class, falling through to larger classes.
-  auto try_reserve = [&](std::uint32_t & out) -> bool {
-    for (std::size_t c = first_class; c < free_by_class_.size(); ++c) {
-      if (!free_by_class_[c].empty()) {
-        const std::uint32_t slot_id = free_by_class_[c].back();
-        free_by_class_[c].pop_back();
-        slots_[slot_id].allocated = true;
-        out = slot_id;
-        return true;
-      }
+  // Never blocks; if nothing is free the caller is told and retries on its side.
+  for (std::size_t c = first_class; c < free_by_class_.size(); ++c) {
+    if (!free_by_class_[c].empty()) {
+      const std::uint32_t slot_id = free_by_class_[c].back();
+      free_by_class_[c].pop_back();
+      slots_[slot_id].allocated = true;
+      slot_id_out = slot_id;
+      return Status::kOk;
     }
-    return false;
-  };
-
-  if (try_reserve(slot_id_out)) {
-    return Status::kOk;
   }
-  if (non_blocking) {
-    return Status::kNoFreeSlot;
-  }
-
-  // Blocking: wait until a fitting slot is freed.
-  slot_freed_.wait(lock, [&] { return try_reserve(slot_id_out); });
-  return Status::kOk;
+  return Status::kNoFreeSlot;
 }
 
 Status GpuSharedMemoryPool::free_slot(std::uint32_t slot_id)
 {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (slot_id >= slots_.size() || !slots_[slot_id].allocated) {
-      return Status::kInvalidSlot;
-    }
-    Slot & slot = slots_[slot_id];
-    slot.allocated = false;
-    free_by_class_[slot.size_class_index].push_back(slot_id);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (slot_id >= slots_.size() || !slots_[slot_id].allocated) {
+    return Status::kInvalidSlot;
   }
-  slot_freed_.notify_one();
+  Slot & slot = slots_[slot_id];
+  slot.allocated = false;
+  free_by_class_[slot.size_class_index].push_back(slot_id);
   return Status::kOk;
 }
 

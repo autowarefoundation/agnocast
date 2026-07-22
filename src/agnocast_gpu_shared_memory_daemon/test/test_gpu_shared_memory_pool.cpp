@@ -5,10 +5,8 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <cstdint>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace proto = agnocast::gpu_shared_memory_daemon;
@@ -125,11 +123,11 @@ TEST(GpuSharedMemoryPool, AllocateBestFitBySizeClass)
   ASSERT_TRUE(pool.initialize(two_class_config()));
 
   std::uint32_t small_slot = 0;
-  ASSERT_EQ(pool.allocate(1000, true, small_slot), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(1000, small_slot), proto::Status::kOk);
   EXPECT_EQ(pool.make_list_response().slots[small_slot].size_class_index, 0u);
 
   std::uint32_t big_slot = 0;
-  ASSERT_EQ(pool.allocate(2000, true, big_slot), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(2000, big_slot), proto::Status::kOk);
   EXPECT_EQ(pool.make_list_response().slots[big_slot].size_class_index, 1u);
 }
 
@@ -142,12 +140,12 @@ TEST(GpuSharedMemoryPool, AllocateFallsThroughToLargerClassWhenExhausted)
   // Drain both slots in class 0 with small requests.
   std::uint32_t a = 0;
   std::uint32_t b = 0;
-  ASSERT_EQ(pool.allocate(100, true, a), proto::Status::kOk);
-  ASSERT_EQ(pool.allocate(100, true, b), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(100, a), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(100, b), proto::Status::kOk);
 
   // A third small request must fall through to class 1.
   std::uint32_t c = 0;
-  ASSERT_EQ(pool.allocate(100, true, c), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(100, c), proto::Status::kOk);
   EXPECT_EQ(pool.make_list_response().slots[c].size_class_index, 1u);
 }
 
@@ -158,12 +156,11 @@ TEST(GpuSharedMemoryPool, AllocateSizeTooLarge)
   ASSERT_TRUE(pool.initialize(two_class_config()));
 
   std::uint32_t slot = 42;
-  EXPECT_EQ(pool.allocate(4097, true, slot), proto::Status::kSizeTooLarge);
-  // Even blocking must not wait on an unsatisfiable request.
-  EXPECT_EQ(pool.allocate(1u << 30, false, slot), proto::Status::kSizeTooLarge);
+  EXPECT_EQ(pool.allocate(4097, slot), proto::Status::kSizeTooLarge);
+  EXPECT_EQ(pool.allocate(1u << 30, slot), proto::Status::kSizeTooLarge);
 }
 
-TEST(GpuSharedMemoryPool, NonBlockingAllocateReturnsNoFreeSlotWhenExhausted)
+TEST(GpuSharedMemoryPool, AllocateReturnsNoFreeSlotWhenExhausted)
 {
   MockSlotBackend backend;
   proto::GpuSharedMemoryPool pool(backend);
@@ -172,13 +169,13 @@ TEST(GpuSharedMemoryPool, NonBlockingAllocateReturnsNoFreeSlotWhenExhausted)
   std::vector<std::uint32_t> ids;
   for (int i = 0; i < 5; ++i) {
     std::uint32_t slot = 0;
-    ASSERT_EQ(pool.allocate(100, true, slot), proto::Status::kOk);
+    ASSERT_EQ(pool.allocate(100, slot), proto::Status::kOk);
     ids.push_back(slot);
   }
   EXPECT_EQ(pool.free_slot_count(), 0u);
 
   std::uint32_t slot = 0;
-  EXPECT_EQ(pool.allocate(100, true, slot), proto::Status::kNoFreeSlot);
+  EXPECT_EQ(pool.allocate(100, slot), proto::Status::kNoFreeSlot);
 }
 
 TEST(GpuSharedMemoryPool, FreeReturnsSlotToPool)
@@ -188,7 +185,7 @@ TEST(GpuSharedMemoryPool, FreeReturnsSlotToPool)
   ASSERT_TRUE(pool.initialize(two_class_config()));
 
   std::uint32_t slot = 0;
-  ASSERT_EQ(pool.allocate(100, true, slot), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(100, slot), proto::Status::kOk);
   EXPECT_EQ(pool.free_slot_count(), 4u);
 
   ASSERT_EQ(pool.free_slot(slot), proto::Status::kOk);
@@ -204,7 +201,7 @@ TEST(GpuSharedMemoryPool, FreeRejectsInvalidAndDoubleFree)
   EXPECT_EQ(pool.free_slot(999), proto::Status::kInvalidSlot);
 
   std::uint32_t slot = 0;
-  ASSERT_EQ(pool.allocate(100, true, slot), proto::Status::kOk);
+  ASSERT_EQ(pool.allocate(100, slot), proto::Status::kOk);
   ASSERT_EQ(pool.free_slot(slot), proto::Status::kOk);
   EXPECT_EQ(pool.free_slot(slot), proto::Status::kInvalidSlot);
 }
@@ -257,29 +254,27 @@ TEST(GpuSharedMemoryPool, InitializeFailsWhenBackendInitFails)
   EXPECT_EQ(backend.create_calls, 0u);
 }
 
-TEST(GpuSharedMemoryPool, BlockingAllocateWakesWhenSlotFreed)
+TEST(GpuSharedMemoryPool, ExhaustedAllocateNeverBlocksAndFreedSlotIsReusable)
 {
+  // The daemon must never block on a client request. Once the pool is exhausted,
+  // allocate returns kNoFreeSlot immediately; after a free, allocate succeeds again.
   MockSlotBackend backend;
   proto::GpuSharedMemoryPool pool(backend);
   ASSERT_TRUE(pool.initialize(two_class_config()));
 
-  // Exhaust the pool.
   std::vector<std::uint32_t> ids;
   for (int i = 0; i < 5; ++i) {
     std::uint32_t slot = 0;
-    ASSERT_EQ(pool.allocate(100, true, slot), proto::Status::kOk);
+    ASSERT_EQ(pool.allocate(100, slot), proto::Status::kOk);
     ids.push_back(slot);
   }
 
-  // A blocking allocate must wait, then succeed once a slot is freed by another thread.
-  std::uint32_t obtained = 0;
-  proto::Status status = proto::Status::kInternalError;
-  std::thread waiter([&] { status = pool.allocate(100, false, obtained); });
+  std::uint32_t denied = 0;
+  EXPECT_EQ(pool.allocate(100, denied), proto::Status::kNoFreeSlot);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
   ASSERT_EQ(pool.free_slot(ids.front()), proto::Status::kOk);
 
-  waiter.join();
-  EXPECT_EQ(status, proto::Status::kOk);
-  EXPECT_EQ(obtained, ids.front());
+  std::uint32_t reused = 0;
+  EXPECT_EQ(pool.allocate(100, reused), proto::Status::kOk);
+  EXPECT_EQ(reused, ids.front());
 }

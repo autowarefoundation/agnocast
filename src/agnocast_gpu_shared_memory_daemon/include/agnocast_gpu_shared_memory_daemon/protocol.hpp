@@ -113,8 +113,11 @@ struct HandshakeResponse
 
 struct AllocRequest
 {
-  std::uint64_t size = 0;         // requested minimum size in bytes
-  std::uint8_t non_blocking = 0;  // 1 = return immediately if no slot is free
+  std::uint64_t size = 0;  // requested minimum size in bytes
+  // Advisory hint for the CLIENT's own retry behavior. The daemon NEVER blocks:
+  // it always answers immediately (kOk / kNoFreeSlot / kSizeTooLarge). A client
+  // that wants blocking semantics retries on kNoFreeSlot on its side.
+  std::uint8_t non_blocking = 0;
 };
 constexpr std::size_t kAllocRequestWireSize = 8 + 1;
 
