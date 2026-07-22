@@ -71,6 +71,7 @@ bool CudaIpcSlotBackend::create_slot(std::size_t size, AllocatedSlotResources & 
     return false;
   }
 
+  // These 2 flags need to be set together for the events to be usable across processes.
   const unsigned int event_flags = cudaEventInterprocess | cudaEventDisableTiming;
   cudaEvent_t ready_event = nullptr;
   cudaEvent_t done_event = nullptr;
