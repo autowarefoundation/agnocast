@@ -12,6 +12,8 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>yaml-cpp</depend>
+
   <test_depend>ament_cmake_gmock</test_depend>
 
   <export>

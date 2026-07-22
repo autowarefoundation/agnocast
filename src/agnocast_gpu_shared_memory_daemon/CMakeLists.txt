@@ -10,15 +10,15 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Header-only interface library.
+# Public header-only interface library.
 #
-# For now this package ships only the wire protocol and the pool configuration
-# schema as installed headers. The proxy (agnocast_cuda) depends on this package
-# for protocol.hpp. The daemon executable and its slot-pool / socket-server
-# implementation are added in later steps. This package has NO build-time CUDA
-# dependency: protocol.hpp carries CUDA IPC handles as opaque byte blobs.
+# Ships the wire protocol and pool configuration schema as installed headers.
+# The proxy (agnocast_cuda) depends on this package for protocol.hpp. This target
+# has NO build-time CUDA dependency: protocol.hpp carries IPC handles as opaque
+# byte blobs.
 # ---------------------------------------------------------------------------
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE
@@ -39,6 +39,24 @@ install(
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_include_directories(include)
 
+# ---------------------------------------------------------------------------
+# Internal daemon slot-pool library (not installed / not exported).
+#
+# Holds the GPU slot pool, the delegated backend interface + its CUDA IPC
+# implementation, and the YAML config loader. Like agnocast_cuda it has NO
+# build-time CUDA dependency: CUDA is loaded at runtime via dlopen (see
+# daemon/cudart_loader.hpp). The daemon executable and Unix-domain-socket server
+# (later step) link this library.
+# ---------------------------------------------------------------------------
+add_library(gpu_shared_memory_pool STATIC
+  daemon/cuda_ipc_slot_backend.cpp
+  daemon/gpu_shared_memory_pool.cpp
+  daemon/pool_config_loader.cpp)
+target_include_directories(gpu_shared_memory_pool PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/daemon)
+target_link_libraries(gpu_shared_memory_pool PUBLIC yaml-cpp ${CMAKE_DL_LIBS})
+
 if(BUILD_TESTING)
   # NOTE: Linting follows the repository convention (clang-format via
   # .pre-commit-config.yaml, using the repo .clang-format), matching sibling
@@ -50,8 +68,11 @@ if(BUILD_TESTING)
 
   ament_add_gmock(test_${PROJECT_NAME}
     test/test_protocol.cpp
-    test/test_pool_config.cpp)
-  target_include_directories(test_${PROJECT_NAME} PRIVATE include)
+    test/test_pool_config.cpp
+    test/test_gpu_shared_memory_pool.cpp
+    test/test_pool_config_loader.cpp)
+  target_include_directories(test_${PROJECT_NAME} PRIVATE include daemon)
+  target_link_libraries(test_${PROJECT_NAME} gpu_shared_memory_pool)
 endif()
 
 ament_package()
