@@ -51,6 +51,7 @@ non_ros_threads: []
   EXPECT_EQ(cb[0].affinity, (std::vector<int>{0, 1}));
   EXPECT_EQ(cb[0].thread_id, -1);
   EXPECT_FALSE(cb[0].applied);
+  EXPECT_FALSE(cb[0].is_wildcard());
 }
 
 TEST(ParseYaml, FallsBackToDefaultDomainId)
@@ -243,4 +244,170 @@ non_ros_threads:
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
   EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+// ---------- wildcard ("<node name>/*") callback-group ids ----------
+
+TEST(ParseYaml, ParsesWildcardCallbackGroupId)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /perception/lidar_node/*
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+    affinity: [2]
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_TRUE(cb[0].is_wildcard());
+  EXPECT_EQ(cb[0].wildcard_prefix(), "/perception/lidar_node");
+  EXPECT_EQ(cb[0].thread_str, "/perception/lidar_node/*");  // kept as written
+  EXPECT_TRUE(cb[0].matched_tids.empty());
+}
+
+TEST(ParseYaml, RejectsWildcardWithEmptyNodePart)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, RejectsStrayAsteriskInId)
+{
+  for (const char * bad_id :
+       {"/node*", "/node/**", "/node/*x", "/a/*/b", "*", "/node/*@Waitable"}) {
+    auto y = yaml_from_str(("callback_groups:\n"
+                            "  - id: \"" +
+                            std::string(bad_id) +
+                            "\"\n"
+                            "    domain_id: 0\n"
+                            "    policy: SCHED_OTHER\n"
+                            "    priority: 0\n"
+                            "    affinity: []\n"
+                            "non_ros_threads: []\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
+      << "id=" << bad_id;
+  }
+}
+
+TEST(ParseYaml, RejectsAtSignInWildcardPrefix)
+{
+  // A full callback-group id copied from the template with "/*" appended.
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /node@Timer(100)/*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, RejectsDuplicateWildcardKey)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /node/*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - id: /node/*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, AllowsSameWildcardInDifferentDomains)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /node/*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - id: /node/*
+    domain_id: 1
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 2u);
+}
+
+TEST(ParseYaml, AllowsExactAndWildcardForSameNode)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: /node/*
+    domain_id: 0
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+  - id: /node@Timer(100)
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 80
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 2u);
+  EXPECT_TRUE(cb[0].is_wildcard());
+  EXPECT_FALSE(cb[1].is_wildcard());
+}
+
+TEST(ParseYaml, NonRosThreadNameEndingInSlashStarStaysExact)
+{
+  // Wildcards are a callback_groups-only feature; non_ros_threads names are
+  // opaque strings matched exactly, even when they happen to end in "/*".
+  auto y = yaml_from_str(R"YAML(
+callback_groups: []
+non_ros_threads:
+  - name: worker/*
+    policy: SCHED_OTHER
+    priority: 0
+    affinity: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(nrt.size(), 1u);
+  EXPECT_EQ(nrt[0].thread_str, "worker/*");
+}
+
+// ---------- extract_node_part ----------
+
+TEST(ExtractNodePart, SplitsAtFirstAtSign)
+{
+  EXPECT_EQ(acie::extract_node_part("/ns/node@Timer(1000000)@Subscription(/topic)"), "/ns/node");
+  EXPECT_EQ(acie::extract_node_part("/plain_node"), "/plain_node");
+  EXPECT_EQ(acie::extract_node_part("/node@"), "/node");
+  EXPECT_EQ(acie::extract_node_part("@Timer(1)"), "");
+  EXPECT_EQ(acie::extract_node_part(""), "");
 }
