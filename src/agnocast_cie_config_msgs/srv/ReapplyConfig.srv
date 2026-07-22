@@ -11,7 +11,10 @@
 # applied/failed, and a single "<domain_id>:<node name>/*" key in skipped
 # while no instance has been announced yet. Instances are matched to entries
 # at announcement time only, so an entry that changed form (exact <-> wildcard)
-# starts over as skipped.
+# starts over as skipped. An exact entry added for an instance already matched
+# by a wildcard likewise takes over at the next announcement; until then the
+# wildcard keeps applying to that instance, and from then on only the exact
+# entry does.
 bool success                       # true iff parse + per-entry validation passed
 string error_message               # parse / validation failure reason (empty on success)
 string[] applied_callback_groups   # syscalls succeeded; format "<domain_id>:<callback_group_id>"

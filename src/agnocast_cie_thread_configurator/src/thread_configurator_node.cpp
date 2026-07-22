@@ -412,6 +412,13 @@ void ThreadConfiguratorNode::callback_group_callback(
   if (it != id_to_callback_group_config_.end()) {
     config = it->second;
     already_seen = config->applied;
+    // Drop stale tracking left in a wildcard entry from before this exact entry
+    // existed; otherwise reapply would apply both entries to the same thread.
+    auto wit = node_to_wildcard_config_.find(std::make_pair(
+      domain_id, agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id)));
+    if (wit != node_to_wildcard_config_.end()) {
+      wit->second->matched_tids.erase(msg->callback_group_id);
+    }
   } else {
     auto wit = node_to_wildcard_config_.find(std::make_pair(
       domain_id, agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id)));

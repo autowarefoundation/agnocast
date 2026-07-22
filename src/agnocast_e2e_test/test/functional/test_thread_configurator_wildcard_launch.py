@@ -16,6 +16,9 @@ import yaml
 from ament_index_python.packages import get_package_prefix
 
 import rclpy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
+from agnocast_cie_config_msgs.msg import CallbackGroupInfo
 from agnocast_cie_config_msgs.srv import ReapplyConfig
 
 CONFIG_DIR = os.path.join(
@@ -24,6 +27,7 @@ CONFIG_DIR = os.path.join(
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'template.yaml')
 
 REAPPLY_SERVICE = '/thread_configurator_node/reapply_config'
+ANNOUNCE_TOPIC = '/agnocast_cie_thread_configurator/callback_group_info'
 
 TARGET_NODE = '/test_publisher_component'
 WILDCARD_ID = TARGET_NODE + '/*'
@@ -332,6 +336,89 @@ class TestThreadConfiguratorWildcard(unittest.TestCase):
             timeout=10.0,
             process=thread_configurator,
         )
+
+    def test_zz_exact_override_takes_over_after_reannouncement(
+            self, proc_output, thread_configurator):
+        # 'zz_' prefix forces alphabetical-last execution: the synthetic
+        # re-announcement below permanently reroutes the instance to the exact
+        # entry in configurator memory, which would break the wildcard
+        # assertions of any test that runs after this one.
+        self._wait_for_all_instances(proc_output, thread_configurator)
+
+        cfg = _read_config()
+        exact_entry = dict(_PUBLISHER_ENTRIES[0])
+        exact_entry['policy'] = 'SCHED_OTHER'
+        exact_entry['priority'] = 15
+        exact_entry['affinity'] = []
+        cfg['callback_groups'] = [exact_entry] + cfg['callback_groups']
+        _write_config(cfg)
+
+        response = _call_reapply()
+        self.assertTrue(
+            response.success,
+            f'reapply failed unexpectedly: error_message={response.error_message!r}',
+        )
+        key = f"{_WILDCARD_DOMAIN_ID}:{exact_entry['id']}"
+        self.assertIn(key, list(response.skipped_callback_groups))
+
+        # A live tid distinct from the wildcard-tracked one; it must outlive
+        # the reapply below, which issues syscalls on it.
+        live_proc = subprocess.Popen(['sleep', '600'])
+
+        def _stop_live_proc():
+            live_proc.kill()
+            live_proc.wait()
+
+        self.addCleanup(_stop_live_proc)
+
+        # Publishing CallbackGroupInfo directly re-announces the instance
+        # without the application restart that normally triggers it.
+        rclpy.init()
+        try:
+            node = rclpy.create_node('test_reannounce_publisher')
+            pub = node.create_publisher(
+                CallbackGroupInfo,
+                ANNOUNCE_TOPIC,
+                QoSProfile(
+                    depth=1,
+                    reliability=ReliabilityPolicy.RELIABLE,
+                    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                ),
+            )
+            msg = CallbackGroupInfo()
+            msg.callback_group_id = exact_entry['id']
+            msg.thread_id = live_proc.pid
+            pub.publish(msg)
+            # Keep the writer alive until receipt is logged: destroying a
+            # transient_local writer discards a yet-undelivered sample.
+            proc_output.assertWaitFor(
+                f'tid={live_proc.pid}',
+                timeout=20.0,
+                process=thread_configurator,
+            )
+        finally:
+            rclpy.shutdown()
+
+        response = _call_reapply()
+        self.assertTrue(
+            response.success,
+            f'reapply failed unexpectedly: error_message={response.error_message!r}',
+        )
+        applied = list(response.applied_callback_groups)
+        self.assertEqual(
+            applied.count(key), 1,
+            'after re-announcement only the exact entry may report the '
+            'instance; a duplicate means the wildcard still tracks it',
+        )
+        self.assertNotIn(key, list(response.skipped_callback_groups))
+        self.assertNotIn(key, list(response.failed_callback_groups))
+        for entry in _PUBLISHER_ENTRIES[1:]:
+            other_key = f"{_WILDCARD_DOMAIN_ID}:{entry['id']}"
+            self.assertEqual(
+                applied.count(other_key), 1,
+                'instances not overridden by an exact entry must stay '
+                'wildcard-tracked',
+            )
 
 
 @launch_testing.post_shutdown_test()
