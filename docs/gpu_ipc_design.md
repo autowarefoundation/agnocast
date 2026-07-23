@@ -355,7 +355,7 @@ sequenceDiagram
 
     Note over M,Sv: SIGINT/SIGTERM -> request_stop()
     Sv-->>M: run() returns
-    M->>Pool: shutdown (destroy slots; OS reclaims on exit)
+    M->>Pool: shutdown (destroy slots and OS reclaims on exit)
 ```
 
 ### 5.2 State transition
