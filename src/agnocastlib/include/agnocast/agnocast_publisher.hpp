@@ -7,8 +7,8 @@
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_pool_api.hpp"
 #include "agnocast/gpu_metadata.hpp"
-#include "agnocast/gpu_transfer_backend.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -190,6 +190,11 @@ public:
   ipc_shared_ptr<MessageT> borrow_loaned_message()
   {
     increment_borrowed_publisher_num();
+    // Open the publish window so the CUDA heaphook routes the publisher's
+    // cudaMalloc(&msg->data, ...) to a GPU pool slot. Closed again in publish().
+    if constexpr (is_cuda_message_v<MessageT>) {
+      agnocast_cuda_set_publish_window(1);
+    }
     MessageT * ptr = new MessageT();
     return ipc_shared_ptr<MessageT>(ptr, topic_name_.c_str(), id_);
   }
@@ -214,11 +219,15 @@ public:
     MessageT * raw_ptr = message.get();
     const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(raw_ptr);
 
-    // CUDA publish hook: export GPU handle and allocate GpuMetadata in shared memory.
-    // Runs while heaphook is still active, so GpuMetadata lands in the publisher's shared memory.
+    // CUDA publish hook: record the data-ready event and store the pool slot id in
+    // GpuMetadata (in shared memory, readable by subscribers). GpuMetadata is
+    // allocated while the heaphook is still active so it lands in shared memory.
     // NOTE: Assumes MessageT has a public `data` member (uint8_t*) pointing to the GPU allocation.
     // All CUDA message types must provide this by shadowing the base ROS message's data field.
     if constexpr (is_cuda_message_v<MessageT>) {
+      // The borrow..publish window ends here; a later cudaMalloc must not be pooled.
+      agnocast_cuda_set_publish_window(0);
+
       if (!raw_ptr->data) {
         RCLCPP_ERROR(
           logger,
@@ -236,11 +245,23 @@ public:
           topic_name_.c_str());
         std::abort();
       }
-      auto & backend = agnocast::cuda::get_backend();
+
+      std::uint32_t slot_id = 0;
+      if (!agnocast_cuda_slot_id_from_ptr(raw_ptr->data, &slot_id)) {
+        RCLCPP_ERROR(
+          logger,
+          "CUDA message on topic '%s' was not allocated from the GPU pool. "
+          "Ensure the CUDA heaphook is LD_PRELOADed and the pool daemon is running, and that "
+          "msg->data was cudaMalloc'd between borrow_loaned_message() and publish().",
+          topic_name_.c_str());
+        std::abort();
+      }
+      // Record the write-complete event so subscribers can order reads after it.
+      agnocast_cuda_record_data_ready(raw_ptr->data);
+
       auto * meta = new GpuMetadata();
-      meta->publisher_gpu_ptr = raw_ptr->data;
+      meta->slot_id = slot_id;
       meta->gpu_data_size = gpu_size;
-      meta->handle = backend.export_handle(raw_ptr->data, gpu_size);
       raw_ptr->gpu_metadata_ = meta;
     }
 
@@ -255,14 +276,18 @@ public:
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
-      // CUDA reclaim hook: free GPU buffer before deleting the message.
-      // On abnormal publisher exit, free_device_memory() is never called, but GPU device
-      // memory is reclaimed by the CUDA driver when the process exits.
+      // CUDA reclaim hook: return the pool slot before deleting the message. This
+      // is pure CPU work — the kernel released the message only after all
+      // subscribers dropped their references, and each subscriber completes its GPU
+      // reads before releasing (see docs), so no GPU wait is needed here.
+      // On abnormal publisher exit, this is skipped, but GPU memory is reclaimed by
+      // the CUDA driver when the process exits.
       if constexpr (is_cuda_message_v<MessageT>) {
+        if (release_ptr->data) {
+          agnocast_cuda_reclaim_gpu_buffer(release_ptr->data);
+        }
         if (release_ptr->gpu_metadata_) {
-          auto * meta = static_cast<GpuMetadata *>(release_ptr->gpu_metadata_);
-          agnocast::cuda::get_backend().free_device_memory(meta->publisher_gpu_ptr);
-          delete meta;
+          delete static_cast<GpuMetadata *>(release_ptr->gpu_metadata_);
         }
       }
       delete release_ptr;

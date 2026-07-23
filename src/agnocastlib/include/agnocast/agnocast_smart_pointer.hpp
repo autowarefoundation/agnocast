@@ -75,9 +75,10 @@ struct control_block
   // minimize overhead for non-CUDA messages (16 bytes for two pointers vs ~40+ bytes).
   void (*gpu_release_fn)(void *) = nullptr;
 
-  // Subscriber-local GPU device pointer obtained via import_handle().
-  // Stored here because the shared memory message is mapped read-only by the subscriber,
-  // so we cannot inject the local pointer into msg->data.
+  // Subscriber-local GPU device pointer for the message's pool slot (resolved from
+  // the slot id in GpuMetadata via the pool proxy). Stored here because the shared
+  // memory message is mapped read-only by the subscriber, so we cannot inject the
+  // local pointer into msg->data.
   void * gpu_data_ptr = nullptr;
 
   control_block(std::string topic, topic_local_id_t pubsub, int64_t entry)
@@ -167,7 +168,7 @@ class ipc_shared_ptr
     }
   }
 
-  // Sets the subscriber-local GPU pointer (obtained via import_handle).
+  // Sets the subscriber-local GPU pointer (the pool slot's imported device pointer).
   // Private: only create_subscriber_ipc_ptr() should call this.
   void set_gpu_data_ptr(void * ptr)
   {

@@ -123,4 +123,22 @@ void CudaIpcClientBackend::release_slot(ImportedSlot & imported)
   imported = ImportedSlot{};
 }
 
+bool CudaIpcClientBackend::record_data_ready(const ImportedSlot & slot)
+{
+  auto & cuda = CudartLoader::instance();
+  // Records on the per-thread default stream, so the publisher's GPU writes on
+  // that stream are captured without serializing with other streams.
+  return cuda_ok(
+    cuda.cudaEventRecord(slot.data_ready_event, cuda_stream_per_thread()), "cudaEventRecord");
+}
+
+bool CudaIpcClientBackend::wait_data_ready(const ImportedSlot & slot)
+{
+  auto & cuda = CudartLoader::instance();
+  // Makes the caller's per-thread default stream wait for the publisher's write.
+  return cuda_ok(
+    cuda.cudaStreamWaitEvent(cuda_stream_per_thread(), slot.data_ready_event, cudaEventWaitDefault),
+    "cudaStreamWaitEvent");
+}
+
 }  // namespace agnocast::cuda

@@ -14,8 +14,8 @@
 // ------------------------
 // Users who do not use CUDA message types are completely unaffected by this library.
 // CudartLoader is lazy: dlopen("libcudart.so") only happens on the first call to
-// CudartLoader::instance(), which is only reachable through get_backend(), which is
-// only called from if-constexpr branches guarded by is_cuda_message_v<T>. If no CUDA
+// CudartLoader::instance(), which is only reachable through the pool proxy / C ABI,
+// which are only exercised when a CUDA message type is actually used. If no CUDA
 // message type is ever instantiated, this loader is never constructed and no CUDA symbols
 // are ever resolved. The library can be safely installed and loaded on machines without
 // a GPU or CUDA runtime.
@@ -81,6 +81,19 @@ constexpr cudaDeviceAttr cudaDevAttrIntegrated = 18;  // driver_types.h: cudaDev
 
 // Opaque event handle (a pointer to a driver object) and its 64-byte IPC handle.
 using cudaEvent_t = void *;
+using cudaStream_t = void *;
+
+// Per-thread default stream handle (CUDART_VERSION stable value). Recording/waiting
+// events on this stream avoids serializing with the legacy default stream and other
+// streams. User GPU work must also run on the per-thread default stream (compile
+// with nvcc --default-stream per-thread).
+inline cudaStream_t cuda_stream_per_thread()
+{
+  return reinterpret_cast<cudaStream_t>(0x2);
+}
+
+// cudaStreamWaitEvent flags: 0 == cudaEventWaitDefault.
+constexpr unsigned int cudaEventWaitDefault = 0x00;
 
 struct cudaIpcEventHandle_t
 {
@@ -104,6 +117,8 @@ using cudaIpcOpenMemHandle_t = cudaError_t (*)(void **, cudaIpcMemHandle_t, unsi
 using cudaIpcCloseMemHandle_t = cudaError_t (*)(void *);
 using cudaIpcOpenEventHandle_t = cudaError_t (*)(cudaEvent_t *, cudaIpcEventHandle_t);
 using cudaEventDestroy_t = cudaError_t (*)(cudaEvent_t);
+using cudaEventRecord_t = cudaError_t (*)(cudaEvent_t, cudaStream_t);
+using cudaStreamWaitEvent_t = cudaError_t (*)(cudaStream_t, cudaEvent_t, unsigned int);
 using cudaFree_t = cudaError_t (*)(void *);
 using cudaGetErrorString_t = const char * (*)(cudaError_t);
 
@@ -136,6 +151,8 @@ public:
   cudaIpcCloseMemHandle_t cudaIpcCloseMemHandle;
   cudaIpcOpenEventHandle_t cudaIpcOpenEventHandle;
   cudaEventDestroy_t cudaEventDestroy;
+  cudaEventRecord_t cudaEventRecord;
+  cudaStreamWaitEvent_t cudaStreamWaitEvent;
   cudaFree_t cudaFree;
   cudaGetErrorString_t cudaGetErrorString;
 
@@ -176,6 +193,8 @@ private:
     load_symbol(cudaIpcCloseMemHandle, "cudaIpcCloseMemHandle");
     load_symbol(cudaIpcOpenEventHandle, "cudaIpcOpenEventHandle");
     load_symbol(cudaEventDestroy, "cudaEventDestroy");
+    load_symbol(cudaEventRecord, "cudaEventRecord");
+    load_symbol(cudaStreamWaitEvent, "cudaStreamWaitEvent");
     load_symbol(cudaFree, "cudaFree");
     load_symbol(cudaGetErrorString, "cudaGetErrorString");
   }

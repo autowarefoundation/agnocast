@@ -38,11 +38,6 @@ find_package(Threads REQUIRED)
 #     ...
 #   endif()
 add_library(agnocast_cuda SHARED
-  src/cuda_ipc_backend.cpp
-  src/vmm_backend.cpp
-  src/nvscibuf_backend.cpp
-  src/unified_memory_backend.cpp
-  src/get_backend.cpp
   src/cuda_ipc_client_backend.cpp
   src/gpu_shared_memory_pool_proxy.cpp
   src/proxy_c_api.cpp)

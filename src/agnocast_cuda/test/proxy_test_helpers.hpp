@@ -63,12 +63,30 @@ public:
     imported = ImportedSlot{};
   }
 
+  bool record_data_ready(const ImportedSlot & slot) override
+  {
+    ++record_ready_calls;
+    last_record_ready_ptr = slot.device_ptr;
+    return true;
+  }
+
+  bool wait_data_ready(const ImportedSlot & slot) override
+  {
+    ++wait_ready_calls;
+    last_wait_ready_ptr = slot.device_ptr;
+    return true;
+  }
+
   gpud::BackendType backend_type_ = gpud::BackendType::kCudaIpc;
   std::string gpu_uuid_ = "GPU-mock-0001";
   bool uuid_result_ = true;
   bool import_result = true;
   std::size_t import_calls = 0;
   std::size_t release_calls = 0;
+  std::size_t record_ready_calls = 0;
+  std::size_t wait_ready_calls = 0;
+  void * last_record_ready_ptr = nullptr;
+  void * last_wait_ready_ptr = nullptr;
 };
 
 // Builds `count` fake slot descriptors with 64-byte handle blobs.

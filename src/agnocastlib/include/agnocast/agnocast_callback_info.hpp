@@ -3,8 +3,8 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_pool_api.hpp"
 #include "agnocast/gpu_metadata.hpp"
-#include "agnocast/gpu_transfer_backend.hpp"
 
 #include <cstdlib>
 #include <mutex>
@@ -86,16 +86,26 @@ agnocast::ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
         topic_name.c_str());
       std::abort();
     }
-    void * gpu_data_ptr =
-      agnocast::cuda::get_backend().import_handle(meta->handle, meta->gpu_data_size);
-    // NOTE: If import_handle() fails, the backend aborts (fail-fast). If a future backend
-    // returns nullptr instead, the subscriber would get a null gpu pointer. Callers should
-    // check gpu_data() != nullptr before use.
+
+    // Resolve this process's local device pointer for the pool slot. The proxy
+    // imported every slot once at startup, so there is no per-message import.
+    void * gpu_data_ptr = nullptr;
+    if (!agnocast_cuda_ptr_from_slot_id(meta->slot_id, &gpu_data_ptr)) {
+      RCLCPP_ERROR(
+        logger,
+        "CUDA message on topic '%s' references unknown pool slot %u. "
+        "Is the GPU pool proxy initialized (pool daemon running for this GPU)?",
+        topic_name.c_str(), meta->slot_id);
+      std::abort();
+    }
+    // Order this subscriber's reads (on the per-thread default stream) after the
+    // publisher's write. The subscriber must complete its reads before releasing
+    // the message (its contract); reclaim on the publisher side is pure CPU work,
+    // so there is no per-message GPU release function.
+    agnocast_cuda_wait_data_ready(meta->slot_id);
 
     auto ipc_ptr = agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);
     ipc_ptr.set_gpu_data_ptr(gpu_data_ptr);
-    ipc_ptr.set_gpu_release_fn(
-      [](void * ptr) { agnocast::cuda::get_backend().release_handle(ptr); });
     return ipc_ptr;
   } else {
     return agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);

@@ -24,6 +24,8 @@ public:
   bool import_slot(
     const gpu_shared_memory_daemon::SlotDescriptor & descriptor, ImportedSlot & out) override;
   void release_slot(ImportedSlot & imported) override;
+  bool record_data_ready(const ImportedSlot & slot) override;
+  bool wait_data_ready(const ImportedSlot & slot) override;
 };
 
 }  // namespace agnocast::cuda

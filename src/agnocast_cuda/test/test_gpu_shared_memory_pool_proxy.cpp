@@ -184,6 +184,48 @@ TEST(GpuSharedMemoryPoolProxy, FreeIgnoresUnknownPointer)
   EXPECT_EQ(daemon.free_requests.load(), 0);
 }
 
+TEST(GpuSharedMemoryPoolProxy, RecordAndWaitDataReadyDelegateToBackend)
+{
+  const auto path = temp_socket_path();
+  FakeDaemon daemon(path);
+  daemon.slots = make_fake_slots(3);
+  ASSERT_TRUE(daemon.start());
+
+  MockClientBackend backend;
+  cuda::GpuSharedMemoryPoolProxy proxy(backend, path);
+  ASSERT_TRUE(proxy.initialize());
+
+  void * ptr = nullptr;
+  ASSERT_TRUE(proxy.allocateMemory(&ptr, 100));
+
+  // Publisher records the ready event for the pooled pointer.
+  ASSERT_TRUE(proxy.recordDataReady(ptr));
+  EXPECT_EQ(backend.record_ready_calls, 1u);
+  EXPECT_EQ(backend.last_record_ready_ptr, ptr);
+
+  // Subscriber waits on the ready event by slot id (slot 0 -> same imported ptr).
+  ASSERT_TRUE(proxy.waitDataReady(0));
+  EXPECT_EQ(backend.wait_ready_calls, 1u);
+  EXPECT_EQ(backend.last_wait_ready_ptr, ptr);
+}
+
+TEST(GpuSharedMemoryPoolProxy, RecordAndWaitRejectUnknownSlots)
+{
+  const auto path = temp_socket_path();
+  FakeDaemon daemon(path);
+  daemon.slots = make_fake_slots(1);
+  ASSERT_TRUE(daemon.start());
+
+  MockClientBackend backend;
+  cuda::GpuSharedMemoryPoolProxy proxy(backend, path);
+  ASSERT_TRUE(proxy.initialize());
+
+  EXPECT_FALSE(proxy.recordDataReady(reinterpret_cast<void *>(0xdeadbeef)));
+  EXPECT_FALSE(proxy.waitDataReady(999));
+  EXPECT_EQ(backend.record_ready_calls, 0u);
+  EXPECT_EQ(backend.wait_ready_calls, 0u);
+}
+
 TEST(GpuSharedMemoryPoolProxy, FinalizeReleasesImportedSlots)
 {
   const auto path = temp_socket_path();

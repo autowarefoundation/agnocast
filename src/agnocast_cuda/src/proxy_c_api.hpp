@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 extern "C" {
 
@@ -26,5 +27,29 @@ int agnocast_cuda_pool_allocate(size_t size, void ** out_ptr);
 // if `ptr` was a pooled pointer (and was freed), 0 if it is not owned by the pool
 // (the hook then calls the real cudaFree).
 int agnocast_cuda_pool_free(void * ptr);
+
+// --- Publish/subscribe hooks used by agnocastlib (guarded by is_cuda_message_v) ---
+
+// Publisher: maps a pooled device pointer to its slot id (stored in the message's
+// GpuMetadata). Returns 1 on success.
+int agnocast_cuda_slot_id_from_ptr(void * ptr, std::uint32_t * out_slot_id);
+
+// Subscriber: maps a slot id (from GpuMetadata) to this process's local imported
+// device pointer for that slot. Returns 1 on success.
+int agnocast_cuda_ptr_from_slot_id(std::uint32_t slot_id, void ** out_ptr);
+
+// Publisher: records the data-ready event for the slot backing `ptr` (call at
+// publish, on the per-thread default stream). Returns 1 on success.
+int agnocast_cuda_record_data_ready(void * ptr);
+
+// Subscriber: makes subsequent per-thread-default-stream GPU reads wait for the
+// slot's data-ready event (call before invoking the callback). Returns 1 on success.
+int agnocast_cuda_wait_data_ready(std::uint32_t slot_id);
+
+// Publisher reclaim: releases a GPU buffer allocated during a borrow..publish
+// window. If `ptr` is a pooled pointer it is returned to the pool; otherwise (a
+// fallback real cudaMalloc) the real device memory is freed. Self-contained so
+// agnocastlib, which cannot call cudaFree, can reclaim in either case.
+void agnocast_cuda_reclaim_gpu_buffer(void * ptr);
 
 }  // extern "C"

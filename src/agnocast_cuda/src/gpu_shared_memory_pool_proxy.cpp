@@ -327,4 +327,28 @@ bool GpuSharedMemoryPoolProxy::getDevicePtrFromSlotId(std::uint32_t slot_id, voi
   return true;
 }
 
+bool GpuSharedMemoryPoolProxy::recordDataReady(void * device_ptr)
+{
+  std::lock_guard<std::mutex> slot_lock(slotManagementMutex_);
+  const auto id_it = device_ptr_to_slot_id_.find(device_ptr);
+  if (id_it == device_ptr_to_slot_id_.end()) {
+    return false;
+  }
+  const auto slot_it = slots_.find(id_it->second);
+  if (slot_it == slots_.end()) {
+    return false;
+  }
+  return backend_.record_data_ready(slot_it->second.imported);
+}
+
+bool GpuSharedMemoryPoolProxy::waitDataReady(std::uint32_t slot_id)
+{
+  std::lock_guard<std::mutex> slot_lock(slotManagementMutex_);
+  const auto it = slots_.find(slot_id);
+  if (it == slots_.end()) {
+    return false;
+  }
+  return backend_.wait_data_ready(it->second.imported);
+}
+
 }  // namespace agnocast::cuda

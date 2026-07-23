@@ -45,6 +45,14 @@ public:
   // Releases resources previously produced by import_slot(). Safe on a
   // default-constructed / already-released struct.
   virtual void release_slot(ImportedSlot & imported) = 0;
+
+  // Publisher side: records the slot's data-ready event (GPU write complete) so
+  // subscribers can order their reads after it. Returns false on failure.
+  virtual bool record_data_ready(const ImportedSlot & slot) = 0;
+
+  // Subscriber side: makes subsequent GPU reads wait for the slot's data-ready
+  // event. Returns false on failure.
+  virtual bool wait_data_ready(const ImportedSlot & slot) = 0;
 };
 
 }  // namespace agnocast::cuda

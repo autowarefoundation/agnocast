@@ -68,6 +68,14 @@ public:
   bool getSlotIdFromDevicePtr(void * device_ptr, std::uint32_t & slot_id);
   bool getDevicePtrFromSlotId(std::uint32_t slot_id, void *& device_ptr);
 
+  // Publisher side: record the data-ready event for the slot backing `device_ptr`
+  // (a pointer previously returned by allocateMemory). Returns false if unknown.
+  bool recordDataReady(void * device_ptr);
+
+  // Subscriber side: make subsequent GPU reads wait for the slot's data-ready
+  // event. Returns false if the slot id is unknown.
+  bool waitDataReady(std::uint32_t slot_id);
+
 private:
   struct ProxySlot
   {
