@@ -1,5 +1,5 @@
 <launch>
     <node pkg="agnocast_sample_application" exec="cuda_talker" name="cuda_talker_node" output="screen">
-        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:libagnocast_cuda_heaphook.so:$(env LD_PRELOAD '')" />
     </node>
 </launch>

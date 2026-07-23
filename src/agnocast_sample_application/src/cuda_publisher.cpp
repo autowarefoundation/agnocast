@@ -44,12 +44,19 @@ class CudaPublisher : public agnocast::Node
 
     const int threads = 256;
     const int blocks = (gpu_size + threads - 1) / threads;
+    // The kernel runs on the per-thread default stream (this file is compiled with
+    // nvcc --default-stream per-thread). We deliberately do NOT cudaStreamSynchronize
+    // here: publish() records Agnocast's dataReadyEvent on the same per-thread stream
+    // right after this kernel, and each subscriber issues cudaStreamWaitEvent on that
+    // event before reading, so the write-before-read ordering is enforced on the GPU
+    // without ever blocking the publisher thread.
     // cppcheck-suppress shiftTooManyBits  // false positive: <<< >>> is CUDA kernel launch syntax
     fill_kernel<<<blocks, threads>>>(msg->data, gpu_size, static_cast<uint8_t>(count_));
 
-    const cudaError_t sync_result = cudaStreamSynchronize(nullptr);
-    if (sync_result != cudaSuccess) {
-      RCLCPP_ERROR(get_logger(), "kernel launch failed: %s", cudaGetErrorString(sync_result));
+    // Catch immediate launch-configuration errors (non-blocking; no device sync).
+    const cudaError_t launch_result = cudaGetLastError();
+    if (launch_result != cudaSuccess) {
+      RCLCPP_ERROR(get_logger(), "kernel launch failed: %s", cudaGetErrorString(launch_result));
       cudaFree(msg->data);
       msg->data = nullptr;
       return;

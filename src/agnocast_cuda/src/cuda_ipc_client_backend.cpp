@@ -59,11 +59,11 @@ bool CudaIpcClientBackend::local_gpu_uuid(std::string & uuid_out)
   if (!cuda_ok(cuda.cudaGetDevice(&device), "cudaGetDevice")) {
     return false;
   }
-  cudaUUID_t uuid{};
-  if (!cuda_ok(cuda.cudaDeviceGetUuid(&uuid, device), "cudaDeviceGetUuid")) {
+  cudaDevicePropUuidView prop{};
+  if (!cuda_ok(cuda.cudaGetDeviceProperties(&prop, device), "cudaGetDeviceProperties")) {
     return false;
   }
-  uuid_out = format_gpu_uuid(uuid);
+  uuid_out = format_gpu_uuid(prop.uuid);
   return true;
 }
 

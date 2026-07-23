@@ -26,7 +26,14 @@ class CudaSubscriber : public agnocast::Node
       return;
     }
 
-    // Read first few bytes from GPU to verify data
+    // Read first few bytes from GPU to verify data.
+    //
+    // This file is compiled with nvcc --default-stream per-thread, so this
+    // cudaMemcpy runs on the per-thread default stream. Agnocast issues
+    // cudaStreamWaitEvent(dataReadyEvent) on that same stream before the callback,
+    // so the copy is GPU-ordered after the publisher's write. cudaMemcpy is also
+    // host-synchronous, so the read completes before this message reference is
+    // dropped (the pool slot is only reclaimed after all subscribers release).
     uint8_t host_buf[16]{};
     const size_t copy_size = std::min(gpu_size, sizeof(host_buf));
     const cudaError_t memcpy_result =

@@ -53,11 +53,11 @@ bool CudaIpcSlotBackend::initialize(std::string & gpu_uuid_out)
     return false;
   }
 
-  cudaUUID_t uuid{};
-  if (!cuda_ok(cuda.cudaDeviceGetUuid(&uuid, 0), "cudaDeviceGetUuid")) {
+  cudaDevicePropUuidView prop{};
+  if (!cuda_ok(cuda.cudaGetDeviceProperties(&prop, 0), "cudaGetDeviceProperties")) {
     return false;
   }
-  gpu_uuid_out = format_gpu_uuid(uuid);
+  gpu_uuid_out = format_gpu_uuid(prop.uuid);
   return true;
 }
 

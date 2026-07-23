@@ -41,6 +41,23 @@ struct cudaUUID_t
   char bytes[16];
 };
 
+// Partial, ABI-stable view of cudaDeviceProp used only to read the device UUID.
+//
+// We obtain the GPU UUID via cudaGetDeviceProperties rather than cudaDeviceGetUuid:
+// the latter is NOT exported by every libcudart (e.g. CUDA 12.x runtimes omit it),
+// whereas cudaGetDeviceProperties is present across CUDA 10/11/12. cudaDeviceProp's
+// first two members have been `char name[256]` followed by `cudaUUID_t uuid` since
+// CUDA 10, so `uuid` is at byte offset 256 in every version. We do not replicate the
+// full (large, version-varying) struct; instead we over-size the trailing buffer far
+// beyond any real cudaDeviceProp (~1 KiB) so the runtime's full write stays in bounds
+// and only read the two leading fields.
+struct cudaDevicePropUuidView
+{
+  char name[256];
+  cudaUUID_t uuid;
+  char reserved_for_full_prop[4096];
+};
+
 // cudaEventCreateWithFlags flags. Interprocess events must disable timing.
 constexpr unsigned int cudaEventDisableTiming = 0x02;
 constexpr unsigned int cudaEventInterprocess = 0x04;
@@ -48,7 +65,7 @@ constexpr unsigned int cudaEventInterprocess = 0x04;
 // ---- Function pointer types ----
 using cudaSetDevice_t = cudaError_t (*)(int);
 using cudaGetDevice_t = cudaError_t (*)(int *);
-using cudaDeviceGetUuid_t = cudaError_t (*)(cudaUUID_t *, int);
+using cudaGetDeviceProperties_t = cudaError_t (*)(cudaDevicePropUuidView *, int);
 using cudaMalloc_t = cudaError_t (*)(void **, size_t);
 using cudaFree_t = cudaError_t (*)(void *);
 using cudaIpcGetMemHandle_t = cudaError_t (*)(cudaIpcMemHandle_t *, void *);
@@ -70,7 +87,7 @@ public:
 
   cudaSetDevice_t cudaSetDevice;
   cudaGetDevice_t cudaGetDevice;
-  cudaDeviceGetUuid_t cudaDeviceGetUuid;
+  cudaGetDeviceProperties_t cudaGetDeviceProperties;
   cudaMalloc_t cudaMalloc;
   cudaFree_t cudaFree;
   cudaIpcGetMemHandle_t cudaIpcGetMemHandle;
@@ -104,7 +121,7 @@ private:
 
     load_symbol(cudaSetDevice, "cudaSetDevice");
     load_symbol(cudaGetDevice, "cudaGetDevice");
-    load_symbol(cudaDeviceGetUuid, "cudaDeviceGetUuid");
+    load_symbol(cudaGetDeviceProperties, "cudaGetDeviceProperties");
     load_symbol(cudaMalloc, "cudaMalloc");
     load_symbol(cudaFree, "cudaFree");
     load_symbol(cudaIpcGetMemHandle, "cudaIpcGetMemHandle");

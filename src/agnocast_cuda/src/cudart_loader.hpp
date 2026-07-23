@@ -100,10 +100,27 @@ struct cudaIpcEventHandle_t
   char reserved[64];  // CUDA_IPC_HANDLE_SIZE = 64
 };
 
-// 16-byte device UUID, as returned by cudaDeviceGetUuid (append-only stable ABI).
+// 16-byte device UUID (matches cudaDeviceProp::uuid; append-only stable ABI).
 struct cudaUUID_t
 {
   char bytes[16];
+};
+
+// Partial, ABI-stable view of cudaDeviceProp used only to read the device UUID.
+//
+// We obtain the GPU UUID via cudaGetDeviceProperties rather than cudaDeviceGetUuid:
+// the latter is NOT exported by every libcudart (e.g. CUDA 12.x runtimes omit it),
+// whereas cudaGetDeviceProperties is present across CUDA 10/11/12. cudaDeviceProp's
+// first two members have been `char name[256]` followed by `cudaUUID_t uuid` since
+// CUDA 10, so `uuid` is at byte offset 256 in every version. We do not replicate the
+// full (large, version-varying) struct; instead we over-size the trailing buffer far
+// beyond any real cudaDeviceProp (~1 KiB) so the runtime's full write stays in bounds
+// and only read the two leading fields.
+struct cudaDevicePropUuidView
+{
+  char name[256];
+  cudaUUID_t uuid;
+  char reserved_for_full_prop[4096];
 };
 
 // ---------------------------------------------------------------------------
@@ -111,7 +128,7 @@ struct cudaUUID_t
 // ---------------------------------------------------------------------------
 using cudaGetDevice_t = cudaError_t (*)(int *);
 using cudaDeviceGetAttribute_t = cudaError_t (*)(int *, cudaDeviceAttr, int);
-using cudaDeviceGetUuid_t = cudaError_t (*)(cudaUUID_t *, int);
+using cudaGetDeviceProperties_t = cudaError_t (*)(cudaDevicePropUuidView *, int);
 using cudaIpcGetMemHandle_t = cudaError_t (*)(cudaIpcMemHandle_t *, void *);
 using cudaIpcOpenMemHandle_t = cudaError_t (*)(void **, cudaIpcMemHandle_t, unsigned int);
 using cudaIpcCloseMemHandle_t = cudaError_t (*)(void *);
@@ -145,7 +162,7 @@ public:
   // Callers use these like: CudartLoader::instance().cudaFree(ptr)
   cudaGetDevice_t cudaGetDevice;
   cudaDeviceGetAttribute_t cudaDeviceGetAttribute;
-  cudaDeviceGetUuid_t cudaDeviceGetUuid;
+  cudaGetDeviceProperties_t cudaGetDeviceProperties;
   cudaIpcGetMemHandle_t cudaIpcGetMemHandle;
   cudaIpcOpenMemHandle_t cudaIpcOpenMemHandle;
   cudaIpcCloseMemHandle_t cudaIpcCloseMemHandle;
@@ -187,7 +204,7 @@ private:
 
     load_symbol(cudaGetDevice, "cudaGetDevice");
     load_symbol(cudaDeviceGetAttribute, "cudaDeviceGetAttribute");
-    load_symbol(cudaDeviceGetUuid, "cudaDeviceGetUuid");
+    load_symbol(cudaGetDeviceProperties, "cudaGetDeviceProperties");
     load_symbol(cudaIpcGetMemHandle, "cudaIpcGetMemHandle");
     load_symbol(cudaIpcOpenMemHandle, "cudaIpcOpenMemHandle");
     load_symbol(cudaIpcCloseMemHandle, "cudaIpcCloseMemHandle");
