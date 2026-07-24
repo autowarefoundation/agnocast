@@ -74,6 +74,7 @@ def generate_test_description():
 
 class TestWaitForAllShutdown(unittest.TestCase):
 
+    # This test ensures that post-shutdown tests are not run until all processes have exited.
     def test_wait_for_all_shutdown(self, proc_info, test_server, test_client):
         proc_info.assertWaitForShutdown(process=test_server, timeout=10)
         proc_info.assertWaitForShutdown(process=test_client, timeout=10)
