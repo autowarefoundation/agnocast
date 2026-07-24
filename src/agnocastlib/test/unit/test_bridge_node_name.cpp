@@ -1,7 +1,6 @@
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
 #include <gtest/gtest.h>
-
 #include <unistd.h>
 
 #include <cstdlib>

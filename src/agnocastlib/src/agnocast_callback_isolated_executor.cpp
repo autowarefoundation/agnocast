@@ -345,7 +345,8 @@ void CallbackIsolatedAgnocastExecutor::add_node(
   std::lock_guard<std::mutex> guard{mutex_};
 
   // Only auto_add==true groups are a real double-add here; auto_add==false groups are never picked
-  // up by the node scan, so their owning node being added later is fine. Mirrors add_callback_group().
+  // up by the node scan, so their owning node being added later is fine. Mirrors
+  // add_callback_group().
   for (const auto & weak_group_to_node : weak_groups_to_nodes_) {
     auto group = weak_group_to_node.first.lock();
 
