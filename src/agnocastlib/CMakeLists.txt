@@ -150,7 +150,8 @@ if(BUILD_TESTING)
     test/unit/test_cie_client_utils.cpp
     test/unit/test_agnocast_context.cpp
     test/unit/test_diagnostic_updater.cpp
-    test/unit/test_type_registry_writer.cpp)
+    test/unit/test_type_registry_writer.cpp
+    test/unit/test_bridge_node_name.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater)

@@ -58,6 +58,7 @@ struct PublisherCountResult
 };
 
 BridgeMode get_bridge_mode();
+std::string get_performance_bridge_node_name(uint64_t self_ipc_ns_inode);
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id);
 rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t publisher_id);
 PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name);

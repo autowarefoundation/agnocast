@@ -5,12 +5,15 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <dlfcn.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cctype>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -43,6 +46,37 @@ BridgeMode get_bridge_mode()
 
   RCLCPP_WARN(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to STANDARD.", env_val);
   return BridgeMode::Standard;
+}
+
+std::string get_performance_bridge_node_name(const uint64_t self_ipc_ns_inode)
+{
+  const std::string default_name = "agnocast_bridge_node_performance_" +
+                                   std::to_string(self_ipc_ns_inode) + "_" +
+                                   std::to_string(getpid());
+
+  const char * env_val = std::getenv("AGNOCAST_BRIDGE_NODE_NAME_SUFFIX");
+  if (env_val == nullptr || *env_val == '\0') {
+    return default_name;
+  }
+
+  // Container names may contain '-' and '.', which are not allowed in ROS 2 node names.
+  std::string suffix = env_val;
+  std::replace(suffix.begin(), suffix.end(), '-', '_');
+  std::replace(suffix.begin(), suffix.end(), '.', '_');
+
+  const bool valid = std::all_of(suffix.begin(), suffix.end(), [](const unsigned char c) {
+    return std::isalnum(c) != 0 || c == '_';
+  });
+  if (!valid) {
+    RCLCPP_WARN(
+      logger,
+      "AGNOCAST_BRIDGE_NODE_NAME_SUFFIX='%s' contains characters not allowed in a ROS 2 node name. "
+      "Falling back to the default node name '%s'.",
+      env_val, default_name.c_str());
+    return default_name;
+  }
+
+  return "agnocast_bridge_node_performance_" + suffix;
 }
 
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id)
