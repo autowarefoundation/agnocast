@@ -276,7 +276,20 @@ class GenericService : public std::enable_shared_from_this<GenericService>
       ipc_shared_ptr<void> response = std::move(res_wrapper).take_response();
       ipc_shared_ptr<void> response_double(response);
 
-      callback(std::move(req_wrapper).take_request(), std::move(response_double));
+      // If the callback throws, we destroy the `response` (ipc_shared_ptr<void>) via
+      // cancel_message() to prevent ipc_shared_ptr::reset() from calling std::terminate(), and then
+      // rethrow. We only need to destroy `response`, not `response_double`:
+      // (1) If `response_double` was moved from, it is empty and does not need to be destroyed.
+      // (2) If `response_double` was not moved from, it will be invalidated when `response` is
+      //     destroyed.
+      try {
+        callback(std::move(req_wrapper).take_request(), std::move(response_double));
+      } catch (...) {
+        publisher->cancel_message(std::move(response), [this](void * p) {
+          GenericResponseWrapper::free(p, this->response_members_);
+        });
+        throw;
+      }
 
       publisher->publish(std::move(response), [this](void * p) {
         GenericResponseWrapper::free(p, this->response_members_);
