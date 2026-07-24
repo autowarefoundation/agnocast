@@ -142,6 +142,12 @@ class GenericResponseWrapper
     alignas(16) int64_t seqno;
   };
 
+  static constexpr size_t get_wire_size(
+    const rosidl_typesupport_introspection_cpp::MessageMembers * response_members)
+  {
+    return offsetof_meta(response_members->size_of_) + sizeof(Meta);
+  }
+
   static Meta * get_meta_ptr(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members,
     void * response_ptr)
@@ -164,6 +170,38 @@ public:
   int64_t & seqno() { return meta_ptr_->seqno; }
 
   ipc_shared_ptr<void> && take_response() && { return std::move(response_); }
+
+  /// @brief Allocate a wire-format response buffer in shared memory.
+  ///
+  /// The payload buffer is initialized via the introspection init function with
+  /// MessageInitialization::SKIP. The seqno number is uninitialized (garbage).
+  ///
+  /// @param response_members The introspection message members for the response type.
+  /// @param borrow_loaned_message A callable that allocates a buffer of the given size in shared
+  /// memory. In practice, this should be TypeErasedPublisher::borrow_loaned_message().
+  template <typename Func>
+  static GenericResponseWrapper allocate(
+    const rosidl_typesupport_introspection_cpp::MessageMembers * response_members,
+    Func && borrow_loaned_message)
+  {
+    ipc_shared_ptr<void> response = borrow_loaned_message(get_wire_size(response_members));
+    auto wrapper = GenericResponseWrapper(response_members, std::move(response));
+
+    response_members->init_function(
+      wrapper.response_.get(), rosidl_runtime_cpp::MessageInitialization::SKIP);
+
+    return wrapper;
+  }
+
+  /// @brief Free a wire-format response buffer in shared memory.
+  /// @param ptr Pointer to the response buffer.
+  /// @param response_members The introspection message members for the response type.
+  static void free(
+    void * ptr, const rosidl_typesupport_introspection_cpp::MessageMembers * response_members)
+  {
+    response_members->fini_function(ptr);
+    ::operator delete(ptr);
+  }
 };
 
 }  // namespace agnocast
