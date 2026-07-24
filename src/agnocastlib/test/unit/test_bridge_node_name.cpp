@@ -55,4 +55,12 @@ TEST_F(GetPerformanceBridgeNodeNameTest, invalid_characters_fall_back_to_default
   EXPECT_EQ(agnocast::get_performance_bridge_node_name(123), default_name_for(123));
 }
 
+TEST_F(GetPerformanceBridgeNodeNameTest, too_long_suffix_falls_back_to_default)
+{
+  // Long enough that the resulting node name exceeds RMW_NODE_NAME_MAX_NAME_LENGTH (255).
+  const std::string long_suffix(256, 'a');
+  setenv("AGNOCAST_BRIDGE_NODE_NAME_SUFFIX", long_suffix.c_str(), 1);
+  EXPECT_EQ(agnocast::get_performance_bridge_node_name(123), default_name_for(123));
+}
+
 }  // namespace
