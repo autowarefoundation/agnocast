@@ -1,7 +1,9 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
 #include "agnocast/agnocast_client.hpp"
+#include "agnocast/agnocast_service.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/vendor/rclcpp/generic_client.hpp"
 #include "agnocast/vendor/rclcpp/generic_service.hpp"
 #include "rclcpp/version.h"
 
@@ -135,7 +137,11 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge(
 {
   void * symbol = get_bridge_factory_symbol(service_type, "create_a2r_service_bridge", true);
   if (symbol == nullptr) {
-    return {nullptr, nullptr, nullptr};
+    // Fall back to the generic bridge, which is independent of plugins.
+    RCLCPP_DEBUG(
+      logger_, "No plugin found for service '%s' (type: %s). Using generic bridge.",
+      service_name.c_str(), service_type.c_str());
+    return create_a2r_service_bridge_generic(node, service_name, service_type, qos);
   }
 
   auto factory = reinterpret_cast<A2RServiceBridgeFactory>(symbol);
@@ -217,8 +223,6 @@ void * PerformanceBridgeLoader::load_library_from_paths(
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const std::string & type_name, const std::string & symbol_name_prefix, bool is_service)
 {
-  // TODO(bdm-k): Remove the error paths for service bridges once we have an A2R generic service
-  // bridge implementation.
   const char * type_label = is_service ? "service" : "message";
   std::string snake_type = convert_type_to_snake_case(type_name);
   std::vector<std::string> lib_paths = generate_library_paths();
@@ -226,32 +230,17 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   std::string last_dlopen_error;
   void * handle = load_library_from_paths(lib_paths, last_dlopen_error);
   if (handle == nullptr) {
-    if (lib_paths.empty()) {
-      if (is_service) {
-        RCLCPP_ERROR(
-          logger_,
-          "No plugin paths available for service bridge. Have you generated bridge plugins?");
-      }
-    } else {
+    if (!lib_paths.empty()) {
       std::string tried_paths;
       for (const auto & path : lib_paths) {
         tried_paths += "\n  - " + path;
       }
-      if (is_service) {
-        RCLCPP_ERROR(
-          logger_,
-          "Failed to load plugin for service type '%s'.\n"
-          "Tried paths:%s\n"
-          "Last error: %s",
-          type_name.c_str(), tried_paths.c_str(), last_dlopen_error.c_str());
-      } else {
-        RCLCPP_WARN(
-          logger_,
-          "Failed to load plugin for message type '%s'. Falling back to generic bridge.\n"
-          "Tried paths:%s\n"
-          "Last error: %s",
-          type_name.c_str(), tried_paths.c_str(), last_dlopen_error.c_str());
-      }
+      RCLCPP_WARN(
+        logger_,
+        "Failed to load plugin for %s type '%s'. Falling back to generic bridge.\n"
+        "Tried paths:%s\n"
+        "Last error: %s",
+        type_label, type_name.c_str(), tried_paths.c_str(), last_dlopen_error.c_str());
     }
     return nullptr;
   }
@@ -263,22 +252,6 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
 
   const char * dlsym_error = dlerror();
   if (dlsym_error != nullptr) {
-    if (is_service) {
-      RCLCPP_ERROR(
-        logger_, "Failed to find symbol '%s' for %s type '%s': %s", symbol_name.c_str(), type_label,
-        type_name.c_str(), dlsym_error);
-    }
-    return nullptr;
-  }
-
-  if (symbol == nullptr) {
-    if (is_service) {
-      RCLCPP_ERROR(
-        logger_,
-        "Symbol '%s' was found for %s type '%s' but returned NULL, which is invalid for a factory "
-        "function.",
-        symbol_name.c_str(), type_label, type_name.c_str());
-    }
     return nullptr;
   }
 
@@ -370,7 +343,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
       if (!request_copier(agno_req, ros_req)) {
         RCLCPP_ERROR(
           logger,
-          "Serialization error occurred in generic service bridge for '%s'; dropping request",
+          "Serialization error occurred in generic R2A service bridge for '%s'; dropping request",
           service_handle->get_service_name());
         agno_client->cancel_request(std::move(agno_req));
         return;
@@ -389,6 +362,54 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
     qos, srv_cb_group);
 
   return {ros_srv, srv_cb_group, client_cb_group};
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+}
+
+ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
+  const rclcpp::Node::SharedPtr & node, const std::string & service_name,
+  const std::string & service_type, const rclcpp::QoS & qos)
+{
+  const std::string response_type = service_type + "_Response";
+
+  auto srv_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto client_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  auto ros_client = agnocast::vendor_rclcpp::GenericClient::create_generic_client(
+    node.get(), service_name, service_type, qos, client_cbg);
+
+  auto agno_srv = std::make_shared<agnocast::GenericService>(
+    node.get(), service_name, service_type,
+    [ros_client = std::move(ros_client), response_copier = get_copier(response_type)](
+      std::shared_ptr<agnocast::GenericService> service_handle, ipc_shared_ptr<void> && agno_req) {
+      const void * ros_req_ptr = agno_req.get();
+
+      ros_client->async_send_request(
+        ros_req_ptr,
+        [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
+         &response_copier](agnocast::vendor_rclcpp::GenericClient::SharedFuture future) {
+          auto ros_res = future.get();
+          auto agno_res = service_handle->borrow_loaned_response(agno_req);
+
+          if (!response_copier(agno_res, ros_res)) {
+            RCLCPP_ERROR(
+              logger,
+              "Serialization error occurred in generic A2R service bridge for '%s'; dropping "
+              "response",
+              service_handle->get_service_name());
+            auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                               // lambda capture.
+            service_handle->cancel_response(std::move(agno_req_movable), std::move(agno_res));
+            return;
+          }
+
+          auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                             // lambda capture.
+          service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+        });
+    },
+    qos, srv_cbg, agnocast::ServiceRole::AgnocastOnly);
+
+  return {agno_srv, srv_cbg, client_cbg};
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 

@@ -382,6 +382,8 @@ public:
   void cancel_response(ipc_shared_ptr<void> && request, ipc_shared_ptr<void> && response);
 
   ipc_shared_ptr<void> borrow_loaned_response(const ipc_shared_ptr<void> & request);
+
+  const char * get_service_name() const { return service_name_.c_str(); }
 };
 
 /**

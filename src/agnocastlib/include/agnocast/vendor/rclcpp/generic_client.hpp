@@ -19,10 +19,6 @@
 
 #pragma once
 
-#include <rclcpp/version.h>
-
-#if RCLCPP_VERSION_MAJOR < 28
-
 #include <rclcpp/client.hpp>
 #include <rclcpp/node.hpp>
 #include <rcpputils/shared_library.hpp>
@@ -96,5 +92,3 @@ private:
 };
 
 }  // namespace agnocast::vendor_rclcpp
-
-#endif
