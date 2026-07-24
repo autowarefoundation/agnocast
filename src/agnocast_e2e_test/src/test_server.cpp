@@ -2,6 +2,7 @@
 #include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+using namespace std::chrono_literals;
 using namespace std::placeholders;
 
 class TestServer : public rclcpp::Node
@@ -32,9 +33,23 @@ class TestServer : public rclcpp::Node
   void deferred_callback(
     agnocast::Service<ServiceT>::SharedPtr srv_handle, agnocast::ipc_shared_ptr<Request> && request)
   {
-    // TODO: Implement this.
-    (void)srv_handle;
-    (void)request;
+    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", request->data[0]);
+
+    std::thread([this, srv_handle = std::move(srv_handle), request = std::move(request)]() {
+      // Wait for a while to simulate an asynchronous operation.
+      std::this_thread::sleep_for(100ms);
+
+      auto response = srv_handle->borrow_loaned_response(request);
+      response->sum = request->data[0];
+      auto request_movable = request;
+      srv_handle->send_response(std::move(request_movable), std::move(response));
+
+      received_count_ += 1;
+      if (received_count_ >= target_count_) {
+        RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
+        rclcpp::shutdown();
+      }
+    }).detach();
   }
 
 public:

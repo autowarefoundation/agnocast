@@ -110,7 +110,7 @@ public:
       rclcpp::shutdown();
     }
 
-    timer_ = this->create_wall_timer(100ms, std::bind(&TestClient::timer_callback, this));
+    timer_ = this->create_wall_timer(200ms, std::bind(&TestClient::timer_callback, this));
   }
 };
 
