@@ -1,10 +1,5 @@
 # Agnocast GPU-IPC (CUDA) Design Document
 
-Status: covers work through Step 7 (feature branch `feature/gpu-ipc`).
-Scope: zero-copy sharing of **GPU device memory** across processes on one host,
-built as an extension of the existing (CPU) Agnocast.
-
----
 
 ## 1. Purpose
 
@@ -14,7 +9,7 @@ wrote without any copy. That mechanism covers **host (CPU) memory** only.
 
 GPU-accelerated Autoware nodes (camera, LiDAR, perception) keep large buffers in
 **CUDA device memory**. Passing such a message between two processes on the same
-GPU normally means device→host→device copies or per-message CUDA IPC export,
+GPU normally means **device→host→device** copies or per-message CUDA IPC export,
 both of which cost latency and bandwidth on every message.
 
 The GPU-IPC feature extends Agnocast so that a CUDA message's **device buffer**
@@ -68,9 +63,11 @@ additional, separate mechanism layered on top.
 3. **Per-thread default stream.** User GPU work must run on the per-thread
    default stream (compile with `nvcc --default-stream per-thread`), because
    Agnocast records/waits its ordering event on that stream.
+   This restriction should be removed for real applications.
+   Publisher and subscriber should provide a way to explicitly specify a CUDA stream for synchronization.
 4. **Publish window only.** Only `cudaMalloc` calls between
    `borrow_loaned_message()` and `publish()` **on the same thread** are pooled.
-5. **Subscriber completes reads before release.** The done-boundary is pure CPU
+5. **Subscriber must complete reads before release.** The done-boundary is pure CPU
    refcounting; a subscriber must finish its GPU reads before dropping its
    message reference (synchronous copies satisfy this automatically).
 6. **Single-threaded / callback-isolated executor** for the subscriber wait
@@ -343,14 +340,17 @@ sequenceDiagram
     C->>Sv: connect + HandshakeRequest
     Sv-->>C: HandshakeResponse{backend, uuid}
     C->>Sv: ListRequest
+    Sv->>Pool: make_list_response()
     Sv-->>C: ListResponse[SlotDescriptor...]
     C->>Sv: AllocRequest(size)
+    Sv->>Pool:allocate(size, slot_id_out)
     alt free slot in fitting class
         Sv-->>C: AllocResponse(kOk, slot_id)
     else none free
         Sv-->>C: AllocResponse(kNoFreeSlot)   %% immediate, no blocking
     end
     C->>Sv: FreeRequest(slot_id)
+    Sv->>Pool:free_slot(slot_id)
     Sv-->>C: FreeResponse(kOk)
 
     Note over M,Sv: SIGINT/SIGTERM -> request_stop()
