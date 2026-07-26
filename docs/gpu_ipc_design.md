@@ -400,14 +400,12 @@ nor starve other clients.
    independently derive the same socket path from it. This guarantees the socket
    always matches the managed GPU with nothing volatile committed to config.
 
-4. **UUID via `cudaGetDeviceProperties().uuid`.** `cudaDeviceGetUuid` is **not a
-   CUDA Runtime API symbol** — it belongs to the Driver API (`cuDeviceGetUuid`),
-   so it resolves against no `libcudart`. The Runtime API exposes the UUID only
+4. **UUID via `cudaGetDeviceProperties().uuid`.**
+   While there is the Driver API (`cuDeviceGetUuid`), the Runtime API exposes the UUID only
    as the `uuid` field of `cudaDeviceProp`. We read it through a partial,
    ABI-stable view (`uuid` is at offset 256, right after `char name[256]`, across
    CUDA 10/11/12), formatted to the canonical `GPU-xxxxxxxx-...` string that
-   matches `nvidia-smi -L`. (Discovered during Step 7 integration; unit tests use
-   mock backends and never exercised the real loader.)
+   matches `nvidia-smi -L`.
 
 5. **Variable-length, length-prefixed handle blobs.** CUDA IPC handles are 64 B,
    but a future NvSci backend uses larger `NvSciBuf`/`NvSciSync` handles. Encoding
@@ -493,7 +491,7 @@ nor starve other clients.
 
 ---
 
-## 8. How the integration test exercises this (Step 7)
+## 8. The integration test
 
 `agnocast_sample_application/test/cuda_ipc_integration_test.bash` starts the
 daemon and runs `cuda_talker` (publisher) and `cuda_listener` (subscriber) with
