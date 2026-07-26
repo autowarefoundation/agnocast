@@ -23,7 +23,7 @@ class AgnocastCommand(CommandExtension):
 
     def main(self, *, parser, args):
         if args.version:
-            from ros2agnocast.verb.version import VersionVerb
+            from ros2agnocast.verb.agnocast_version import VersionVerb
             return VersionVerb().main(args=args)
 
         if not hasattr(args, '_verb'):

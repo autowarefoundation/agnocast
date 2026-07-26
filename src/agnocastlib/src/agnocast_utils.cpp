@@ -1,10 +1,14 @@
 #include "agnocast/agnocast_utils.hpp"
 
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
+#include <sys/stat.h>
+
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <system_error>
 
 namespace agnocast
 {
@@ -75,16 +79,56 @@ std::string create_mq_name_for_agnocast_publish(
   return create_mq_name("/agnocast", topic_name, id);
 }
 
-std::string create_mq_name_for_bridge(const pid_t pid)
+// UDS-address suffix that scopes the per-IPC-namespace bridge listener by domain.
+// An unset OR empty ROS_DOMAIN_ID means "no domain" (no suffix), keeping this in
+// sync with the Python discovery agent (bridge_decider._bridge_uds_addr).
+static std::string bridge_domain_suffix()
 {
-  std::string name = "/agnocast_bridge_manager@" + std::to_string(pid);
-  if (pid == PERFORMANCE_BRIDGE_VIRTUAL_PID) {
-    const char * domain_id = getenv("ROS_DOMAIN_ID");
-    if (domain_id != nullptr) {
-      name += "_d" + std::string(domain_id);
-    }
+  const char * domain_id = getenv("ROS_DOMAIN_ID");
+  if (domain_id == nullptr || *domain_id == '\0') {
+    return "";
   }
-  return name;
+  return "_d" + std::string(domain_id);
+}
+
+uint32_t get_ros_domain_id()
+{
+  const char * domain_id_env = getenv("ROS_DOMAIN_ID");
+  if (domain_id_env == nullptr || *domain_id_env == '\0') {
+    return 0;
+  }
+  char * end = nullptr;
+  errno = 0;
+  const uint64_t value = std::strtoul(domain_id_env, &end, 10);
+  // Out-of-range values would silently wrap into an unintended domain (e.g. 0),
+  // breaking isolation, so reject them rather than truncate.
+  if (*end != '\0' || errno != 0 || value > std::numeric_limits<uint32_t>::max()) {
+    return 0;
+  }
+  return static_cast<uint32_t>(value);
+}
+
+std::string create_uds_addr_for_bridge()
+{
+  // Abstract-namespace UDS address is prefixed with '\0' and its length is
+  // scoped by the socklen_t passed to bind()/sendto() (no trailing NUL).
+  std::string addr;
+  addr.push_back('\0');
+  addr += "agnocast_bridge_manager_";
+  addr += std::to_string(get_self_ipc_ns_inode());
+  addr += bridge_domain_suffix();
+  return addr;
+}
+
+uint64_t get_self_ipc_ns_inode()
+{
+  struct stat st
+  {
+  };
+  if (stat("/proc/self/ns/ipc", &st) != 0) {
+    throw std::system_error(errno, std::generic_category(), "stat(/proc/self/ns/ipc)");
+  }
+  return static_cast<uint64_t>(st.st_ino);
 }
 
 std::string create_shm_name(const pid_t pid)
@@ -112,6 +156,12 @@ uint64_t agnocast_get_timestamp()
 const void * get_node_base_address(agnocast::Node * node)
 {
   return static_cast<const void *>(node->get_node_base_interface().get());
+}
+
+const void * get_node_base_address(rclcpp::Node * node)
+{
+  return static_cast<const void *>(
+    node->get_node_base_interface()->get_shared_rcl_node_handle().get());
 }
 
 }  // namespace agnocast

@@ -582,11 +582,12 @@ public:
   }
 
   /// Create a service client.
+  /// @tparam ServiceT ROS service type.
   /// @param service_name Service name.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created client.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT>
   typename agnocast::Client<ServiceT>::SharedPtr create_client(
     const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
@@ -596,14 +597,15 @@ public:
   }
 
   /// Create a service server.
-  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&,
-  /// agnocast::ipc_shared_ptr<ResponseT>&).
+  /// @tparam ServiceT ROS service type.
+  /// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
+  /// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
   /// @param service_name Service name.
   /// @param callback Callback invoked on each request.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created service.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT, typename Func>
   typename agnocast::Service<ServiceT>::SharedPtr create_service(
     const std::string & service_name, Func && callback,
@@ -650,13 +652,13 @@ private:
   // ParsedArguments must be stored to keep rcl_arguments_t alive
   ParsedArguments local_args_;
 
-  rclcpp::Logger logger_{rclcpp::get_logger("agnocast_node")};
   node_interfaces::NodeBase::SharedPtr node_base_;
-  node_interfaces::NodeParameters::SharedPtr node_parameters_;
+  rclcpp::Logger logger_;
   node_interfaces::NodeTopics::SharedPtr node_topics_;
+  node_interfaces::NodeServices::SharedPtr node_services_;
+  node_interfaces::NodeParameters::SharedPtr node_parameters_;
   node_interfaces::NodeClock::SharedPtr node_clock_;
   node_interfaces::NodeTimeSource::SharedPtr node_time_source_;
-  node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeLogging::SharedPtr node_logging_;
 };
 

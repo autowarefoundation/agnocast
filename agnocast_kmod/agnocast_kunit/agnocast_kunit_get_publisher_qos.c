@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_get_publisher_qos.h"
 
 #include "../agnocast.h"
@@ -13,7 +14,7 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 

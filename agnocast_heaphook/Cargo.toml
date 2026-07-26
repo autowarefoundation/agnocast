@@ -1,11 +1,11 @@
 [package]
 name = "agnocast_heaphook"
-version = "2.3.3"
+version = "2.3.5"
 edition = "2021"
 license = "Apache-2.0"
 authors = [
     "Takahiro Ishikawa-Aso <sykwer@gmail.com>",
-    "Ryuta Kambe <ryuta.kambe@tier4.jp>",
+    "Ryuta Kambe <veqcc.c@gmail.com>",
     "Atsushi Yano <atsushi.yano.2@tier4.jp>",
     "Koichi Imai <koichi.imai.2@tier4.jp>"
 ]

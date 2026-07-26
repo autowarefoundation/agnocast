@@ -1,10 +1,20 @@
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <rmw/validate_node_name.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -15,7 +25,7 @@ BridgeMode get_bridge_mode()
 {
   const char * env_val = std::getenv("AGNOCAST_BRIDGE_MODE");
   if (env_val == nullptr) {
-    return BridgeMode::Standard;
+    return BridgeMode::On;
   }
 
   std::string val = env_val;
@@ -24,15 +34,54 @@ BridgeMode get_bridge_mode()
   if (val == "0" || val == "off") {
     return BridgeMode::Off;
   }
+  if (val == "on") {
+    return BridgeMode::On;
+  }
   if (val == "1" || val == "standard") {
-    return BridgeMode::Standard;
+    RCLCPP_WARN_ONCE(logger, "AGNOCAST_BRIDGE_MODE=%s is deprecated. Fallback to ON.", env_val);
+    return BridgeMode::On;
   }
   if (val == "2" || val == "performance") {
-    return BridgeMode::Performance;
+    RCLCPP_WARN_ONCE(logger, "AGNOCAST_BRIDGE_MODE=%s is deprecated. Fallback to ON.", env_val);
+    return BridgeMode::On;
   }
 
-  RCLCPP_WARN(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to STANDARD.", env_val);
-  return BridgeMode::Standard;
+  RCLCPP_WARN_ONCE(logger, "Unknown AGNOCAST_BRIDGE_MODE: %s. Fallback to ON.", env_val);
+  return BridgeMode::On;
+}
+
+std::string get_performance_bridge_node_name(const uint64_t self_ipc_ns_inode)
+{
+  std::string default_name = "agnocast_bridge_node_performance_" +
+                             std::to_string(self_ipc_ns_inode) + "_" + std::to_string(getpid());
+
+  const char * env_val = std::getenv("AGNOCAST_BRIDGE_NODE_NAME_SUFFIX");
+  if (env_val == nullptr || *env_val == '\0') {
+    return default_name;
+  }
+
+  // Container names may contain '-' and '.', which are not allowed in ROS 2 node names.
+  std::string suffix = env_val;
+  std::replace(suffix.begin(), suffix.end(), '-', '_');
+  std::replace(suffix.begin(), suffix.end(), '.', '_');
+
+  std::string node_name = "agnocast_bridge_node_performance_" + suffix;
+
+  // rmw rejects node names longer than RMW_NODE_NAME_MAX_NAME_LENGTH.
+  const bool valid = node_name.size() <= RMW_NODE_NAME_MAX_NAME_LENGTH &&
+                     std::all_of(suffix.begin(), suffix.end(), [](const unsigned char c) {
+                       return std::isalnum(c) != 0 || c == '_';
+                     });
+  if (!valid) {
+    RCLCPP_WARN(
+      logger,
+      "AGNOCAST_BRIDGE_NODE_NAME_SUFFIX='%s' does not form a valid ROS 2 node name. "
+      "Falling back to the default node name '%s'.",
+      env_val, default_name.c_str());
+    return default_name;
+  }
+
+  return node_name;
 }
 
 rclcpp::QoS get_subscriber_qos(const std::string & topic_name, topic_local_id_t subscriber_id)
@@ -69,6 +118,17 @@ rclcpp::QoS get_publisher_qos(const std::string & topic_name, topic_local_id_t p
     .durability(
       get_publisher_qos_args.ret_is_transient_local ? rclcpp::DurabilityPolicy::TransientLocal
                                                     : rclcpp::DurabilityPolicy::Volatile);
+}
+
+rclcpp::QoS daemon_request_qos(const BridgeMsgDaemonPubSubPayload & req)
+{
+  return rclcpp::QoS(req.qos_depth)
+    .durability(
+      req.qos_is_transient_local ? rclcpp::DurabilityPolicy::TransientLocal
+                                 : rclcpp::DurabilityPolicy::Volatile)
+    .reliability(
+      req.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
+                          : rclcpp::ReliabilityPolicy::BestEffort);
 }
 
 SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_name)
@@ -174,6 +234,219 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
     subscribers.begin(), subscribers.end(), [&self_name, &self_ns](const auto & info) {
       return info.node_name() != self_name || info.node_namespace() != self_ns;
     });
+}
+
+rclcpp::QoS get_service_qos(const std::string & service_name)
+{
+  const std::string request_topic_name = create_service_request_topic_name(service_name);
+
+  auto topic_info_buffer = std::make_unique<std::array<topic_info_ret, 1>>();
+  ioctl_topic_info_args topic_info_args = {};
+  topic_info_args.topic_name = {request_topic_name.c_str(), request_topic_name.size()};
+  topic_info_args.topic_info_ret_buffer_addr =
+    reinterpret_cast<uint64_t>(topic_info_buffer->data());
+  topic_info_args.topic_info_ret_buffer_size = 1;
+
+  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
+    if (errno == ENOBUFS) {
+      throw std::runtime_error("Multiple target agnocast services found");
+    }
+    throw std::runtime_error(
+      "Failed to fetch target service information from agnocast kernel module");
+  }
+
+  if (topic_info_args.ret_topic_info_ret_num <= 0) {
+    throw std::runtime_error("No target agnocast service found");
+  }
+
+  const topic_info_ret & info = (*topic_info_buffer)[0];
+
+  // We know the durability policy is set to Volatile because this is a service.
+  rclcpp::QoS qos = rclcpp::QoS(info.qos_depth)
+                      .durability(rclcpp::DurabilityPolicy::Volatile)
+                      .reliability(
+                        info.qos_is_reliable ? rclcpp::ReliabilityPolicy::Reliable
+                                             : rclcpp::ReliabilityPolicy::BestEffort);
+  return qos;
+}
+
+bool is_agnocast_service_alive(const std::string & service_name, std::string & reason)
+{
+  // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
+  // directly without using get_service_qos() as a probe.
+  try {
+    (void)get_service_qos(service_name);
+    return true;
+  } catch (const std::exception & e) {
+    reason = e.what();
+    return false;
+  } catch (...) {
+    reason = "Unknown error";
+    return false;
+  }
+}
+
+std::pair<std::string, std::string> split_full_node_name(const std::string & fqn)
+{
+  const auto pos = fqn.find_last_of('/');
+  std::string ns = (pos == 0) ? "/" : fqn.substr(0, pos);
+  std::string name = fqn.substr(pos + 1);
+  return {std::move(ns), std::move(name)};
+}
+
+BridgeRegistrationMsgBuilder::BridgeRegistrationMsgBuilder() : failed_(false)
+{
+}
+
+// NOLINTBEGIN(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::fail(const char * format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(nullptr, 0, format, args);
+  va_end(args);
+
+  if (n < 0) {
+    failed_ = true;
+    reason_ = "Failed to format error message";
+    return *this;
+  }
+
+  std::string buf(n + 1, '\0');
+  va_start(args, format);
+  vsnprintf(buf.data(), n + 1, format, args);
+  va_end(args);
+  // Drop the trailing null terminator.
+  buf.resize(n);
+
+  failed_ = true;
+  reason_ = std::move(buf);
+  return *this;
+}
+
+int BridgeRegistrationMsgBuilder::checked_snprintf(
+  const std::string & member, char * buffer, size_t size, const char * format, ...)
+{
+  if (failed_) return -1;
+
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(buffer, size, format, args);
+  va_end(args);
+
+  if (n < 0) {
+    fail("snprintf() for '%s' returned a negative value", member.c_str());
+  } else if (static_cast<size_t>(n) >= size) {
+    fail(
+      "snprintf() for '%s' failed; length must be %zu characters or fewer", member.c_str(),
+      size - 1);
+  }
+
+  return n;
+}
+// NOLINTEND(cert-dcl50-cpp, cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+// hicpp-no-array-decay)
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_direction(
+  BridgeDirection direction)
+{
+  direction_ = direction;
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_is_service(bool is_service)
+{
+  is_service_ = is_service;
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_message_type(
+  const char * message_type)
+{
+  checked_snprintf(
+    "message_type", static_cast<char *>(pubsub_.message_type), MESSAGE_TYPE_BUFFER_SIZE, "%s",
+    message_type);
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_topic_name(const char * topic_name)
+{
+  checked_snprintf(
+    "topic_name", static_cast<char *>(pubsub_.topic_name), TOPIC_NAME_BUFFER_SIZE, "%s",
+    topic_name);
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_pubsub_target_id(
+  topic_local_id_t target_id)
+{
+  pubsub_.target_id = target_id;
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_type(
+  const char * service_type)
+{
+  checked_snprintf(
+    "service_type", static_cast<char *>(service_.service_type), SERVICE_TYPE_BUFFER_SIZE, "%s",
+    service_type);
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_service_name(
+  const char * service_name)
+{
+  checked_snprintf(
+    "service_name", static_cast<char *>(service_.service_name), SERVICE_NAME_BUFFER_SIZE, "%s",
+    service_name);
+  return *this;
+}
+
+BridgeRegistrationMsgBuilder & BridgeRegistrationMsgBuilder::set_shadow_node_identity(
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
+{
+  service_.create_shadow_node = shadow_node_identity.has_value();
+
+  const char * shadow_node_namespace =
+    shadow_node_identity.has_value() ? shadow_node_identity->first.c_str() : "";
+  const char * shadow_node_name =
+    shadow_node_identity.has_value() ? shadow_node_identity->second.c_str() : "";
+
+  checked_snprintf(
+    "shadow_node_namespace", static_cast<char *>(service_.shadow_node_namespace),
+    NODE_NAME_BUFFER_SIZE, "%s", shadow_node_namespace);
+  checked_snprintf(
+    "shadow_node_name", static_cast<char *>(service_.shadow_node_name), NODE_NAME_BUFFER_SIZE, "%s",
+    shadow_node_name);
+
+  return *this;
+}
+
+std::pair<BridgeMsg, std::string> BridgeRegistrationMsgBuilder::build_message()
+{
+  BridgeMsg msg{};
+  if (is_service_) {
+    msg.type = BridgeMsgType::Service;
+    service_.direction = direction_;
+    msg.payload.service = service_;
+  } else {
+    msg.type = BridgeMsgType::PubSub;
+    pubsub_.direction = direction_;
+    msg.payload.pubsub = pubsub_;
+  }
+  return {msg, failed_ ? std::move(reason_) : std::string{}};
+}
+
+void register_service_bridge(
+  const std::string & service_type, const std::string & service_name, BridgeDirection direction,
+  const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
+{
+  if (get_bridge_mode() != BridgeMode::On) {
+    return;
+  }
+  send_performance_service_bridge_registration_by_type_name(
+    service_type, service_name, direction, shadow_node_identity);
 }
 
 }  // namespace agnocast

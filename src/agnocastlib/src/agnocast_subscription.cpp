@@ -1,26 +1,41 @@
-#include "agnocast/agnocast.hpp"
+#include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/typesupport_helpers.hpp"
+#include "rclcpp/version.h"
+#include "rcpputils/shared_library.hpp"
+
+#include <rmw/rmw.h>
+#include <rmw/serialized_message.h>
 
 namespace agnocast
 {
 
 SubscriptionBase::SubscriptionBase(rclcpp::Node * node, const std::string & topic_name)
-: id_(0), topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
+: topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
 {
   validate_ld_preload();
 }
 
 SubscriptionBase::SubscriptionBase(
   agnocast::Node * node, const std::string & topic_name)  // NOLINT(modernize-pass-by-value)
-: id_(0), topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
+: topic_name_(node->get_node_topics_interface()->resolve_topic_name(topic_name))
 {
   validate_ld_preload();
 }
 
-union ioctl_add_subscriber_args SubscriptionBase::initialize(
+void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const std::string & node_name)
+  SubscriptionRole role, const std::string & node_name, const std::string & type_name)
 {
+  // Announce to the per-IPC-namespace discovery agent before the kmod call so
+  // the registry line is in place whenever a later snapshot sees the
+  // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
+  if (!type_name.empty()) {
+    internal::TypeRegistryWriter::instance().register_type(
+      topic_name_, type_name, "sub", node_name);
+  }
+
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
   add_subscriber_args.node_name = {node_name.c_str(), node_name.size()};
@@ -30,15 +45,61 @@ union ioctl_add_subscriber_args SubscriptionBase::initialize(
   add_subscriber_args.qos_is_reliable = qos.reliability() == rclcpp::ReliabilityPolicy::Reliable;
   add_subscriber_args.is_take_sub = is_take_sub;
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
-  add_subscriber_args.is_bridge = is_bridge;
+  add_subscriber_args.is_bridge = (role == SubscriptionRole::BridgeInternal);
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
-  return add_subscriber_args;
+  id_ = add_subscriber_args.ret_id;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+  mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
+
+  if (role == SubscriptionRole::Default) {
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    } else {
+      RCLCPP_ERROR(
+        logger,
+        "R2A bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
+  }
 }
+
+template <typename NodeT>
+rclcpp::QoS SubscriptionBase::init_base(
+  NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
+  const SubscriptionOptions & options, SubscriptionRole role)
+{
+  const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
+  rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
+    override_qos ? node->get_node_parameters_interface() : nullptr;
+  const rclcpp::QoS actual_qos = override_qos
+                                   ? rclcpp::detail::declare_qos_parameters(
+                                       options.qos_overriding_options, node_parameters, topic_name_,
+                                       qos, rclcpp::detail::SubscriptionQosParametersTraits{})
+                                   : qos;
+
+  validate_subscription_qos(actual_qos);
+
+  const std::string node_name = node->get_fully_qualified_name();
+  initialize(
+    actual_qos, is_take_sub, options.ignore_local_publications, role, node_name, type_name);
+
+  return actual_qos;
+}
+
+template rclcpp::QoS SubscriptionBase::init_base<rclcpp::Node>(
+  rclcpp::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
+  SubscriptionRole);
+
+template rclcpp::QoS SubscriptionBase::init_base<agnocast::Node>(
+  agnocast::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
+  SubscriptionRole);
 
 uint32_t get_publisher_count_core(const std::string & topic_name)
 {
@@ -109,6 +170,37 @@ void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription)
 rclcpp::CallbackGroup::SharedPtr get_default_callback_group_for_tracepoint(agnocast::Node * node)
 {
   return node->get_node_base_interface()->get_default_callback_group();
+}
+
+GenericSubscription::TypeSupportBundle GenericSubscription::load_typesupport_impl(
+  const std::string & topic_type)
+{
+  TypeSupportBundle result;
+  result.library = rclcpp::get_typesupport_library(topic_type, "rosidl_typesupport_cpp");
+  // rclcpp::get_typesupport_handle() was deprecated in Jazzy (rclcpp 28) in favor of
+  // rclcpp::get_message_typesupport_handle() to distinguish message handles from service handles.
+#if RCLCPP_VERSION_MAJOR >= 28
+  result.handle =
+    rclcpp::get_message_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#else
+  result.handle =
+    rclcpp::get_typesupport_handle(topic_type, "rosidl_typesupport_cpp", *result.library);
+#endif
+  return result;
+}
+
+bool GenericSubscription::serialize_message(
+  const void * raw, const rosidl_message_type_support_t * type_support,
+  rclcpp::SerializedMessage & out)
+{
+  const rmw_ret_t ret = rmw_serialize(raw, type_support, &out.get_rcl_serialized_message());
+  if (ret != RMW_RET_OK) {
+    RCLCPP_ERROR(
+      logger, "rmw_serialize failed (rmw_ret=%d); skipping message", static_cast<int>(ret));
+    rmw_reset_error();
+    return false;
+  }
+  return true;
 }
 
 }  // namespace agnocast

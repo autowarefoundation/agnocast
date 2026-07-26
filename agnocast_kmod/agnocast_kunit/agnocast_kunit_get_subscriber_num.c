@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_get_subscriber_num.h"
 
 #include "../agnocast.h"
@@ -17,8 +18,8 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(
+    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -35,8 +36,8 @@ static void setup_one_subscriber_with_bridge(struct kunit * test, char * topic_n
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(
+    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
@@ -53,8 +54,8 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
   publisher_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 =
-    agnocast_ioctl_add_process(publisher_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(
+    publisher_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
 
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
@@ -71,7 +72,7 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
 
   union ioctl_add_process_args add_process_args;
   int ret1 =
-    agnocast_ioctl_add_process(intra_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+    agnocast_ioctl_add_process(intra_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(

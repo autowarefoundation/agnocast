@@ -2,12 +2,11 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocastlib</name>
-  <version>2.3.3</version>
+  <version>2.3.5</version>
   <description>
     True Zero Copy Communication Middleware for Unsized ROS 2 Message Types.
   </description>
   <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
-  <maintainer email="ryuta.kambe@tier4.jp">Ryuta Kambe</maintainer>
   <maintainer email="atsushi.yano.2@tier4.jp">Atsushi Yano</maintainer>
   <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
   <maintainer email="kawaguchitnon@icloud.com">Tetsuhiro Kawaguchi</maintainer>
@@ -15,7 +14,7 @@
 
   <!-- Original authors -->
   <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
-  <author email="ryuta.kambe@tier4.jp">Ryuta Kambe</author>
+  <author email="veqcc.c@gmail.com">Ryuta Kambe</author>
   <author email="atsushi.yano.2@tier4.jp">Atsushi Yano</author>
   <author email="koichi.imai.2@tier4.jp">Koichi Imai</author>
 
@@ -28,11 +27,20 @@
   <depend>rcl_yaml_param_parser</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
+  <depend>rcpputils</depend>
+  <depend>rmw</depend>
   <depend>rosgraph_msgs</depend>
+  <depend>rosidl_typesupport_introspection_cpp</depend>
   <depend>tracetools</depend>
 
   <depend>agnocast_cie_config_msgs</depend>
   <depend>agnocast_cie_thread_configurator</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>diagnostic_updater</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <!-- Uncomment when agnocast_kmod is released from PPA -->
   <!-- <exec_depend>agnocast_kmod</exec_depend> -->
@@ -40,11 +48,17 @@
   <!-- Uncomment when agnocast_heaphook is released from PPA -->
   <!-- <exec_depend>agnocast_heaphook</exec_depend> -->
 
+  <!-- initialize_agnocast() forks+execs `ros2 run ros2agnocast_discovery_agent discovery_agent`
+       (the auto-forked discovery agent), so the package must be present at runtime. Runtime-only,
+       so it does not affect build order. -->
+  <exec_depend>ros2agnocast_discovery_agent</exec_depend>
+
   <test_depend>ament_cmake_gmock</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
   <test_depend>std_msgs</test_depend>
+  <test_depend>std_srvs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

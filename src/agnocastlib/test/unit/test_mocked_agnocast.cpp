@@ -3,7 +3,6 @@
 #include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
-#include "agnocast/agnocast_timer_info.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_msgs/msg/int32.hpp"
@@ -41,12 +40,14 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string &, const std::string &, const rclcpp::QoS &, const bool)
+  const std::string & topic_name, const std::string &, const rclcpp::QoS &, const bool,
+  const std::string &, std::string & out_mq_topic_name)
 {
-  return 0;  // Dummy value
+  out_mq_topic_name = topic_name;  // non-bridged: the notification MQ uses the topic's own name
+  return 0;                        // Dummy value
 }
 union ioctl_publish_msg_args publish_core(
-  const void *, const std::string &, const topic_local_id_t, const uint64_t,
+  const void *, const std::string &, const std::string &, const topic_local_id_t, const uint64_t,
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> &)
 {
   publish_core_mock_called_count++;
@@ -57,6 +58,8 @@ BridgeMode get_bridge_mode()
 {
   return BridgeMode::Off;  // Skip MQ sending in tests
 }
+
+PublisherBase::~PublisherBase() = default;
 }  // namespace agnocast
 
 // =========================================
@@ -210,6 +213,52 @@ TEST_F(AgnocastPublisherTest, test_multiple_borrows_mixed_publish_and_drop)
 }
 
 // =========================================
+// TypeErasedPublisher tests
+// =========================================
+
+class AgnocastTypeErasedPublisherTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    rclcpp::init(0, nullptr);
+    node = std::make_shared<rclcpp::Node>("dummy_node");
+    dummy_publisher = std::make_shared<agnocast::TypeErasedPublisher>(
+      node.get(), "/dummy", "/std_msgs/msg/Int32", rclcpp::QoS{10}, agnocast::PublisherOptions{},
+      agnocast::PublisherRole::Default);
+
+    publish_core_mock_called_count = 0;
+    mock_borrowed_publisher_num = 0;
+  }
+
+  void TearDown() override { rclcpp::shutdown(); }
+
+  std::shared_ptr<rclcpp::Node> node;
+  std::shared_ptr<agnocast::TypeErasedPublisher> dummy_publisher;
+};
+
+TEST_F(AgnocastTypeErasedPublisherTest, test_cancel)
+{
+  // Arrange
+  agnocast::ipc_shared_ptr<void> message = dummy_publisher->borrow_loaned_message(4);
+  void * message_ptr = message.get();
+  void * delete_ptr = nullptr;
+  auto deleter = [&delete_ptr](void * p) {
+    delete_ptr = p;
+    ::operator delete(p);
+  };
+
+  // Act
+  dummy_publisher->cancel_message(std::move(message), deleter);
+
+  // Assert
+  EXPECT_EQ(publish_core_mock_called_count, 0);
+  EXPECT_EQ(agnocast_get_borrowed_publisher_num(), 0);
+  EXPECT_NE(message_ptr, nullptr);
+  EXPECT_EQ(delete_ptr, message_ptr);
+}
+
+// =========================================
 // ipc_shared_ptr tests
 // =========================================
 
@@ -254,6 +303,18 @@ TEST_F(AgnocastSmartPointerTest, reset_nullptr)
 
   // Assert
   EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+}
+
+void drop_unpublished_void_message(const std::string & tn, topic_local_id_t pubsub_id)
+{
+  void * ptr = ::operator new(4);
+  agnocast::ipc_shared_ptr<void> sut{ptr, tn, pubsub_id, ENTRY_ID_NOT_ASSIGNED};
+  return;
+}
+
+TEST_F(AgnocastSmartPointerTest, reset_void)
+{
+  EXPECT_DEATH(drop_unpublished_void_message(dummy_tn, dummy_pubsub_id), "");
 }
 
 TEST_F(AgnocastSmartPointerTest, copy_constructor_normal)
@@ -382,7 +443,7 @@ TEST_F(AgnocastSmartPointerTest, move_assignment_self)
 
   // Act
 #pragma GCC diagnostic push
-#ifdef __clang__
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 13)
 #pragma GCC diagnostic ignored "-Wself-move"
 #endif
   sut = std::move(sut);
@@ -623,104 +684,15 @@ TEST_F(AgnocastCallbackInfoTest, get_erased_callback_const_ptr)
 }
 
 // =========================================
-// create_timer free function tests
-// =========================================
-
-class CreateTimerFreeFunctionTest : public ::testing::Test
-{
-protected:
-  void SetUp() override { node = std::make_shared<agnocast::Node>("test_timer_node"); }
-
-  void TearDown() override { node.reset(); }
-
-  std::shared_ptr<agnocast::Node> node;
-};
-
-TEST_F(CreateTimerFreeFunctionTest, creates_timer_and_registers_info)
-{
-  // Arrange
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
-
-  // Act
-  auto timer = agnocast::create_timer(node.get(), clock, period, []() {});
-
-  // Assert
-  ASSERT_NE(timer, nullptr);
-  EXPECT_EQ(timer->get_clock()->get_clock_type(), RCL_STEADY_TIME);
-}
-
-TEST_F(CreateTimerFreeFunctionTest, uses_default_callback_group_when_nullptr)
-{
-  // Arrange
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = rclcpp::Duration(std::chrono::milliseconds(100));
-  auto expected_group = node->get_node_base_interface()->get_default_callback_group();
-
-  // Act
-  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, nullptr);
-
-  // Assert: verify the timer was registered with the default callback group
-  ASSERT_NE(timer, nullptr);
-  // Check via id2_timer_info that the callback group matches the default
-  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
-  bool found = false;
-  for (const auto & [id, info] : agnocast::id2_timer_info) {
-    if (info->callback_group == expected_group && info->timer.lock() == timer) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(found) << "Timer should be registered with the default callback group";
-}
-
-TEST_F(CreateTimerFreeFunctionTest, uses_explicit_callback_group)
-{
-  // Arrange
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = rclcpp::Duration(std::chrono::milliseconds(50));
-  auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
-  // Act
-  auto timer = agnocast::create_timer(node.get(), clock, period, []() {}, group);
-
-  // Assert
-  ASSERT_NE(timer, nullptr);
-  std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
-  bool found = false;
-  for (const auto & [id, info] : agnocast::id2_timer_info) {
-    if (info->callback_group == group && info->timer.lock() == timer) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(found) << "Timer should be registered with the explicit callback group";
-}
-
-TEST_F(CreateTimerFreeFunctionTest, callback_is_invoked)
-{
-  // Arrange
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = rclcpp::Duration(std::chrono::milliseconds(10));
-  bool called = false;
-  auto timer = agnocast::create_timer(node.get(), clock, period, [&called]() { called = true; });
-
-  // Act
-  timer->execute_callback();
-
-  // Assert
-  EXPECT_TRUE(called);
-}
-
-// =========================================
 // ID overflow tests
 // =========================================
 
 TEST(AllocateCallbackInfoIdTest, throws_when_id_has_reserved_epoll_flag_bits)
 {
-  // Arrange: Set next_callback_info_id so the next allocation hits SHUTDOWN_EVENT_FLAG (bit 29).
+  // Arrange: Set next_callback_info_id to MAX_CALLBACK_INFO_ID so the next allocation overflows the
+  // boundary.
   const uint32_t original = next_callback_info_id.load();
-  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG);
+  next_callback_info_id.store(MAX_CALLBACK_INFO_ID);
 
   // Act & Assert
   EXPECT_THROW(allocate_callback_info_id(), std::runtime_error);
@@ -731,43 +703,15 @@ TEST(AllocateCallbackInfoIdTest, throws_when_id_has_reserved_epoll_flag_bits)
 
 TEST(AllocateCallbackInfoIdTest, succeeds_just_below_reserved_range)
 {
-  // Arrange: Set next_callback_info_id to the maximum valid value (one below SHUTDOWN_EVENT_FLAG).
+  // Arrange: Set next_callback_info_id to the maximum valid value (one below MAX_CALLBACK_INFO_ID).
   const uint32_t original = next_callback_info_id.load();
-  next_callback_info_id.store(SHUTDOWN_EVENT_FLAG - 1);
+  next_callback_info_id.store(MAX_CALLBACK_INFO_ID - 1);
 
   // Act & Assert
-  EXPECT_EQ(allocate_callback_info_id(), SHUTDOWN_EVENT_FLAG - 1);
+  EXPECT_EQ(allocate_callback_info_id(), MAX_CALLBACK_INFO_ID - 1);
 
   // Cleanup
   next_callback_info_id.store(original);
-}
-
-TEST(AllocateTimerIdTest, throws_when_id_has_reserved_epoll_flag_bits)
-{
-  // Arrange: Set next_timer_id so the returned ID includes a reserved epoll flag bit.
-  // This covers the bug where timer IDs OR'd with CLOCK_EVENT_FLAG/TIMER_EVENT_FLAG
-  // could collide with reserved flags.
-  const uint32_t original = next_timer_id.load();
-  next_timer_id.store(SHUTDOWN_EVENT_FLAG);
-
-  // Act & Assert
-  EXPECT_THROW(allocate_timer_id(), std::runtime_error);
-
-  // Cleanup
-  next_timer_id.store(original);
-}
-
-TEST(AllocateTimerIdTest, succeeds_just_below_reserved_range)
-{
-  // Arrange: Set next_timer_id to the maximum valid value.
-  const uint32_t original = next_timer_id.load();
-  next_timer_id.store(SHUTDOWN_EVENT_FLAG - 1);
-
-  // Act & Assert
-  EXPECT_EQ(allocate_timer_id(), SHUTDOWN_EVENT_FLAG - 1);
-
-  // Cleanup
-  next_timer_id.store(original);
 }
 
 TEST_F(AgnocastSmartPointerTest, converting_copy_constructor)

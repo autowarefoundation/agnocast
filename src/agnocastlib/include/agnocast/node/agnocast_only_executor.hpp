@@ -1,5 +1,7 @@
 #pragma once
 
+#include "agnocast/agnocast_epoll.hpp"
+#include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
@@ -22,16 +24,28 @@ using WeakCallbackGroupsToNodesMap = std::map<
 struct AgnocastExecutable;
 class Node;
 
-/** @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
- * agnocast::Node. */
+/**
+ * @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
+ * agnocast::Node.
+ *
+ * One-shot: once cancel() is called, spin() will not run again on the same instance -- create a
+ * new executor instead. All current uses (clock executor, CIE child executors) are recreated.
+ * TODO: to support re-spin, replace the spinning_ / cancel_requested_ flags with one atomic state
+ * enum (Idle / Spinning / Cancelled) so spin() can re-arm to Idle on exit.
+ */
 AGNOCAST_PUBLIC
 class AgnocastOnlyExecutor
 {
 protected:
-  std::atomic_bool spinning_;
-  int epoll_fd_;
+  std::atomic_bool spinning_{false};
+  // Sticky cancel flag: set by cancel(), never cleared, so a cancel() before spin() is not lost
+  // when spin() does spinning_.exchange(true). Never cleared -> the executor is one-shot.
+  std::atomic_bool cancel_requested_{false};
+  std::unique_ptr<EpollManager> epoll_manager_;
   int shutdown_event_fd_;
   pid_t my_pid_;
+
+  EpollUpdateTracker epoll_update_tracker_;
 
   // Lock ordering: When both mutexes are needed, always acquire
   // ready_agnocast_executables_mutex_ before mutex_ to prevent deadlocks.
@@ -46,8 +60,7 @@ protected:
   std::list<rclcpp::node_interfaces::NodeBaseInterface::WeakPtr> weak_nodes_
     RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  bool get_next_agnocast_executable(
-    AgnocastExecutable & agnocast_executable, const int timeout_ms, bool & shutdown_detected);
+  bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   bool get_next_ready_agnocast_executable(AgnocastExecutable & agnocast_executable);
   void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
 
@@ -63,10 +76,13 @@ public:
   virtual ~AgnocastOnlyExecutor();
 
   /// Block the calling thread and process Agnocast callbacks in a loop until cancel() is called.
+  /// One-shot: if cancel() was already called, spin() returns at once (see class comment).
   AGNOCAST_PUBLIC
   virtual void spin() = 0;
 
-  /// Request the executor to stop spinning. Causes the current or next spin() call to return.
+  /// Request the executor to stop spinning. Causes the current spin() call to return.
+  /// One-shot: once called, the executor is permanently stopped -- every subsequent spin()
+  /// returns immediately. Create a new instance to spin again.
   AGNOCAST_PUBLIC
   virtual void cancel();
 

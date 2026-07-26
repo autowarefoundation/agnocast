@@ -103,12 +103,12 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
+| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
 
 **Other differences from rclcpp::NodeParameters**:
 
 | Item | rclcpp::NodeParameters | agnocast::NodeParameters | Planned |
 |------|------------------------|-------------------------|---------|
-| Parameter Service | Creates `ParameterService` (optional) | None | Yes |
 | Parameter Event Publishing | Publishes to `/parameter_events` | None | TBD |
 
 ---
@@ -146,8 +146,6 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 ### 2.6 NodeServicesInterface
 
 **Purpose**: Service and Client management
-
-> **Warning**: Agnocast service/client is not officially supported yet and the API may change in the future. Use at your own risk.
 
 | Feature | agnocast::Node | Support Level | Planned | Notes |
 |---------|----------------|---------------|---------|-------|
@@ -199,10 +197,10 @@ This provides the same argument parsing functionality as rcl.
 | `--params-file file.yaml` | ✓ | **Full Support** | - | Load parameters from YAML file |
 | `--` (end marker) | ✓ | **Full Support** | - | ROS arguments end marker |
 | `-r node:old:=new` | ✓ | **Full Support** | - | Node-specific remapping |
-| `--log-level` | ✗ | **Unsupported** | TBD | Set log level |
+| `--log-level` | ✓ | **Full Support** | - | Set log level |
 | `--enable-rosout-logs` | ✗ | **Unsupported** | TBD | Enable logging to rosout |
 | `--disable-external-lib-logs` | ✓ | **Full Support** | - | Disable external library logs (file logging via rcl_logging_spdlog) |
-| `--disable-stdout-logs` | ✗ | **Unsupported** | TBD | Disable stdout logging |
+| `--disable-stdout-logs` | ✓ | **Full Support** | - | Disable stdout logging |
 | `-e` (enclave) | ✗ | **Unsupported** | TBD | Specify security enclave |
 
 ### 3.2 Parameter Override Resolution
@@ -306,8 +304,8 @@ The following tables compare methods that are **directly defined** in each class
 |-----|:------------:|:--------------:|-------|
 | `create_wall_timer()` | ✓ | ✓ | Return type differs (`uint32_t` timer_id vs `rclcpp::TimerBase::SharedPtr`) |
 | `create_timer()` | ✓ | ✓ | Supports ROS_TIME (simulation time). Return type differs (`agnocast::TimerBase::SharedPtr` vs `rclcpp::TimerBase::SharedPtr`). Note: dynamic deactivation of ROS time (`use_sim_time` changed from `true` to `false` at runtime) is not yet supported. |
-| `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client). **Not officially supported yet; API may change.** |
-| `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service). **Not officially supported yet; API may change.** |
+| `create_client<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Client vs. agnocast::Client). |
+| `create_service<ServiceT>()` | ✓ | ✓ | Return type differs (rclcpp::Service vs. agnocast::Service). |
 
 #### Graph API (ROS Network Discovery)
 

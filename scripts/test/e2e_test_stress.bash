@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if ! grep -q "^agnocast " /proc/modules; then
+    echo "ERROR: agnocast kernel module is not loaded." >&2
+    echo "Load it first: sudo insmod agnocast_kmod/agnocast.ko" >&2
+    exit 1
+fi
+
 set -e
 
 PERCENTAGES=($(seq 5 5 95))   # You can change this
@@ -13,15 +19,7 @@ for ((i = 0; i < NUM_PERCENTAGES; i++)); do
 done
 TIMEOUT=680s # based on the measurement time of e2e tests
 
-# Workaround for launch_testing timeout configuration
-# This is because it is hard coded in https://github.com/ros2/launch/blob/f31c1ff13fcbed3653d1a0e26438cb739e96d751/launch_testing/launch_testing/test_runner.py#L184.
-SED_TARGET_FILE=$(dirname "$(python3 -c 'import launch_testing; print(launch_testing.__file__)')")/test_runner.py
-sudo cp $SED_TARGET_FILE $SED_TARGET_FILE.bak
-TIMEOUT_WITH_BUFFER=$((TIMEOUT_EACH_TEST_CASE_S + 10))
-sudo sed -i '/if not self._processes_launched.wait/s/\(timeout=\)[0-9]\+/\1'"$TIMEOUT_WITH_BUFFER"'/' "$SED_TARGET_FILE"
-
 cleanup() {
-    sudo cp $SED_TARGET_FILE.bak $SED_TARGET_FILE
     echo "Stopping stress-ng..."
     pkill -P $$ # Kill all child processes
     exit 1

@@ -1,4 +1,14 @@
 <launch>
+    <!--
+      `discovery_agent` arg controls whether the per-IPC-namespace Agnocast
+      discovery agent is spawned alongside the talker. Exactly one daemon
+      should run per IPC namespace; set this to false when including this
+      launch from another launch that already spawns the daemon.
+    -->
+    <arg name="discovery_agent" default="false"/>
+    <include file="$(find-pkg-share ros2agnocast_discovery_agent)/launch/discovery_agent.launch.xml"
+             if="$(var discovery_agent)"/>
+
     <node pkg="agnocast_sample_application" exec="talker" name="talker_node" output="screen">
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
     </node>
