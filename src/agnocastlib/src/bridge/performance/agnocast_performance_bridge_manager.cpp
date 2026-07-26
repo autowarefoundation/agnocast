@@ -23,6 +23,7 @@ namespace agnocast
 
 PerformanceBridgeManager::PerformanceBridgeManager()
 : logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
+  clock_(std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME)),
   self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_),
   loader_(std::make_shared<PerformanceBridgeLoader>(logger_))
@@ -40,6 +41,8 @@ PerformanceBridgeManager::~PerformanceBridgeManager()
 {
   request_shutdown();
 
+  // Join before any member is destroyed: the worker uses container_node_,
+  // executor_ and the pending_msgs_ mutex/CV, which live only until this returns.
   if (worker_thread_.joinable()) {
     worker_thread_.join();
   }
@@ -79,6 +82,9 @@ void PerformanceBridgeManager::run()
 
 void PerformanceBridgeManager::worker_loop()
 {
+  // Also the maintenance polling interval, not just a safety net for the CV: the
+  // sweep below must run periodically (bridge teardown, daemon lease expiry) even
+  // while no message arrives. Do not drop it in favour of a plain wait().
   constexpr auto WORKER_TIMEOUT = std::chrono::milliseconds(1000);
 
   while (!shutdown_requested_) {
@@ -98,10 +104,30 @@ void PerformanceBridgeManager::worker_loop()
       dispatch_bridge_message(msg);
     }
 
+    // Gate the creating steps and re-check between them: each can dlopen a plugin
+    // and build DDS entities, so shutdown may arrive mid-sweep. The reclaiming
+    // steps are left ungated; letting them finish keeps the state consistent.
+    const auto shutting_down = [this]() {
+      return shutdown_requested_.load(std::memory_order_relaxed);
+    };
+
+    if (shutting_down()) {
+      break;
+    }
     check_and_create_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
     create_daemon_forced_bridges();
+
     check_and_remove_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
     check_and_update_service_bridges();
+
     check_and_remove_request_cache();
     check_and_request_shutdown();
   }
@@ -196,8 +222,10 @@ void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t 
   pending_msgs_cv_.notify_one();
 
   if (exceeded_threshold) {
-    RCLCPP_WARN_ONCE(
-      logger_, "Pending bridge message backlog exceeded %zu; worker thread may not be keeping up.",
+    constexpr int BACKLOG_WARN_INTERVAL_MS = 10000;
+    RCLCPP_WARN_THROTTLE(
+      logger_, *clock_, BACKLOG_WARN_INTERVAL_MS,
+      "Pending bridge message backlog exceeded %zu; worker thread may not be keeping up.",
       PENDING_MSGS_WARN_THRESHOLD);
   }
 }

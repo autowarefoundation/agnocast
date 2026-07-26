@@ -46,6 +46,9 @@ private:
   };
 
   rclcpp::Logger logger_;
+  // Steady clock for throttled logging. Owned here rather than taken from
+  // container_node_, since throttled logging happens on the event loop thread.
+  std::shared_ptr<rclcpp::Clock> clock_;
   uint64_t self_ipc_ns_inode_;
   PerformanceBridgeIpcEventLoop event_loop_;
   std::shared_ptr<PerformanceBridgeLoader> loader_;
