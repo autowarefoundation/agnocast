@@ -16,6 +16,7 @@ from ros2agnocast.discovery import (
     BRIDGE_WARN,
     collect_announcements_with_fallback,
     collect_bridge_roles,
+    is_internal_node_name,
     topic_endpoints,
     topics_of_node,
     warn_if_using_fallback,
@@ -154,6 +155,30 @@ def test_collect_bridge_roles_extracts_real_and_bridge_roles_per_ns():
     roles = collect_bridge_roles([snap_a, snap_b, snap_c])
     assert roles['/foo'] == [(True, False, False, True), (False, True, False, False)]
     assert '/bridge_only' not in roles
+
+
+def test_is_internal_node_name_true_for_bridge_discovery_agent_and_cie_client():
+    assert is_internal_node_name('/agnocast_bridge_node_0')
+    assert is_internal_node_name('/agnocast_discovery_agent_0')
+    assert is_internal_node_name('/agnocast_cie_thread_configurator/client_0')
+
+
+def test_is_internal_node_name_true_for_cie_domain_helper_node():
+    # Per-domain helper node created by create_node_for_domain in util.cpp; it has no
+    # trailing slash after the namespace prefix, unlike the per-process client nodes.
+    assert is_internal_node_name('/agnocast_cie_thread_configurator_domain_1')
+
+
+def test_is_internal_node_name_false_for_ordinary_application_nodes():
+    assert not is_internal_node_name('/cie_listener_node')
+    assert not is_internal_node_name('/talker')
+
+
+def test_is_internal_node_name_matches_regardless_of_leading_slash():
+    assert is_internal_node_name('agnocast_bridge_node_0')
+    assert is_internal_node_name('agnocast_discovery_agent_0')
+    assert is_internal_node_name('agnocast_cie_thread_configurator/client_0')
+    assert not is_internal_node_name('cie_listener_node')
 
 
 def test_resolve_spin_node_returns_node_as_is_when_not_nodestrategy():
