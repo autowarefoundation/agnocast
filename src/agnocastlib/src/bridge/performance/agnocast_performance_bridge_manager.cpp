@@ -135,7 +135,7 @@ void PerformanceBridgeManager::worker_loop()
 
 void PerformanceBridgeManager::start_ros_execution()
 {
-  std::string node_name = "agnocast_bridge_node_performance";
+  const std::string node_name = get_performance_bridge_node_name(self_ipc_ns_inode_);
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
   // We must not use single-threaded executors because of how service bridges work. Service bridges
