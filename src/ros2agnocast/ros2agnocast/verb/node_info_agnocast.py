@@ -1,3 +1,5 @@
+import sys
+
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import (
     get_action_client_info, get_action_server_info, get_node_names,
@@ -112,8 +114,24 @@ class NodeInfoAgnocastVerb(VerbExtension):
             # Get Agnocast node info from gossip (every NS / ECU on the domain).
             agnocast_subscribers, agnocast_publishers, agnocast_servers, agnocast_clients, gossip_topic_types = get_agnocast_node_topics(node_name)
 
-            # Get ros2 all node names
-            ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=True)
+            # Get ros2 all node names.
+            # The RMW layer can raise (e.g. "empty node name returned by the RMW
+            # layer" when a participant without a valid node name is present in the
+            # DDS graph). Don't let that abort the whole command: the per-node graph
+            # queries below still work, so we can classify the target node directly
+            # even without the full enumeration.
+            ros2_enumeration_ok = True
+            try:
+                ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=True)
+            except Exception as e:
+                print(
+                    f'WARNING: failed to enumerate ROS 2 nodes ({e}); classifying '
+                    'the target node directly. A participant with an empty node '
+                    'name may be present in the DDS graph; try '
+                    '`ros2 daemon stop && ros2 daemon start`.',
+                    file=sys.stderr)
+                ros2_node_name_list = []
+                ros2_enumeration_ok = False
             ros2_node_names = {n.full_name for n in ros2_node_name_list}
 
             ########################################################################
@@ -128,7 +146,10 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # Determine node class
             # 1. ros2 node
-            if node_name in ros2_node_names:
+            #    If enumeration failed we can't trust the membership set, so fall
+            #    through to the per-node queries (which don't hit the empty-name
+            #    path) and let them decide.
+            if node_name in ros2_node_names or not ros2_enumeration_ok:
                 subscribers = get_subscriber_info(node=node, remote_node_name=node_name)
                 publishers = get_publisher_info(node=node, remote_node_name=node_name)
                 service_servers = get_service_server_info(node=node, remote_node_name=node_name)

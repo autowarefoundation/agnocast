@@ -29,6 +29,18 @@ static void remove_all_process_info(void)
   // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
 }
 
+static void remove_all_discovery_agents(void)
+{
+  struct discovery_agent_info * agent;
+  int bkt;
+  struct hlist_node * tmp;
+  hash_for_each_safe(discovery_agent_htable, bkt, tmp, agent, node)
+  {
+    hash_del_rcu(&agent->node);
+    kfree_rcu(agent, rcu_head);
+  }
+}
+
 static void remove_all_bridge_info(void)
 {
   struct bridge_info * br_info;
@@ -50,7 +62,8 @@ static void remove_all_domain_rules(void)
   hash_for_each_safe(domain_rule_htable, bkt, tmp, rule, node)
   {
     hash_del(&rule->node);
-    kfree(rule->topic_name);
+    kfree(rule->topic_name_a);
+    kfree(rule->topic_name_b);
     kfree(rule);
   }
 }
@@ -61,6 +74,7 @@ void agnocast_exit_free_data(void)
   down_write(&global_htables_rwsem);
   remove_all_topics();
   remove_all_process_info();
+  remove_all_discovery_agents();
   remove_all_bridge_info();
   remove_all_domain_rules();
   up_write(&global_htables_rwsem);

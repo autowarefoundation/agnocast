@@ -29,9 +29,6 @@
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
-  <!-- discovery-daemon-status duplicates the agent's singleton-lock path; a test
-       cross-checks the two builders, so it needs the agent package importable. -->
-  <test_depend>ros2agnocast_discovery_agent</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

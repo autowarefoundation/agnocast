@@ -158,4 +158,10 @@ const void * get_node_base_address(agnocast::Node * node)
   return static_cast<const void *>(node->get_node_base_interface().get());
 }
 
+const void * get_node_base_address(rclcpp::Node * node)
+{
+  return static_cast<const void *>(
+    node->get_node_base_interface()->get_shared_rcl_node_handle().get());
+}
+
 }  // namespace agnocast

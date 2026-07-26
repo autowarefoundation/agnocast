@@ -5,14 +5,23 @@ helpers directly with a mock ctypes library.
 """
 
 import ctypes
+import sys
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from rclpy.executors import ExternalShutdownException
+
 from ros2agnocast_discovery_agent.agent import (
+    DiscoveryAgent,
+    EXIT_WHEN_IDLE_ENV,
+    EXIT_WHEN_IDLE_FLAG,
+    IdleExitTracker,
     NODE_NAME_BUFFER_SIZE,
     TopicInfoRet,
+    _exit_when_idle_enabled,
     _ioctl_to_endpoint,
     _read_host_uuid,
     read_local_topics,
@@ -251,20 +260,8 @@ def test_read_host_uuid_returns_uuid_string():
 
 
 # ---------------------------------------------------------------------------
-# Singleton lock
+# Singleton claim (kmod-arbitrated) + idle-exit gate
 # ---------------------------------------------------------------------------
-
-
-def test_singleton_lock_path_honors_tmpfs_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42, 3) == str(tmp_path / 'agnocast_discovery_agent_42_d3.lock')
-
-
-def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
-    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
-    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42, 0) == '/dev/shm/agnocast_discovery_agent_42_d0.lock'
 
 
 def test_read_ros_domain_id_parses_env(monkeypatch):
@@ -277,84 +274,141 @@ def test_read_ros_domain_id_parses_env(monkeypatch):
     assert _read_ros_domain_id() == 0
     monkeypatch.setenv('ROS_DOMAIN_ID', 'abc')  # unparsable -> default 0
     assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', '-5')  # negative would wrap in uint32 -> default 0
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', str(2 ** 32))  # above uint32 max -> default 0
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', str(2 ** 32 - 1))  # uint32 max -> accepted as-is
+    assert _read_ros_domain_id() == 2 ** 32 - 1
 
 
-def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    attempt = _try_acquire_singleton_lock(123, 0)
-    assert attempt.status == LockStatus.ACQUIRED
-    attempt.file.close()
+class _FakeSingletonLib:
+    """Stand-in for the ioctl wrapper: agnocast_discovery_agent_register returns a set code."""
+
+    def __init__(self, register_ret):
+        self._register_ret = register_ret
+        self.register_calls = []
+
+    def agnocast_discovery_agent_register(self, domain_id):
+        self.register_calls.append(domain_id)
+        return self._register_ret
 
 
-def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
-    """A second acquire in the same (NS, domain) reports HELD while the first is alive."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    first = _try_acquire_singleton_lock(456, 0)
-    assert first.status == LockStatus.ACQUIRED
-    assert _try_acquire_singleton_lock(456, 0).status == LockStatus.HELD
-    first.file.close()
-    # After releasing, a new acquire succeeds.
-    third = _try_acquire_singleton_lock(456, 0)
-    assert third.status == LockStatus.ACQUIRED
-    third.file.close()
+def test_main_exits_cleanly_when_claim_is_lost(monkeypatch):
+    """A duplicate (register -> 1) returns 0 promptly, before any DDS / rclpy bring-up.
 
-
-def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
-    """Different IPC NS inodes get independent locks."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    lock_a = _try_acquire_singleton_lock(111, 0)
-    lock_b = _try_acquire_singleton_lock(222, 0)
-    assert lock_a.status == LockStatus.ACQUIRED
-    assert lock_b.status == LockStatus.ACQUIRED
-    lock_a.file.close()
-    lock_b.file.close()
-
-
-def test_acquire_singleton_lock_independent_per_domain(monkeypatch, tmp_path):
-    """Same IPC NS but different ROS_DOMAIN_ID get independent locks, so two
-    launches sharing a namespace in different domains each run their own agent."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    lock_d1 = _try_acquire_singleton_lock(111, 1)
-    lock_d3 = _try_acquire_singleton_lock(111, 3)
-    assert lock_d1.status == LockStatus.ACQUIRED
-    assert lock_d3.status == LockStatus.ACQUIRED
-    lock_d1.file.close()
-    lock_d3.file.close()
-
-
-def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
-    """When the lock-file directory is not writable we report ERROR (distinct
-    from HELD) so the caller can surface a non-zero exit code."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    assert _try_acquire_singleton_lock(789, 0).status == LockStatus.ERROR
-
-
-def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_path):
-    """A duplicate (lock already held) returns 0 promptly instead of idling.
-
-    Runs main() in a thread so a regression to the old ``signal.pause()``
-    (which would block forever here) is caught as a non-returning thread
-    rather than hanging the whole test run. main() returns before any DDS /
-    ioctl bring-up, so this needs neither the kmod nor rclpy.
+    Runs main() in a thread so a regression to a blocking wait is caught as a non-returning
+    thread rather than hanging the run: a lost claim means another agent owns this (ns, domain),
+    so main must return 0 without spinning.
     """
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import (
-        LockStatus, _read_ipc_ns_inode, _read_ros_domain_id,
-        _try_acquire_singleton_lock, main)
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
 
-    holder = _try_acquire_singleton_lock(_read_ipc_ns_inode(), _read_ros_domain_id())
-    assert holder.status == LockStatus.ACQUIRED
-    try:
-        result = {}
-        t = threading.Thread(target=lambda: result.__setitem__('rc', main(argv=[])))
-        t.start()
-        t.join(timeout=5.0)
-        assert not t.is_alive(), 'main() did not return (regressed to signal.pause()?)'
-        assert result['rc'] == 0
-    finally:
-        holder.file.close()
+    result = {}
+    t = threading.Thread(target=lambda: result.__setitem__('rc', agent.main(argv=[])))
+    t.start()
+    t.join(timeout=5.0)
+    assert not t.is_alive(), 'main() did not return on a lost claim (blocked instead of exiting?)'
+    assert result['rc'] == 0
+    assert fake.register_calls  # it actually attempted the claim
+
+
+def test_main_returns_error_when_claim_ioctl_fails(monkeypatch):
+    """A register ioctl error (-1) propagates as a non-zero exit, not a silent 0."""
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=-1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
+    assert agent.main(argv=[]) == 1
+
+
+def test_main_returns_error_when_wrapper_unavailable(monkeypatch):
+    """A missing library or symbol (version skew) exits 1 cleanly, not with a traceback."""
+    from ros2agnocast_discovery_agent import agent
+
+    def _raise_oserror():
+        raise OSError('libagnocast_ioctl_wrapper.so: cannot open shared object file')
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', _raise_oserror)
+    assert agent.main(argv=[]) == 1
+
+    # spec=[] makes any attribute access (the missing symbol) raise AttributeError.
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: MagicMock(spec=[]))
+    assert agent.main(argv=[]) == 1
+
+
+def _idle_gate_self(should_exit_ret, commit_ret):
+    """Build a duck-typed DiscoveryAgent for exercising _maybe_exit_when_idle without rclpy/kmod.
+
+    threshold=1 makes the idle tracker fire on the first idle tick, so one call reaches the gate.
+    """
+    lib = MagicMock()
+    lib.agnocast_discovery_agent_should_exit.return_value = should_exit_ret
+    lib.agnocast_discovery_agent_commit_exit.return_value = commit_ret
+    return SimpleNamespace(
+        _lib=lib, _domain_id=0, _ipc_ns_inode=1,
+        _idle_tracker=IdleExitTracker(threshold=1), get_logger=lambda: MagicMock())
+
+
+def test_idle_exit_commits_then_exits_when_domain_stays_empty():
+    """Grace period elapsed and the kmod commit succeeds -> the agent exits."""
+    fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=1)
+    with pytest.raises(ExternalShutdownException):
+        DiscoveryAgent._maybe_exit_when_idle(fake_self)
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_called_once_with(0)
+
+
+def test_idle_exit_vetoed_keeps_running_when_process_races_in():
+    """The commit is vetoed (a process started during the grace period) -> keep running."""
+    fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=0)
+    DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_called_once_with(0)
+
+
+def test_idle_exit_never_commits_on_query_error():
+    """A should_exit error counts as not-idle: the gate is never reached, so we never exit."""
+    fake_self = _idle_gate_self(should_exit_ret=-1, commit_ret=1)
+    DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_not_called()
+
+
+# --- idle-exit (opt-in auto-fork cleanup) -----------------------------------
+
+def test_idle_exit_tracker_fires_after_threshold():
+    tracker = IdleExitTracker(threshold=3)
+    assert tracker.update(True) is False
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True  # third consecutive idle tick
+
+
+def test_idle_exit_tracker_resets_on_activity():
+    tracker = IdleExitTracker(threshold=3)
+    tracker.update(True)
+    tracker.update(True)
+    assert tracker.update(False) is False  # a busy tick resets the count
+    assert tracker.update(True) is False   # counting restarts from zero
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True
+
+
+def test_idle_exit_tracker_threshold_floor():
+    # A non-positive threshold is clamped to 1, so a single idle tick fires.
+    assert IdleExitTracker(threshold=0).update(True) is True
+
+
+def test_exit_when_idle_enabled_via_env(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent'])  # no CLI flag
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    assert _exit_when_idle_enabled() is False
+    for truthy in ('1', 'true', 'TRUE', 'yes'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, truthy)
+        assert _exit_when_idle_enabled() is True
+    for falsy in ('0', 'false', '', 'no'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, falsy)
+        assert _exit_when_idle_enabled() is False
+
+
+def test_exit_when_idle_enabled_via_cli_flag(monkeypatch):
+    # The auto-fork passes the flag as an argv literal (no env set in the child).
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent', EXIT_WHEN_IDLE_FLAG])
+    assert _exit_when_idle_enabled() is True
