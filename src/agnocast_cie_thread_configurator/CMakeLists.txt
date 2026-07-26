@@ -80,11 +80,11 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_${PROJECT_NAME} agnocast_thread_configurator)
 
-  ament_add_gtest(test_reapply_config
-    test/test_reapply_config.cpp
+  ament_add_gtest(test_thread_config
+    test/test_thread_config.cpp
   )
-  target_link_libraries(test_reapply_config agnocast_thread_configurator yaml-cpp)
-  target_include_directories(test_reapply_config PRIVATE
+  target_link_libraries(test_thread_config agnocast_thread_configurator yaml-cpp)
+  target_include_directories(test_thread_config PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
 endif()

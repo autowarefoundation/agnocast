@@ -329,6 +329,38 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             'modified non_ros_thread must appear in applied_non_ros_threads',
         )
 
+    def test_reapply_wildcard_without_instances_is_skipped(
+            self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+        cfg = _read_config()
+        added_entry = {
+            'id': '/fictitious_node/*',
+            'domain_id': 0,
+            'policy': 'SCHED_OTHER',
+            'priority': 0,
+            'affinity': [],
+        }
+        cfg.setdefault('callback_groups', []).append(added_entry)
+        _write_config(cfg)
+
+        response = _call_reapply()
+        self.assertTrue(
+            response.success,
+            f'reapply rejected unexpectedly: error_message={response.error_message!r}',
+        )
+        pattern_key = f"{added_entry['domain_id']}:{added_entry['id']}"
+        self.assertIn(pattern_key, list(response.skipped_callback_groups))
+        for arr in (
+            response.applied_callback_groups,
+            response.failed_callback_groups,
+        ):
+            self.assertNotIn(pattern_key, list(arr))
+
     def test_reapply_rejects_invalid_policy(self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received CallbackGroupInfo',

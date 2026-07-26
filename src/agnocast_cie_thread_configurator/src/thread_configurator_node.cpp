@@ -58,8 +58,11 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
   std::set<size_t> domain_ids;
   for (auto & cfg : callback_group_configs_) {
     domain_ids.insert(cfg.domain_id);
-    auto key = std::make_pair(cfg.domain_id, cfg.thread_str);
-    id_to_callback_group_config_[key] = &cfg;
+    if (cfg.is_wildcard()) {
+      node_to_wildcard_config_[std::make_pair(cfg.domain_id, cfg.wildcard_prefix())] = &cfg;
+    } else {
+      id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+    }
   }
   for (auto & cfg : non_ros_thread_configs_) {
     id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
@@ -301,7 +304,7 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
   return true;
 }
 
-bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
+bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t thread_id)
 {
   if (
     config.policy == "SCHED_OTHER" || config.policy == "SCHED_BATCH" ||
@@ -309,19 +312,18 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = 0;
 
-    if (
-      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
+    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
-        config.thread_str.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
 
     // Specify nice value
-    if (setpriority(PRIO_PROCESS, config.thread_id, config.priority) == -1) {
+    if (setpriority(PRIO_PROCESS, thread_id, config.priority) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure nice value (thread=%s, tid=%ld): %s",
-        config.thread_str.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
 
@@ -329,11 +331,10 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     struct sched_param param;
     param.sched_priority = config.priority;
 
-    if (
-      sched_setscheduler(config.thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
+    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
-        config.thread_str.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
 
@@ -354,25 +355,25 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
     attr.sched_period = config.period;
     attr.sched_deadline = config.deadline;
 
-    if (sched_setattr(config.thread_id, &attr, 0) == -1) {
+    if (sched_setattr(thread_id, &attr, 0) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
-        config.thread_str.c_str(), config.thread_id, strerror(errno));
+        config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
   } else {
     RCLCPP_ERROR(
       this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%ld)",
-      config.policy.c_str(), config.thread_str.c_str(), config.thread_id);
+      config.policy.c_str(), config.thread_str.c_str(), thread_id);
     return false;
   }
 
   if (config.affinity.size() > 0) {
     if (config.policy == "SCHED_DEADLINE") {
-      if (!set_affinity_by_cgroup(config.thread_id, config.affinity)) {
+      if (!set_affinity_by_cgroup(thread_id, config.affinity)) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
-          config.thread_str.c_str(), config.thread_id,
+          config.thread_str.c_str(), thread_id,
           "Please disable cgroup v2 if used: "
           "`systemd.unified_cgroup_hierarchy=0`");
         return false;
@@ -383,10 +384,10 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config)
       for (int cpu : config.affinity) {
         CPU_SET(cpu, &set);
       }
-      if (sched_setaffinity(config.thread_id, sizeof(set), &set) == -1) {
+      if (sched_setaffinity(thread_id, sizeof(set), &set) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
-          config.thread_str.c_str(), config.thread_id, strerror(errno));
+          config.thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
     }
@@ -403,24 +404,46 @@ const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_
 void ThreadConfiguratorNode::callback_group_callback(
   size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
-  auto key = std::make_pair(domain_id, msg->callback_group_id);
-  auto it = id_to_callback_group_config_.find(key);
-  if (it == id_to_callback_group_config_.end()) {
+  ThreadConfig * config = nullptr;
+  bool already_seen = false;
+
+  // Exact entries take precedence over wildcard ("<node>/*") entries.
+  auto it = id_to_callback_group_config_.find(std::make_pair(domain_id, msg->callback_group_id));
+  if (it != id_to_callback_group_config_.end()) {
+    config = it->second;
+    already_seen = config->applied;
+    // Drop stale tracking left in a wildcard entry from before this exact entry
+    // existed; otherwise reapply would apply both entries to the same thread.
+    auto wit = node_to_wildcard_config_.find(std::make_pair(
+      domain_id, agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id)));
+    if (wit != node_to_wildcard_config_.end()) {
+      wit->second->matched_tids.erase(msg->callback_group_id);
+    }
+  } else {
+    auto wit = node_to_wildcard_config_.find(std::make_pair(
+      domain_id, agnocast_cie_thread_configurator::extract_node_part(msg->callback_group_id)));
+    if (wit == node_to_wildcard_config_.end()) {
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Received CallbackGroupInfo: but the yaml file does not "
+        "contain configuration for domain=%zu, id=%s (tid=%ld)",
+        domain_id, msg->callback_group_id.c_str(), msg->thread_id);
+      return;
+    }
+    config = wit->second;
+    already_seen = config->matched_tids.count(msg->callback_group_id) > 0;
     RCLCPP_INFO(
-      this->get_logger(),
-      "Received CallbackGroupInfo: but the yaml file does not "
-      "contain configuration for domain=%zu, id=%s (tid=%ld)",
-      domain_id, msg->callback_group_id.c_str(), msg->thread_id);
-    return;
+      this->get_logger(), "Callback group (domain=%zu, id=%s) matched wildcard entry '%s'",
+      domain_id, msg->callback_group_id.c_str(), config->thread_str.c_str());
   }
 
-  ThreadConfig * config = it->second;
-  if (config->applied) {
+  if (already_seen) {
     // Always re-apply: the OS may reuse the same thread IDs after an application
     // restarts, so we cannot use thread_id equality to skip reconfiguration.
+    // "tracked", not "configured": a recorded wildcard tid's syscall may have failed.
     RCLCPP_INFO(
       this->get_logger(),
-      "Re-applying configuration for already configured callback group "
+      "Re-applying configuration for already tracked callback group "
       "(domain=%zu, id=%s, tid=%ld)",
       domain_id, msg->callback_group_id.c_str(), msg->thread_id);
   }
@@ -428,9 +451,14 @@ void ThreadConfiguratorNode::callback_group_callback(
   RCLCPP_INFO(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
-  config->thread_id = msg->thread_id;
+  // Record the tid before the syscall so a failed attempt can be retried via reapply.
+  if (config->is_wildcard()) {
+    config->matched_tids[msg->callback_group_id] = msg->thread_id;
+  } else {
+    config->thread_id = msg->thread_id;
+  }
 
-  if (!issue_syscalls(*config)) {
+  if (!issue_syscalls(*config, msg->thread_id)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for callback group (domain=%zu, id=%s, tid=%ld) due to syscall "
@@ -479,7 +507,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
   config->thread_id = info.tid;
 
-  if (!issue_syscalls(*config)) {
+  if (!issue_syscalls(*config, info.tid)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall "
@@ -526,20 +554,35 @@ void ThreadConfiguratorNode::on_reapply_config_request(
     return;
   }
 
-  // Carry thread_id over from existing state. 'applied' is intentionally NOT
-  // carried: a syscall failure below must leave applied=false, not the stale
-  // 'true' that a verbatim carry-over would imply.
+  // Carry known tids over from the existing state, same-form entries only:
+  // exact entries carry thread_id, wildcard entries carry matched_tids. An
+  // entry that changed form (exact <-> wildcard) starts fresh and is only
+  // picked up at the next announcement (see ReapplyConfig.srv). 'applied' is
+  // intentionally NOT carried: a syscall failure below must leave
+  // applied=false, not the stale 'true' that a verbatim carry-over would imply.
   for (auto & cfg : new_cb) {
-    auto it = id_to_callback_group_config_.find(std::make_pair(cfg.domain_id, cfg.thread_str));
-    if (it != id_to_callback_group_config_.end()) {
-      cfg.thread_id = it->second->thread_id;
+    if (cfg.is_wildcard()) {
+      auto it = node_to_wildcard_config_.find(std::make_pair(cfg.domain_id, cfg.wildcard_prefix()));
+      if (it != node_to_wildcard_config_.end()) {
+        cfg.matched_tids = it->second->matched_tids;
+      }
+    } else {
+      auto it = id_to_callback_group_config_.find(std::make_pair(cfg.domain_id, cfg.thread_str));
+      if (it != id_to_callback_group_config_.end()) {
+        cfg.thread_id = it->second->thread_id;
+      }
     }
   }
 
   callback_group_configs_ = std::move(new_cb);
   id_to_callback_group_config_.clear();
+  node_to_wildcard_config_.clear();
   for (auto & cfg : callback_group_configs_) {
-    id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+    if (cfg.is_wildcard()) {
+      node_to_wildcard_config_[std::make_pair(cfg.domain_id, cfg.wildcard_prefix())] = &cfg;
+    } else {
+      id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+    }
   }
 
   // One lock spans non-ROS carry-over + swap + unapplied_num_ recompute so the
@@ -565,12 +608,37 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   }
 
   for (auto & cfg : callback_group_configs_) {
+    if (cfg.is_wildcard()) {
+      // One applied/failed key per known instance; the pattern itself is
+      // reported as skipped only while no instance has been announced yet.
+      if (cfg.matched_tids.empty()) {
+        response->skipped_callback_groups.push_back(
+          std::to_string(cfg.domain_id) + ":" + cfg.thread_str);
+        continue;
+      }
+      bool any_applied = false;
+      for (const auto & [full_id, tid] : cfg.matched_tids) {
+        std::string key = std::to_string(cfg.domain_id) + ":" + full_id;
+        if (issue_syscalls(cfg, tid)) {
+          response->applied_callback_groups.push_back(std::move(key));
+          any_applied = true;
+        } else {
+          response->failed_callback_groups.push_back(std::move(key));
+        }
+      }
+      if (any_applied) {
+        cfg.applied = true;
+        unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
+      }
+      continue;
+    }
+
     std::string key = std::to_string(cfg.domain_id) + ":" + cfg.thread_str;
     if (cfg.thread_id == -1) {
       response->skipped_callback_groups.push_back(std::move(key));
       continue;
     }
-    if (issue_syscalls(cfg)) {
+    if (issue_syscalls(cfg, cfg.thread_id)) {
       response->applied_callback_groups.push_back(std::move(key));
       cfg.applied = true;
       unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
@@ -586,7 +654,7 @@ void ThreadConfiguratorNode::on_reapply_config_request(
         response->skipped_non_ros_threads.push_back(cfg.thread_str);
         continue;
       }
-      if (issue_syscalls(cfg)) {
+      if (issue_syscalls(cfg, cfg.thread_id)) {
         response->applied_non_ros_threads.push_back(cfg.thread_str);
         if (!cfg.applied) {
           cfg.applied = true;
