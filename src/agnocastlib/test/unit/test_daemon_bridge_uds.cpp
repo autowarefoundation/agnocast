@@ -1,5 +1,5 @@
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
 #include <gtest/gtest.h>
@@ -39,63 +39,85 @@ private:
 };
 }  // namespace
 
-// The discovery daemon (Python) packs MqMsgDaemonBridge by hand, mirroring
-// this layout. These checks fail loudly if the C++ struct drifts from the
-// daemon's `_MSG_PACK_FORMAT` ('=256s256sIIBB2x', 524 bytes).
-TEST(DaemonBridgeMqTest, WireLayoutMatchesDaemonPackFormat)
+// The discovery daemon (Python) packs BridgeMsgDaemonPubSubPayload by hand inside a
+// BridgeMsg, mirroring this layout. These checks fail loudly if the C++ struct
+// drifts from the daemon's `_MSG_PACK_FORMAT`.
+TEST(DaemonBridgeUdsTest, DaemonPayloadWireLayout)
 {
-  using agnocast::MqMsgDaemonBridge;
-  EXPECT_EQ(sizeof(MqMsgDaemonBridge), 524u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, topic_name), 0u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, type_name), 256u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, direction), 512u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, qos_depth), 516u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, qos_is_transient_local), 520u);
-  EXPECT_EQ(offsetof(MqMsgDaemonBridge, qos_is_reliable), 521u);
+  using agnocast::BridgeMsgDaemonPubSubPayload;
+  EXPECT_EQ(sizeof(BridgeMsgDaemonPubSubPayload), 524u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, topic_name), 0u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, type_name), 256u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, direction), 512u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_depth), 516u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_is_transient_local), 520u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_is_reliable), 521u);
 }
 
-TEST(DaemonBridgeMqTest, StandardMqNameIsKeyedByPid)
+TEST(DaemonBridgeUdsTest, BridgeMsgTypeNumeric)
 {
-  EXPECT_EQ(agnocast::create_mq_name_for_daemon_bridge(4242), "/agnocast_daemon_bridge@4242");
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::PubSub), 0u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::Service), 1u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonPubSub), 2u);
 }
 
-TEST(DaemonBridgeMqTest, PerformanceMqNameIsPerNamespace)
+TEST(DaemonBridgeUdsTest, BridgeMsgWireLayout)
 {
-  const ScopedRosDomainId guard;
-  unsetenv("ROS_DOMAIN_ID");
+  EXPECT_EQ(offsetof(agnocast::BridgeMsg, type), 0u);
+  EXPECT_EQ(offsetof(agnocast::BridgeMsg, payload), 4u);
   EXPECT_EQ(
-    agnocast::create_mq_name_for_daemon_bridge(agnocast::PERFORMANCE_BRIDGE_VIRTUAL_PID),
-    "/agnocast_daemon_bridge_perf");
-}
-
-TEST(DaemonBridgeMqTest, PerformanceMqNameAppendsDomainId)
-{
-  const ScopedRosDomainId guard;
-  setenv("ROS_DOMAIN_ID", "7", 1);
+    agnocast::bridge_msg_wire_size<agnocast::BridgeMsgDaemonPubSubPayload>(),
+    4u + sizeof(agnocast::BridgeMsgDaemonPubSubPayload));
   EXPECT_EQ(
-    agnocast::create_mq_name_for_daemon_bridge(agnocast::PERFORMANCE_BRIDGE_VIRTUAL_PID),
-    "/agnocast_daemon_bridge_perf_d7");
+    agnocast::bridge_msg_wire_size<agnocast::BridgeMsgPubSubPayload>(),
+    4u + sizeof(agnocast::BridgeMsgPubSubPayload));
+  EXPECT_EQ(
+    agnocast::bridge_msg_wire_size<agnocast::BridgeMsgServicePayload>(),
+    4u + sizeof(agnocast::BridgeMsgServicePayload));
 }
 
-// An empty ROS_DOMAIN_ID (set but "") means "no domain": no `_d` suffix. Both
-// name builders must agree on this and with the Python agent.
-TEST(DaemonBridgeMqTest, PerformanceMqNameEmptyDomainIdHasNoSuffix)
+// An empty ROS_DOMAIN_ID (set but "") means "no domain": no `_d` suffix.
+TEST(DaemonBridgeUdsTest, BridgeUdsAddrEmptyDomainIdHasNoSuffix)
 {
   const ScopedRosDomainId guard;
   setenv("ROS_DOMAIN_ID", "", 1);
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_daemon_bridge(agnocast::PERFORMANCE_BRIDGE_VIRTUAL_PID),
-    "/agnocast_daemon_bridge_perf");
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_bridge(agnocast::PERFORMANCE_BRIDGE_VIRTUAL_PID),
-    "/agnocast_bridge_manager@" + std::to_string(agnocast::PERFORMANCE_BRIDGE_VIRTUAL_PID));
+  const auto addr = agnocast::create_uds_addr_for_bridge();
+  ASSERT_FALSE(addr.empty());
+  EXPECT_EQ(addr[0], '\0');
+  const auto expected =
+    "agnocast_bridge_manager_" + std::to_string(agnocast::get_self_ipc_ns_inode());
+  EXPECT_EQ(addr.substr(1), expected);
+}
+
+TEST(DaemonBridgeUdsTest, BridgeUdsAddrAppendsDomainId)
+{
+  const ScopedRosDomainId guard;
+  setenv("ROS_DOMAIN_ID", "7", 1);
+  const auto addr = agnocast::create_uds_addr_for_bridge();
+  ASSERT_FALSE(addr.empty());
+  EXPECT_EQ(addr[0], '\0');
+  const auto expected =
+    "agnocast_bridge_manager_" + std::to_string(agnocast::get_self_ipc_ns_inode()) + "_d7";
+  EXPECT_EQ(addr.substr(1), expected);
+}
+
+TEST(DaemonBridgeUdsTest, BridgeUdsAddrUnsetDomainIdHasNoSuffix)
+{
+  const ScopedRosDomainId guard;
+  unsetenv("ROS_DOMAIN_ID");
+  const auto addr = agnocast::create_uds_addr_for_bridge();
+  ASSERT_FALSE(addr.empty());
+  EXPECT_EQ(addr[0], '\0');
+  const auto expected =
+    "agnocast_bridge_manager_" + std::to_string(agnocast::get_self_ipc_ns_inode());
+  EXPECT_EQ(addr.substr(1), expected);
 }
 
 // Performance-mode daemon bridges have no local endpoint to query, so the QoS
 // must be rebuilt faithfully from the request's explicit fields.
-TEST(DaemonBridgeMqTest, DaemonRequestQosReliableTransientLocal)
+TEST(DaemonBridgeUdsTest, DaemonRequestQosReliableTransientLocal)
 {
-  agnocast::MqMsgDaemonBridge req{};
+  agnocast::BridgeMsgDaemonPubSubPayload req{};
   req.qos_depth = 10;
   req.qos_is_reliable = true;
   req.qos_is_transient_local = true;
@@ -106,9 +128,9 @@ TEST(DaemonBridgeMqTest, DaemonRequestQosReliableTransientLocal)
   EXPECT_EQ(qos.durability(), rclcpp::DurabilityPolicy::TransientLocal);
 }
 
-TEST(DaemonBridgeMqTest, DaemonRequestQosBestEffortVolatile)
+TEST(DaemonBridgeUdsTest, DaemonRequestQosBestEffortVolatile)
 {
-  agnocast::MqMsgDaemonBridge req{};
+  agnocast::BridgeMsgDaemonPubSubPayload req{};
   req.qos_depth = 1;
   req.qos_is_reliable = false;
   req.qos_is_transient_local = false;
@@ -122,7 +144,7 @@ TEST(DaemonBridgeMqTest, DaemonRequestQosBestEffortVolatile)
 // The daemon-forced lease (used by the performance bridge_manager to keep a
 // cross-NS bridge alive without a same-graph DDS counterpart) is active for the
 // half-open window [registered, registered + DAEMON_FORCE_TTL).
-TEST(DaemonBridgeMqTest, DaemonForceLeaseWindowIsHalfOpen)
+TEST(DaemonBridgeUdsTest, DaemonForceLeaseWindowIsHalfOpen)
 {
   const std::chrono::steady_clock::time_point t0{};
   const auto deadline = agnocast::daemon_force_deadline(t0);
@@ -141,7 +163,7 @@ TEST(DaemonBridgeMqTest, DaemonForceLeaseWindowIsHalfOpen)
 
 // Re-asserting the request (the daemon does so every tick) pushes the deadline
 // out, so a continuously-requested bridge never lapses.
-TEST(DaemonBridgeMqTest, DaemonForceLeaseRenewalExtendsDeadline)
+TEST(DaemonBridgeUdsTest, DaemonForceLeaseRenewalExtendsDeadline)
 {
   const std::chrono::steady_clock::time_point t0{};
   const auto first = agnocast::daemon_force_deadline(t0);

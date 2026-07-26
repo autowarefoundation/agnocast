@@ -7,6 +7,7 @@
 #include "agnocast_kunit/agnocast_kunit_bridge_shutdown.h"
 #include "agnocast_kunit/agnocast_kunit_check_and_request_bridge_shutdown.h"
 #include "agnocast_kunit/agnocast_kunit_do_exit.h"
+#include "agnocast_kunit/agnocast_kunit_domain_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_publisher_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_num.h"
@@ -50,6 +51,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_GET_PUBLISHER_QOS,
   TEST_CASES_ADD_BRIDGE,
   TEST_CASES_REMOVE_BRIDGE,
+  TEST_CASES_DOMAIN_BRIDGE,
   TEST_CASES_SET_ROS2_SUBSCRIBER_NUM,
   TEST_CASES_SET_ROS2_PUBLISHER_NUM,
   TEST_CASES_DO_EXIT,

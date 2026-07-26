@@ -16,6 +16,7 @@ from ros2agnocast.discovery import (
     BRIDGE_WARN,
     collect_announcements_with_fallback,
     collect_bridge_roles,
+    is_internal_node_name,
     topic_endpoints,
     topics_of_node,
     warn_if_using_fallback,
@@ -156,6 +157,30 @@ def test_collect_bridge_roles_extracts_real_and_bridge_roles_per_ns():
     assert '/bridge_only' not in roles
 
 
+def test_is_internal_node_name_true_for_bridge_discovery_agent_and_cie_client():
+    assert is_internal_node_name('/agnocast_bridge_node_0')
+    assert is_internal_node_name('/agnocast_discovery_agent_0')
+    assert is_internal_node_name('/agnocast_cie_thread_configurator/client_0')
+
+
+def test_is_internal_node_name_true_for_cie_domain_helper_node():
+    # Per-domain helper node created by create_node_for_domain in util.cpp; it has no
+    # trailing slash after the namespace prefix, unlike the per-process client nodes.
+    assert is_internal_node_name('/agnocast_cie_thread_configurator_domain_1')
+
+
+def test_is_internal_node_name_false_for_ordinary_application_nodes():
+    assert not is_internal_node_name('/cie_listener_node')
+    assert not is_internal_node_name('/talker')
+
+
+def test_is_internal_node_name_matches_regardless_of_leading_slash():
+    assert is_internal_node_name('agnocast_bridge_node_0')
+    assert is_internal_node_name('agnocast_discovery_agent_0')
+    assert is_internal_node_name('agnocast_cie_thread_configurator/client_0')
+    assert not is_internal_node_name('cie_listener_node')
+
+
 def test_resolve_spin_node_returns_node_as_is_when_not_nodestrategy():
     plain = MagicMock(spec=[])
     assert _resolve_spin_node(plain) is plain
@@ -178,22 +203,38 @@ def _plain_node(publishers=None):
 
 
 def test_warn_if_using_fallback_silent_when_no_fallback_or_timeout_zero(capsys):
-    warn_if_using_fallback(_plain_node(), used_fallback=False, timeout_sec=2.0)
-    warn_if_using_fallback(_plain_node(), used_fallback=True, timeout_sec=0)
+    warn_if_using_fallback(_plain_node(), used_fallback=False, timeout_sec=2.0, snapshots=[])
+    warn_if_using_fallback(_plain_node(), used_fallback=True, timeout_sec=0, snapshots=[])
     assert capsys.readouterr().err == ''
 
 
 def test_warn_if_using_fallback_says_no_agent_when_dds_sees_no_publisher(capsys):
+    # Local Agnocast state exists (a topic), but no agent is gossiping.
     warn_if_using_fallback(
-        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0)
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[_state('h', 1, topics=[_topic('/chatter')])])
     err = capsys.readouterr().err
     assert 'NOTE' in err
     assert 'no /_agnocast_discovery agent visible' in err
 
 
+def test_warn_if_using_fallback_silent_when_no_publisher_and_no_local_state(capsys):
+    # No agent and no local Agnocast: stay quiet rather than nag the many ros2 CLI
+    # invocations in namespaces without Agnocast. The ioctl fallback yields a single
+    # state with empty ``topics`` (not an empty list) when nothing is registered, so
+    # emptiness is judged by topics, not list length.
+    warn_if_using_fallback(
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[_state('h', 1)])
+    warn_if_using_fallback(
+        _plain_node(publishers=[]), used_fallback=True, timeout_sec=2.0, snapshots=[])
+    assert capsys.readouterr().err == ''
+
+
 def test_warn_if_using_fallback_says_qos_or_pythonpath_when_publisher_visible(capsys):
     warn_if_using_fallback(
-        _plain_node(publishers=[MagicMock()]), used_fallback=True, timeout_sec=2.0)
+        _plain_node(publishers=[MagicMock()]), used_fallback=True, timeout_sec=2.0,
+        snapshots=[])
     err = capsys.readouterr().err
     assert 'WARNING' in err
     assert 'falling back to ioctl' in err

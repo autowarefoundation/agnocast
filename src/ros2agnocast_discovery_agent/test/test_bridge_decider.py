@@ -2,7 +2,8 @@
 
 These need neither the kmod, DDS, nor a POSIX MQ: ``decide_bridges`` is pure
 logic, and the wire format is checked against the hand-built byte layout that
-mirrors ``sizeof(MqMsgDaemonBridge) == 524`` in ``agnocast_mq.hpp``.
+mirrors a Daemon-variant ``BridgeMsg`` (4-byte tag + 524-byte payload = 528
+bytes) in ``agnocast_bridge_msg.hpp``.
 """
 
 import struct
@@ -32,11 +33,11 @@ def _endpoint(node, depth=10, transient=False, reliable=True, is_bridge=False):
     return ep
 
 
-def _topic(name, type_name='std_msgs/msg/Int32', pubs=None, subs=None):
+def _topic(name, type_name='std_msgs/msg/Int32', pubs=None, subs=None, domain=0):
     t = AgnocastTopic()
     t.topic_name = name
     t.type_name = type_name
-    t.domain_id = 0
+    t.domain_id = domain
     t.publishers = pubs or []
     t.subscribers = subs or []
     return t
@@ -143,6 +144,25 @@ def test_decide_skips_when_only_same_role_present():
     assert decide_bridges(local, {('OTHER', 222): remote}) == []
 
 
+def test_decide_skips_cross_domain_match():
+    # Same topic name but different domains must not be bridged: isolation holds
+    # and cross-domain relaying is the external domain_bridge's job.
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=0)])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_topic('/x', subs=[_endpoint('/rs')], domain=1)])
+    assert decide_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_decide_matches_within_same_nonzero_domain():
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=5)])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_topic('/x', subs=[_endpoint('/rs')], domain=5)])
+    reqs = decide_bridges(local, {('OTHER', 222): remote})
+    assert len(reqs) == 1
+    assert reqs[0].direction == DIRECTION_AGNOCAST_TO_ROS2
+    assert reqs[0].domain_id == 5
+
+
 def test_decide_collapses_duplicates_across_remotes():
     local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')])])
     remote_a = _state(host_uuid='A', ipc_ns=1, topics=[_topic('/x', subs=[_endpoint('/sa')])])
@@ -156,29 +176,51 @@ def test_decide_collapses_duplicates_across_remotes():
 def test_serialize_matches_cpp_struct_size():
     req = BridgeRequest('/x', 'std_msgs/msg/Int32', DIRECTION_AGNOCAST_TO_ROS2,
                         10, False, True)
-    assert len(serialize_request(req)) == 524
+    msg = serialize_request(req)
+    assert len(msg) == 528
+    # First uint32 must be BridgeMsgType::DaemonPubSub (=2)
+    (tag,) = struct.unpack_from('=I', msg, 0)
+    assert tag == 2
 
 
 def test_serialize_nul_terminates_truncated_topic():
     req = BridgeRequest('/' + 'a' * 1000, 'T', DIRECTION_AGNOCAST_TO_ROS2, 10, False, True)
-    assert serialize_request(req)[255] == 0
+    msg = serialize_request(req)
+    payload = msg[4:]
+    assert payload[255] == 0
 
 
 def test_serialize_packs_direction_qos_at_expected_offsets():
     req = BridgeRequest('/x', 'T', DIRECTION_ROS2_TO_AGNOCAST, 7, True, True)
-    payload = serialize_request(req)
+    msg = serialize_request(req)
+    payload = msg[4:]
     direction, depth = struct.unpack_from('=II', payload, 512)
     transient, reliable = struct.unpack_from('=BB', payload, 520)
     assert (direction, depth, transient, reliable) == (DIRECTION_ROS2_TO_AGNOCAST, 7, 1, 1)
 
 
-def test_dispatch_targets_per_namespace_mq(monkeypatch):
+def test_dispatch_targets_per_namespace_uds(monkeypatch):
     from ros2agnocast_discovery_agent import bridge_decider as bd
     sent = []
-    monkeypatch.setattr(bd, 'send_request', lambda mq, payload: sent.append(mq) or None)
+    monkeypatch.setattr(bd, 'send_request', lambda addr, payload: sent.append(addr) or None)
 
     req = BridgeRequest('/x', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True)
-    dispatch_requests([req])
+    dispatch_requests([req], ipc_ns_inode=12345)
 
-    assert all(name.startswith('/agnocast_daemon_bridge_perf') for name in sent)
-    assert len(sent) == 1
+    assert sent == ['\x00agnocast_bridge_manager_12345']
+
+
+def test_dispatch_routes_to_per_domain_uds(monkeypatch):
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    sent = []
+    monkeypatch.setattr(bd, 'send_request', lambda addr, payload: sent.append(addr) or None)
+
+    dispatch_requests([
+        BridgeRequest('/a', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=0),
+        BridgeRequest('/b', 'T', DIRECTION_AGNOCAST_TO_ROS2, 1, False, True, domain_id=5),
+    ], ipc_ns_inode=12345)
+
+    assert sent == [
+        '\x00agnocast_bridge_manager_12345',
+        '\x00agnocast_bridge_manager_12345_d5',
+    ]

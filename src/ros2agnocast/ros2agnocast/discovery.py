@@ -15,7 +15,7 @@ from rclpy.qos import (
 
 from ros2agnocast._ioctl import self_ns_snapshot
 
-from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
+from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState, AgnocastEndpoint
 
 
 GOSSIP_TOPIC = '/_agnocast_discovery'
@@ -66,8 +66,12 @@ def gossip_qos() -> QoSProfile:
 def collect_announcements(
     node,
     timeout_sec: float = DEFAULT_COLLECT_TIMEOUT_SEC,
-) -> list:
-    """Collect one latest snapshot per ``(host_uuid, ipc_ns_inode)`` from gossip."""
+) -> list[AgnocastDaemonState]:
+    """Collect one latest snapshot per ``(host_uuid, ipc_ns_inode)`` from gossip.
+
+    Returns one ``AgnocastDaemonState`` per gossiping agent, or ``[]`` when no
+    agent is reachable within ``timeout_sec``.
+    """
     snapshots = {}
 
     def on_msg(msg: AgnocastDaemonState) -> None:
@@ -99,8 +103,16 @@ def collect_announcements(
 def collect_announcements_with_fallback(
     node,
     timeout_sec: float = DEFAULT_COLLECT_TIMEOUT_SEC,
-) -> tuple:
-    """Gossip first; ioctl fallback. Returns ``(snapshots, used_fallback)``."""
+) -> tuple[list[AgnocastDaemonState], bool]:
+    """Gossip first, then ioctl fallback. Returns ``(snapshots, used_fallback)``.
+
+    - ``used_fallback`` is False when at least one agent gossiped; ``snapshots``
+      is then every reachable agent's state.
+    - Otherwise it is True and ``snapshots`` is the local-NS ioctl view: a
+      single-element ``[state]`` whose ``topics`` may be empty (kmod absent or
+      nothing registered), or ``[]`` only if the ioctl wrapper library itself
+      cannot be loaded.
+    """
     snapshots = collect_announcements(node, timeout_sec)
     if snapshots:
         return snapshots, False
@@ -120,8 +132,16 @@ def _resolve_spin_node(node):
     return getattr(direct, 'node', direct)
 
 
-def warn_if_using_fallback(node, used_fallback: bool, timeout_sec: float) -> None:
-    """Best-effort stderr note when gossip was unavailable and ioctl fallback ran."""
+def warn_if_using_fallback(
+    node, used_fallback: bool, timeout_sec: float, snapshots: list[AgnocastDaemonState]
+) -> None:
+    """Best-effort stderr note when gossip was unavailable and ioctl fallback ran.
+
+    ``snapshots`` is the fallback result from ``collect_announcements_with_fallback``.
+    The local ioctl fallback returns a ``[state]`` with empty ``topics`` (not ``[]``)
+    when the kmod is absent or nothing is registered, so "no Agnocast here" is
+    detected by the absence of topics, not by an empty list.
+    """
     if not used_fallback or timeout_sec <= 0:
         return
 
@@ -132,6 +152,11 @@ def warn_if_using_fallback(node, used_fallback: bool, timeout_sec: float) -> Non
         publishers = []
 
     if not publishers:
+        # No agent is gossiping. Only worth a note when this namespace actually
+        # has Agnocast endpoints to show: ros2 CLI runs constantly in namespaces
+        # without Agnocast, where "no agent" would be misleading noise.
+        if not any(snap.topics for snap in snapshots):
+            return
         print(
             'NOTE: no /_agnocast_discovery agent visible; showing local '
             'NS only via ioctl. Start one with '
@@ -148,12 +173,12 @@ def warn_if_using_fallback(node, used_fallback: bool, timeout_sec: float) -> Non
             file=sys.stderr)
 
 
-def all_topic_names(snapshots: list) -> set:
+def all_topic_names(snapshots: list[AgnocastDaemonState]) -> set[str]:
     """Union of topic names across all snapshots."""
     return {topic.topic_name for snap in snapshots for topic in snap.topics}
 
 
-def all_nodes(snapshots: list) -> set:
+def all_nodes(snapshots: list[AgnocastDaemonState]) -> set[str]:
     """Union of node names across all snapshots."""
     nodes = set()
     for snap in snapshots:
@@ -165,7 +190,9 @@ def all_nodes(snapshots: list) -> set:
     return nodes
 
 
-def topic_endpoints(snapshots: list, topic_name: str) -> tuple:
+def topic_endpoints(
+    snapshots: list[AgnocastDaemonState], topic_name: str
+) -> tuple[list[AgnocastEndpoint], list[AgnocastEndpoint]]:
     """Return (publishers, subscribers) for ``topic_name`` across all snapshots."""
     publishers = []
     subscribers = []
@@ -178,7 +205,9 @@ def topic_endpoints(snapshots: list, topic_name: str) -> tuple:
     return publishers, subscribers
 
 
-def topics_of_node(snapshots: list, node_name: str) -> tuple:
+def topics_of_node(
+    snapshots: list[AgnocastDaemonState], node_name: str
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Return (pub topics, sub topics) for ``node_name`` as {topic_name, type_name} dicts."""
     pubs, subs = [], []
     for snap in snapshots:
@@ -194,6 +223,34 @@ def topics_of_node(snapshots: list, node_name: str) -> tuple:
     return pubs, subs
 
 
+# Prefixes/namespaces for Agnocast-internal nodes. These are implementation
+# details (not application nodes), so list verbs hide them by default behind
+# ``-d/--debug``, same as the domain bridge nodes.
+BRIDGE_NODE_PREFIX = '/agnocast_bridge_node_'
+DISCOVERY_AGENT_NODE_PREFIX = '/agnocast_discovery_agent_'
+# No trailing slash: also matches the per-domain helper nodes
+# (``/agnocast_cie_thread_configurator_domain_<id>``) created by
+# ``create_node_for_domain`` in util.cpp, not just the per-process client
+# nodes under the namespace.
+CIE_THREAD_CONFIGURATOR_NODE_PREFIX = '/agnocast_cie_thread_configurator'
+# Trailing slash kept for the topic filter, which only needs to match
+# topics published under the namespace.
+CIE_THREAD_CONFIGURATOR_NAMESPACE = CIE_THREAD_CONFIGURATOR_NODE_PREFIX + '/'
+
+_INTERNAL_NODE_PREFIXES = (
+    BRIDGE_NODE_PREFIX,
+    DISCOVERY_AGENT_NODE_PREFIX,
+    CIE_THREAD_CONFIGURATOR_NODE_PREFIX,
+)
+
+
+def is_internal_node_name(node_name: str) -> bool:
+    """True for Agnocast-internal nodes (domain bridge, CIE thread configurator,
+    discovery agent) that should be hidden unless ``-d/--debug`` is given."""
+    name = node_name if node_name.startswith('/') else '/' + node_name
+    return name.startswith(_INTERNAL_NODE_PREFIXES)
+
+
 # Bridge-label states for the CLI verbs. Wording is shared so list/info stay
 # consistent.
 BRIDGE_ENABLED = 'enabled'
@@ -206,7 +263,9 @@ BRIDGE_LABEL_TEXT = {
 }
 
 
-def collect_bridge_roles(snapshots: list) -> dict:
+def collect_bridge_roles(
+    snapshots: list[AgnocastDaemonState],
+) -> dict[str, list[tuple[bool, bool, bool, bool]]]:
     """Map ``topic_name -> per-NS bridge roles`` in a single pass over snapshots.
 
     Each value is a list with one entry per NS that has a real (non-bridge)
