@@ -1,6 +1,7 @@
 #include "gpu_shared_memory_pool.hpp"
 
 #include <cstdio>
+#include <numeric>
 #include <utility>
 
 namespace agnocast::gpu_shared_memory_daemon
@@ -152,11 +153,8 @@ std::size_t GpuSharedMemoryPool::total_slots() const
 std::size_t GpuSharedMemoryPool::free_slot_count() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::size_t count = 0;
-  for (const auto & free_list : free_by_class_) {
-    count += free_list.size();
-  }
-  return count;
+  return std::accumulate(free_by_class_.begin(), free_by_class_.end(), std::size_t(0),
+             [](std::size_t sum, const std::vector<std::uint32_t> & list) { return sum + list.size(); });
 }
 
 }  // namespace agnocast::gpu_shared_memory_daemon
