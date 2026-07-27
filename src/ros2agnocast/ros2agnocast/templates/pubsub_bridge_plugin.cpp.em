@@ -58,7 +58,10 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
     topic_name, "@(msg_type)",
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists.
+  auto cb_group =
+    node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<MsgT> msg) {
     static const rclcpp::Serialization<MsgT> serialization;
