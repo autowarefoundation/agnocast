@@ -15,7 +15,7 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
   const rclcpp::QoS & qos /*QoS for the target Agnocast service*/)
 {
   using ServiceT = @(cpp_type);
-  using AgnoClient = agnocast::BasicClient<ServiceT>;
+  using AgnoClient = agnocast::Client<ServiceT>;
 
   // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
   // agnocast entities below are created, so they are never classified before their agnocast
