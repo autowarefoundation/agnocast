@@ -8,12 +8,9 @@
 #include "agnocast/cuda_pool_api.hpp"
 #include "agnocast/gpu_metadata.hpp"
 
-<<<<<<< HEAD
-#include <cstdlib>
-=======
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
->>>>>>> origin/main
 #include <mutex>
 #include <type_traits>
 
@@ -65,13 +62,7 @@ struct CallbackInfo
   mqd_t mqdes;
   rclcpp::CallbackGroup::SharedPtr callback_group;
   TypeErasedCallback callback;
-<<<<<<< HEAD
-  std::function<std::unique_ptr<AnyObject>(
-    const void *, const std::string &, const topic_local_id_t, const int64_t)>
-    message_creator;
-=======
   MessageCreator message_creator;
->>>>>>> origin/main
   bool need_epoll_update = true;
 };
 
@@ -166,14 +157,9 @@ uint32_t register_callback(
   auto message_creator = [](
                            void * ptr, const std::string & topic_name,
                            const topic_local_id_t subscriber_id, const int64_t entry_id) {
-<<<<<<< HEAD
-    auto * msg = const_cast<MessageT *>(static_cast<const MessageT *>(ptr));
+    auto * msg = static_cast<MessageT *>(ptr);
     return std::make_unique<TypedMessagePtr<MessageT>>(
       create_subscriber_ipc_ptr(msg, topic_name, subscriber_id, entry_id));
-=======
-    return std::make_unique<TypedMessagePtr<MessageT>>(agnocast::ipc_shared_ptr<MessageT>(
-      static_cast<MessageT *>(ptr), topic_name, subscriber_id, entry_id));
->>>>>>> origin/main
   };
 
   uint32_t callback_info_id = allocate_callback_info_id();

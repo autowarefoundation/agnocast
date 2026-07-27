@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocast_gpu_shared_memory_daemon</name>
-  <version>2.3.3</version>
+  <version>2.3.5</version>
   <description>
     Daemon that manages a pool of shareable GPU memory slots for Agnocast, and the
     Unix-domain-socket wire protocol used by the per-process pool proxy to talk to it.

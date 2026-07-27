@@ -40,20 +40,14 @@ extern int agnocast_fd;
 // Sentinel value indicating entry_id has not been assigned (publisher-side, before publish).
 constexpr int64_t ENTRY_ID_NOT_ASSIGNED = -1;
 
-<<<<<<< HEAD
 // Forward declarations for friend access
 template <typename T>
 class ipc_shared_ptr;
 
-template <typename MessageT, typename BridgeRequestPolicy>
-class BasicPublisher;
-=======
-// Forward declaration for friend access
 template <typename MessageT>
 class Publisher;
 
 class TypeErasedPublisher;
->>>>>>> origin/main
 
 template <typename MessageT>
 ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(

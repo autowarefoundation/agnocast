@@ -6,13 +6,10 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-<<<<<<< HEAD
 #include "agnocast/cuda_message_tag.hpp"
 #include "agnocast/cuda_pool_api.hpp"
 #include "agnocast/gpu_metadata.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
-=======
->>>>>>> origin/main
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
@@ -22,12 +19,9 @@
 #include <unistd.h>
 
 #include <cstdint>
-<<<<<<< HEAD
 #include <cstdlib>
 #include <cstring>
 #include <functional>
-=======
->>>>>>> origin/main
 #include <mutex>
 
 namespace agnocast
@@ -110,7 +104,8 @@ protected:
   template <typename NodeT>
   rclcpp::QoS init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role,
+    const bool is_cuda_message);
 
 public:
   PublisherBase() = default;
@@ -172,7 +167,8 @@ class Publisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
-    return this->init_base(node, topic_name, type_name, qos, options, role);
+    return this->init_base(
+      node, topic_name, type_name, qos, options, role, is_cuda_message_v<MessageT>);
   }
 
 public:
