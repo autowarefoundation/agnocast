@@ -236,6 +236,11 @@ uint32_t allocate_timer_id()
   return timer_id;
 }
 
+void set_timer_info(TimerBase & timer, std::weak_ptr<TimerInfo> timer_info)
+{
+  timer.timer_info_ = std::move(timer_info);
+}
+
 void register_timer_info(
   uint32_t timer_id, const std::shared_ptr<TimerBase> & timer, std::chrono::nanoseconds period,
   const rclcpp::CallbackGroup::SharedPtr & callback_group, const rclcpp::Clock::SharedPtr & clock)
@@ -272,7 +277,7 @@ void register_timer_info(
     timer_info->timer_fd = create_timer_fd(timer_id, period, clock->get_clock_type());
   }
 
-  timer->set_timer_info(timer_info);
+  set_timer_info(*timer, timer_info);
 
   setup_time_jump_callback(timer_info, clock);
 
@@ -333,6 +338,15 @@ void unregister_timer_info(uint32_t timer_id)
 {
   std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
   id2_timer_info.erase(timer_id);
+}
+
+bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group)
+{
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+  return std::any_of(id2_timer_info.begin(), id2_timer_info.end(), [&group](const auto & entry) {
+    const auto & timer_info = entry.second;
+    return timer_info && timer_info->callback_group == group;
+  });
 }
 
 void TimerInfo::set_period(std::chrono::nanoseconds new_period)

@@ -1,6 +1,8 @@
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
+#include "agnocast/agnocast_client.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/vendor/rclcpp/generic_service.hpp"
 #include "rclcpp/version.h"
 
 #include <ament_index_cpp/get_package_prefix.hpp>
@@ -13,6 +15,54 @@
 
 namespace agnocast
 {
+
+namespace
+{
+
+/// @brief Returns a function that copies a ROS 2 message into Agnocast shared memory via CDR
+/// serialization/deserialization. The function returns a bool indicating whether the copy was
+/// successful.
+///
+/// The caller must ensure that the destination memory block is initialized with the introspection
+/// init function.
+std::function<bool(const ipc_shared_ptr<void> &, const std::shared_ptr<void> &)> get_copier(
+  const std::string & message_type)
+{
+  // --- typesupport setup ---
+  static const std::string ts_identifier = "rosidl_typesupport_cpp";
+
+  std::shared_ptr<rcpputils::SharedLibrary> ts_lib =
+    rclcpp::get_typesupport_library(message_type, ts_identifier);
+
+#if RCLCPP_VERSION_MAJOR >= 28
+  const rosidl_message_type_support_t * ts_handle =
+    rclcpp::get_message_typesupport_handle(message_type, ts_identifier, *ts_lib);
+#else
+  const rosidl_message_type_support_t * ts_handle =
+    rclcpp::get_typesupport_handle(message_type, ts_identifier, *ts_lib);
+#endif
+  // -------------------------
+
+  return [ts_lib = std::move(ts_lib), ts_handle](
+           const ipc_shared_ptr<void> & agno_msg, const std::shared_ptr<void> & ros_msg) {
+    (void)ts_lib;
+
+    rclcpp::SerializedMessage serialized;
+    if (
+      rmw_serialize(ros_msg.get(), ts_handle, &serialized.get_rcl_serialized_message()) !=
+      RMW_RET_OK) {
+      return false;
+    }
+    if (
+      rmw_deserialize(&serialized.get_rcl_serialized_message(), ts_handle, agno_msg.get()) !=
+      RMW_RET_OK) {
+      return false;
+    }
+    return true;
+  };
+}
+
+}  // namespace
 
 PerformanceBridgeLoader::PerformanceBridgeLoader(const rclcpp::Logger & logger) : logger_(logger)
 {
@@ -68,7 +118,11 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge(
 {
   void * symbol = get_bridge_factory_symbol(service_type, "create_r2a_service_bridge", true);
   if (symbol == nullptr) {
-    return {nullptr, nullptr, nullptr};
+    // Fall back to generic bridge, which is independent of plugins.
+    RCLCPP_DEBUG(
+      logger_, "No plugin found for service '%s' (type: %s). Using generic bridge.",
+      service_name.c_str(), service_type.c_str());
+    return create_r2a_service_bridge_generic(node, service_name, service_type, qos);
   }
 
   auto factory = reinterpret_cast<R2AServiceBridgeFactory>(symbol);
@@ -163,6 +217,8 @@ void * PerformanceBridgeLoader::load_library_from_paths(
 void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   const std::string & type_name, const std::string & symbol_name_prefix, bool is_service)
 {
+  // TODO(bdm-k): Remove the error paths for service bridges once we have an A2R generic service
+  // bridge implementation.
   const char * type_label = is_service ? "service" : "message";
   std::string snake_type = convert_type_to_snake_case(type_name);
   std::vector<std::string> lib_paths = generate_library_paths();
@@ -238,7 +294,10 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(), agnocast::PublisherOptions{},
     agnocast::PublisherRole::BridgeInternal);
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists. Do not drop
+  // the false here; with the default (true) the manager's explicit add_callback_group would abort.
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   rclcpp::SubscriptionOptions opts;
   opts.ignore_local_publications = true;
   opts.callback_group = cb_group;
@@ -275,7 +334,10 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_
     topic_name, message_type,
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists. Do not drop
+  // the false here; with the default (true) the manager's explicit add_callback_group would abort.
+  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   agnocast::SubscriptionOptions sub_opts;
   sub_opts.ignore_local_publications = true;
   sub_opts.callback_group = cb_group;
@@ -288,6 +350,52 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_
     sub_opts, agnocast::SubscriptionRole::BridgeInternal);
 
   return {agno_sub, cb_group};
+}
+
+ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
+  const rclcpp::Node::SharedPtr & node, const std::string & service_name,
+  const std::string & service_type, const rclcpp::QoS & qos)
+{
+  const std::string request_type = service_type + "_Request";
+
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  auto agno_client = std::make_shared<agnocast::GenericClient>(
+    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::AgnocastOnly);
+
+  auto ros_srv = agnocast::vendor_rclcpp::GenericService::create_generic_service(
+    node.get(), service_name, service_type,
+    [agno_client = std::move(agno_client), request_copier = get_copier(request_type)](
+      const std::shared_ptr<agnocast::vendor_rclcpp::GenericService> & service_handle,
+      const std::shared_ptr<rmw_request_id_t> & request_header,
+      const std::shared_ptr<void> & ros_req) {
+      ipc_shared_ptr<void> agno_req = agno_client->borrow_loaned_request();
+
+      // Copy the ROS 2 request into Agnocast shared memory (ipc_shared_ptr).
+      if (!request_copier(agno_req, ros_req)) {
+        RCLCPP_ERROR(
+          logger,
+          "Serialization error occurred in generic service bridge for '%s'; dropping request",
+          service_handle->get_service_name());
+        agno_client->cancel_request(std::move(agno_req));
+        return;
+      }
+
+      agno_client->async_send_request(
+        std::move(agno_req),
+        [service_handle, request_header](const agnocast::GenericClient::SharedFuture & future) {
+          const auto & agno_res = future.get();
+
+          // Reuse Agnocast response payload directly as ROS response buffer.
+          auto borrowed_ros_res = std::shared_ptr<void>(agno_res.get(), [](void *) { /* no-op */ });
+          service_handle->send_response(*request_header, borrowed_ros_res);
+        });
+    },
+    qos, srv_cb_group);
+
+  return {ros_srv, srv_cb_group, client_cb_group};
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
 }  // namespace agnocast
