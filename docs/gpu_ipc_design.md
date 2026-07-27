@@ -246,7 +246,7 @@ classDiagram
   proxy is present *and* the calling thread is inside the publish window;
   otherwise (and on pool exhaustion) it calls the real `cudaMalloc`.
 
-**agnocastlib glue (CUDA-free)**
+**agnocastlib glue (`CUDA-free`)**
 
 - `cuda_pool_api.hpp` — `extern "C"` declarations of the C ABI, resolved at link
   time against `libagnocast_cuda.so`. Keeps agnocastlib free of any CUDA header.
