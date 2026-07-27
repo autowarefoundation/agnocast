@@ -153,8 +153,9 @@ std::size_t GpuSharedMemoryPool::total_slots() const
 std::size_t GpuSharedMemoryPool::free_slot_count() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  return std::accumulate(free_by_class_.begin(), free_by_class_.end(), std::size_t(0),
-             [](std::size_t sum, const std::vector<std::uint32_t> & list) { return sum + list.size(); });
+  return std::accumulate(
+    free_by_class_.begin(), free_by_class_.end(), std::size_t(0),
+    [](std::size_t sum, const std::vector<std::uint32_t> & list) { return sum + list.size(); });
 }
 
 }  // namespace agnocast::gpu_shared_memory_daemon

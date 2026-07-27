@@ -1,6 +1,5 @@
 # Agnocast GPU-IPC (CUDA) Design Document
 
-
 ## 1. Purpose
 
 Agnocast provides true zero-copy publish/subscribe for ROS 2 by placing message
