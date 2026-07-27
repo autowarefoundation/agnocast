@@ -14,10 +14,26 @@ TARGET_COUNT = 2
 
 
 @launch_testing.parametrize(
-    "use_deferred_callback, use_response_callback",
-    [(True, True), (True, False), (False, True), (False, False)],
+    "server_plugin, client_plugin, use_deferred_callback, use_response_callback",
+    [
+        # basic arrangement
+        ("TestServer", "TestClient", False, False),
+        # deferred server callback
+        ("TestServer", "TestClient", True, False),
+        # callback-based async_send_request()
+        ("TestServer", "TestClient", False, True),
+        # ROS2 server to test A2R service bridge
+        ("TestROS2Server", "TestClient", False, False),
+        # ROS2 client to test R2A service bridge
+        ("TestServer", "TestROS2Client", False, False),
+    ],
 )
-def generate_test_description(use_deferred_callback, use_response_callback):
+def generate_test_description(
+    server_plugin,
+    client_plugin,
+    use_deferred_callback,
+    use_response_callback
+):
     server_container = ComposableNodeContainer(
         name="test_server_container",
         namespace="",
@@ -26,7 +42,7 @@ def generate_test_description(use_deferred_callback, use_response_callback):
         composable_node_descriptions=[
             ComposableNode(
                 package="agnocast_e2e_test",
-                plugin="TestServer",
+                plugin=server_plugin,
                 name="test_server_node",
                 parameters=[
                     {
@@ -51,7 +67,7 @@ def generate_test_description(use_deferred_callback, use_response_callback):
         composable_node_descriptions=[
             ComposableNode(
                 package="agnocast_e2e_test",
-                plugin="TestClient",
+                plugin=client_plugin,
                 name="test_client_node",
                 parameters=[
                     {

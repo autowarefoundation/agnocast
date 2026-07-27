@@ -86,6 +86,22 @@ rclcpp_components_register_node(
   EXECUTABLE test_server
 )
 
+add_library(agnocast_test_ros2_client_component SHARED src/test_ros2_client.cpp)
+ament_target_dependencies(agnocast_test_ros2_client_component rclcpp rclcpp_components agnocast_sample_interfaces)
+rclcpp_components_register_node(
+  agnocast_test_ros2_client_component
+  PLUGIN "TestROS2Client"
+  EXECUTABLE test_ros2_client
+)
+
+add_library(agnocast_test_ros2_server_component SHARED src/test_ros2_server.cpp)
+ament_target_dependencies(agnocast_test_ros2_server_component rclcpp rclcpp_components agnocast_sample_interfaces)
+rclcpp_components_register_node(
+  agnocast_test_ros2_server_component
+  PLUGIN "TestROS2Server"
+  EXECUTABLE test_ros2_server
+)
+
 add_library(agnocast_test_cie_publisher_component SHARED src/test_publisher_component.cpp)
 ament_target_dependencies(agnocast_test_cie_publisher_component rclcpp rclcpp_components std_msgs agnocastlib agnocast_cie_thread_configurator)
 
@@ -142,13 +158,12 @@ install(TARGETS agnocast_test_ros2_talker_component
         RUNTIME DESTINATION bin
 )
 
-install(TARGETS agnocast_test_client_component agnocast_test_server_component
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION bin
-)
-
-install(TARGETS agnocast_test_cie_publisher_component agnocast_test_cie_subscription_component
+install(TARGETS agnocast_test_client_component
+                agnocast_test_server_component
+                agnocast_test_ros2_client_component
+                agnocast_test_ros2_server_component
+                agnocast_test_cie_publisher_component
+                agnocast_test_cie_subscription_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
