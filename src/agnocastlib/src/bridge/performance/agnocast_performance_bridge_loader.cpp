@@ -377,8 +377,11 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
 {
   const std::string response_type = service_type + "_Response";
 
-  auto srv_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
+  // agnocast entities below are created, so they are never classified before their agnocast
+  // subscriptions (created internally by the client/service) exist.
+  auto srv_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto client_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto ros_client = agnocast::vendor_rclcpp::GenericClient::create_generic_client(
     node.get(), service_name, service_type, qos, client_cbg);
@@ -389,29 +392,37 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
       std::shared_ptr<agnocast::GenericService> service_handle, ipc_shared_ptr<void> && agno_req) {
       const void * ros_req_ptr = agno_req.get();
 
-      ros_client->async_send_request(
-        ros_req_ptr,
-        [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
-         &response_copier](agnocast::vendor_rclcpp::GenericClient::SharedFuture future) {
-          auto ros_res = future.get();
-          auto agno_res = service_handle->borrow_loaned_response(agno_req);
+      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
+      // and terminating the process.
+      try {
+        ros_client->async_send_request(
+          ros_req_ptr,
+          [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
+           &response_copier](agnocast::vendor_rclcpp::GenericClient::SharedFuture future) {
+            auto ros_res = future.get();
+            auto agno_res = service_handle->borrow_loaned_response(agno_req);
 
-          if (!response_copier(agno_res, ros_res)) {
-            RCLCPP_ERROR(
-              logger,
-              "Serialization error occurred in generic A2R service bridge for '%s'; dropping "
-              "response",
-              service_handle->get_service_name());
+            if (!response_copier(agno_res, ros_res)) {
+              RCLCPP_ERROR(
+                logger,
+                "Serialization error occurred in generic A2R service bridge for '%s'; dropping "
+                "response",
+                service_handle->get_service_name());
+              auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                                 // lambda capture.
+              service_handle->cancel_response(std::move(agno_req_movable), std::move(agno_res));
+              return;
+            }
+
             auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
                                                // lambda capture.
-            service_handle->cancel_response(std::move(agno_req_movable), std::move(agno_res));
-            return;
-          }
-
-          auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
-                                             // lambda capture.
-          service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
-        });
+            service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+          });
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(
+          logger, "Failed to forward request in A2R service bridge for '%s': %s; dropping request",
+          service_handle->get_service_name(), e.what());
+      }
     },
     qos, srv_cbg, agnocast::ServiceRole::AgnocastOnly);
 

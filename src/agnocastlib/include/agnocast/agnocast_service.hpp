@@ -219,6 +219,8 @@ public:
     response->seqno = internal_request->seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
   }
+
+  const char * get_service_name() const { return service_name_.c_str(); }
 };
 
 /**
