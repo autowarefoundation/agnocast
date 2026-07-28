@@ -331,8 +331,11 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
 {
   const std::string request_type = service_type + "_Request";
 
-  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  // auto_add=false: ServiceBridgeItem::start_r2a_bridge adds these groups to the executor
+  // explicitly, after the entities are created. Do not drop the false here; with the default (true)
+  // the node auto-registers them and that explicit add_callback_group would abort the process.
+  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto agno_client = std::make_shared<agnocast::GenericClient>(
     node.get(), service_name, service_type, qos, client_cb_group, ClientRole::AgnocastOnly);
