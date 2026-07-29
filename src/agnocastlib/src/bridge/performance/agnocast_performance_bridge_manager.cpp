@@ -11,14 +11,19 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <string>
 
 namespace agnocast
 {
 
 PerformanceBridgeManager::PerformanceBridgeManager()
 : logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
+  clock_(std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME)),
   self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_),
   loader_(std::make_shared<PerformanceBridgeLoader>(logger_))
@@ -34,8 +39,12 @@ PerformanceBridgeManager::PerformanceBridgeManager()
 
 PerformanceBridgeManager::~PerformanceBridgeManager()
 {
-  if (executor_) {
-    executor_->cancel();
+  request_shutdown();
+
+  // Join before any member is destroyed: the worker uses container_node_,
+  // executor_ and the pending_msgs_ mutex/CV, which live only until this returns.
+  if (worker_thread_.joinable()) {
+    worker_thread_.join();
   }
 
   if (executor_thread_.joinable()) {
@@ -55,22 +64,70 @@ void PerformanceBridgeManager::run()
   prctl(PR_SET_NAME, proc_name.c_str(), 0, 0, 0);
 
   start_ros_execution();
+  start_worker_thread();
 
   event_loop_.set_message_handler(
-    [this](const void * data, std::size_t size) { this->on_bridge_message(data, size); });
+    [this](const void * data, std::size_t size) { this->parse_and_enqueue(data, size); });
   event_loop_.set_signal_handler([this]() { this->on_signal(); });
   event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
 
   while (!shutdown_requested_) {
     if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
       RCLCPP_ERROR(logger_, "Event loop spin failed.");
+      request_shutdown();
       break;
     }
+  }
+}
 
+void PerformanceBridgeManager::worker_loop()
+{
+  // Also the maintenance polling interval, not just a safety net for the CV: the
+  // sweep below must run periodically (bridge teardown, daemon lease expiry) even
+  // while no message arrives. Do not drop it in favour of a plain wait().
+  constexpr auto WORKER_TIMEOUT = std::chrono::milliseconds(1000);
+
+  while (!shutdown_requested_) {
+    std::deque<BridgeMsg> batch;
+    {
+      std::unique_lock<std::mutex> lk(pending_msgs_mtx_);
+      pending_msgs_cv_.wait_for(lk, WORKER_TIMEOUT, [this]() {
+        return shutdown_requested_.load(std::memory_order_relaxed) || !pending_msgs_.empty();
+      });
+      batch.swap(pending_msgs_);
+    }
+
+    for (const auto & msg : batch) {
+      if (shutdown_requested_.load(std::memory_order_relaxed)) {
+        break;
+      }
+      dispatch_bridge_message(msg);
+    }
+
+    // Gate the creating steps and re-check between them: each can dlopen a plugin
+    // and build DDS entities, so shutdown may arrive mid-sweep. The reclaiming
+    // steps are left ungated; letting them finish keeps the state consistent.
+    const auto shutting_down = [this]() {
+      return shutdown_requested_.load(std::memory_order_relaxed);
+    };
+
+    if (shutting_down()) {
+      break;
+    }
     check_and_create_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
     create_daemon_forced_bridges();
+
     check_and_remove_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
     check_and_update_service_bridges();
+
     check_and_remove_request_cache();
     check_and_request_shutdown();
   }
@@ -94,14 +151,23 @@ void PerformanceBridgeManager::start_ros_execution()
       if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
         RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
       }
-      shutdown_requested_ = true;
+      request_shutdown();
       RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
     }
   });
 }
 
-void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t size)
+void PerformanceBridgeManager::start_worker_thread()
 {
+  worker_thread_ = std::thread([this]() { this->worker_loop(); });
+}
+
+void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t size)
+{
+  if (shutdown_requested_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
   if (size < offsetof(BridgeMsg, payload)) {
     RCLCPP_WARN(
       logger_,
@@ -125,10 +191,49 @@ void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t 
   };
 
   switch (msg.type) {
-    case BridgeMsgType::Service: {
+    case BridgeMsgType::Service:
       if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgServicePayload>())) {
         return;
       }
+      break;
+    case BridgeMsgType::PubSub:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgPubSubPayload>())) {
+        return;
+      }
+      break;
+    case BridgeMsgType::DaemonPubSub:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonPubSubPayload>())) {
+        return;
+      }
+      break;
+    default:
+      RCLCPP_WARN(
+        logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
+      return;
+  }
+
+  constexpr size_t PENDING_MSGS_WARN_THRESHOLD = 2000;
+  bool exceeded_threshold = false;
+  {
+    std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
+    pending_msgs_.push_back(msg);
+    exceeded_threshold = pending_msgs_.size() > PENDING_MSGS_WARN_THRESHOLD;
+  }
+  pending_msgs_cv_.notify_one();
+
+  if (exceeded_threshold) {
+    constexpr int BACKLOG_WARN_INTERVAL_MS = 10000;
+    RCLCPP_WARN_THROTTLE(
+      logger_, *clock_, BACKLOG_WARN_INTERVAL_MS,
+      "Pending bridge message backlog exceeded %zu; worker thread may not be keeping up.",
+      PENDING_MSGS_WARN_THRESHOLD);
+  }
+}
+
+void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
+{
+  switch (msg.type) {
+    case BridgeMsgType::Service: {
       const auto & payload = msg.payload.service;
       ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
       std::string service_name = static_cast<const char *>(payload.service_name);
@@ -147,9 +252,6 @@ void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t 
       break;
     }
     case BridgeMsgType::PubSub: {
-      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgPubSubPayload>())) {
-        return;
-      }
       const auto & payload = msg.payload.pubsub;
       std::string topic_name = static_cast<const char *>(payload.topic_name);
       topic_local_id_t target_id = payload.target_id;
@@ -162,16 +264,18 @@ void PerformanceBridgeManager::on_bridge_message(const void * data, std::size_t 
       break;
     }
     case BridgeMsgType::DaemonPubSub: {
-      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonPubSubPayload>())) {
-        return;
-      }
       register_daemon_pubsub_request(msg.payload.daemon_pubsub);
       break;
     }
-    default:
-      RCLCPP_WARN(
-        logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
+    default: {
+      // parse_and_enqueue() must reject every unknown type before enqueuing,
+      // so reaching here means the two switches drifted out of sync.
+      RCLCPP_ERROR(
+        logger_,
+        "Agnocast internal implementation error: dispatch_bridge_message got unknown type %u",
+        static_cast<uint32_t>(msg.type));
       break;
+    }
   }
 }
 
@@ -267,15 +371,27 @@ void PerformanceBridgeManager::activate_daemon_forced_bridge(
   }
 }
 
+void PerformanceBridgeManager::request_shutdown()
+{
+  // Write the flag under the same mutex that the worker's cv predicate reads.
+  // Without this pairing, a shutdown could be missed if the worker evaluates
+  // the predicate just before this store and then sleeps.
+  {
+    std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
+    shutdown_requested_ = true;
+  }
+  pending_msgs_cv_.notify_all();
+  if (executor_) {
+    executor_->cancel();
+  }
+}
+
 void PerformanceBridgeManager::on_signal()
 {
   if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
     RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
   }
-  shutdown_requested_ = true;
-  if (executor_) {
-    executor_->cancel();
-  }
+  request_shutdown();
 }
 
 std::string PerformanceBridgeManager::on_socket_request() const
@@ -325,7 +441,7 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
       if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
         RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
       }
-      shutdown_requested_ = true;
+      request_shutdown();
       return;
     }
 
@@ -361,7 +477,7 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
       if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
         RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
       }
-      shutdown_requested_ = true;
+      request_shutdown();
       return;
     }
 
@@ -426,7 +542,7 @@ void PerformanceBridgeManager::check_and_request_shutdown()
   }
 
   if (args.ret_should_shutdown) {
-    shutdown_requested_ = true;
+    request_shutdown();
   }
 }
 
