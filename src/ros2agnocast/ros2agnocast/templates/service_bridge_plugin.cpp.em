@@ -83,8 +83,8 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
       try {
         ros_client->async_send_request(
           ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
-                     typename rclcpp::Client<ServiceT>::SharedFuture future) {
-            auto ros_res = future.get();
+                     const typename rclcpp::Client<ServiceT>::SharedFuture future) {
+            const auto & ros_res = future.get();
             auto agno_res = service_handle->borrow_loaned_response(agno_req);
             *agno_res = *ros_res;
             auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const

@@ -401,8 +401,8 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
         ros_client->async_send_request(
           ros_req_ptr,
           [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
-           &response_copier](agnocast::vendor_rclcpp::GenericClient::SharedFuture future) {
-            auto ros_res = future.get();
+           &response_copier](const agnocast::vendor_rclcpp::GenericClient::SharedFuture & future) {
+            const auto & ros_res = future.get();
             auto agno_res = service_handle->borrow_loaned_response(agno_req);
 
             if (!response_copier(agno_res, ros_res)) {
