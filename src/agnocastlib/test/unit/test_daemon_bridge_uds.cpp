@@ -113,6 +113,29 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrUnsetDomainIdHasNoSuffix)
   EXPECT_EQ(addr.substr(1), expected);
 }
 
+// The kmod keys the bridge manager on get_ros_domain_id(), so every spelling that
+// parses to the same domain must produce the same address. Otherwise processes
+// sharing a domain bind/send to different sockets and never reach each other.
+TEST(DaemonBridgeUdsTest, BridgeUdsAddrIsCanonicalPerDomain)
+{
+  const ScopedRosDomainId guard;
+  const auto addr_for = [](const char * value) {
+    setenv("ROS_DOMAIN_ID", value, 1);
+    return agnocast::create_uds_addr_for_bridge();
+  };
+
+  unsetenv("ROS_DOMAIN_ID");
+  const auto domain_0 = agnocast::create_uds_addr_for_bridge();
+
+  // Spellings that get_ros_domain_id() normalizes to 0.
+  EXPECT_EQ(addr_for("0"), domain_0);
+  EXPECT_EQ(addr_for("abc"), domain_0);
+  EXPECT_EQ(addr_for("-5"), domain_0);
+  EXPECT_EQ(addr_for("4294967296"), domain_0);
+
+  EXPECT_EQ(addr_for("007"), addr_for("7"));
+}
+
 // Performance-mode daemon bridges have no local endpoint to query, so the QoS
 // must be rebuilt faithfully from the request's explicit fields.
 TEST(DaemonBridgeUdsTest, DaemonRequestQosReliableTransientLocal)
