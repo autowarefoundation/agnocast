@@ -53,6 +53,10 @@ private:
     const rclcpp::Node::SharedPtr & node, const std::string & service_name,
     const std::string & service_type, const rclcpp::QoS & qos);
 
+  static ServiceBridgeEntity create_a2r_service_bridge_generic(
+    const rclcpp::Node::SharedPtr & node, const std::string & service_name,
+    const std::string & service_type, const rclcpp::QoS & qos);
+
   static std::string convert_type_to_snake_case(const std::string & message_type);
   static std::vector<std::string> generate_library_paths();
   void * load_library_from_paths(const std::vector<std::string> & paths, std::string & last_error);

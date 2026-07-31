@@ -37,9 +37,9 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
       *agno_req = *ros_req;
 
       agno_client->async_send_request(
-        std::move(agno_req),
-        [service_handle, request_header](typename agnocast::Client<ServiceT>::SharedFuture future) {
-          auto agno_res = future.get();
+        std::move(agno_req), [service_handle, request_header](
+                               const typename agnocast::Client<ServiceT>::SharedFuture & future) {
+          const auto & agno_res = future.get();
           service_handle->send_response(*request_header, *agno_res);
         });
     },
@@ -78,16 +78,25 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
       agnocast::ipc_shared_ptr<typename ServiceT::Request> && agno_req) {
       std::shared_ptr<typename ServiceT::Request> ros_req(agno_req.get(), [](void *) {});
 
-      ros_client->async_send_request(
-        ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
-                   typename rclcpp::Client<ServiceT>::SharedFuture future) {
-          auto ros_res = future.get();
-          auto agno_res = service_handle->borrow_loaned_response(agno_req);
-          *agno_res = *ros_res;
-          // Resort to pointer copying because a mutable lambda can't be used here.
-          auto agno_req_movable = agno_req;
-          service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
-        });
+      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
+      // and terminating the process.
+      try {
+        ros_client->async_send_request(
+          ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
+                     const typename rclcpp::Client<ServiceT>::SharedFuture future) {
+            const auto & ros_res = future.get();
+            auto agno_res = service_handle->borrow_loaned_response(agno_req);
+            *agno_res = *ros_res;
+            auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                               // lambda capture.
+            service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+          });
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(
+          agnocast::logger,
+          "Failed to forward request in A2R service bridge for '%s': %s; dropping request",
+          service_handle->get_service_name(), e.what());
+      }
     },
     // AgnocastOnly: this service is the bridge's own endpoint and must not itself request a bridge.
     qos, srv_cb_group, agnocast::ServiceRole::AgnocastOnly);
