@@ -70,6 +70,7 @@ bool GpuSharedMemoryPoolProxy::initialize()
 void GpuSharedMemoryPoolProxy::finalize()
 {
   std::lock_guard<std::mutex> io_lock(daemonIOMutex_);
+  destroyReadDoneMarkers();
   releaseImportedSlots();
   closeSocket();
   initialized_ = false;
@@ -327,7 +328,8 @@ bool GpuSharedMemoryPoolProxy::getDevicePtrFromSlotId(std::uint32_t slot_id, voi
   return true;
 }
 
-bool GpuSharedMemoryPoolProxy::recordDataReady(void * device_ptr)
+bool GpuSharedMemoryPoolProxy::recordDataReady(
+  void * device_ptr, const int stream_kind, void * stream)
 {
   std::lock_guard<std::mutex> slot_lock(slotManagementMutex_);
   const auto id_it = device_ptr_to_slot_id_.find(device_ptr);
@@ -338,17 +340,105 @@ bool GpuSharedMemoryPoolProxy::recordDataReady(void * device_ptr)
   if (slot_it == slots_.end()) {
     return false;
   }
-  return backend_.record_data_ready(slot_it->second.imported);
+  return backend_.record_data_ready(slot_it->second.imported, stream_kind, stream);
 }
 
-bool GpuSharedMemoryPoolProxy::waitDataReady(std::uint32_t slot_id)
+bool GpuSharedMemoryPoolProxy::waitDataReady(
+  std::uint32_t slot_id, const int stream_kind, void * stream)
 {
   std::lock_guard<std::mutex> slot_lock(slotManagementMutex_);
   const auto it = slots_.find(slot_id);
   if (it == slots_.end()) {
     return false;
   }
-  return backend_.wait_data_ready(it->second.imported);
+  return backend_.wait_data_ready(it->second.imported, stream_kind, stream);
+}
+
+bool GpuSharedMemoryPoolProxy::recordReadDone(
+  const int stream_kind, void * stream, void ** out_token)
+{
+  if (out_token == nullptr) {
+    return false;
+  }
+
+  void * marker = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(readDoneMarkersMutex_);
+    if (!free_read_done_markers_.empty()) {
+      marker = free_read_done_markers_.back();
+      free_read_done_markers_.pop_back();
+    }
+  }
+  // Markers are created lazily and then recycled, so a steady-state reader creates at
+  // most as many as it has messages in flight.
+  if (marker == nullptr && !backend_.create_read_done_marker(&marker)) {
+    return false;
+  }
+
+  if (!backend_.record_read_done_marker(marker, stream_kind, stream)) {
+    recycleReadDoneMarker(marker);
+    return false;
+  }
+
+  *out_token = marker;
+  return true;
+}
+
+int GpuSharedMemoryPoolProxy::queryReadDone(void * token)
+{
+  if (token == nullptr) {
+    return 1;
+  }
+  const int state = backend_.query_read_done_marker(token);
+  if (state == 0) {
+    return 0;
+  }
+  if (state < 0) {
+    // Report complete so a broken marker cannot pin a pool slot forever (the backend has
+    // already logged the error), but DESTROY it rather than recycle it. Recycling a
+    // marker that failed to query would put it back in circulation, and under a sticky
+    // context error every future message would then report "complete" on its first poll —
+    // silently disabling the done edge process-wide for the rest of the run.
+    backend_.destroy_read_done_marker(token);
+    return 1;
+  }
+  recycleReadDoneMarker(token);
+  return 1;
+}
+
+void GpuSharedMemoryPoolProxy::waitReadDone(void * token)
+{
+  if (token == nullptr) {
+    return;
+  }
+  backend_.sync_read_done_marker(token);
+  recycleReadDoneMarker(token);
+}
+
+bool GpuSharedMemoryPoolProxy::isDefaultStream(const int stream_kind, void * stream) const
+{
+  return backend_.is_default_stream(stream_kind, stream);
+}
+
+void GpuSharedMemoryPoolProxy::recycleReadDoneMarker(void * marker)
+{
+  if (marker == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(readDoneMarkersMutex_);
+  free_read_done_markers_.push_back(marker);
+}
+
+void GpuSharedMemoryPoolProxy::destroyReadDoneMarkers()
+{
+  std::vector<void *> markers;
+  {
+    std::lock_guard<std::mutex> lock(readDoneMarkersMutex_);
+    markers.swap(free_read_done_markers_);
+  }
+  for (void * marker : markers) {
+    backend_.destroy_read_done_marker(marker);
+  }
 }
 
 }  // namespace agnocast::cuda

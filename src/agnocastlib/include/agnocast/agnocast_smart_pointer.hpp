@@ -3,6 +3,8 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_deferred_release.hpp"
+#include "agnocast/cuda_stream.hpp"
 
 #include <fcntl.h>
 #include <mqueue.h>
@@ -52,7 +54,7 @@ class TypeErasedPublisher;
 template <typename MessageT>
 ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
   MessageT * msg, const std::string & topic_name, const topic_local_id_t subscriber_id,
-  const int64_t entry_id);
+  const int64_t entry_id, const CudaStream & cuda_stream = CudaStream{});
 
 namespace detail
 {
@@ -82,6 +84,13 @@ struct control_block
   // memory message is mapped read-only by the subscriber, so we cannot inject the
   // local pointer into msg->data.
   void * gpu_data_ptr = nullptr;
+
+  // The subscriber's declared CUDA stream, used to defer the kernel-side reference
+  // release until this reader's GPU reads have completed (the GPU-IPC "done edge",
+  // see cuda_deferred_release.hpp). `gpu_done_stream_kind < 0` means "release
+  // immediately" — every non-CUDA message, and the publisher side.
+  int gpu_done_stream_kind = -1;
+  void * gpu_done_stream = nullptr;
 
   control_block(std::string topic, topic_local_id_t pubsub, int64_t entry)
   : topic_name(std::move(topic)), entry_id(entry), pubsub_id(pubsub)
@@ -130,10 +139,11 @@ class ipc_shared_ptr
 
   friend class TypeErasedPublisher;
 
-  // Allow create_subscriber_ipc_ptr to call set_gpu_release_fn() and set_gpu_data_ptr()
+  // Allow create_subscriber_ipc_ptr to call set_gpu_release_fn(), set_gpu_data_ptr()
+  // and set_gpu_done_stream()
   template <typename MessageT>
   friend ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
-    MessageT *, const std::string &, const topic_local_id_t, const int64_t);
+    MessageT *, const std::string &, const topic_local_id_t, const int64_t, const CudaStream &);
 
   // Allow converting constructors to access private members of ipc_shared_ptr<U>
   template <typename U>
@@ -178,6 +188,17 @@ class ipc_shared_ptr
   {
     if (control_) {
       control_->gpu_data_ptr = ptr;
+    }
+  }
+
+  // Declares the stream on which this subscriber's GPU reads are issued, so that the
+  // kernel-side reference release is deferred until they complete.
+  // Private: only create_subscriber_ipc_ptr() should call this.
+  void set_gpu_done_stream(int stream_kind, void * stream)
+  {
+    if (control_) {
+      control_->gpu_done_stream_kind = stream_kind;
+      control_->gpu_done_stream = stream;
     }
   }
 
@@ -414,8 +435,18 @@ public:
       }
 
       if (control_->entry_id != ENTRY_ID_NOT_ASSIGNED) {
-        // Subscriber side: notify kmod that all references are released.
-        release_subscriber_reference(control_->topic_name, control_->pubsub_id, control_->entry_id);
+        // Subscriber side: notify kmod that all references are released. For a CUDA
+        // message the notification is deferred until this reader's GPU reads on its
+        // declared stream complete, so the publisher cannot hand the pool slot to the
+        // next writer while the reads are still in flight (the "done edge").
+        const bool deferred = control_->gpu_done_stream_kind >= 0 &&
+                              defer_subscriber_release(
+                                control_->topic_name, control_->pubsub_id, control_->entry_id,
+                                control_->gpu_done_stream_kind, control_->gpu_done_stream);
+        if (!deferred) {
+          release_subscriber_reference(
+            control_->topic_name, control_->pubsub_id, control_->entry_id);
+        }
       } else if (control_->valid.load(std::memory_order_acquire)) {
         // Publisher side, last reference, not published: delete the memory.
         // This handles the case where borrow_loaned_message() was called but publish() was not.

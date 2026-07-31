@@ -7,6 +7,7 @@
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_stream.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
@@ -47,6 +48,15 @@ struct SubscriptionOptions
   bool ignore_local_publications{false};
   /// QoS parameter override options (same semantics as rclcpp).
   rclcpp::QosOverridingOptions qos_overriding_options{};
+  /// CUDA-message subscriptions only: the stream on which the callback issues its GPU
+  /// reads. Assign a `cudaStream_t` directly. Agnocast makes this stream wait for the
+  /// publisher's write before the callback, and defers the message's kernel-side
+  /// release until this stream's work completes — so the callback may read
+  /// asynchronously and return without any host synchronization. Left unset, the
+  /// legacy default stream is used. Subscriptions sharing one stream interleave their
+  /// waits (conservative-safe, but serializing); a stream per callback group avoids
+  /// that. See agnocast::CudaStream.
+  CudaStream cuda_stream{};
 };
 
 /**
@@ -188,7 +198,8 @@ class Subscription : public SubscriptionBase
     const bool is_transient_local =
       actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
     callback_info_id_ = agnocast::register_callback<MessageT>(
-      std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq, callback_group);
+      std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq, callback_group,
+      options.cuda_stream);
 
     {
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
@@ -281,12 +292,16 @@ private:
   // so that the kernel-side reference is not released until all userspace copies are destroyed.
   agnocast::ipc_shared_ptr<const MessageT> last_taken_ptr_;
   std::mutex last_taken_ptr_mtx_;
+  // The stream declared in SubscriptionOptions; unused for non-CUDA message types.
+  CudaStream cuda_stream_{};
 
   template <typename NodeT>
   rclcpp::QoS constructor_impl(
     NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options,
     SubscriptionRole role)
   {
+    cuda_stream_ = options.cuda_stream;
+
     // Gated to message types — service types pulled in by
     // BasicService<ServiceT> have no rosidl message name. The empty string
     // signals "skip registry" to initialize().
@@ -401,8 +416,8 @@ public:
         }
 
         MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
-        auto result =
-          create_subscriber_ipc_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
+        auto result = create_subscriber_ipc_ptr<const MessageT>(
+          ptr, topic_name_, id_, take_args.ret_entry_id, cuda_stream_);
         old_ptr = std::move(last_taken_ptr_);
         last_taken_ptr_ = result;
         return result;
@@ -410,7 +425,8 @@ public:
     }
 
     MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
-    return create_subscriber_ipc_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
+    return create_subscriber_ipc_ptr<const MessageT>(
+      ptr, topic_name_, id_, take_args.ret_entry_id, cuda_stream_);
   }
 };
 

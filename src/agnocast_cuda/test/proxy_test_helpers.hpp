@@ -63,18 +63,78 @@ public:
     imported = ImportedSlot{};
   }
 
-  bool record_data_ready(const ImportedSlot & slot) override
+  bool record_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) override
   {
     ++record_ready_calls;
     last_record_ready_ptr = slot.device_ptr;
+    last_record_ready_stream_kind = stream_kind;
+    last_record_ready_stream = stream;
     return true;
   }
 
-  bool wait_data_ready(const ImportedSlot & slot) override
+  bool wait_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) override
   {
     ++wait_ready_calls;
     last_wait_ready_ptr = slot.device_ptr;
+    last_wait_ready_stream_kind = stream_kind;
+    last_wait_ready_stream = stream;
     return true;
+  }
+
+  // Read-done markers are handed out as opaque, distinguishable fake pointers; the
+  // "recorded" set lets a test decide per marker whether a query reports completion.
+  bool create_read_done_marker(void ** out_marker) override
+  {
+    ++create_marker_calls;
+    if (!create_marker_result) {
+      return false;
+    }
+    *out_marker =
+      reinterpret_cast<void *>(static_cast<std::uintptr_t>(0x900000u + create_marker_calls));
+    return true;
+  }
+
+  void destroy_read_done_marker(void * marker) override
+  {
+    if (marker != nullptr) {
+      ++destroy_marker_calls;
+    }
+  }
+
+  bool record_read_done_marker(void * marker, int stream_kind, void * stream) override
+  {
+    ++record_marker_calls;
+    last_marker_stream_kind = stream_kind;
+    last_marker_stream = stream;
+    if (!record_marker_result) {
+      return false;
+    }
+    recorded_markers.push_back(marker);
+    return true;
+  }
+
+  int query_read_done_marker(void * marker) override
+  {
+    ++query_marker_calls;
+    (void)marker;
+    return query_marker_state;
+  }
+
+  void sync_read_done_marker(void * marker) override
+  {
+    ++sync_marker_calls;
+    (void)marker;
+  }
+
+  bool is_default_stream(int stream_kind, void * stream) const override
+  {
+    // Mirrors the CUDA backend without needing a runtime: explicit non-null handles
+    // that are not the 0x1 / 0x2 sentinels are real streams.
+    if (stream_kind != 2 || stream == nullptr) {
+      return true;
+    }
+    const auto value = reinterpret_cast<std::uintptr_t>(stream);
+    return value == 0x1u || value == 0x2u;
   }
 
   gpud::BackendType backend_type_ = gpud::BackendType::kCudaIpc;
@@ -87,6 +147,22 @@ public:
   std::size_t wait_ready_calls = 0;
   void * last_record_ready_ptr = nullptr;
   void * last_wait_ready_ptr = nullptr;
+  int last_record_ready_stream_kind = -1;
+  void * last_record_ready_stream = nullptr;
+  int last_wait_ready_stream_kind = -1;
+  void * last_wait_ready_stream = nullptr;
+
+  bool create_marker_result = true;
+  bool record_marker_result = true;
+  int query_marker_state = 1;  // 1 = complete, 0 = pending, -1 = error
+  std::size_t create_marker_calls = 0;
+  std::size_t destroy_marker_calls = 0;
+  std::size_t record_marker_calls = 0;
+  std::size_t query_marker_calls = 0;
+  std::size_t sync_marker_calls = 0;
+  int last_marker_stream_kind = -1;
+  void * last_marker_stream = nullptr;
+  std::vector<void *> recorded_markers;
 };
 
 // Builds `count` fake slot descriptors with 64-byte handle blobs.

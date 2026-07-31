@@ -46,13 +46,51 @@ public:
   // default-constructed / already-released struct.
   virtual void release_slot(ImportedSlot & imported) = 0;
 
-  // Publisher side: records the slot's data-ready event (GPU write complete) so
-  // subscribers can order their reads after it. Returns false on failure.
-  virtual bool record_data_ready(const ImportedSlot & slot) = 0;
+  // --- Ready edge: publisher write -> subscriber read ----------------------------
+  //
+  // `stream_kind` / `stream` are the C ABI's opaque stream declaration; see
+  // cudart_loader.hpp::resolve_stream(). A CUDA-IPC backend maps them to a
+  // cudaStream_t; an NvSci backend will map them to its own queue.
 
-  // Subscriber side: makes subsequent GPU reads wait for the slot's data-ready
-  // event. Returns false on failure.
-  virtual bool wait_data_ready(const ImportedSlot & slot) = 0;
+  // Publisher side: records the slot's data-ready event (GPU write complete) on the
+  // publisher's stream so subscribers can order their reads after it. Returns false
+  // on failure.
+  virtual bool record_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) = 0;
+
+  // Subscriber side: makes subsequent GPU work on the subscriber's stream wait for
+  // the slot's data-ready event. Returns false on failure.
+  virtual bool wait_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) = 0;
+
+  // --- Done edge: subscriber read -> slot reuse by the next publisher -------------
+  //
+  // A "read-done marker" is a process-PRIVATE (non-interprocess) synchronization
+  // object recorded on the reader's stream. The proxy polls it to decide when a
+  // message's kernel-side reference may be released. Markers are pooled and reused,
+  // so their count scales with in-flight messages per reader process — not with pool
+  // slots x subscribers, which is what rules out per-subscriber interprocess events
+  // (MAX_SUBSCRIBER_NUM is 3072 per topic).
+
+  // Creates one marker. Returns false on failure.
+  virtual bool create_read_done_marker(void ** out_marker) = 0;
+
+  // Destroys a marker produced by create_read_done_marker().
+  virtual void destroy_read_done_marker(void * marker) = 0;
+
+  // Records the marker on the reader's stream. Returns false on failure.
+  virtual bool record_read_done_marker(void * marker, int stream_kind, void * stream) = 0;
+
+  // Polls a recorded marker: 1 = complete, 0 = still pending, -1 = error. Must never
+  // block, so a stuck reader can never wedge the release path.
+  virtual int query_read_done_marker(void * marker) = 0;
+
+  // Blocks until a recorded marker completes. Used only under deferral pressure and
+  // at shutdown.
+  virtual void sync_read_done_marker(void * marker) = 0;
+
+  // True when (stream_kind, stream) resolves to a *default* stream. Default streams do
+  // not order against streams created non-blocking, which makes that combination a
+  // correctness failure worth failing fast on.
+  virtual bool is_default_stream(int stream_kind, void * stream) const = 0;
 };
 
 }  // namespace agnocast::cuda

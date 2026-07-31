@@ -17,10 +17,19 @@
 # The publisher fills each GPU buffer with an incrementing byte pattern
 #   data[i] = (i + seq) % 256
 # so the first four bytes of message `seq` are [seq, seq+1, seq+2, seq+3] (mod 256).
-# The subscriber cudaMemcpy's the first bytes back to the host and logs them. This
-# test PASSES only if the subscriber observes that exact increasing pattern on
-# several messages, which proves the GPU bytes the publisher wrote were read,
-# zero-copy, in another process through the pool + CUDA IPC + interprocess event.
+# The subscriber issues an ASYNCHRONOUS device-to-host copy on its own declared,
+# non-blocking stream and returns from the callback without any host synchronization,
+# then logs the bytes once its completion event fires. This test PASSES only if the
+# subscriber observes that exact increasing pattern on several messages, which proves:
+#
+#   * the GPU bytes the publisher wrote were read, zero-copy, in another process
+#     through the pool + CUDA IPC + interprocess dataReadyEvent (the READY edge), and
+#   * the pool slot was not recycled underneath a read that was still in flight when
+#     the message reference was dropped (the DONE edge: reader-local deferred release).
+#
+# Both phases below run the same pipeline; the second one spins the subscriber on a
+# MULTI-THREADED executor, which arbitrary-stream support is what makes possible (an
+# explicit stream handle means the same thing from any thread).
 #
 # Requirements (fails fast with a clear message if unmet):
 #   * an NVIDIA GPU + CUDA runtime (libcudart)
@@ -104,8 +113,6 @@ PRELOAD="${CPU_HEAPHOOK}:${CUDA_HEAPHOOK}"
 
 WORK_DIR="$(mktemp -d)"
 DAEMON_LOG="${WORK_DIR}/daemon.log"
-PUB_LOG="${WORK_DIR}/publisher.log"
-SUB_LOG="${WORK_DIR}/subscriber.log"
 
 DAEMON_PID="" ; PUB_PID="" ; SUB_PID=""
 cleanup() {
@@ -119,7 +126,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# --- 1. Start the daemon ------------------------------------------------------
+# --- 1. Start the daemon (shared by both phases) ------------------------------
 log "workspace : ${WS_ROOT}"
 log "GPU index : ${CUDA_VISIBLE_DEVICES}"
 log "starting daemon..."
@@ -141,78 +148,115 @@ done
 log "daemon serving on ${SOCKET_PATH}"
 log "$(grep 'serving GPU' "${DAEMON_LOG}" | head -1)"
 
-# --- 2. Start subscriber, then publisher --------------------------------------
-log "starting subscriber (cuda_listener)..."
-LD_PRELOAD="${PRELOAD}" "${LISTENER_BIN}" >"${SUB_LOG}" 2>&1 &
-SUB_PID=$!
-sleep 1  # let the subscriber connect to the daemon and import slots before we publish
+# =============================================================================
+# run_phase <label> <executor-mode>
+#
+# Runs one publisher/subscriber pair against the already-running daemon and verifies
+# the byte pattern the subscriber observed. `executor-mode` is passed to the listener
+# as AGNOCAST_SAMPLE_EXECUTOR ("st" = single-threaded, "mt" = multi-threaded).
+# =============================================================================
+run_phase() {
+  local label="$1"
+  local executor_mode="$2"
+  local pub_log="${WORK_DIR}/publisher_${executor_mode}.log"
+  local sub_log="${WORK_DIR}/subscriber_${executor_mode}.log"
 
-log "starting publisher (cuda_talker)..."
-LD_PRELOAD="${PRELOAD}" "${TALKER_BIN}" >"${PUB_LOG}" 2>&1 &
-PUB_PID=$!
+  echo "======================================================================"
+  log "PHASE: ${label}"
 
-# --- 3. Let them exchange messages -------------------------------------------
-log "running for ${RUN_SECONDS}s..."
-for _ in $(seq 1 "${RUN_SECONDS}"); do
+  log "starting subscriber (cuda_listener, executor=${executor_mode})..."
+  AGNOCAST_SAMPLE_EXECUTOR="${executor_mode}" LD_PRELOAD="${PRELOAD}" \
+    "${LISTENER_BIN}" >"${sub_log}" 2>&1 &
+  SUB_PID=$!
+  sleep 1  # let the subscriber connect to the daemon and import slots before we publish
+
+  log "starting publisher (cuda_talker)..."
+  LD_PRELOAD="${PRELOAD}" "${TALKER_BIN}" >"${pub_log}" 2>&1 &
+  PUB_PID=$!
+
+  log "running for ${RUN_SECONDS}s..."
+  local _
+  for _ in $(seq 1 "${RUN_SECONDS}"); do
+    sleep 1
+    kill -0 "${PUB_PID}" 2>/dev/null || { log "publisher exited early"; break; }
+    kill -0 "${SUB_PID}" 2>/dev/null || { log "subscriber exited early"; break; }
+  done
+
+  # Stop the pair (this also triggers the publisher's slot-reclaim path).
+  kill -INT "${PUB_PID}" "${SUB_PID}" 2>/dev/null
   sleep 1
-  kill -0 "${PUB_PID}" 2>/dev/null || { log "publisher exited early"; break; }
-  kill -0 "${SUB_PID}" 2>/dev/null || { log "subscriber exited early"; break; }
-done
+  wait "${PUB_PID}" 2>/dev/null
+  wait "${SUB_PID}" 2>/dev/null
+  PUB_PID="" ; SUB_PID=""
 
-# --- 4. Stop everything (triggers publisher's slot-reclaim path) --------------
-kill -INT "${PUB_PID}" "${SUB_PID}" 2>/dev/null
-sleep 1
+  echo "----------------------------------------------------------------------"
+  log "publisher log (tail):"; tail -n 4 "${pub_log}" | sed 's/^/    /'
+  log "subscriber log (tail):"; tail -n 4 "${sub_log}" | sed 's/^/    /'
+  echo "----------------------------------------------------------------------"
+
+  # Fatal-error fingerprints from the publish/subscribe integration.
+  if grep -q "was not allocated from the GPU pool" "${pub_log}"; then
+    fail "[${label}] publisher's cudaMalloc was NOT served by the pool (heaphook/daemon not wired)"
+  fi
+  if grep -qE "gpu_data\(\) returned nullptr|SlotId .* not found" "${sub_log}"; then
+    fail "[${label}] subscriber could not resolve the pooled GPU pointer"
+  fi
+  # Both samples declare their non-blocking stream, so the fail-fast guard must stay
+  # silent; if it fires, the declaration did not reach the record/wait call.
+  if grep -q "cudaStreamNonBlocking" "${pub_log}" "${sub_log}"; then
+    fail "[${label}] the undeclared-non-blocking-stream guard fired despite a declared stream"
+  fi
+  if grep -q "all read slots busy" "${sub_log}"; then
+    log "[${label}] NOTE: the subscriber dropped messages because its read slots were busy"
+  fi
+
+  local pub_count
+  pub_count="$(grep -c "published CUDA PointCloud2" "${pub_log}")"
+  [[ "${pub_count}" -gt 0 ]] || { cat "${pub_log}" >&2; fail "[${label}] publisher published 0 messages"; }
+  log "publisher published ${pub_count} messages"
+
+  # Every received line must show the incrementing GPU byte pattern written by the
+  # publisher: first_bytes=[b0,b1,b2,b3] with b_{k} == (b0 + k) % 256.
+  local verified=0 mismatched=0 line bytes b0 b1 b2 b3
+  while IFS= read -r line; do
+    bytes="$(sed -n 's/.*first_bytes=\[\([0-9,]*\)\].*/\1/p' <<<"${line}")"
+    [[ -n "${bytes}" ]] || continue
+    IFS=',' read -r b0 b1 b2 b3 <<<"${bytes}"
+    if [[ "${b1}" == "$(( (b0 + 1) % 256 ))" && \
+          "${b2}" == "$(( (b0 + 2) % 256 ))" && \
+          "${b3}" == "$(( (b0 + 3) % 256 ))" ]]; then
+      verified=$((verified + 1))
+    else
+      mismatched=$((mismatched + 1))
+      log "byte-pattern MISMATCH: [${b0},${b1},${b2},${b3}]"
+    fi
+  done < <(grep "received CUDA PointCloud2" "${sub_log}")
+
+  log "subscriber received & byte-verified ${verified} messages (${mismatched} mismatched)"
+
+  # gpu_size sanity: height(1) * width(1024) * point_step(16) = 16384
+  if ! grep -q "gpu_size=16384" "${sub_log}"; then
+    fail "[${label}] subscriber never reported the expected gpu_size=16384"
+  fi
+
+  [[ "${mismatched}" -eq 0 ]] || fail "[${label}] one or more messages had corrupted GPU data"
+  [[ "${verified}" -ge "${MIN_RECEIVED}" ]] || \
+    fail "[${label}] only ${verified} verified messages (need >= ${MIN_RECEIVED}); GPU data did not cross processes reliably"
+
+  log "phase PASS: ${verified} messages transferred zero-copy through the GPU pool"
+  TOTAL_VERIFIED=$((TOTAL_VERIFIED + verified))
+}
+
+TOTAL_VERIFIED=0
+run_phase "single-threaded executor, async subscriber reads" "st"
+run_phase "multi-threaded executor, async subscriber reads" "mt"
+
+# --- Stop the daemon ----------------------------------------------------------
 kill -INT "${DAEMON_PID}" 2>/dev/null
 sleep 0.5
 
-# --- 5. Verify ----------------------------------------------------------------
-echo "----------------------------------------------------------------------"
-log "publisher log (tail):"; tail -n 4 "${PUB_LOG}" | sed 's/^/    /'
-log "subscriber log (tail):"; tail -n 4 "${SUB_LOG}" | sed 's/^/    /'
-echo "----------------------------------------------------------------------"
-
-# Fatal-error fingerprints from the publish/subscribe integration.
-if grep -q "was not allocated from the GPU pool" "${PUB_LOG}"; then
-  fail "publisher's cudaMalloc was NOT served by the pool (heaphook/daemon not wired)"
-fi
-if grep -qE "gpu_data\(\) returned nullptr|SlotId .* not found" "${SUB_LOG}"; then
-  fail "subscriber could not resolve the pooled GPU pointer"
-fi
-
-PUB_COUNT="$(grep -c "published CUDA PointCloud2" "${PUB_LOG}")"
-[[ "${PUB_COUNT}" -gt 0 ]] || { cat "${PUB_LOG}" >&2; fail "publisher published 0 messages"; }
-log "publisher published ${PUB_COUNT} messages"
-
-# Every received line must show the incrementing GPU byte pattern written by the
-# publisher: first_bytes=[b0,b1,b2,b3] with b_{k} == (b0 + k) % 256.
-verified=0
-mismatched=0
-while IFS= read -r line; do
-  bytes="$(sed -n 's/.*first_bytes=\[\([0-9,]*\)\].*/\1/p' <<<"${line}")"
-  [[ -n "${bytes}" ]] || continue
-  IFS=',' read -r b0 b1 b2 b3 <<<"${bytes}"
-  if [[ "${b1}" == "$(( (b0 + 1) % 256 ))" && \
-        "${b2}" == "$(( (b0 + 2) % 256 ))" && \
-        "${b3}" == "$(( (b0 + 3) % 256 ))" ]]; then
-    verified=$((verified + 1))
-  else
-    mismatched=$((mismatched + 1))
-    log "byte-pattern MISMATCH: [${b0},${b1},${b2},${b3}]"
-  fi
-done < <(grep "received CUDA PointCloud2" "${SUB_LOG}")
-
-log "subscriber received & byte-verified ${verified} messages (${mismatched} mismatched)"
-
-# gpu_size sanity: height(1) * width(1024) * point_step(16) = 16384
-if ! grep -q "gpu_size=16384" "${SUB_LOG}"; then
-  fail "subscriber never reported the expected gpu_size=16384"
-fi
-
-[[ "${mismatched}" -eq 0 ]] || fail "one or more messages had corrupted GPU data"
-[[ "${verified}" -ge "${MIN_RECEIVED}" ]] || \
-  fail "only ${verified} verified messages (need >= ${MIN_RECEIVED}); GPU data did not cross processes reliably"
-
 echo "======================================================================"
-log "PASS: ${verified} messages transferred zero-copy through the GPU pool"
+log "PASS: ${TOTAL_VERIFIED} messages transferred zero-copy through the GPU pool"
+log "      across both the single-threaded and multi-threaded executors"
 echo "======================================================================"
 exit 0

@@ -83,17 +83,63 @@ constexpr cudaDeviceAttr cudaDevAttrIntegrated = 18;  // driver_types.h: cudaDev
 using cudaEvent_t = void *;
 using cudaStream_t = void *;
 
-// Per-thread default stream handle (CUDART_VERSION stable value). Recording/waiting
-// events on this stream avoids serializing with the legacy default stream and other
-// streams. User GPU work must also run on the per-thread default stream (compile
-// with nvcc --default-stream per-thread).
+// Default-stream handles (ABI-stable constants from driver_types.h:
+// cudaStreamLegacy = 0x1, cudaStreamPerThread = 0x2). They are plain integer handle
+// values, not compile-time-dependent macros, so passing them across the CUDA-free C
+// ABI is unambiguous — unlike a NULL stream, which every libcudart interprets as the
+// legacy stream regardless of how the *caller* was compiled.
+
+// The legacy default stream. Operations on it implicitly synchronize with all
+// blocking streams (and the per-thread default stream is a blocking stream), so it is
+// the correct default when the application has not declared a stream. It is a
+// GPU-side barrier, not a host synchronization.
+inline cudaStream_t cuda_stream_legacy()
+{
+  return reinterpret_cast<cudaStream_t>(0x1);
+}
+
+// The per-thread default stream.
 inline cudaStream_t cuda_stream_per_thread()
 {
   return reinterpret_cast<cudaStream_t>(0x2);
 }
 
+// Mirrors agnocast::CudaStreamKind (agnocastlib/include/agnocast/cuda_stream.hpp),
+// which is what the C ABI carries as a plain int.
+constexpr int kStreamKindLegacyDefault = 0;
+constexpr int kStreamKindPerThreadDefault = 1;
+constexpr int kStreamKindExplicit = 2;
+
+// Maps a (kind, handle) pair from the C ABI to a real stream handle. An explicit kind
+// with a null handle cannot be honoured, so it degrades to the legacy stream — the
+// same conservative choice as "nothing declared".
+inline cudaStream_t resolve_stream(int stream_kind, void * stream)
+{
+  if (stream_kind == kStreamKindExplicit && stream != nullptr) {
+    return static_cast<cudaStream_t>(stream);
+  }
+  if (stream_kind == kStreamKindPerThreadDefault) {
+    return cuda_stream_per_thread();
+  }
+  return cuda_stream_legacy();
+}
+
+// True for the legacy and per-thread default streams. Neither orders against a stream
+// created with cudaStreamNonBlocking — that is exactly what the flag opts out of.
+inline bool is_default_stream_handle(cudaStream_t stream)
+{
+  return stream == nullptr || stream == cuda_stream_legacy() || stream == cuda_stream_per_thread();
+}
+
 // cudaStreamWaitEvent flags: 0 == cudaEventWaitDefault.
 constexpr unsigned int cudaEventWaitDefault = 0x00;
+
+// cudaEventCreateWithFlags flag: skip timing bookkeeping. Agnocast's read-done
+// markers are only ever queried for completion.
+constexpr unsigned int cudaEventDisableTiming = 0x02;
+
+// cudaEventQuery returns this while the recorded work has not completed.
+constexpr cudaError_t cudaErrorNotReady = 600;
 
 struct cudaIpcEventHandle_t
 {
@@ -133,8 +179,11 @@ using cudaIpcGetMemHandle_t = cudaError_t (*)(cudaIpcMemHandle_t *, void *);
 using cudaIpcOpenMemHandle_t = cudaError_t (*)(void **, cudaIpcMemHandle_t, unsigned int);
 using cudaIpcCloseMemHandle_t = cudaError_t (*)(void *);
 using cudaIpcOpenEventHandle_t = cudaError_t (*)(cudaEvent_t *, cudaIpcEventHandle_t);
+using cudaEventCreateWithFlags_t = cudaError_t (*)(cudaEvent_t *, unsigned int);
 using cudaEventDestroy_t = cudaError_t (*)(cudaEvent_t);
 using cudaEventRecord_t = cudaError_t (*)(cudaEvent_t, cudaStream_t);
+using cudaEventQuery_t = cudaError_t (*)(cudaEvent_t);
+using cudaEventSynchronize_t = cudaError_t (*)(cudaEvent_t);
 using cudaStreamWaitEvent_t = cudaError_t (*)(cudaStream_t, cudaEvent_t, unsigned int);
 using cudaFree_t = cudaError_t (*)(void *);
 using cudaGetErrorString_t = const char * (*)(cudaError_t);
@@ -167,8 +216,11 @@ public:
   cudaIpcOpenMemHandle_t cudaIpcOpenMemHandle;
   cudaIpcCloseMemHandle_t cudaIpcCloseMemHandle;
   cudaIpcOpenEventHandle_t cudaIpcOpenEventHandle;
+  cudaEventCreateWithFlags_t cudaEventCreateWithFlags;
   cudaEventDestroy_t cudaEventDestroy;
   cudaEventRecord_t cudaEventRecord;
+  cudaEventQuery_t cudaEventQuery;
+  cudaEventSynchronize_t cudaEventSynchronize;
   cudaStreamWaitEvent_t cudaStreamWaitEvent;
   cudaFree_t cudaFree;
   cudaGetErrorString_t cudaGetErrorString;
@@ -209,8 +261,11 @@ private:
     load_symbol(cudaIpcOpenMemHandle, "cudaIpcOpenMemHandle");
     load_symbol(cudaIpcCloseMemHandle, "cudaIpcCloseMemHandle");
     load_symbol(cudaIpcOpenEventHandle, "cudaIpcOpenEventHandle");
+    load_symbol(cudaEventCreateWithFlags, "cudaEventCreateWithFlags");
     load_symbol(cudaEventDestroy, "cudaEventDestroy");
     load_symbol(cudaEventRecord, "cudaEventRecord");
+    load_symbol(cudaEventQuery, "cudaEventQuery");
+    load_symbol(cudaEventSynchronize, "cudaEventSynchronize");
     load_symbol(cudaStreamWaitEvent, "cudaStreamWaitEvent");
     load_symbol(cudaFree, "cudaFree");
     load_symbol(cudaGetErrorString, "cudaGetErrorString");

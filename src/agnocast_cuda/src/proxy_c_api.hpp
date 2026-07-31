@@ -38,13 +38,42 @@ int agnocast_cuda_slot_id_from_ptr(void * ptr, std::uint32_t * out_slot_id);
 // device pointer for that slot. Returns 1 on success.
 int agnocast_cuda_ptr_from_slot_id(std::uint32_t slot_id, void ** out_ptr);
 
-// Publisher: records the data-ready event for the slot backing `ptr` (call at
-// publish, on the per-thread default stream). Returns 1 on success.
-int agnocast_cuda_record_data_ready(void * ptr);
+// Stream declarations cross this ABI as a (kind, handle) pair, where `stream_kind` is
+// an agnocast::CudaStreamKind value. A null handle is never used to mean "the default
+// stream": this library resolves the unsuffixed cudaEventRecord through its own
+// dlopen'd libcudart, where NULL always means the LEGACY stream — so a caller compiled
+// with `--default-stream per-thread` passing NULL would silently get the wrong stream.
 
-// Subscriber: makes subsequent per-thread-default-stream GPU reads wait for the
-// slot's data-ready event (call before invoking the callback). Returns 1 on success.
-int agnocast_cuda_wait_data_ready(std::uint32_t slot_id);
+// Publisher: records the data-ready event for the slot backing `ptr` on the
+// publisher's stream (call at publish). Returns 1 on success.
+int agnocast_cuda_record_data_ready(void * ptr, int stream_kind, void * stream);
+
+// Subscriber: makes subsequent GPU work on the subscriber's stream wait for the slot's
+// data-ready event (call before invoking the callback). Returns 1 on success.
+int agnocast_cuda_wait_data_ready(std::uint32_t slot_id, int stream_kind, void * stream);
+
+// --- Done edge: reader-local deferred release ------------------------------------
+
+// Records a read-done marker on the subscriber's stream, writing an opaque token to
+// *out_token. Returns 1 on success.
+int agnocast_cuda_record_read_done(int stream_kind, void * stream, void ** out_token);
+
+// Polls a token: 1 = complete (token consumed), 0 = pending. Never blocks.
+int agnocast_cuda_query_read_done(void * token);
+
+// Blocks until the token's marker completes, then consumes the token.
+void agnocast_cuda_wait_read_done(void * token);
+
+// --- Fail-fast on undeclared non-blocking streams --------------------------------
+
+// Called by the CUDA heaphook when this process creates a stream with the
+// cudaStreamNonBlocking flag (runtime API) or CU_STREAM_NON_BLOCKING (driver API).
+void agnocast_cuda_note_non_blocking_stream(void);
+
+// Returns 1 when using (stream_kind, stream) for Agnocast's ordering would be unsafe:
+// the process created a non-blocking stream and the pair resolves to a default stream,
+// which does not order against it. Returns 0 otherwise.
+int agnocast_cuda_stream_ordering_unsafe(int stream_kind, void * stream);
 
 // Publisher reclaim: releases a GPU buffer allocated during a borrow..publish
 // window. If `ptr` is a pooled pointer it is returned to the pool; otherwise (a

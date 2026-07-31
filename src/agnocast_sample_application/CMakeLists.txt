@@ -205,14 +205,14 @@ if(CMAKE_CUDA_COMPILER AND agnocast_cuda_FOUND)
   enable_language(CUDA)
   find_package(CUDAToolkit REQUIRED)
 
-  # Both CUDA samples run their GPU work on the per-thread default stream. This
-  # matches where Agnocast records/waits its dataReadyEvent (cudaStreamPerThread),
-  # so the publisher's write and each subscriber's read are correctly ordered by
-  # that event. See the GPU-IPC design notes (per-thread-stream decision).
+  # Both CUDA samples create their own non-blocking CUDA stream and declare it in
+  # PublisherOptions / SubscriptionOptions, which is where Agnocast records and waits
+  # its ordering events. Because the stream is explicit, no --default-stream setting is
+  # needed (and relying on one would be wrong: the .cu translation unit's setting says
+  # nothing about the stream a kernel in another unit actually ran on). See the
+  # arbitrary-CUDA-stream chapter of docs/gpu_ipc_design.md.
   add_executable(cuda_talker src/cuda_publisher.cpp)
   set_source_files_properties(src/cuda_publisher.cpp PROPERTIES LANGUAGE CUDA)
-  target_compile_options(cuda_talker PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--default-stream=per-thread>)
   ament_target_dependencies(cuda_talker agnocastlib agnocast_cuda sensor_msgs)
   target_link_libraries(cuda_talker CUDA::cudart)
   target_include_directories(cuda_talker PRIVATE
@@ -222,8 +222,6 @@ if(CMAKE_CUDA_COMPILER AND agnocast_cuda_FOUND)
 
   add_executable(cuda_listener src/cuda_subscriber.cpp)
   set_source_files_properties(src/cuda_subscriber.cpp PROPERTIES LANGUAGE CUDA)
-  target_compile_options(cuda_listener PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--default-stream=per-thread>)
   ament_target_dependencies(cuda_listener agnocastlib agnocast_cuda sensor_msgs)
   target_link_libraries(cuda_listener CUDA::cudart)
   target_include_directories(cuda_listener PRIVATE

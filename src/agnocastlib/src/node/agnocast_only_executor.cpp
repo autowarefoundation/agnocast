@@ -4,6 +4,7 @@
 #include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
+#include "agnocast/cuda_deferred_release.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast_signal_handler.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -96,6 +97,11 @@ bool AgnocastOnlyExecutor::get_next_agnocast_executable(
 
   epoll_manager_->wait_and_handle_epoll_event(timeout_ms);
 
+  // Also drain here, not only after a callback: a subscriber that stops receiving would
+  // otherwise leave its last deferred references — and the publisher's pool slots —
+  // pinned until the process exits.
+  drain_deferred_subscriber_releases();
+
   if (!agnocast::ok()) {
     return false;
   }
@@ -134,6 +140,10 @@ bool AgnocastOnlyExecutor::get_next_ready_agnocast_executable(
 void AgnocastOnlyExecutor::execute_agnocast_executable(AgnocastExecutable & agnocast_executable)
 {
   (*agnocast_executable.callable)();
+
+  // Retire GPU-IPC message references whose reader-side GPU work has finished. A
+  // no-op (one atomic load) when nothing is deferred, i.e. for every non-CUDA node.
+  drain_deferred_subscriber_releases();
 
   if (agnocast_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
     agnocast_executable.callback_group->can_be_taken_from().store(true);

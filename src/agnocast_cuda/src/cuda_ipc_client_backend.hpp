@@ -24,8 +24,15 @@ public:
   bool import_slot(
     const gpu_shared_memory_daemon::SlotDescriptor & descriptor, ImportedSlot & out) override;
   void release_slot(ImportedSlot & imported) override;
-  bool record_data_ready(const ImportedSlot & slot) override;
-  bool wait_data_ready(const ImportedSlot & slot) override;
+  bool record_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) override;
+  bool wait_data_ready(const ImportedSlot & slot, int stream_kind, void * stream) override;
+
+  bool create_read_done_marker(void ** out_marker) override;
+  void destroy_read_done_marker(void * marker) override;
+  bool record_read_done_marker(void * marker, int stream_kind, void * stream) override;
+  int query_read_done_marker(void * marker) override;
+  void sync_read_done_marker(void * marker) override;
+  bool is_default_stream(int stream_kind, void * stream) const override;
 };
 
 }  // namespace agnocast::cuda

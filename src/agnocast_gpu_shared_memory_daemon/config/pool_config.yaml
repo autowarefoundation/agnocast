@@ -15,6 +15,27 @@
 # file is added in a later step; until then the compiled-in defaults in
 # include/agnocast_gpu_shared_memory_daemon/pool_config.hpp are authoritative and
 # mirror the values below.
+#
+# SIZING A SIZE CLASS
+# -------------------
+# A slot is held from the publisher's cudaMalloc until every subscriber has released
+# the message AND each subscriber's GPU reads of it have completed. So, per publisher
+# on a given size class:
+#
+#   slots_needed = qos_depth                      # messages the kmod keeps queued
+#                + 1                              # the message being borrowed/written
+#                + sum over subscribers of        # reader-local deferred releases
+#                    (that subscriber's in-flight reads)
+#
+# The last term is what arbitrary-CUDA-stream support adds: a subscriber that reads
+# asynchronously returns from its callback while the copy or kernel is still running,
+# and Agnocast defers the release until it completes (see the done-edge chapter of
+# docs/gpu_ipc_design.md). It is bounded per reader process by
+# agnocast::MAX_DEFERRED_SUBSCRIBER_RELEASES (32), and in practice by how many reads
+# the subscriber keeps in flight — typically 1-4.
+#
+# Under-sizing is not a correctness problem: alloc returns kNoFreeSlot, the proxy
+# retries, and the publisher slows down. Over-sizing only costs device memory.
 
 # Size classes, sorted ascending by slot_size_bytes.
 # Total reserved GPU memory with these defaults: 416 MiB.

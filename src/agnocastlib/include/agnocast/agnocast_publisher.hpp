@@ -8,6 +8,7 @@
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/cuda_message_tag.hpp"
 #include "agnocast/cuda_pool_api.hpp"
+#include "agnocast/cuda_stream.hpp"
 #include "agnocast/gpu_metadata.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -57,6 +58,13 @@ struct PublisherOptions
   bool do_always_ros2_publish = false;
   /// QoS parameter override options (same semantics as rclcpp).
   rclcpp::QosOverridingOptions qos_overriding_options{};
+  /// CUDA-message publishers only: the stream on which this publisher's GPU writes
+  /// are issued. Assign a `cudaStream_t` directly. Left unset, Agnocast records its
+  /// data-ready event on the legacy default stream, which is correct but inserts a
+  /// GPU-side barrier against every blocking stream in the process. A publisher that
+  /// produces one message from several streams must join them before publish(),
+  /// because one event captures one stream. See agnocast::CudaStream.
+  CudaStream cuda_stream{};
 };
 
 /**
@@ -167,9 +175,15 @@ class Publisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
+    cuda_stream_ = options.cuda_stream;
+
     return this->init_base(
       node, topic_name, type_name, qos, options, role, is_cuda_message_v<MessageT>);
   }
+
+  // The stream declared in PublisherOptions; used by publish() unless the caller
+  // overrides it per call. Unused for non-CUDA message types.
+  CudaStream cuda_stream_{};
 
 public:
   using SharedPtr = std::shared_ptr<Publisher<MessageT>>;
@@ -227,7 +241,21 @@ public:
    * @param message Message obtained from borrow_loaned_message(). Must be moved in.
    */
   AGNOCAST_PUBLIC
-  void publish(ipc_shared_ptr<MessageT> && message)
+  void publish(ipc_shared_ptr<MessageT> && message) { publish(std::move(message), cuda_stream_); }
+
+  /**
+   * @brief Publish a CUDA message whose GPU writes were issued on `cuda_stream`,
+   * overriding PublisherOptions::cuda_stream for this call.
+   *
+   * Agnocast records its data-ready event on that stream, so the stream must contain
+   * all of the GPU work that writes the message's buffer. Ignored for non-CUDA
+   * message types.
+   *
+   * @param message Message obtained from borrow_loaned_message(). Must be moved in.
+   * @param cuda_stream Stream carrying this message's GPU writes.
+   */
+  AGNOCAST_PUBLIC
+  void publish(ipc_shared_ptr<MessageT> && message, const CudaStream & cuda_stream)
   {
     if (!message || topic_name_ != message.get_topic_name()) {
       RCLCPP_ERROR(logger, "Invalid message to publish.");
@@ -276,13 +304,29 @@ public:
           topic_name_.c_str());
         std::abort();
       }
-      // Record the write-complete event so subscribers can order reads after it.
-      agnocast_cuda_record_data_ready(raw_ptr->data);
+      const int stream_kind = cuda_stream.kind_value();
+      if (agnocast_cuda_stream_ordering_unsafe(stream_kind, cuda_stream.handle) == 1) {
+        RCLCPP_ERROR(
+          logger,
+          "CUDA message on topic '%s' would be published with its data-ready event on a default "
+          "CUDA stream, but this process created a stream with cudaStreamNonBlocking. A default "
+          "stream does not order against a non-blocking stream, so the event would complete "
+          "while the kernel is still writing and every subscriber's wait would be a no-op. "
+          "Fix: set PublisherOptions::cuda_stream (or pass the stream to publish()) to the "
+          "stream the message's GPU writes are issued on.",
+          topic_name_.c_str());
+        std::abort();
+      }
+      // Record the write-complete event on the declared stream so subscribers can
+      // order their reads after it, without the publisher ever blocking.
+      agnocast_cuda_record_data_ready(raw_ptr->data, stream_kind, cuda_stream.handle);
 
       auto * meta = new GpuMetadata();
       meta->slot_id = slot_id;
       meta->gpu_data_size = gpu_size;
       raw_ptr->gpu_metadata_ = meta;
+    } else {
+      (void)cuda_stream;  // CUDA streams are meaningless for a host-memory message
     }
 
     // Invalidate all references sharing this handle's control block.
@@ -302,8 +346,9 @@ public:
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
       // CUDA reclaim hook: return the pool slot before deleting the message. This
       // is pure CPU work — the kernel released the message only after all
-      // subscribers dropped their references, and each subscriber completes its GPU
-      // reads before releasing (see docs), so no GPU wait is needed here.
+      // subscribers dropped their references, and each subscriber defers that drop
+      // until its own GPU reads complete (the done edge, see
+      // cuda_deferred_release.hpp), so no GPU wait is needed here.
       // On abnormal publisher exit, this is skipped, but GPU memory is reclaimed by
       // the CUDA driver when the process exits.
       if constexpr (is_cuda_message_v<MessageT>) {

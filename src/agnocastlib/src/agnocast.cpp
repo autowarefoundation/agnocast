@@ -4,6 +4,7 @@
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
+#include "agnocast/cuda_deferred_release.hpp"
 
 #include <dlfcn.h>
 #include <strings.h>
@@ -529,6 +530,10 @@ struct initialize_agnocast_result initialize_agnocast(
 
 static void shutdown_agnocast()
 {
+  // Give GPU-IPC readers a last chance to report their reads complete, then release
+  // the references they were holding so the pool slots go back to the daemon.
+  flush_deferred_subscriber_releases();
+
   std::lock_guard<std::mutex> lock(shm_fds_mtx);
   for (int fd : shm_fds) {
     if (close(fd) == -1) {
