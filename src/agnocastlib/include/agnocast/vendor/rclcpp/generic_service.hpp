@@ -67,10 +67,17 @@ public:
       }
     }
 
-    if constexpr (::rclcpp::function_traits::same_arguments<Func, BasicCallback>::value) {
+    if constexpr (std::is_invocable_v<
+                    std::decay_t<Func>, std::shared_ptr<void> &&, const std::shared_ptr<void> &>) {
       callback_.template emplace<BasicCallback>(std::forward<Func>(callback));
-    } else if constexpr (::rclcpp::function_traits::same_arguments<Func, DeferredCallback>::value) {
+    } else if constexpr (std::is_invocable_v<
+                           std::decay_t<Func>, const std::shared_ptr<GenericService> &,
+                           const std::shared_ptr<rmw_request_id_t> &, std::shared_ptr<void> &&>) {
       callback_.template emplace<DeferredCallback>(std::forward<Func>(callback));
+    } else {
+      // Here, we use `sizeof(Func) == 0` to make it dependent on the template parameter, so that
+      // this assertion will only be evaluated at instantiation time.
+      static_assert(sizeof(Func) == 0, "Invalid callback type for GenericServiceCallback");
     }
   }
 
