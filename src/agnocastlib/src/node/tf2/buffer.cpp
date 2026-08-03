@@ -114,8 +114,12 @@ bool Buffer::canTransform(
     clock_->now() < start_time + rclcpp_timeout &&
     !canTransform(target_frame, source_frame, time, std::chrono::nanoseconds::zero(), errstr) &&
     (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
-    // Poll while the live runtime is up: agnocast::ok() for AgnocastOnly (rclcpp uninit),
-    // rclcpp::ok() for rclcpp mode (agnocast uninit).
+    // agnocast::Buffer is primarily for agnocast::Node. But it is a plain tf data store and does
+    // not touch the Agnocast IPC layer, so it works with rclcpp::Node as well.
+    // In practice, Autoware's agnocast_wrapper uses it from both node types. So poll while
+    // whichever runtime the process initialized is still up:
+    //   - agnocast::ok(): AgnocastOnly mode (rclcpp is uninitialized)
+    //   - rclcpp::ok()  : rclcpp mode (agnocast is uninitialized)
     (agnocast::ok() || rclcpp::ok())) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -153,7 +157,7 @@ bool Buffer::canTransform(
            target_frame, target_time, source_frame, source_time, fixed_frame,
            std::chrono::nanoseconds::zero(), errstr) &&
          (clock_->now() + rclcpp::Duration(3, 0) >= start_time) &&  // don't wait bag loop detected
-         (agnocast::ok() || rclcpp::ok())) {  // live-runtime guard; see 3-arg overload above
+         (agnocast::ok() || rclcpp::ok())) {  // live-runtime guard; see the overload above
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
