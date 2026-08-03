@@ -82,12 +82,38 @@ struct ioctl_get_version_args
 // Mirrors agnocast_kmod/agnocast.h so _IOW encodes the same size.
 struct ioctl_add_domain_bridge_args
 {
-  struct name_info topic_name;
+  // topic_name_from / topic_name_to may differ (rename); equal for a plain bridge.
+  struct name_info topic_name_from;
+  struct name_info topic_name_to;
   uint32_t from_domain;
   uint32_t to_domain;
 };
 
+struct ioctl_discovery_agent_should_exit_args
+{
+  uint32_t domain_id;
+  bool commit;
+  bool ret_should_exit;
+};
+
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_already_exists;
+};
+
+struct ioctl_discovery_agent_exists_args
+{
+  uint32_t domain_id;
+  bool ret_exists;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
+#define AGNOCAST_DISCOVERY_AGENT_SHOULD_EXIT_CMD \
+  _IOWR(0xA6, 29, struct ioctl_discovery_agent_should_exit_args)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD \
+  _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
 #define AGNOCAST_GET_TOPIC_LIST_CMD _IOWR(0xA6, 20, union ioctl_topic_list_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD _IOWR(0xA6, 22, union ioctl_topic_info_args)

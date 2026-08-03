@@ -16,7 +16,7 @@ topics:
   chatter:
     type: std_msgs/msg/String
 """
-    assert parse_domain_bridge_config(text) == ([('chatter', 1, 2)], [])
+    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
 
 
 def test_per_topic_domains_override_top_level():
@@ -31,9 +31,57 @@ topics:
     to_domain: 4
 """
     rules, skipped = parse_domain_bridge_config(text)
-    assert ('chatter', 1, 2) in rules
-    assert ('special', 3, 4) in rules
+    assert ('chatter', 'chatter', 1, 2) in rules
+    assert ('special', 'special', 3, 4) in rules
     assert skipped == []
+
+
+def test_remap_sets_the_target_topic_name():
+    # The `remap` field becomes the to_topic; the source name stays the from_topic.
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /in_sub/chatter:
+    type: std_msgs/msg/String
+    remap: /chatter
+"""
+    assert parse_domain_bridge_config(text) == ([('/in_sub/chatter', '/chatter', 1, 2)], [])
+
+
+def test_absent_remap_reuses_the_source_name():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  chatter:
+    type: std_msgs/msg/String
+"""
+    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+
+
+def test_non_string_topic_key_without_remap_is_coerced():
+    # A non-string YAML key (here an integer) with no `remap` must not trip the remap
+    # string check; both names default to the coerced source name.
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  123:
+"""
+    assert parse_domain_bridge_config(text) == ([('123', '123', 1, 2)], [])
+
+
+def test_non_string_remap_raises():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  chatter:
+    remap: [not, a, string]
+"""
+    with pytest.raises((ValueError, TypeError)):
+        parse_domain_bridge_config(text)
 
 
 def test_topic_without_resolvable_domain_pair_is_reported_as_skipped():
@@ -118,4 +166,4 @@ to_domain: 2
 topics:
   chatter:
 """
-    assert parse_domain_bridge_config(text) == ([('chatter', 1, 2)], [])
+    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])

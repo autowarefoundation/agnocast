@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_service_bridge.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
@@ -9,7 +10,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -42,6 +46,9 @@ private:
   };
 
   rclcpp::Logger logger_;
+  // Steady clock for throttled logging. Owned here rather than taken from
+  // container_node_, since throttled logging happens on the event loop thread.
+  std::shared_ptr<rclcpp::Clock> clock_;
   uint64_t self_ipc_ns_inode_;
   PerformanceBridgeIpcEventLoop event_loop_;
   std::shared_ptr<PerformanceBridgeLoader> loader_;
@@ -49,6 +56,11 @@ private:
   std::shared_ptr<rclcpp::Node> container_node_;
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
+  std::thread worker_thread_;
+
+  std::mutex pending_msgs_mtx_;
+  std::condition_variable pending_msgs_cv_;
+  std::deque<BridgeMsg> pending_msgs_;
 
   std::atomic_bool shutdown_requested_ = false;
 
@@ -63,8 +75,18 @@ private:
   std::unordered_map<std::string, ServiceBridgeItem> active_service_bridges_;
 
   void start_ros_execution();
+  void start_worker_thread();
 
-  void on_bridge_message(const void * data, std::size_t size);
+  void worker_loop();
+
+  void parse_and_enqueue(const void * data, std::size_t size);
+  void dispatch_bridge_message(const BridgeMsg & msg);
+
+  // Signals every background thread to exit: raises shutdown_requested_ (which
+  // the run() and worker_loop() poll), wakes the worker sleeping on the CV,
+  // and cancels the ROS 2 executor so its thread can leave spin().
+  void request_shutdown();
+
   void on_signal();
   std::string on_socket_request() const;
 

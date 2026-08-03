@@ -74,6 +74,11 @@ void register_timer_info(
 
 void unregister_timer_info(uint32_t timer_id);
 
+// Whether the given callback group owns any agnocast timer. Used alongside
+// get_agnocast_topics_by_group() so a timer-only group is still classified as needing an
+// agnocast-capable executor.
+bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group);
+
 class TimerEventHandler : public EpollEventHandler
 {
   pid_t my_pid_;
