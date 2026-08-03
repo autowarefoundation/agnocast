@@ -67,12 +67,9 @@ public:
       }
     }
 
-    if constexpr (std::is_invocable_v<
-                    std::decay_t<Func>, std::shared_ptr<void> &&, const std::shared_ptr<void> &>) {
+    if constexpr (std::is_constructible_v<BasicCallback, Func &&>) {
       callback_.template emplace<BasicCallback>(std::forward<Func>(callback));
-    } else if constexpr (std::is_invocable_v<
-                           std::decay_t<Func>, const std::shared_ptr<GenericService> &,
-                           const std::shared_ptr<rmw_request_id_t> &, std::shared_ptr<void> &&>) {
+    } else if constexpr (std::is_constructible_v<DeferredCallback, Func &&>) {
       callback_.template emplace<DeferredCallback>(std::forward<Func>(callback));
     } else {
       // Here, we use `sizeof(Func) == 0` to make it dependent on the template parameter, so that
