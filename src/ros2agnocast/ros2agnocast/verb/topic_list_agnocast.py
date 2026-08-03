@@ -7,6 +7,7 @@ from ros2agnocast.discovery import (
     all_topic_names,
     bridge_label_from_roles,
     BRIDGE_LABEL_TEXT,
+    CIE_THREAD_CONFIGURATOR_NAMESPACE,
     collect_announcements_with_fallback,
     collect_bridge_roles,
     warn_if_gossip_timeout_overridden,
@@ -17,6 +18,9 @@ class ListAgnocastVerb(VerbExtension):
     "Output a list of available topics including Agnocast"
 
     def add_arguments(self, parser, cli_name):
+        parser.add_argument(
+            '-d', '--debug', action='store_true',
+            help='Include internal topics (CIE thread configurator) in the output')
         add_gossip_timeout_arg(parser)
 
     def main(self, *, args):
@@ -68,7 +72,14 @@ class ListAgnocastVerb(VerbExtension):
             ros2_sub_set = set(ros2_sub_topics)
             ros2_topics_set = ros2_only_topics | ros2_pub_set | ros2_sub_set
 
-            for topic in sorted(agnocast_topics_set | ros2_topics_set):
+            merged_topics = agnocast_topics_set | ros2_topics_set
+            if not args.debug:
+                merged_topics = {
+                    topic for topic in merged_topics
+                    if not topic.startswith(CIE_THREAD_CONFIGURATOR_NAMESPACE)
+                }
+
+            for topic in sorted(merged_topics):
                 if topic in agnocast_topics_set:
                     status = bridge_label_from_roles(
                         bridge_roles.get(topic, []), topic in ros2_pub_set, topic in ros2_sub_set)

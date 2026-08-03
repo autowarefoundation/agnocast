@@ -96,7 +96,7 @@ bash scripts/dev/setup.bash
 
 ### Setup pre-commit
 
-The following command allows `clang-format`, `markdownlint`, and [KUNIT Test](./agnocast_kmod/agnocast_kunit.c) to be run before each commit.
+The following command allows `clang-format`, `markdownlint`, and [KUNIT Test](./agnocast_kmod/agnocast_kunit_main.c) to be run before each commit.
 
 ```bash
 python3 -m pip install pre-commit
@@ -211,11 +211,11 @@ If you encounter `mq_open failed: No space left on device`, the system has reach
 - [Autoware integration](./docs/autoware_integration.md)
 - [Memory format in heaphook](./docs/heaphook_alignment.md)
 - [Clang-tidy Suppressions](./docs/clang_tidy_suppression.md)
-- [How to set environment variables](./docs/how_to_set_environment_variables.md)
+- [Environment Variables](https://autowarefoundation.github.io/agnocast_doc/api/environment-variables/)
 - [ros2 command extension](./docs/ros2_command_extension.md)
 - [agnocast::Node and rclcpp::Node interface comparison](./docs/agnocast_node_interface_comparison.md)
 - [Callback Isolated Executor for Agnocast](./docs/callback_isolated_executor_for_agnocast.md)
 - [Agnocast-ROS 2 Bridge](./docs/agnocast_ros2_bridge.md)
 - [Message Filters Design Document](./docs/message_filters_design_document.md)
-- [Message Filters User Guide](./docs/message_filters_user_guide.md)
+- [Message Filters Migration Guide](https://autowarefoundation.github.io/agnocast_doc/migration-guide/message-filters/)
 - [ApproximateTime Algorithm](./docs/approximate_time_algorithm.md)
