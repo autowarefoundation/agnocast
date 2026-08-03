@@ -14,12 +14,11 @@
 //
 // This file has been modified from the original.
 
-#include <rclcpp/version.h>
-
-#if RCLCPP_VERSION_MAJOR < 28
-
 #include "agnocast/vendor/rclcpp/generic_client.hpp"
+
 #include "agnocast/vendor/rclcpp/generic_service.hpp"  // get_service_typesupport_handle
+
+#include <rclcpp/version.h>
 
 namespace agnocast::vendor_rclcpp
 {
@@ -40,10 +39,17 @@ GenericClient::GenericClient(
     ts_lib_introspection_ =
       rclcpp::get_typesupport_library(service_type, ts_introspection_identifier);
 
+#if RCLCPP_VERSION_MAJOR >= 28
+    service_ts = rclcpp::get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
+
+    const rosidl_message_type_support_t * response_ts = rclcpp::get_message_typesupport_handle(
+      response_type, ts_introspection_identifier, *ts_lib_introspection_);
+#else
     service_ts = get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
 
     const rosidl_message_type_support_t * response_ts = rclcpp::get_typesupport_handle(
       response_type, ts_introspection_identifier, *ts_lib_introspection_);
+#endif
     response_members_ =
       static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(response_ts->data);
   } catch (std::runtime_error & err) {
@@ -152,5 +158,3 @@ std::optional<GenericClient::PendingRequest> GenericClient::get_and_erase_pendin
 }
 
 }  // namespace agnocast::vendor_rclcpp
-
-#endif
