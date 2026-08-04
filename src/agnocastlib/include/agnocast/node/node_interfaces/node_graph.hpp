@@ -4,6 +4,7 @@
 #include "rclcpp/event.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/node_interfaces/node_graph_interface.hpp"
+#include "rclcpp/version.h"
 
 #include <chrono>
 #include <map>
@@ -64,6 +65,12 @@ public:
     const std::string & topic_name, bool no_mangle = false) const override;
   std::vector<rclcpp::TopicEndpointInfo> get_subscriptions_info_by_topic(
     const std::string & topic_name, bool no_mangle = false) const override;
+
+  // rclcpp 28+ (Jazzy) added these methods to NodeGraphInterface.
+#if RCLCPP_VERSION_MAJOR >= 28
+  size_t count_clients(const std::string & service_name) const override;
+  size_t count_services(const std::string & service_name) const override;
+#endif
 
 private:
   NodeBase::SharedPtr node_base_;

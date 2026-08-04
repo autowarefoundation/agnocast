@@ -150,4 +150,19 @@ std::vector<rclcpp::TopicEndpointInfo> NodeGraph::get_subscriptions_info_by_topi
     "NodeGraph::get_subscriptions_info_by_topic is not supported in agnocast.");
 }
 
+// rclcpp 28+ (Jazzy) added these methods to NodeGraphInterface.
+#if RCLCPP_VERSION_MAJOR >= 28
+size_t NodeGraph::count_clients(const std::string & service_name) const
+{
+  (void)service_name;
+  throw std::runtime_error("NodeGraph::count_clients is not supported in agnocast.");
+}
+
+size_t NodeGraph::count_services(const std::string & service_name) const
+{
+  (void)service_name;
+  throw std::runtime_error("NodeGraph::count_services is not supported in agnocast.");
+}
+#endif
+
 }  // namespace agnocast::node_interfaces
