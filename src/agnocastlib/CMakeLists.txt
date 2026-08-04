@@ -267,8 +267,7 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
-  # NodeGraphInterface integration test (requires kernel module, no mock).
-  # count_publishers()/count_subscribers() go through the real endpoint-counting ioctls.
+  # NodeGraphInterface integration test (requires kernel module, no mock)
   ament_add_gmock(test_integration_node_graph_${PROJECT_NAME}
     test/integration/test_node_graph.cpp)
   target_link_libraries(test_integration_node_graph_${PROJECT_NAME} agnocast)
