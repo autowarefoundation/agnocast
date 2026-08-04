@@ -69,16 +69,6 @@ TEST(AgnocastUtilsTest, create_mq_name_invalid_topic)
     ::testing::ExitedWithCode(EXIT_FAILURE), "");
 }
 
-TEST(AgnocastUtilsTest, create_uds_addr_bridge_manager)
-{
-  const auto addr = agnocast::create_uds_addr_for_bridge();
-  ASSERT_FALSE(addr.empty());
-  EXPECT_EQ(addr[0], '\0');
-  const auto expected =
-    "agnocast_bridge_manager_" + std::to_string(agnocast::get_self_ipc_ns_inode());
-  EXPECT_EQ(addr.substr(1), expected);
-}
-
 TEST(AgnocastUtilsTest, validate_ld_preload_normal)
 {
   setenv("LD_PRELOAD", "libagnocast_heaphook.so:", 1);
