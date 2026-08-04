@@ -47,7 +47,7 @@ add_library(agnocast SHARED
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
-  src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
+  src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp src/node/agnocast_parameter_client.cpp
   src/cie_client_utils.cpp
   src/internal/type_registry_writer.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp src/node/node_interfaces/node_graph.cpp
@@ -275,6 +275,18 @@ if(BUILD_TESTING)
   set_tests_properties(test_integration_node_graph_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # AsyncParametersClient integration test (requires kernel module, no mock).
+  # Black-box test of agnocast::AsyncParametersClient against a real
+  # agnocast::ParameterService on a second node in the same process.
+  ament_add_gmock(test_integration_agnocast_parameter_client_${PROJECT_NAME}
+    test/integration/test_agnocast_parameter_client.cpp)
+  target_link_libraries(test_integration_agnocast_parameter_client_${PROJECT_NAME} agnocast)
+  set_tests_properties(test_integration_agnocast_parameter_client_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 120
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
