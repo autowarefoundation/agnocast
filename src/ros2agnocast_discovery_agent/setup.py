@@ -14,7 +14,8 @@ setup(
         ('share/' + package_name + '/systemd',
             ['systemd/agnocast-domain-bridge.service.example', 'systemd/README.md']),
         ('lib/' + package_name,
-            ['scripts/agnocast_discovery_agent', 'scripts/register_domain_bridge']),
+            ['scripts/agnocast_discovery_agent', 'scripts/discovery_agent',
+             'scripts/register_domain_bridge']),
     ],
     install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
@@ -30,6 +31,8 @@ setup(
     entry_points={
         'console_scripts': [
             'agnocast_discovery_agent = ros2agnocast_discovery_agent.agent:main',
+            # Deprecated alias of the above; remove in a release that may break users.
+            'discovery_agent = ros2agnocast_discovery_agent.agent:main_deprecated_alias',
             'register_domain_bridge = '
             'ros2agnocast_discovery_agent.register_domain_bridge:main',
         ],
