@@ -22,6 +22,7 @@ Node::Node(
     node_name, namespace_, options.context(), local_args_.get(), options.use_global_arguments(),
     options.use_intra_process_comms(), options.enable_topic_statistics())),
   logger_(rclcpp::get_logger(node_base_->get_name())),
+  node_graph_(std::make_shared<node_interfaces::NodeGraph>(node_base_)),
   node_topics_(std::make_shared<node_interfaces::NodeTopics>(node_base_)),
   node_services_(std::make_shared<node_interfaces::NodeServices>(node_base_)),
   node_parameters_(std::make_shared<node_interfaces::NodeParameters>(
