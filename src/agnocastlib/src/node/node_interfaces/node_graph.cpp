@@ -3,6 +3,8 @@
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 
+#include <stdexcept>
+
 namespace agnocast::node_interfaces
 {
 
