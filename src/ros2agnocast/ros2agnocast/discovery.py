@@ -160,7 +160,7 @@ def warn_if_using_fallback(
         print(
             'NOTE: no /_agnocast_discovery agent visible; showing local '
             'NS only via ioctl. Start one with '
-            '`ros2 run ros2agnocast_discovery_agent discovery_agent` to '
+            '`ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent` to '
             'see other NSes / ECUs.',
             file=sys.stderr)
     else:

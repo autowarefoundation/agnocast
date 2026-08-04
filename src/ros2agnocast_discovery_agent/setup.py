@@ -14,7 +14,7 @@ setup(
         ('share/' + package_name + '/systemd',
             ['systemd/agnocast-domain-bridge.service.example', 'systemd/README.md']),
         ('lib/' + package_name,
-            ['scripts/discovery_agent', 'scripts/register_domain_bridge']),
+            ['scripts/agnocast_discovery_agent', 'scripts/register_domain_bridge']),
     ],
     install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
@@ -29,7 +29,7 @@ setup(
     license='Apache License 2.0',
     entry_points={
         'console_scripts': [
-            'discovery_agent = ros2agnocast_discovery_agent.agent:main',
+            'agnocast_discovery_agent = ros2agnocast_discovery_agent.agent:main',
             'register_domain_bridge = '
             'ros2agnocast_discovery_agent.register_domain_bridge:main',
         ],
