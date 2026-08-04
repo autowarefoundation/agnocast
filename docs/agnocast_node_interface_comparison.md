@@ -168,13 +168,42 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 
 ---
 
-### 2.8 Other Interfaces
+### 2.8 NodeGraphInterface
+
+**Purpose**: Graph
+
+**Important**: `agnocast::node_interfaces::NodeGraph` **inherits from** `rclcpp::node_interfaces::NodeGraphInterface`.
+
+| Feature | agnocast::Node | Support Level | Planned | Notes |
+|---------|----------------|---------------|---------|-------|
+| `get_topic_names_and_types()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
+| `get_service_names_and_types()` | ✗ | **Throws Exception** | No | Agnocast does not officially support Service |
+| `get_service_names_and_types_by_node()` | ✗ | **Throws Exception** | No | Agnocast does not officially support Service |
+| `get_client_names_and_types_by_node()` | ✗ | **Throws Exception** | No | Agnocast does not officially support Service |
+| `get_publisher_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
+| `get_subscriber_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
+| `get_node_names()` | ✗ | **Throws Exception** | Yes | To support this, the kmod must report the nodes owning an agnocast endpoint; it currently does not |
+| `get_node_names_with_enclaves()` | ✗ | **Throws Exception** | No | |
+| `get_node_names_and_namespaces()` | ✗ | **Throws Exception** | No | To support this, namespace must be managed within the kmod; however, they are currently not managed |
+| `count_publishers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 publishers, excluding those created by bridges. `agnocast::Node::count_publishers()` delegates here |
+| `count_subscribers()` | ✓ | **Partial Support** | - | Counts agnocast and ROS 2 subscribers, excluding those created by bridges. Agnocast subscribers in the caller's own process are not counted. `agnocast::Node::count_subscribers()` delegates here |
+| `get_graph_guard_condition()` | ✗ | **Throws Exception** | No | |
+| `notify_graph_change()` | - | **No-op** | No | agnocast has no graph events, so there is nothing to notify. Made a no-op because rclcpp utilities call it unconditionally |
+| `notify_shutdown()` | - | **No-op** | No | Same as `notify_graph_change()` |
+| `get_graph_event()` | ✗ | **Throws Exception** | No | |
+| `wait_for_graph_change()` | ✗ | **Throws Exception** | No | |
+| `count_graph_users()` | ✗ | **Throws Exception** | No | |
+| `get_publishers_info_by_topic()` | ✗ | **Throws Exception** | No | To support this, namespace and topic_type must be managed within the kmod; however, they are currently not managed |
+| `get_subscriptions_info_by_topic()` | ✗ | **Throws Exception** | No | To support this, namespace and topic_type must be managed within the kmod; however, they are currently not managed |
+
+---
+
+### 2.9 Other Interfaces
 
 The following interfaces are all **unsupported**. agnocast::Node does not implement these interfaces.
 
 | Interface | Support Status | Planned | Notes |
 |-----------|---------------|---------|-------|
-| NodeGraphInterface | Unsupported | No | DDS is not used |
 | NodeTimersInterface | Unsupported | Yes | |
 | NodeWaitablesInterface | Unsupported | TBD | |
 
