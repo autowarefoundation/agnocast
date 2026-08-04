@@ -26,6 +26,9 @@ public:
 
   virtual ~NodeGraph() = default;
 
+  NodeGraph(const NodeGraph &) = delete;
+  NodeGraph & operator=(const NodeGraph &) = delete;
+
   size_t count_publishers(const std::string & topic_name) const override;
   size_t count_subscribers(const std::string & topic_name) const override;
 
