@@ -245,8 +245,8 @@ void poll_for_bridge_manager()
 void exec_discovery_agent()
 {
   execlp(
-    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "discovery_agent", "--exit-when-idle",
-    static_cast<char *>(nullptr));
+    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "agnocast_discovery_agent",
+    "--exit-when-idle", static_cast<char *>(nullptr));
   // execlp only returns on failure. This still runs in the pre-allocator forked child, so the
   // failure path must be async-signal-safe and allocation-free: RCLCPP_ERROR / strerror / exit()
   // may allocate or run atexit handlers before the TLSF allocator is ready. Use write() + _exit().

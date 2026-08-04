@@ -322,6 +322,15 @@ def test_main_returns_error_when_claim_ioctl_fails(monkeypatch):
     assert agent.main(argv=[]) == 1
 
 
+def test_main_deprecated_alias_warns_and_delegates(monkeypatch, capsys):
+    """The old `discovery_agent` name still runs the agent, but says it is deprecated."""
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=-1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
+    assert agent.main_deprecated_alias(argv=[]) == 1
+    assert 'deprecated' in capsys.readouterr().err
+
+
 def test_main_returns_error_when_wrapper_unavailable(monkeypatch):
     """A missing library or symbol (version skew) exits 1 cleanly, not with a traceback."""
     from ros2agnocast_discovery_agent import agent

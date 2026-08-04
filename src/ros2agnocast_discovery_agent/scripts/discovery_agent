@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Console-script wrapper so `ros2 run ros2agnocast_discovery_agent discovery_agent` works.
+"""Deprecated alias of `agnocast_discovery_agent`, kept so existing callers keep working.
 
-ament_python's `entry_points` would normally produce a binary in `bin/`, but
-`ros2 run` looks in `lib/<pkg>/`. The setup.py installs this file to
-`lib/<pkg>/discovery_agent` so the standard ros2 run discovery rule finds it.
+Installed to `lib/<pkg>/discovery_agent` for `ros2 run` (and as a `bin/` console script),
+alongside the new name. Warns on stderr and then runs the agent.
 """
 import sys
 
-from ros2agnocast_discovery_agent.agent import main
+from ros2agnocast_discovery_agent.agent import main_deprecated_alias
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
+    sys.exit(main_deprecated_alias(sys.argv))
