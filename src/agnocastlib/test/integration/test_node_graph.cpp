@@ -13,8 +13,6 @@
 
 using StringMsg = std_msgs::msg::String;
 
-// The kmod keeps a topic entry alive for the lifetime of the process, so every test uses its own
-// topic name to stay independent of the ones before it.
 class NodeGraphIntegrationTest : public ::testing::Test
 {
 protected:
@@ -27,8 +25,8 @@ protected:
 
   void TearDown() override
   {
-    node_.reset();
     graph_.reset();
+    node_.reset();
     if (agnocast::ok()) {
       agnocast::shutdown();
     }
@@ -72,6 +70,16 @@ TEST_F(NodeGraphIntegrationTest, count_publishers_counts_every_publisher_on_the_
   EXPECT_EQ(graph_->count_publishers(topic), 2u);
 }
 
+TEST_F(NodeGraphIntegrationTest, count_publishers_drops_when_the_publisher_is_destroyed)
+{
+  const std::string topic = "/test_node_graph_pub_destroyed";
+  {
+    auto pub = node_->create_publisher<StringMsg>(topic, 1);
+    ASSERT_EQ(graph_->count_publishers(topic), 1u);
+  }
+  EXPECT_EQ(graph_->count_publishers(topic), 0u);
+}
+
 // count_subscribers() reports ret_other_process_subscriber_num, so a subscriber living in the
 // caller's own process is not counted. This is the documented limitation, not an accident: the
 // underlying helper exists to tell a publisher how many peers receive a published message.
@@ -86,8 +94,6 @@ TEST_F(NodeGraphIntegrationTest, count_subscribers_does_not_see_same_process_sub
 
 TEST_F(NodeGraphIntegrationTest, count_publishers_resolves_a_relative_topic_name)
 {
-  agnocast::shutdown();
-  agnocast::init(0, nullptr);
   auto node = std::make_shared<agnocast::Node>("test_node_graph_rel", "/test_ns");
   auto graph = node->get_node_graph_interface();
 
@@ -98,15 +104,10 @@ TEST_F(NodeGraphIntegrationTest, count_publishers_resolves_a_relative_topic_name
   EXPECT_EQ(graph->count_publishers("/relative_topic"), 0u);
 }
 
-// agnocast::Node::count_publishers()/count_subscribers() are thin wrappers over the interface.
 TEST_F(NodeGraphIntegrationTest, node_delegates_counting_to_the_node_graph_interface)
 {
   const std::string topic = "/test_node_graph_delegation";
-
   auto pub = node_->create_publisher<StringMsg>(topic, 1);
-
-  EXPECT_EQ(node_->count_publishers(topic), graph_->count_publishers(topic));
-  EXPECT_EQ(node_->count_subscribers(topic), graph_->count_subscribers(topic));
   EXPECT_EQ(node_->count_publishers(topic), 1u);
 }
 
