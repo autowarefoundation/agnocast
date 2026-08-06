@@ -3,6 +3,8 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_deferred_release.hpp"
+#include "agnocast/cuda_stream.hpp"
 
 #include <fcntl.h>
 #include <mqueue.h>
@@ -40,11 +42,19 @@ extern int agnocast_fd;
 // Sentinel value indicating entry_id has not been assigned (publisher-side, before publish).
 constexpr int64_t ENTRY_ID_NOT_ASSIGNED = -1;
 
-// Forward declaration for friend access
+// Forward declarations for friend access
+template <typename T>
+class ipc_shared_ptr;
+
 template <typename MessageT>
 class Publisher;
 
 class TypeErasedPublisher;
+
+template <typename MessageT>
+ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
+  MessageT * msg, const std::string & topic_name, const topic_local_id_t subscriber_id,
+  const int64_t entry_id, const CudaStream & cuda_stream = CudaStream{});
 
 namespace detail
 {
@@ -61,6 +71,26 @@ struct control_block
   std::atomic<uint32_t> ref_count{1U};  // 4-byte alignment
   topic_local_id_t pubsub_id;           // 4-byte alignment
   std::atomic<bool> valid{true};        // 1-byte alignment
+
+  // Optional GPU cleanup function pointer. Null for non-CUDA messages.
+  // Called as gpu_release_fn(gpu_data_ptr) before bitmap release in reset() to ensure GPU
+  // mappings are released before the publisher can free the underlying GPU buffer.
+  // Uses a plain function pointer instead of std::function to avoid heap allocation and
+  // minimize overhead for non-CUDA messages (16 bytes for two pointers vs ~40+ bytes).
+  void (*gpu_release_fn)(void *) = nullptr;
+
+  // Subscriber-local GPU device pointer for the message's pool slot (resolved from
+  // the slot id in GpuMetadata via the pool proxy). Stored here because the shared
+  // memory message is mapped read-only by the subscriber, so we cannot inject the
+  // local pointer into msg->data.
+  void * gpu_data_ptr = nullptr;
+
+  // The subscriber's declared CUDA stream, used to defer the kernel-side reference
+  // release until this reader's GPU reads have completed (the GPU-IPC "done edge",
+  // see cuda_deferred_release.hpp). `gpu_done_stream_kind < 0` means "release
+  // immediately" — every non-CUDA message, and the publisher side.
+  int gpu_done_stream_kind = -1;
+  void * gpu_done_stream = nullptr;
 
   control_block(std::string topic, topic_local_id_t pubsub, int64_t entry)
   : topic_name(std::move(topic)), entry_id(entry), pubsub_id(pubsub)
@@ -109,6 +139,12 @@ class ipc_shared_ptr
 
   friend class TypeErasedPublisher;
 
+  // Allow create_subscriber_ipc_ptr to call set_gpu_release_fn(), set_gpu_data_ptr()
+  // and set_gpu_done_stream()
+  template <typename MessageT>
+  friend ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
+    MessageT *, const std::string &, const topic_local_id_t, const int64_t, const CudaStream &);
+
   // Allow converting constructors to access private members of ipc_shared_ptr<U>
   template <typename U>
   friend class ipc_shared_ptr;
@@ -134,6 +170,35 @@ class ipc_shared_ptr
   {
     if (control_) {
       control_->valid.store(false, std::memory_order_release);
+    }
+  }
+
+  // Sets a GPU release function to be invoked as fn(gpu_data_ptr) when the last reference
+  // is released. Private: only create_subscriber_ipc_ptr() should call this.
+  void set_gpu_release_fn(void (*fn)(void *))
+  {
+    if (control_) {
+      control_->gpu_release_fn = fn;
+    }
+  }
+
+  // Sets the subscriber-local GPU pointer (the pool slot's imported device pointer).
+  // Private: only create_subscriber_ipc_ptr() should call this.
+  void set_gpu_data_ptr(void * ptr)
+  {
+    if (control_) {
+      control_->gpu_data_ptr = ptr;
+    }
+  }
+
+  // Declares the stream on which this subscriber's GPU reads are issued, so that the
+  // kernel-side reference release is deferred until they complete.
+  // Private: only create_subscriber_ipc_ptr() should call this.
+  void set_gpu_done_stream(int stream_kind, void * stream)
+  {
+    if (control_) {
+      control_->gpu_done_stream_kind = stream_kind;
+      control_->gpu_done_stream = stream;
     }
   }
 
@@ -345,6 +410,9 @@ public:
   AGNOCAST_PUBLIC
   T * get() const noexcept { return is_invalidated_() ? nullptr : ptr_; }
 
+  // Returns the subscriber-local GPU device pointer, or nullptr for non-CUDA messages.
+  void * gpu_data() const noexcept { return control_ ? control_->gpu_data_ptr : nullptr; }
+
   /**
    * @brief Release ownership of the managed message. If this is the last reference: on the
    * subscriber side, notifies the kernel module that the message can be reclaimed; on the
@@ -360,9 +428,25 @@ public:
     const bool was_last = control_->decrement_and_check();
 
     if (was_last) {
+      // GPU cleanup must run BEFORE bitmap release: unmapping the GPU buffer before
+      // the publisher is allowed to cudaFree the underlying allocation.
+      if (control_->gpu_release_fn) {
+        control_->gpu_release_fn(control_->gpu_data_ptr);
+      }
+
       if (control_->entry_id != ENTRY_ID_NOT_ASSIGNED) {
-        // Subscriber side: notify kmod that all references are released.
-        release_subscriber_reference(control_->topic_name, control_->pubsub_id, control_->entry_id);
+        // Subscriber side: notify kmod that all references are released. For a CUDA
+        // message the notification is deferred until this reader's GPU reads on its
+        // declared stream complete, so the publisher cannot hand the pool slot to the
+        // next writer while the reads are still in flight (the "done edge").
+        const bool deferred = control_->gpu_done_stream_kind >= 0 &&
+                              defer_subscriber_release(
+                                control_->topic_name, control_->pubsub_id, control_->entry_id,
+                                control_->gpu_done_stream_kind, control_->gpu_done_stream);
+        if (!deferred) {
+          release_subscriber_reference(
+            control_->topic_name, control_->pubsub_id, control_->entry_id);
+        }
       } else if (control_->valid.load(std::memory_order_acquire)) {
         // Publisher side, last reference, not published: delete the memory.
         // This handles the case where borrow_loaned_message() was called but publish() was not.

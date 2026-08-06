@@ -32,6 +32,13 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
+  <!-- agnocast_cuda has no build-time CUDA dependency (it dlopen's libcudart.so at runtime),
+       so it is safe to declare as a dependency on all systems including non-CUDA ones.
+       Note: linking against agnocast_cuda does NOT mean CUDA is available at runtime.
+       Packages that compile .cu files must also check for CUDAToolkit in CMakeLists.txt. -->
+  <depend>agnocast_cuda</depend>
+  <depend>sensor_msgs</depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>

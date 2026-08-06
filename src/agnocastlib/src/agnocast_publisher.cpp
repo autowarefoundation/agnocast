@@ -208,7 +208,8 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
 template <typename NodeT>
 rclcpp::QoS PublisherBase::init_base(
   NodeT * node, const std::string & topic_name, const std::string & type_name,
-  const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role)
+  const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role,
+  const bool is_cuda_message)
 {
   if (options.do_always_ros2_publish) {
     RCLCPP_ERROR(
@@ -235,7 +236,15 @@ rclcpp::QoS PublisherBase::init_base(
   generate_gid();
 
   if (role == PublisherRole::Default) {
-    if (!type_name.empty()) {
+    if (is_cuda_message) {
+      // CUDA message types cannot be bridged to ROS 2 directly (GPU pointers are not
+      // serializable). Bridge support for CUDA types (via cudaMemcpy D2H) is future work.
+      RCLCPP_WARN(
+        logger,
+        "A2R bridge skipped for CUDA topic '%s': GPU message types cannot be bridged to ROS 2. "
+        "Use cudaMemcpy to a standard ROS message if DDS bridging is needed.",
+        topic_name_.c_str());
+    } else if (!type_name.empty()) {
       register_pubsub_bridge_by_type_name(
         topic_name_, id_, type_name, BridgeDirection::AGNOCAST_TO_ROS2);
     } else {
@@ -252,10 +261,10 @@ rclcpp::QoS PublisherBase::init_base(
 
 template rclcpp::QoS PublisherBase::init_base<rclcpp::Node>(
   rclcpp::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
-  const PublisherOptions &, PublisherRole);
+  const PublisherOptions &, PublisherRole, const bool);
 template rclcpp::QoS PublisherBase::init_base<agnocast::Node>(
   agnocast::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
-  const PublisherOptions &, PublisherRole);
+  const PublisherOptions &, PublisherRole, const bool);
 
 void PublisherBase::generate_gid()
 {
@@ -319,7 +328,9 @@ TypeErasedPublisher::TypeErasedPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
+  // TypeErasedPublisher is used for runtime-typed (non-CUDA) topics only.
+  const rclcpp::QoS actual_qos =
+    this->init_base(node, topic_name, topic_type, qos, options, role, false);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),
@@ -331,7 +342,9 @@ TypeErasedPublisher::TypeErasedPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
+  // TypeErasedPublisher is used for runtime-typed (non-CUDA) topics only.
+  const rclcpp::QoS actual_qos =
+    this->init_base(node, topic_name, topic_type, qos, options, role, false);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),

@@ -3,8 +3,15 @@
 #include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
+#include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_deferred_release.hpp"
+#include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_pool_api.hpp"
+#include "agnocast/cuda_stream.hpp"
+#include "agnocast/gpu_metadata.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -72,6 +79,76 @@ extern std::atomic<uint32_t> next_callback_info_id;
 
 uint32_t allocate_callback_info_id();
 
+// Creates an ipc_shared_ptr for a subscriber-received message.
+// For CUDA messages: resolves the subscriber-local GPU pointer for the message's pool
+// slot into control_block->gpu_data_ptr (accessed via ipc_shared_ptr::gpu_data()),
+// makes `cuda_stream` wait for the publisher's write, and records the stream so that
+// the kernel-side reference release is deferred until this reader's GPU reads finish.
+// For non-CUDA messages: simply wraps the pointer.
+template <typename MessageT>
+agnocast::ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
+  MessageT * msg, const std::string & topic_name, const topic_local_id_t subscriber_id,
+  const int64_t entry_id, const CudaStream & cuda_stream)
+{
+  if constexpr (is_cuda_message_v<MessageT>) {
+    auto * meta = static_cast<GpuMetadata *>(msg->gpu_metadata_);
+    if (!meta) {
+      RCLCPP_ERROR(
+        logger,
+        "CUDA message on topic '%s' has null gpu_metadata_. "
+        "The publisher may have failed to set GpuMetadata during publish().",
+        topic_name.c_str());
+      std::abort();
+    }
+
+    // Resolve this process's local device pointer for the pool slot. The proxy
+    // imported every slot once at startup, so there is no per-message import.
+    void * gpu_data_ptr = nullptr;
+    if (!agnocast_cuda_ptr_from_slot_id(meta->slot_id, &gpu_data_ptr)) {
+      RCLCPP_ERROR(
+        logger,
+        "CUDA message on topic '%s' references unknown pool slot %u. "
+        "Is the GPU pool proxy initialized (pool daemon running for this GPU)?",
+        topic_name.c_str(), meta->slot_id);
+      std::abort();
+    }
+    // Install the done-edge primitives. Done here, inside the CUDA branch, so that
+    // agnocastlib's own translation units never reference the CUDA C ABI and a
+    // non-CUDA executable need not link libagnocast_cuda. set_gpu_done_ops() is
+    // idempotent, so doing it per message type is harmless.
+    set_gpu_done_ops(GpuDoneOps{
+      &agnocast_cuda_record_read_done, &agnocast_cuda_query_read_done,
+      &agnocast_cuda_wait_read_done});
+
+    const int stream_kind = cuda_stream.kind_value();
+    if (agnocast_cuda_stream_ordering_unsafe(stream_kind, cuda_stream.handle) == 1) {
+      RCLCPP_ERROR(
+        logger,
+        "Subscription on topic '%s' reads CUDA messages on a default CUDA stream, but this "
+        "process created a stream with cudaStreamNonBlocking. A default stream does not order "
+        "against a non-blocking stream, so the wait for the publisher's write would be a no-op "
+        "and reads could observe partially written data. Fix: set "
+        "SubscriptionOptions::cuda_stream to the stream the callback reads on.",
+        topic_name.c_str());
+      std::abort();
+    }
+
+    // Order this subscriber's reads on its declared stream after the publisher's
+    // write. Because the stream is an explicit handle, this wait means the same thing
+    // from any thread, so it can stay on the message-take path even under a
+    // multi-threaded executor.
+    agnocast_cuda_wait_data_ready(meta->slot_id, stream_kind, cuda_stream.handle);
+
+    auto ipc_ptr = agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);
+    ipc_ptr.set_gpu_data_ptr(gpu_data_ptr);
+    ipc_ptr.set_gpu_done_stream(stream_kind, cuda_stream.handle);
+    return ipc_ptr;
+  } else {
+    (void)cuda_stream;  // CUDA streams are meaningless for a host-memory message
+    return agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);
+  }
+}
+
 template <typename T, typename Func>
 TypeErasedCallback get_erased_callback(Func && callback)
 {
@@ -91,7 +168,8 @@ TypeErasedCallback get_erased_callback(Func && callback)
 template <typename MessageT, typename Func>
 uint32_t register_callback(
   Func && callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
-  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
+  const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group,
+  const CudaStream & cuda_stream = CudaStream{})
 {
   // NOTE: ipc_shared_ptr<MessageT> and ipc_shared_ptr<MessageT>&& make no difference in the
   // assertion expression below, but we go with ipc_shared_ptr<MessageT>&&.
@@ -103,11 +181,12 @@ uint32_t register_callback(
 
   TypeErasedCallback erased_callback = get_erased_callback<MessageT>(std::forward<Func>(callback));
 
-  auto message_creator = [](
+  auto message_creator = [cuda_stream](
                            void * ptr, const std::string & topic_name,
                            const topic_local_id_t subscriber_id, const int64_t entry_id) {
-    return std::make_unique<TypedMessagePtr<MessageT>>(agnocast::ipc_shared_ptr<MessageT>(
-      static_cast<MessageT *>(ptr), topic_name, subscriber_id, entry_id));
+    auto * msg = static_cast<MessageT *>(ptr);
+    return std::make_unique<TypedMessagePtr<MessageT>>(
+      create_subscriber_ipc_ptr(msg, topic_name, subscriber_id, entry_id, cuda_stream));
   };
 
   uint32_t callback_info_id = allocate_callback_info_id();

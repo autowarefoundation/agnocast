@@ -26,7 +26,8 @@ SubscriptionBase::SubscriptionBase(
 
 void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-  SubscriptionRole role, const std::string & node_name, const std::string & type_name)
+  SubscriptionRole role, const std::string & node_name, const std::string & type_name,
+  const bool is_cuda_message)
 {
   // Announce to the per-IPC-namespace discovery agent before the kmod call so
   // the registry line is in place whenever a later snapshot sees the
@@ -57,7 +58,15 @@ void SubscriptionBase::initialize(
   mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
 
   if (role == SubscriptionRole::Default) {
-    if (!type_name.empty()) {
+    if (is_cuda_message) {
+      // CUDA message types cannot be bridged to ROS 2 directly (GPU pointers are not
+      // serializable). Bridge support for CUDA types (via cudaMemcpy D2H) is future work.
+      RCLCPP_WARN(
+        logger,
+        "R2A bridge skipped for CUDA topic '%s': GPU message types cannot be bridged to ROS 2. "
+        "Use cudaMemcpy to a standard ROS message if DDS bridging is needed.",
+        topic_name_.c_str());
+    } else if (!type_name.empty()) {
       register_pubsub_bridge_by_type_name(
         topic_name_, id_, type_name, BridgeDirection::ROS2_TO_AGNOCAST);
     } else {
@@ -73,7 +82,7 @@ void SubscriptionBase::initialize(
 template <typename NodeT>
 rclcpp::QoS SubscriptionBase::init_base(
   NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
-  const SubscriptionOptions & options, SubscriptionRole role)
+  const SubscriptionOptions & options, SubscriptionRole role, const bool is_cuda_message)
 {
   const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
@@ -88,18 +97,19 @@ rclcpp::QoS SubscriptionBase::init_base(
 
   const std::string node_name = node->get_fully_qualified_name();
   initialize(
-    actual_qos, is_take_sub, options.ignore_local_publications, role, node_name, type_name);
+    actual_qos, is_take_sub, options.ignore_local_publications, role, node_name, type_name,
+    is_cuda_message);
 
   return actual_qos;
 }
 
 template rclcpp::QoS SubscriptionBase::init_base<rclcpp::Node>(
   rclcpp::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
-  SubscriptionRole);
+  SubscriptionRole, const bool);
 
 template rclcpp::QoS SubscriptionBase::init_base<agnocast::Node>(
   agnocast::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
-  SubscriptionRole);
+  SubscriptionRole, const bool);
 
 uint32_t get_publisher_count_core(const std::string & topic_name)
 {

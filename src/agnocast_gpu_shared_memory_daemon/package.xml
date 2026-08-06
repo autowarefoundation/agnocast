@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>agnocast_gpu_shared_memory_daemon</name>
+  <version>2.3.5</version>
+  <description>
+    Daemon that manages a pool of shareable GPU memory slots for Agnocast, and the
+    Unix-domain-socket wire protocol used by the per-process pool proxy to talk to it.
+  </description>
+  <maintainer email="masaki.nishikawa@tier4.jp">Masaki Nishikawa</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>yaml-cpp</depend>
+
+  <test_depend>ament_cmake_gmock</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

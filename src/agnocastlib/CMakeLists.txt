@@ -45,6 +45,7 @@ add_library(agnocast SHARED
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp
+  src/cuda_deferred_release.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
@@ -161,11 +162,24 @@ if(BUILD_TESTING)
     test/unit/test_daemon_bridge_uds.cpp
     test/unit/test_agnocast_bridge_uds.cpp
     test/unit/test_discovery_agent_auto_fork.cpp
-    test/unit/test_bridge_node_name.cpp)
+    test/unit/test_bridge_node_name.cpp
+    test/unit/test_cuda_stream.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
   set_tests_properties(test_unit_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
+  )
+
+  # GPU-IPC done-edge unit tests. Own release_subscriber_reference() mock, and test
+  # doubles for the read-done markers that normally live in libagnocast_cuda, so no GPU
+  # and no CUDA runtime are needed.
+  ament_add_gmock(test_unit_cuda_deferred_release_${PROJECT_NAME}
+    test/unit/test_cuda_deferred_release.cpp)
+  target_include_directories(test_unit_cuda_deferred_release_${PROJECT_NAME} PRIVATE include src)
+  target_link_libraries(test_unit_cuda_deferred_release_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_unit_cuda_deferred_release_${PROJECT_NAME} rclcpp)
+  set_tests_properties(test_unit_cuda_deferred_release_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
 
