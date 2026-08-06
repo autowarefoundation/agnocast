@@ -245,8 +245,8 @@ void poll_for_bridge_manager()
 void exec_discovery_agent()
 {
   execlp(
-    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "discovery_agent", "--exit-when-idle",
-    static_cast<char *>(nullptr));
+    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "agnocast_discovery_agent",
+    "--exit-when-idle", static_cast<char *>(nullptr));
   // execlp only returns on failure. This still runs in the pre-allocator forked child, so the
   // failure path must be async-signal-safe and allocation-free: RCLCPP_ERROR / strerror / exit()
   // may allocate or run atexit handlers before the TLSF allocator is ready. Use write() + _exit().
@@ -429,14 +429,23 @@ pid_t spawn_daemon_process(Func && func)
         fail("Failed to open /dev/null: %s");
       }
 
+      // Send the output to the terminal rather than discarding it. Must be opened before setsid(),
+      // which drops the controlling terminal /dev/tty resolves against. stdin stays on /dev/null
+      // because this is write-only, so reads see EOF rather than EBADF.
+      const int tty = open("/dev/tty", O_WRONLY);
+      const int out_fd = (tty >= 0) ? tty : devnull;
+
       if (dup2(devnull, STDIN_FILENO) < 0) {
         fail("dup2 for stdin failed: %s");
       }
-      if (dup2(devnull, STDOUT_FILENO) < 0) {
+      if (dup2(out_fd, STDOUT_FILENO) < 0) {
         fail("dup2 for stdout failed: %s");
       }
-      if (dup2(devnull, STDERR_FILENO) < 0) {
+      if (dup2(out_fd, STDERR_FILENO) < 0) {
         fail("dup2 for stderr failed: %s");
+      }
+      if (out_fd != devnull) {
+        close(out_fd);
       }
       close(devnull);
     }

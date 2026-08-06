@@ -64,7 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 yellow "Starting agnocast_discovery_agent and talker..."
-ros2 run ros2agnocast_discovery_agent discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
+ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
 sleep "$DAEMON_WARMUP_SEC"
 ros2 launch agnocast_sample_application talker.launch.xml > "$LOG_DIR/talker.log" 2>&1 &
 sleep "$TALKER_WARMUP_SEC"

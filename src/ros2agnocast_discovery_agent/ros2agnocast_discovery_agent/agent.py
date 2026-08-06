@@ -496,5 +496,17 @@ def main(argv=None) -> int:
     return 0
 
 
+def main_deprecated_alias(argv=None) -> int:
+    """Entry point for the old ``discovery_agent`` name: warn once, then run ``main()``.
+
+    Kept so launch files and units that still spawn ``discovery_agent`` keep working; it is
+    scheduled for removal, which is a user-facing break and needs its own release.
+    """
+    sys.stderr.write(
+        'agnocast_discovery_agent: the `discovery_agent` executable is deprecated; '
+        'use `agnocast_discovery_agent` instead.\n')
+    return main(argv)
+
+
 if __name__ == '__main__':
     sys.exit(main(sys.argv))

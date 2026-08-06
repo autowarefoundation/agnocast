@@ -109,6 +109,7 @@ int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
   topic_info_args.topic_info_ret_buffer_addr =
     reinterpret_cast<uint64_t>(topic_info_buffer->data());
   topic_info_args.topic_info_ret_buffer_size = 1;
+  topic_info_args.domain_id = get_ros_domain_id();
 
   if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
     if (errno == ENOBUFS) {
