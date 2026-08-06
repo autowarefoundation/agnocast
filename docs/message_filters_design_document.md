@@ -62,6 +62,8 @@ Supported parameter types:
 
 **Difference from ROS 2**: ROS 2 additionally supports `std::shared_ptr<M>` (non-const), `const M&`, and `M` (by value). These are omitted because agnocast messages are always accessed via `ipc_shared_ptr<const M>`.
 
+Note that plain `agnocast::Subscription` callbacks *do* accept `std::shared_ptr<const M>` (see `agnocast::to_std_shared_ptr()`). That does not extend to `registerCallback()` here: `ParameterAdapter` still only handles the `ipc_shared_ptr` forms listed above.
+
 ### Signal1 (`signal1.hpp`)
 
 Thread-safe single-message signal dispatcher. Uses `ParameterAdapter` to adapt callback signatures.

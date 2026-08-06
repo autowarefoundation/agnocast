@@ -302,7 +302,7 @@ The following tables compare methods that are **directly defined** in each class
 | API | rclcpp::Node | agnocast::Node | Notes |
 |-----|:------------:|:--------------:|-------|
 | `create_publisher<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Publisher vs agnocast::Publisher) |
-| `create_subscription<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Subscription vs agnocast::Subscription) |
+| `create_subscription<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Subscription vs agnocast::Subscription). Callbacks taking `MessageT::ConstSharedPtr` are source-compatible with rclcpp; `MessageT::SharedPtr` and `MessageT::UniquePtr` are not accepted |
 | `create_generic_publisher()` | ✓ | ✗ | |
 | `create_generic_subscription()` | ✓ | ✗ | |
 

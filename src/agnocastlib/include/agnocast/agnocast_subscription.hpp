@@ -156,6 +156,19 @@ public:
  * writes to the topic. Allocate instances with
  * `agnocast::create_subscription<MessageT>()` or construct directly.
  *
+ * @par Supported callback signatures
+ * - `agnocast::ipc_shared_ptr<MessageT>` / `ipc_shared_ptr<const MessageT>` -- zero-copy, no
+ *   allocation beyond the message's own control block. Prefer this on hot paths.
+ * - `std::shared_ptr<const MessageT>`, i.e. `MessageT::ConstSharedPtr` -- the plain ROS 2 shape,
+ *   for interfaces that cannot be templated on the pointer type. The payload is still not copied,
+ *   but each message costs one extra heap allocation. See agnocast::to_std_shared_ptr().
+ *
+ * Either form can be taken by value, by const&, or by &&. `MessageT::SharedPtr` and
+ * `std::unique_ptr` are rejected at compile time.
+ *
+ * @warning A message reference must not outlive the `Subscription` that delivered it. Declare the
+ * `Subscription` member **before** any member that caches messages, so that it is destroyed last.
+ *
  * @tparam MessageT  ROS message type.
  */
 AGNOCAST_PUBLIC

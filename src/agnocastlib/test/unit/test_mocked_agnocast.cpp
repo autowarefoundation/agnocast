@@ -619,6 +619,8 @@ protected:
   {
     dummy_tn = "dummy";
     dummy_pubsub_id = 1;
+
+    release_subscriber_reference_mock_called_count = 0;
   }
 
   std::string dummy_tn;
@@ -778,4 +780,241 @@ TEST_F(AgnocastSmartPointerTest, converting_move_assignment)
   EXPECT_EQ(ptr, sut2.get());
   EXPECT_EQ(dummy_tn, sut2.get_topic_name());
   EXPECT_EQ(dummy_entry_id, sut2.get_entry_id());
+}
+
+// =========================================
+// to_std_shared_ptr tests
+// =========================================
+
+TEST_F(AgnocastSmartPointerTest, to_std_shared_ptr_keeps_reference_alive)
+{
+  // Arrange
+  int data = 42;
+  std::shared_ptr<int> sut;
+
+  // Act: the ipc_shared_ptr is consumed and goes out of scope, but the returned std::shared_ptr
+  // holds the only remaining reference.
+  {
+    agnocast::ipc_shared_ptr<int> original{&data, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+    sut = agnocast::to_std_shared_ptr(std::move(original));
+    EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+  }
+
+  // Assert
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+  EXPECT_EQ(&data, sut.get());
+  EXPECT_EQ(42, *sut);
+
+  sut.reset();
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 1);
+}
+
+TEST_F(AgnocastSmartPointerTest, to_std_shared_ptr_empty)
+{
+  // Arrange
+  agnocast::ipc_shared_ptr<int> original;
+
+  // Act
+  std::shared_ptr<int> sut = agnocast::to_std_shared_ptr(std::move(original));
+
+  // Assert: an empty std::shared_ptr, not a non-empty one wrapping nullptr, so that `if (!sut)`
+  // works and no reference is released.
+  EXPECT_EQ(nullptr, sut);
+  EXPECT_EQ(0, sut.use_count());
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+}
+
+TEST_F(AgnocastSmartPointerTest, to_std_shared_ptr_last_copy_releases)
+{
+  // Arrange
+  int data = 7;
+  agnocast::ipc_shared_ptr<int> original{&data, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+  std::shared_ptr<int> first = agnocast::to_std_shared_ptr(std::move(original));
+
+  // Act
+  std::shared_ptr<int> second = first;
+  std::shared_ptr<int> third = second;
+  first.reset();
+  second.reset();
+
+  // Assert: only the last copy reaches the kernel.
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+  EXPECT_EQ(7, *third);
+  third.reset();
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 1);
+}
+
+TEST_F(AgnocastSmartPointerTest, to_std_shared_ptr_const)
+{
+  // Arrange
+  int data = 3;
+  agnocast::ipc_shared_ptr<const int> original{&data, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+
+  // Act
+  auto sut = agnocast::to_std_shared_ptr(std::move(original));
+
+  // Assert: constness is carried through by deduction, no separate overload needed.
+  static_assert(std::is_same_v<decltype(sut), std::shared_ptr<const int>>);
+  EXPECT_EQ(&data, sut.get());
+  EXPECT_EQ(3, *sut);
+}
+
+TEST_F(AgnocastSmartPointerTest, to_std_shared_ptr_shares_with_ipc_copy)
+{
+  // Arrange: an ipc_shared_ptr copy and a converted std::shared_ptr share one control block.
+  int data = 11;
+  agnocast::ipc_shared_ptr<int> kept{&data, dummy_tn, dummy_pubsub_id, dummy_entry_id};
+  agnocast::ipc_shared_ptr<int> converted = kept;
+
+  // Act
+  std::shared_ptr<int> sut = agnocast::to_std_shared_ptr(std::move(converted));
+  sut.reset();
+
+  // Assert: the surviving ipc_shared_ptr still holds the reference.
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+  kept.reset();
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 1);
+}
+
+TEST_F(AgnocastInvalidationTest, to_std_shared_ptr_after_publish_returns_empty)
+{
+  // Arrange: borrow a message, keep a copy, then publish so the copy is invalidated.
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> message = dummy_publisher->borrow_loaned_message();
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> copy = message;
+  dummy_publisher->publish(std::move(message));
+
+  // Act
+  std::shared_ptr<std_msgs::msg::Int32> sut = agnocast::to_std_shared_ptr(std::move(copy));
+
+  // Assert: get() already returns nullptr for an invalidated handle, so the result is empty rather
+  // than a dangling pointer.
+  EXPECT_EQ(nullptr, sut);
+}
+
+TEST_F(AgnocastInvalidationTest, to_std_shared_ptr_on_borrowed_message_exits)
+{
+  // Arrange: a borrowed (publisher-side) message has no entry_id assigned.
+  agnocast::ipc_shared_ptr<std_msgs::msg::Int32> message = dummy_publisher->borrow_loaned_message();
+
+  // Act & Assert
+  EXPECT_EXIT(
+    agnocast::to_std_shared_ptr(std::move(message)), ::testing::ExitedWithCode(EXIT_FAILURE),
+    "publisher-side");
+}
+
+// =========================================
+// Callback shape dispatch tests
+// =========================================
+
+TEST_F(AgnocastCallbackInfoTest, dispatch_const_std_shared_ptr_callback)
+{
+  // Arrange
+  int data = 7;
+  agnocast::TypedMessagePtr<int> int_arg{
+    agnocast::ipc_shared_ptr<int>(&data, dummy_tn, dummy_pubsub_id, /*entry_id=*/1)};
+  std::shared_ptr<const int> captured;
+  auto callback = [&](std::shared_ptr<const int> msg) { captured = std::move(msg); };
+
+  // Act
+  agnocast::TypeErasedCallback erased_callback =
+    agnocast::make_type_erased_callback<int, decltype(callback) &>(callback);
+  erased_callback(std::move(int_arg));
+
+  // Assert: the message outlives the dispatch, which is the point of this shape.
+  ASSERT_NE(nullptr, captured);
+  EXPECT_EQ(7, *captured);
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 0);
+  captured.reset();
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 1);
+}
+
+TEST_F(AgnocastCallbackInfoTest, dispatch_const_std_shared_ptr_callback_by_const_ref)
+{
+  // Arrange
+  int data = 5;
+  agnocast::TypedMessagePtr<int> int_arg{
+    agnocast::ipc_shared_ptr<int>(&data, dummy_tn, dummy_pubsub_id, /*entry_id=*/1)};
+  bool callback_called = false;
+  auto callback = [&](const std::shared_ptr<const int> & msg) {
+    callback_called = true;
+    EXPECT_EQ(5, *msg);
+  };
+
+  // Act
+  agnocast::TypeErasedCallback erased_callback =
+    agnocast::make_type_erased_callback<int, decltype(callback) &>(callback);
+  erased_callback(std::move(int_arg));
+
+  // Assert
+  EXPECT_TRUE(callback_called);
+  EXPECT_EQ(release_subscriber_reference_mock_called_count, 1);
+}
+
+TEST_F(AgnocastCallbackInfoTest, dispatch_prefers_ipc_branch_for_generic_lambda)
+{
+  // Arrange: a generic callable is invocable with both shapes, so branch ordering decides which one
+  // it observes. Regression guard: it must keep resolving to ipc_shared_ptr.
+  int data = 1;
+  agnocast::TypedMessagePtr<int> int_arg{
+    agnocast::ipc_shared_ptr<int>(&data, dummy_tn, dummy_pubsub_id, /*entry_id=*/1)};
+  const std::type_info * observed = nullptr;
+  auto callback = [&](auto msg) { observed = &typeid(decltype(msg)); };
+
+  // Act
+  agnocast::TypeErasedCallback erased_callback =
+    agnocast::make_type_erased_callback<int, decltype(callback) &>(callback);
+  erased_callback(std::move(int_arg));
+
+  // Assert
+  ASSERT_NE(nullptr, observed);
+  EXPECT_EQ(typeid(agnocast::ipc_shared_ptr<int>), *observed);
+}
+
+// =========================================
+// Callback shape trait tests
+// =========================================
+
+TEST(CallbackShapeTraitsTest, ipc_shared_ptr_shapes_are_recognized)
+{
+  auto by_value = [](agnocast::ipc_shared_ptr<int>) {};
+  auto by_const_ref = [](const agnocast::ipc_shared_ptr<const int> &) {};
+  auto by_rvalue_ref = [](agnocast::ipc_shared_ptr<int> &&) {};
+
+  static_assert(agnocast::detail::is_ipc_shared_ptr_cb<int, decltype(by_value)>::value);
+  static_assert(agnocast::detail::is_ipc_shared_ptr_cb<int, decltype(by_const_ref)>::value);
+  static_assert(agnocast::detail::is_ipc_shared_ptr_cb<int, decltype(by_rvalue_ref)>::value);
+  static_assert(!agnocast::detail::is_const_std_shared_ptr_cb<int, decltype(by_value)>::value);
+}
+
+TEST(CallbackShapeTraitsTest, const_std_shared_ptr_shapes_are_recognized)
+{
+  auto by_value = [](std::shared_ptr<const int>) {};
+  auto by_const_ref = [](const std::shared_ptr<const int> &) {};
+
+  static_assert(agnocast::detail::is_const_std_shared_ptr_cb<int, decltype(by_value)>::value);
+  static_assert(agnocast::detail::is_const_std_shared_ptr_cb<int, decltype(by_const_ref)>::value);
+  static_assert(!agnocast::detail::is_ipc_shared_ptr_cb<int, decltype(by_value)>::value);
+}
+
+TEST(CallbackShapeTraitsTest, mutable_and_unique_ptr_shapes_are_rejected)
+{
+  auto mutable_shared = [](std::shared_ptr<int>) {};
+  auto unique = [](std::unique_ptr<int>) {};
+
+  static_assert(agnocast::detail::is_unsupported_std_ptr_cb<int, decltype(mutable_shared)>::value);
+  static_assert(agnocast::detail::is_unsupported_std_ptr_cb<int, decltype(unique)>::value);
+  static_assert(!agnocast::detail::is_const_std_shared_ptr_cb<int, decltype(unique)>::value);
+  static_assert(!agnocast::detail::is_ipc_shared_ptr_cb<int, decltype(unique)>::value);
+}
+
+TEST(CallbackShapeTraitsTest, std_shared_ptr_traits_are_false_for_void_message)
+{
+  // The GenericSubscription path instantiates register_callback<void>. No std::shared_ptr<const
+  // void> must ever be formed there.
+  auto void_callback = [](agnocast::ipc_shared_ptr<void> &&) {};
+
+  static_assert(agnocast::detail::is_ipc_shared_ptr_cb<void, decltype(void_callback)>::value);
+  static_assert(
+    !agnocast::detail::is_const_std_shared_ptr_cb<void, decltype(void_callback)>::value);
+  static_assert(!agnocast::detail::is_unsupported_std_ptr_cb<void, decltype(void_callback)>::value);
 }

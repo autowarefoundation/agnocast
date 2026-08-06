@@ -467,7 +467,8 @@ public:
 
   /// Create a subscription (QoS overload).
   /// @tparam MessageT ROS message type.
-  /// @tparam Func Callback type.
+  /// @tparam Func Callback type. See agnocast::create_subscription() for the accepted callback
+  ///         signatures.
   /// @param topic_name Topic name.
   /// @param qos Quality of service profile.
   /// @param callback Callback invoked on each received message.
@@ -485,7 +486,8 @@ public:
 
   /// Create a subscription (queue-size overload).
   /// @tparam MessageT ROS message type.
-  /// @tparam Func Callback type.
+  /// @tparam Func Callback type. See agnocast::create_subscription() for the accepted callback
+  ///         signatures.
   /// @param topic_name Topic name.
   /// @param queue_size History depth for the QoS profile.
   /// @param callback Callback invoked on each received message.

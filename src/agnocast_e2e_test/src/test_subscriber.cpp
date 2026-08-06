@@ -7,17 +7,18 @@ using std::placeholders::_1;
 
 class TestSubscriber : public rclcpp::Node
 {
+  // Declared before any message-holding member so that it is destroyed last.
   agnocast::Subscription<std_msgs::msg::Int64>::SharedPtr sub_;
   bool forever_;
   int64_t target_end_id_;
   int target_end_count_;
   int received_end_count_ = 0;
 
-  void callback(const agnocast::ipc_shared_ptr<std_msgs::msg::Int64> & message)
+  void handle(const int64_t data)
   {
-    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", message->data);
+    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", data);
 
-    if (message->data == target_end_id_) {
+    if (data == target_end_id_) {
       received_end_count_++;
 
       if (received_end_count_ >= target_end_count_) {
@@ -32,6 +33,17 @@ class TestSubscriber : public rclcpp::Node
     }
   }
 
+  void callback(const agnocast::ipc_shared_ptr<std_msgs::msg::Int64> & message)
+  {
+    handle(message->data);
+  }
+
+  // Plain ROS 2 callback shape, selected by the `const_shared_ptr` parameter.
+  void const_shared_ptr_callback(const std_msgs::msg::Int64::ConstSharedPtr & message)
+  {
+    handle(message->data);
+  }
+
 public:
   explicit TestSubscriber(const rclcpp::NodeOptions & options) : Node("test_subscription", options)
   {
@@ -41,6 +53,7 @@ public:
     this->declare_parameter<bool>("forever", false);
     this->declare_parameter<int64_t>("target_end_id", 0);
     this->declare_parameter<int>("target_end_count", 1);
+    this->declare_parameter<bool>("const_shared_ptr", false);
     std::string topic_name = this->get_parameter("topic_name").as_string();
     forever_ = this->get_parameter("forever").as_bool();
     target_end_id_ = this->get_parameter("target_end_id").as_int();
@@ -55,8 +68,14 @@ public:
     auto cbg = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions sub_options;
     sub_options.callback_group = cbg;
-    sub_ = agnocast::create_subscription<std_msgs::msg::Int64>(
-      this, topic_name, qos, std::bind(&TestSubscriber::callback, this, _1), sub_options);
+    if (this->get_parameter("const_shared_ptr").as_bool()) {
+      sub_ = agnocast::create_subscription<std_msgs::msg::Int64>(
+        this, topic_name, qos, std::bind(&TestSubscriber::const_shared_ptr_callback, this, _1),
+        sub_options);
+    } else {
+      sub_ = agnocast::create_subscription<std_msgs::msg::Int64>(
+        this, topic_name, qos, std::bind(&TestSubscriber::callback, this, _1), sub_options);
+    }
   }
 };
 

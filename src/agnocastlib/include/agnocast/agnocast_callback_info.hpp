@@ -72,6 +72,47 @@ extern std::atomic<uint32_t> next_callback_info_id;
 
 uint32_t allocate_callback_info_id();
 
+namespace detail
+{
+
+// Accepts ipc_shared_ptr<MessageT> or ipc_shared_ptr<const MessageT>, by value, const&, or &&.
+template <typename MessageT, typename Func>
+struct is_ipc_shared_ptr_cb
+: std::bool_constant<
+    std::is_invocable_v<std::decay_t<Func>, agnocast::ipc_shared_ptr<MessageT> &&> ||
+    std::is_invocable_v<std::decay_t<Func>, agnocast::ipc_shared_ptr<const MessageT> &&>>
+{
+};
+
+// The std::shared_ptr shapes below are never valid on the type-erased (MessageT = void) path, so
+// the primary template makes them hard-false and no std::shared_ptr<const void> is ever formed.
+template <typename MessageT, typename Func, typename Enable = void>
+struct is_const_std_shared_ptr_cb : std::false_type
+{
+};
+template <typename MessageT, typename Func>
+struct is_const_std_shared_ptr_cb<MessageT, Func, std::enable_if_t<!std::is_void_v<MessageT>>>
+: std::bool_constant<std::is_invocable_v<std::decay_t<Func>, std::shared_ptr<const MessageT>>>
+{
+};
+
+// Diagnostic only: shapes that are deliberately rejected, so that register_callback() can explain
+// why instead of falling through to the generic "unsupported callback" message.
+template <typename MessageT, typename Func, typename Enable = void>
+struct is_unsupported_std_ptr_cb : std::false_type
+{
+};
+template <typename MessageT, typename Func>
+struct is_unsupported_std_ptr_cb<MessageT, Func, std::enable_if_t<!std::is_void_v<MessageT>>>
+: std::bool_constant<
+    std::is_invocable_v<std::decay_t<Func>, std::shared_ptr<MessageT>> ||
+    std::is_invocable_v<std::decay_t<Func>, std::unique_ptr<MessageT>> ||
+    std::is_invocable_v<std::decay_t<Func>, std::unique_ptr<const MessageT>>>
+{
+};
+
+}  // namespace detail
+
 template <typename T, typename Func>
 TypeErasedCallback get_erased_callback(Func && callback)
 {
@@ -88,20 +129,56 @@ TypeErasedCallback get_erased_callback(Func && callback)
   };
 }
 
+// Adapts any supported callback shape to the ipc_shared_ptr<MessageT>&& shape that
+// get_erased_callback() expects. The ipc_shared_ptr branch is checked FIRST so that generic
+// callables (e.g. `[](auto msg) {}`) and every existing callsite keep their current behavior.
+template <typename MessageT, typename Func>
+TypeErasedCallback make_type_erased_callback(Func && callback)
+{
+  if constexpr (detail::is_ipc_shared_ptr_cb<MessageT, Func>::value) {
+    return get_erased_callback<MessageT>(std::forward<Func>(callback));
+  } else {
+    static_assert(detail::is_const_std_shared_ptr_cb<MessageT, Func>::value);
+    return get_erased_callback<MessageT>(
+      [callback = std::forward<Func>(callback)](agnocast::ipc_shared_ptr<MessageT> && msg) {
+        // The converting move constructor transfers the control block without touching the
+        // reference count, so this adds no atomic traffic and no allocation of its own.
+        callback(
+          agnocast::to_std_shared_ptr(agnocast::ipc_shared_ptr<const MessageT>(std::move(msg))));
+      });
+  }
+}
+
 template <typename MessageT, typename Func>
 uint32_t register_callback(
   Func && callback, const std::string & topic_name, const topic_local_id_t subscriber_id,
   const bool is_transient_local, mqd_t mqdes, rclcpp::CallbackGroup::SharedPtr callback_group)
 {
+  // Fires before the generic assertion below, so that a deliberately rejected shape gets a precise
+  // reason instead of just the list of accepted ones.
+  static_assert(
+    !detail::is_unsupported_std_ptr_cb<MessageT, Func>::value ||
+      detail::is_ipc_shared_ptr_cb<MessageT, Func>::value ||
+      detail::is_const_std_shared_ptr_cb<MessageT, Func>::value,
+    "Unsupported callback shape. std::shared_ptr<MessageT> (MessageT::SharedPtr) is rejected "
+    "because the message lives in shared memory that other subscribers read concurrently; "
+    "std::unique_ptr is rejected because the message must not be freed with operator delete. "
+    "Use std::shared_ptr<const MessageT> (MessageT::ConstSharedPtr) instead.");
+
   // NOTE: ipc_shared_ptr<MessageT> and ipc_shared_ptr<MessageT>&& make no difference in the
   // assertion expression below, but we go with ipc_shared_ptr<MessageT>&&.
   static_assert(
-    std::is_invocable_v<std::decay_t<Func>, agnocast::ipc_shared_ptr<MessageT> &&> ||
-      std::is_invocable_v<std::decay_t<Func>, agnocast::ipc_shared_ptr<const MessageT> &&>,
-    "Callback must be callable with ipc_shared_ptr<T> or ipc_shared_ptr<const T> (const&, &&, or "
-    "by-value)");
+    detail::is_ipc_shared_ptr_cb<MessageT, Func>::value ||
+      detail::is_const_std_shared_ptr_cb<MessageT, Func>::value,
+    "Callback must be callable with one of:\n"
+    "1. agnocast::ipc_shared_ptr<MessageT> or ipc_shared_ptr<const MessageT> (zero-copy, no extra "
+    "allocation)\n"
+    "2. std::shared_ptr<const MessageT>, i.e. MessageT::ConstSharedPtr (one extra heap allocation "
+    "per message)\n"
+    "Either can be taken by value, by const&, or by &&.");
 
-  TypeErasedCallback erased_callback = get_erased_callback<MessageT>(std::forward<Func>(callback));
+  TypeErasedCallback erased_callback =
+    make_type_erased_callback<MessageT>(std::forward<Func>(callback));
 
   auto message_creator = [](
                            void * ptr, const std::string & topic_name,

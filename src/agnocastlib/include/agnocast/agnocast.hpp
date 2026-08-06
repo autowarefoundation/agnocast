@@ -148,7 +148,11 @@ GenericPublisher::SharedPtr create_generic_publisher(
 /// @brief Create an Agnocast subscription (Stage 1 free function, QoS overload).
 /// @tparam MessageT ROS message type.
 /// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
-/// @tparam Func Callback callable with `void(agnocast::ipc_shared_ptr<const MessageT>&&)`.
+/// @tparam Func Callback callable with either `agnocast::ipc_shared_ptr<const MessageT>`
+///         (zero-copy, no extra allocation) or `std::shared_ptr<const MessageT>`, i.e.
+///         `MessageT::ConstSharedPtr` (one extra heap allocation per message). Either can be
+///         taken by value, by const&, or by &&. See agnocast::to_std_shared_ptr() for the
+///         lifetime contract of the `std::shared_ptr` form.
 /// @param node Pointer to the node.
 /// @param topic_name Topic name.
 /// @param qos Quality of service profile.
@@ -171,7 +175,11 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
 /// @brief Create an Agnocast subscription (Stage 1 free function, history-depth overload).
 /// @tparam MessageT ROS message type.
 /// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
-/// @tparam Func Callback callable with `void(agnocast::ipc_shared_ptr<const MessageT>&&)`.
+/// @tparam Func Callback callable with either `agnocast::ipc_shared_ptr<const MessageT>`
+///         (zero-copy, no extra allocation) or `std::shared_ptr<const MessageT>`, i.e.
+///         `MessageT::ConstSharedPtr` (one extra heap allocation per message). Either can be
+///         taken by value, by const&, or by &&. See agnocast::to_std_shared_ptr() for the
+///         lifetime contract of the `std::shared_ptr` form.
 /// @param node Pointer to the node.
 /// @param topic_name Topic name.
 /// @param qos_history_depth History depth for the QoS profile.

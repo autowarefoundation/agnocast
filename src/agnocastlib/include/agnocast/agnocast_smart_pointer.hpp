@@ -97,6 +97,13 @@ struct control_block
  * - `get()` returns `nullptr`, `operator bool()` returns `false`.
  * - `operator->()` and `operator*()` call `std::terminate()`.
  *
+ * @par Conversion to std::shared_ptr
+ * A message received by a subscription can be handed to code that expects a plain
+ * `std::shared_ptr` via to_std_shared_ptr(), without copying the payload. The result keeps the
+ * kernel-side reference alive, so it may be retained beyond the callback -- but it must not
+ * outlive the `Subscription` that delivered it, and it pins one shared-memory entry for as long
+ * as it lives. See to_std_shared_ptr() for the full contract.
+ *
  * @tparam T  The message type (or `const`-qualified message type on the subscriber side).
  */
 AGNOCAST_PUBLIC
@@ -399,6 +406,66 @@ ipc_shared_ptr<T> static_ipc_shared_ptr_cast(ipc_shared_ptr<U> && r) noexcept
 {
   T * ptr = static_cast<T *>(r.get());
   return ipc_shared_ptr<T>(std::move(r), ptr);
+}
+
+/**
+ * @brief Convert an `ipc_shared_ptr` into a `std::shared_ptr` that keeps the Agnocast
+ * (kernel-side) reference alive.
+ *
+ * The returned pointer shares ownership with a hidden `ipc_shared_ptr<T>` holder, so the
+ * kernel-side reference is released only once the last `std::shared_ptr` copy is destroyed. The
+ * payload is never copied; the cost is one extra heap allocation (the `std::shared_ptr` control
+ * block) per conversion, on top of the `ipc_shared_ptr`'s own control block.
+ *
+ * @warning The returned pointer must not outlive the `Subscription` that delivered the message.
+ * Declare the `Subscription` member **before** any member that caches messages, so that it is
+ * destroyed last.
+ * @warning Holding the returned pointer pins a shared-memory entry: the publisher's entry count
+ * can exceed its QoS depth for as long as the reference is held. Caching messages in an unbounded
+ * container can exhaust the process mempool (see `docs/shared_memory.md`).
+ * @warning Unlike `ipc_shared_ptr`, the result carries no invalidation check: dereferencing an
+ * empty one segfaults instead of printing a diagnostic. Test it with `if (!msg)` first.
+ *
+ * @param p Pointer to convert. Taken by value; pass an rvalue to avoid a reference-count bump.
+ * @return `std::shared_ptr<T>` sharing ownership of the message, or an empty `std::shared_ptr`
+ *         if `p` is empty or has been invalidated by publish().
+ */
+AGNOCAST_PUBLIC
+template <typename T>
+std::shared_ptr<T> to_std_shared_ptr(ipc_shared_ptr<T> p)
+{
+  static_assert(
+    !std::is_void_v<T>,
+    "to_std_shared_ptr() does not support ipc_shared_ptr<void>: a type-erased message has no "
+    "well-defined std::shared_ptr element type.");
+
+  // Empty, or publisher-invalidated (get() returns nullptr after publish()). Return an empty
+  // std::shared_ptr rather than a non-empty one wrapping nullptr, so that `if (!msg)` works.
+  if (p.get() == nullptr) {
+    return nullptr;
+  }
+
+  // Subscriber-side pointers only. Wrapping a publisher-side (borrowed) pointer would be unsafe:
+  // std::shared_ptr has no invalidation check, so publish() would leave the result silently
+  // dangling, and a borrowed message that is never published would run the "dropped before
+  // publish" path (decrement_borrowed_publisher_num() + delete) at an arbitrary time on an
+  // arbitrary thread, corrupting the heaphook's borrow-window accounting.
+  if (p.get_entry_id() == ENTRY_ID_NOT_ASSIGNED) {
+    RCLCPP_ERROR(
+      logger,
+      "to_std_shared_ptr() was called on a publisher-side (borrowed) ipc_shared_ptr. "
+      "Only messages received by a subscription can be converted.");
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  T * const raw = p.get();
+  auto holder = std::make_shared<ipc_shared_ptr<T>>(std::move(p));
+  // Aliasing constructor: shares the holder's control block but exposes the message pointer.
+  // NOTE: under C++17 std::move() still selects the copy form of the aliasing constructor (one
+  // atomic increment, undone when `holder` goes out of scope). C++20 adds the move form, which
+  // avoids even that.
+  return std::shared_ptr<T>(std::move(holder), raw);
 }
 
 }  // namespace agnocast
