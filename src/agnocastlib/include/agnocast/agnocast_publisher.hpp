@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <cstdint>
-#include <mutex>
 
 namespace agnocast
 {

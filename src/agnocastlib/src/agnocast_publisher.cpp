@@ -13,7 +13,6 @@
 #include <rmw/serialized_message.h>
 #include <sys/types.h>
 
-#include <array>
 #include <new>
 
 namespace agnocast
