@@ -20,7 +20,9 @@
     KUNIT_CASE(test_case_domain_bridge_rename_groups_wrappers),               \
     KUNIT_CASE(test_case_domain_bridge_rename_cross_domain_delivery),         \
     KUNIT_CASE(test_case_domain_bridge_rename_fanout_rejected),               \
-    KUNIT_CASE(test_case_domain_bridge_rename_multi_publisher)
+    KUNIT_CASE(test_case_domain_bridge_rename_multi_publisher),               \
+    KUNIT_CASE(test_case_domain_bridge_rename_notify_uses_canonical_name),    \
+    KUNIT_CASE(test_case_domain_bridge_rename_exit_cleanup_uses_canonical_name)
 
 void test_case_add_domain_bridge_normal(struct kunit * test);
 void test_case_add_domain_bridge_same_domain_rejected(struct kunit * test);
@@ -40,3 +42,5 @@ void test_case_domain_bridge_rename_groups_wrappers(struct kunit * test);
 void test_case_domain_bridge_rename_cross_domain_delivery(struct kunit * test);
 void test_case_domain_bridge_rename_fanout_rejected(struct kunit * test);
 void test_case_domain_bridge_rename_multi_publisher(struct kunit * test);
+void test_case_domain_bridge_rename_notify_uses_canonical_name(struct kunit * test);
+void test_case_domain_bridge_rename_exit_cleanup_uses_canonical_name(struct kunit * test);

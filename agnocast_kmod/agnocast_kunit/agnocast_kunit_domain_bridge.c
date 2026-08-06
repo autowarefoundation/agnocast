@@ -6,6 +6,8 @@
 
 #include <kunit/test.h>
 #include <linux/delay.h>
+#include <linux/mm.h>
+#include <linux/string.h>
 
 static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 
@@ -442,4 +444,83 @@ void test_case_domain_bridge_rename_multi_publisher(struct kunit * test)
 
   // Woken exactly once, regardless of the other publishers sharing the struct.
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
+void test_case_domain_bridge_rename_notify_uses_canonical_name(struct kunit * test)
+{
+  // Both endpoints of a renamed pair must derive the same publish-notification MQ name -- the
+  // pair's canonical (domain_a) name -- even though they publish/subscribe under different
+  // per-domain names. Otherwise the userspace publisher and the renamed subscriber open different
+  // MQs and the subscriber is never notified.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  union ioctl_add_publisher_args pub_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_publisher(
+      RN_SRC, current->nsproxy->ipc_ns, "/kunit_node", current->tgid, 1, false, false, &pub_args),
+    0);
+
+  setup_process_in_domain(test, 1001, 2);
+  union ioctl_add_subscriber_args sub_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_subscriber(
+      RN_DST, current->nsproxy->ipc_ns, "/kunit_node", 1001, 1, false, true, false, false, false,
+      -1, &sub_args),
+    0);
+
+  // domain_a is the lower domain (1), so the canonical name is RN_SRC: the publisher on RN_SRC@1
+  // and the renamed subscriber on RN_DST@2 both report RN_SRC as their notification MQ topic.
+  KUNIT_EXPECT_STREQ(test, pub_args.ret_mq_topic_name, RN_SRC);
+  KUNIT_EXPECT_STREQ(test, sub_args.ret_mq_topic_name, RN_SRC);
+}
+
+// A renamed subscriber opens its notification MQ under the canonical (domain_a) name, so the
+// exit-cleanup record the daemon later unlinks must carry that same canonical name -- not the
+// subscriber's own per-domain name -- otherwise a crashed renamed subscriber's MQ leaks.
+void test_case_domain_bridge_rename_exit_cleanup_uses_canonical_name(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  setup_process_in_domain(test, current->tgid, 1);
+  add_publisher_named(test, current->tgid, RN_SRC);
+
+  const pid_t subscriber_pid = 1001;
+  setup_process_in_domain(test, subscriber_pid, 2);
+  const topic_local_id_t sub_id = add_subscriber_named(test, subscriber_pid, RN_DST);
+
+  agnocast_enqueue_exit_pid(subscriber_pid);
+  msleep(20);  // let exit_worker_thread record the subscription MQ
+
+  struct ioctl_get_exit_process_args get_exit_args;
+  const uint32_t buf_size = 4;
+  struct exit_subscription_mq_info * mq_info_buf =
+    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
+  KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
+
+  memset(&get_exit_args, 0, sizeof(get_exit_args));
+  pid_t global_pid = -1;
+  KUNIT_EXPECT_EQ(
+    test,
+    agnocast_ioctl_get_exit_process(
+      current->nsproxy->ipc_ns, &get_exit_args, mq_info_buf, buf_size, &global_pid),
+    0);
+
+  KUNIT_EXPECT_EQ(test, get_exit_args.ret_pid, subscriber_pid);
+  KUNIT_EXPECT_EQ(test, (int)get_exit_args.ret_subscription_mq_info_num, 1);
+  // domain_a is the lower domain (1), so the daemon must unlink the MQ under the canonical name
+  // RN_SRC -- the name the renamed subscriber opened it under -- not its own name RN_DST.
+  KUNIT_EXPECT_STREQ(test, mq_info_buf[0].topic_name, RN_SRC);
+  KUNIT_EXPECT_EQ(test, mq_info_buf[0].subscriber_id, sub_id);
+
+  bool daemon_should_exit = false;
+  agnocast_commit_exit_process(
+    current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
+    &daemon_should_exit);
+
+  kvfree(mq_info_buf);
 }
