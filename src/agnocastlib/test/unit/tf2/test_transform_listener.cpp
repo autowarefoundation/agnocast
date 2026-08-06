@@ -64,7 +64,7 @@ void remove_mq(const std::pair<mqd_t, std::string> &)
 
 void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool, const bool, SubscriptionRole, const std::string &,
-  const std::string &)
+  const std::string &, const bool)
 {
   initialize_subscriber_call_count++;
   initialized_topic_names.push_back(topic_name_);

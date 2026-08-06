@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_message_tag.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
@@ -110,12 +111,13 @@ protected:
   std::string mq_topic_name_;
   void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
-    SubscriptionRole role, const std::string & node_name, const std::string & type_name);
+    SubscriptionRole role, const std::string & node_name, const std::string & type_name,
+    const bool is_cuda_message);
 
   template <typename NodeT>
   rclcpp::QoS init_base(
     NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
-    const SubscriptionOptions & options, SubscriptionRole role);
+    const SubscriptionOptions & options, SubscriptionRole role, const bool is_cuda_message);
 
 public:
   SubscriptionBase(rclcpp::Node * node, const std::string & topic_name);
@@ -185,7 +187,8 @@ class Subscription : public SubscriptionBase
     const void * callback_addr = static_cast<const void *>(&callback);
     const char * callback_symbol = tracetools::get_symbol(callback);
 
-    const rclcpp::QoS actual_qos = init_base(node, qos, type_name, false, options, role);
+    const rclcpp::QoS actual_qos =
+      init_base(node, qos, type_name, false, options, role, is_cuda_message_v<MessageT>);
 
     mqd_t mq = open_mq_for_subscription(mq_topic_name_, id_, mq_subscription_);
 
@@ -298,7 +301,7 @@ private:
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    return init_base(node, qos, type_name, true, options, role);
+    return init_base(node, qos, type_name, true, options, role, is_cuda_message_v<MessageT>);
   }
 
 public:
@@ -406,7 +409,7 @@ public:
 
         MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
         auto result =
-          agnocast::ipc_shared_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
+          create_subscriber_ipc_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
         old_ptr = std::move(last_taken_ptr_);
         last_taken_ptr_ = result;
         return result;
@@ -414,7 +417,7 @@ public:
     }
 
     MessageT * ptr = reinterpret_cast<MessageT *>(take_args.ret_addr);
-    return agnocast::ipc_shared_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
+    return create_subscriber_ipc_ptr<const MessageT>(ptr, topic_name_, id_, take_args.ret_entry_id);
   }
 };
 

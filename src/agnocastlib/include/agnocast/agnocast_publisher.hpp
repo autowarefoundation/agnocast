@@ -6,6 +6,10 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_pool_api.hpp"
+#include "agnocast/gpu_metadata.hpp"
+#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
@@ -15,6 +19,9 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <mutex>
 
 namespace agnocast
@@ -97,7 +104,8 @@ protected:
   template <typename NodeT>
   rclcpp::QoS init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role,
+    const bool is_cuda_message);
 
 public:
   PublisherBase() = default;
@@ -159,7 +167,8 @@ class Publisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
-    return this->init_base(node, topic_name, type_name, qos, options, role);
+    return this->init_base(
+      node, topic_name, type_name, qos, options, role, is_cuda_message_v<MessageT>);
   }
 
 public:
@@ -201,6 +210,11 @@ public:
   ipc_shared_ptr<MessageT> borrow_loaned_message()
   {
     increment_borrowed_publisher_num();
+    // Open the publish window so the CUDA heaphook routes the publisher's
+    // cudaMalloc(&msg->data, ...) to a GPU pool slot. Closed again in publish().
+    if constexpr (is_cuda_message_v<MessageT>) {
+      agnocast_cuda_set_publish_window(1);
+    }
     MessageT * ptr = new MessageT();
     return ipc_shared_ptr<MessageT>(ptr, topic_name_.c_str(), id_);
   }
@@ -222,7 +236,54 @@ public:
     }
 
     // Capture raw pointer BEFORE invalidation (get() returns nullptr after invalidation).
-    const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(message.get());
+    MessageT * raw_ptr = message.get();
+    const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(raw_ptr);
+
+    // CUDA publish hook: record the data-ready event and store the pool slot id in
+    // GpuMetadata (in shared memory, readable by subscribers). GpuMetadata is
+    // allocated while the heaphook is still active so it lands in shared memory.
+    // NOTE: Assumes MessageT has a public `data` member (uint8_t*) pointing to the GPU allocation.
+    // All CUDA message types must provide this by shadowing the base ROS message's data field.
+    if constexpr (is_cuda_message_v<MessageT>) {
+      // The borrow..publish window ends here; a later cudaMalloc must not be pooled.
+      agnocast_cuda_set_publish_window(0);
+
+      if (!raw_ptr->data) {
+        RCLCPP_ERROR(
+          logger,
+          "CUDA message on topic '%s' has null data pointer. "
+          "Did you forget to cudaMalloc(&msg->data, size) before publish()?",
+          topic_name_.c_str());
+        std::abort();
+      }
+      const size_t gpu_size = get_cuda_gpu_data_size(*raw_ptr);
+      if (gpu_size == 0) {
+        RCLCPP_ERROR(
+          logger,
+          "CUDA message on topic '%s' has gpu_data_size == 0. "
+          "Ensure message fields (height, width, point_step, etc.) are set before publish().",
+          topic_name_.c_str());
+        std::abort();
+      }
+
+      std::uint32_t slot_id = 0;
+      if (!agnocast_cuda_slot_id_from_ptr(raw_ptr->data, &slot_id)) {
+        RCLCPP_ERROR(
+          logger,
+          "CUDA message on topic '%s' was not allocated from the GPU pool. "
+          "Ensure the CUDA heaphook is LD_PRELOADed and the pool daemon is running, and that "
+          "msg->data was cudaMalloc'd between borrow_loaned_message() and publish().",
+          topic_name_.c_str());
+        std::abort();
+      }
+      // Record the write-complete event so subscribers can order reads after it.
+      agnocast_cuda_record_data_ready(raw_ptr->data);
+
+      auto * meta = new GpuMetadata();
+      meta->slot_id = slot_id;
+      meta->gpu_data_size = gpu_size;
+      raw_ptr->gpu_metadata_ = meta;
+    }
 
     // Invalidate all references sharing this handle's control block.
     // Any remaining copies held elsewhere will fail-fast on dereference.
@@ -239,6 +300,20 @@ public:
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
+      // CUDA reclaim hook: return the pool slot before deleting the message. This
+      // is pure CPU work — the kernel released the message only after all
+      // subscribers dropped their references, and each subscriber completes its GPU
+      // reads before releasing (see docs), so no GPU wait is needed here.
+      // On abnormal publisher exit, this is skipped, but GPU memory is reclaimed by
+      // the CUDA driver when the process exits.
+      if constexpr (is_cuda_message_v<MessageT>) {
+        if (release_ptr->data) {
+          agnocast_cuda_reclaim_gpu_buffer(release_ptr->data);
+        }
+        if (release_ptr->gpu_metadata_) {
+          delete static_cast<GpuMetadata *>(release_ptr->gpu_metadata_);
+        }
+      }
       delete release_ptr;
     }
 

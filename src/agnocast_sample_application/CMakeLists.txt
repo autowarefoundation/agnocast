@@ -192,6 +192,49 @@ install(TARGETS no_rclcpp_client
 install(TARGETS sim_time_timer
   DESTINATION lib/${PROJECT_NAME})
 
+# CUDA sample applications (only built when the CUDA compiler, CUDA toolkit, and
+# agnocast_cuda are all available). Note: agnocast_cuda itself has no build-time CUDA
+# dependency (it dlopen's libcudart.so at runtime), but these sample apps compile .cu
+# files with CUDA kernels, so they need the full CUDA toolchain.
+# These binaries are NOT included in the pre-built deb from the ROS build farm (which
+# has no CUDA). Users who want to try the CUDA samples must build from source with CUDA.
+include(CheckLanguage)
+check_language(CUDA)
+find_package(agnocast_cuda QUIET)
+if(CMAKE_CUDA_COMPILER AND agnocast_cuda_FOUND)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+
+  # Both CUDA samples run their GPU work on the per-thread default stream. This
+  # matches where Agnocast records/waits its dataReadyEvent (cudaStreamPerThread),
+  # so the publisher's write and each subscriber's read are correctly ordered by
+  # that event. See the GPU-IPC design notes (per-thread-stream decision).
+  add_executable(cuda_talker src/cuda_publisher.cpp)
+  set_source_files_properties(src/cuda_publisher.cpp PROPERTIES LANGUAGE CUDA)
+  target_compile_options(cuda_talker PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--default-stream=per-thread>)
+  ament_target_dependencies(cuda_talker agnocastlib agnocast_cuda sensor_msgs)
+  target_link_libraries(cuda_talker CUDA::cudart)
+  target_include_directories(cuda_talker PRIVATE
+    ${agnocastlib_INCLUDE_DIRS}
+    ${agnocast_cuda_INCLUDE_DIRS}
+  )
+
+  add_executable(cuda_listener src/cuda_subscriber.cpp)
+  set_source_files_properties(src/cuda_subscriber.cpp PROPERTIES LANGUAGE CUDA)
+  target_compile_options(cuda_listener PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--default-stream=per-thread>)
+  ament_target_dependencies(cuda_listener agnocastlib agnocast_cuda sensor_msgs)
+  target_link_libraries(cuda_listener CUDA::cudart)
+  target_include_directories(cuda_listener PRIVATE
+    ${agnocastlib_INCLUDE_DIRS}
+    ${agnocast_cuda_INCLUDE_DIRS}
+  )
+
+  install(TARGETS cuda_talker cuda_listener
+    DESTINATION lib/${PROJECT_NAME})
+endif()
+
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/
 )

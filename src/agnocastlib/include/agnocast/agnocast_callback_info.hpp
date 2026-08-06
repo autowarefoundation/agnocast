@@ -3,8 +3,13 @@
 #include "agnocast/agnocast_epoll.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
+#include "agnocast/agnocast_utils.hpp"
+#include "agnocast/cuda_message_tag.hpp"
+#include "agnocast/cuda_pool_api.hpp"
+#include "agnocast/gpu_metadata.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -72,6 +77,52 @@ extern std::atomic<uint32_t> next_callback_info_id;
 
 uint32_t allocate_callback_info_id();
 
+// Creates an ipc_shared_ptr for a subscriber-received message.
+// For CUDA messages: imports the GPU handle, stores the subscriber-local GPU pointer in
+// control_block->gpu_data_ptr, and registers a gpu_release_fn to release the mapping
+// on last reference. The pointer is accessed via ipc_shared_ptr::gpu_data().
+// For non-CUDA messages: simply wraps the pointer.
+template <typename MessageT>
+agnocast::ipc_shared_ptr<MessageT> create_subscriber_ipc_ptr(
+  MessageT * msg, const std::string & topic_name, const topic_local_id_t subscriber_id,
+  const int64_t entry_id)
+{
+  if constexpr (is_cuda_message_v<MessageT>) {
+    auto * meta = static_cast<GpuMetadata *>(msg->gpu_metadata_);
+    if (!meta) {
+      RCLCPP_ERROR(
+        logger,
+        "CUDA message on topic '%s' has null gpu_metadata_. "
+        "The publisher may have failed to set GpuMetadata during publish().",
+        topic_name.c_str());
+      std::abort();
+    }
+
+    // Resolve this process's local device pointer for the pool slot. The proxy
+    // imported every slot once at startup, so there is no per-message import.
+    void * gpu_data_ptr = nullptr;
+    if (!agnocast_cuda_ptr_from_slot_id(meta->slot_id, &gpu_data_ptr)) {
+      RCLCPP_ERROR(
+        logger,
+        "CUDA message on topic '%s' references unknown pool slot %u. "
+        "Is the GPU pool proxy initialized (pool daemon running for this GPU)?",
+        topic_name.c_str(), meta->slot_id);
+      std::abort();
+    }
+    // Order this subscriber's reads (on the per-thread default stream) after the
+    // publisher's write. The subscriber must complete its reads before releasing
+    // the message (its contract); reclaim on the publisher side is pure CPU work,
+    // so there is no per-message GPU release function.
+    agnocast_cuda_wait_data_ready(meta->slot_id);
+
+    auto ipc_ptr = agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);
+    ipc_ptr.set_gpu_data_ptr(gpu_data_ptr);
+    return ipc_ptr;
+  } else {
+    return agnocast::ipc_shared_ptr<MessageT>(msg, topic_name, subscriber_id, entry_id);
+  }
+}
+
 template <typename T, typename Func>
 TypeErasedCallback get_erased_callback(Func && callback)
 {
@@ -106,8 +157,9 @@ uint32_t register_callback(
   auto message_creator = [](
                            void * ptr, const std::string & topic_name,
                            const topic_local_id_t subscriber_id, const int64_t entry_id) {
-    return std::make_unique<TypedMessagePtr<MessageT>>(agnocast::ipc_shared_ptr<MessageT>(
-      static_cast<MessageT *>(ptr), topic_name, subscriber_id, entry_id));
+    auto * msg = static_cast<MessageT *>(ptr);
+    return std::make_unique<TypedMessagePtr<MessageT>>(
+      create_subscriber_ipc_ptr(msg, topic_name, subscriber_id, entry_id));
   };
 
   uint32_t callback_info_id = allocate_callback_info_id();

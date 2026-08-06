@@ -1,0 +1,12 @@
+[package]
+name = "agnocast_cuda_heaphook"
+version = "2.3.3"
+edition = "2021"
+license = "Apache-2.0"
+description = "LD_PRELOAD hook that routes a publisher's cudaMalloc/cudaFree to the Agnocast GPU shared-memory pool"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"

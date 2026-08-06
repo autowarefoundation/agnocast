@@ -1,0 +1,27 @@
+# Configuration for the GpuSharedMemoryPoolDaemon slot pool.
+#
+# The daemon pre-allocates a fixed set of GPU memory "slots" grouped into size
+# classes. An "alloc" request for N bytes is served from the smallest size class
+# whose slot_size_bytes >= N. All slots are allocated at daemon startup.
+#
+# This file describes ONLY pool geometry. It does NOT identify a GPU: which GPU a
+# daemon instance manages is decided at launch (e.g. the systemd instance sets
+# CUDA_VISIBLE_DEVICES). The daemon discovers the GPU UUID at runtime and derives
+# its Unix domain socket path from it, so the socket always matches the managed
+# GPU and no volatile UUID is hard-coded here.
+#
+# NOTE: These values are a first proposal (sized for typical Autoware camera
+# images and LiDAR point clouds) and are expected to be tuned. Parsing of this
+# file is added in a later step; until then the compiled-in defaults in
+# include/agnocast_gpu_shared_memory_daemon/pool_config.hpp are authoritative and
+# mirror the values below.
+
+# Size classes, sorted ascending by slot_size_bytes.
+# Total reserved GPU memory with these defaults: 416 MiB.
+size_classes:
+  - slot_size_bytes: 2097152    # 2 MiB
+    slot_count: 16
+  - slot_size_bytes: 8388608    # 8 MiB
+    slot_count: 16
+  - slot_size_bytes: 33554432   # 32 MiB
+    slot_count: 8

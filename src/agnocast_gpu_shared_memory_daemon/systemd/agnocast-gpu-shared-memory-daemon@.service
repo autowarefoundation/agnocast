@@ -1,0 +1,33 @@
+# systemd template unit for the Agnocast GPU shared-memory pool daemon.
+#
+# One instance manages one GPU (or MIG instance). The instance name (%i) selects
+# the GPU via CUDA_VISIBLE_DEVICES, so start it as, e.g.:
+#   systemctl start agnocast-gpu-shared-memory-daemon@0.service          # device index 0
+#   systemctl start agnocast-gpu-shared-memory-daemon@GPU-xxxxxxxx.service # by UUID
+#   systemctl start agnocast-gpu-shared-memory-daemon@MIG-xxxxxxxx.service # by MIG UUID
+#
+# INSTALLATION (manual, requires root; not done by colcon):
+#   - Copy this file to /etc/systemd/system/ and substitute the two placeholders
+#     below (@EXECSTART@, @CONFIG@) with the absolute install paths, e.g.:
+#       ExecStart=/opt/ros/<distro>/lib/agnocast_gpu_shared_memory_daemon/gpu_shared_memory_daemon \
+#                 --config /opt/ros/<distro>/share/agnocast_gpu_shared_memory_daemon/config/pool_config.yaml
+#   - systemctl daemon-reload && systemctl enable --now agnocast-gpu-shared-memory-daemon@0
+
+[Unit]
+Description=Agnocast GPU shared-memory pool daemon (GPU %i)
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=CUDA_VISIBLE_DEVICES=%i
+ExecStart=@EXECSTART@ --config @CONFIG@
+Restart=always
+RestartSec=2
+
+# Creates and owns /run/agnocast (matches kSocketDir), where the daemon binds its
+# UUID-derived socket.
+RuntimeDirectory=agnocast
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
