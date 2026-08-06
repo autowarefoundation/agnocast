@@ -10,6 +10,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
 #include "agnocast/node/node_interfaces/node_clock.hpp"
+#include "agnocast/node/node_interfaces/node_graph.hpp"
 #include "agnocast/node/node_interfaces/node_logging.hpp"
 #include "agnocast/node/node_interfaces/node_parameters.hpp"
 #include "agnocast/node/node_interfaces/node_services.hpp"
@@ -127,6 +128,13 @@ public:
   rclcpp::node_interfaces::NodeClockInterface::SharedPtr get_node_clock_interface()
   {
     return node_clock_;
+  }
+
+  // Non-const to align with rclcpp::Node API
+  // cppcheck-suppress functionConst
+  rclcpp::node_interfaces::NodeGraphInterface::SharedPtr get_node_graph_interface()
+  {
+    return node_graph_;
   }
 
   // Non-const to align with rclcpp::Node API
@@ -398,19 +406,32 @@ public:
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
   /// Return the number of publishers on a topic.
+  ///
+  /// Counts the agnocast publishers in the same domain, plus the ROS 2 publishers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the publishers the application set up.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
   /// @return Publisher count.
   AGNOCAST_PUBLIC
   size_t count_publishers(const std::string & topic_name) const
   {
-    return get_publisher_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_publishers(topic_name);
   }
 
   /// Return the number of subscribers on a topic.
-  /// @return Subscriber count.
+  ///
+  /// Counts the agnocast subscribers in the same domain, plus the ROS 2 subscribers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the subscribers the application set up.
+  ///
+  /// Agnocast subscribers living in the calling process are not counted, because the underlying
+  /// query answers how many other processes receive a published message.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
+  /// @return Subscriber count, excluding agnocast subscribers in the calling process.
   AGNOCAST_PUBLIC
   size_t count_subscribers(const std::string & topic_name) const
   {
-    return get_subscription_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_subscribers(topic_name);
   }
 
   /// Create a publisher (QoS overload).
@@ -654,6 +675,7 @@ private:
 
   node_interfaces::NodeBase::SharedPtr node_base_;
   rclcpp::Logger logger_;
+  node_interfaces::NodeGraph::SharedPtr node_graph_;
   node_interfaces::NodeTopics::SharedPtr node_topics_;
   node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeParameters::SharedPtr node_parameters_;
