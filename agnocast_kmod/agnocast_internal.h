@@ -48,6 +48,36 @@ extern struct rw_semaphore global_htables_rwsem;
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
 
+// All eventfd access goes through these three wrappers. Besides hiding the 6.8 signature change of
+// eventfd_signal(), this is the seam the KUnit build replaces: KUnit runs in-kernel with no fd
+// table to install an eventfd into, and no exported API creates one from a module, so real
+// contexts cannot be obtained in tests. agnocast_kunit/agnocast_kunit_eventfd.c provides fakes that
+// count get/signal/put per fd. The production build below is a direct call with no indirection.
+#ifdef KUNIT_BUILD
+struct eventfd_ctx * agnocast_eventfd_get(int fd);
+void agnocast_eventfd_signal(struct eventfd_ctx * ctx);
+void agnocast_eventfd_put(struct eventfd_ctx * ctx);
+#else
+static inline struct eventfd_ctx * agnocast_eventfd_get(int fd)
+{
+  return eventfd_ctx_fdget(fd);
+}
+
+static inline void agnocast_eventfd_signal(struct eventfd_ctx * ctx)
+{
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+  eventfd_signal(ctx);
+#else
+  eventfd_signal(ctx, 1);
+#endif
+}
+
+static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
+{
+  eventfd_ctx_put(ctx);
+}
+#endif
+
 // Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
 // the daemon successfully copies the data to user-space.
 struct exit_subscription_entry
@@ -92,8 +122,23 @@ struct publisher_info
   bool qos_is_transient_local;
   uint32_t entries_num;
   bool is_bridge;
+  // The eventfd contexts PUBLISH signals for this publisher, in no particular order. Which
+  // subscribers belong here depends only on the endpoints themselves (take/domain/local-publication
+  // filters), never on the message, so the list is built when endpoints register and publish only
+  // reads it. Kept exactly as long as it needs to be; notify_capacity is the allocation, which only
+  // grows.
+  struct eventfd_ctx ** notify_ctxs;
+  uint32_t notify_num;
+  uint32_t notify_capacity;
   struct hlist_node node;
 };
+
+static inline void free_publisher_info(struct publisher_info * pub_info)
+{
+  kfree(pub_info->notify_ctxs);
+  kfree(pub_info->node_name);
+  kfree(pub_info);
+}
 
 struct subscriber_info
 {
@@ -114,21 +159,20 @@ struct subscriber_info
   struct hlist_node node;
 };
 
-// eventfd_signal() dropped its count argument in 6.8; wrap it so both APIs compile.
-#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
-#define agnocast_eventfd_signal(ctx) eventfd_signal(ctx)
-#else
-static inline void agnocast_eventfd_signal(struct eventfd_ctx * ctx)
+// Releases everything a subscriber_info owns. Use agnocast_unlink_subscriber_info() instead unless
+// the whole topic is being torn down, since a subscriber that disappears from a live topic also
+// has to disappear from the publishers' notify lists.
+static inline void free_subscriber_info(struct subscriber_info * sub_info)
 {
-  eventfd_signal(ctx, 1);
+  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
+  kfree(sub_info->node_name);
+  kfree(sub_info);
 }
-#endif
 
-// Stack buffer size for collecting subscriber notify_ctx pointers in publish_msg before signaling
-// them outside topic_rwsem. Covers typical ROS 2 fan-out (N <= 10; /tf-like outliers reach 100+)
-// while bounding stack use (64 * sizeof(void *) = 512 B). Larger fan-out falls back to
-// kcalloc(GFP_ATOMIC).
-#define NOTIFY_CTX_STACK_SIZE 64
+// Initial allocation for publisher_info::notify_ctxs. Covers typical ROS 2 fan-out (N <= 10)
+// without reallocation at a negligible per-publisher cost; /tf-like outliers (100+) grow it
+// geometrically, always while endpoints are registering and never during publish.
+#define NOTIFY_CTXS_MIN_CAPACITY 8
 
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
 // Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
@@ -261,6 +305,18 @@ void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_nod
 // struct itself) is freed only when the last referencing wrapper is dropped, so
 // a grouped partner keeps working until it too is released.
 void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
+
+// Rebuilds every publisher's notify list on the topic from the current subscriber set. Returns
+// -ENOMEM only when a list has to grow, which can happen while registering an endpoint but never
+// while removing one. Caller holds global_htables_rwsem (write).
+int agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
+
+// Removes a subscriber from the topic and releases it. This is the single place the obligations
+// that come with dropping a subscriber are discharged -- releasing its eventfd context, and
+// rebuilding the notify lists that pointed at it -- so that they cannot be honored at one call
+// site and forgotten at another. Caller holds global_htables_rwsem (write).
+void agnocast_unlink_subscriber_info(
+  struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 

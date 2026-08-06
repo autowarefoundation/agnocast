@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_eventfd.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -766,4 +767,35 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
 
   kvfree(mq_info_buf);
+}
+
+// A subscriber process that dies without calling REMOVE_SUBSCRIBER is cleaned up by the exit
+// handler instead, which must release the eventfd context the registration acquired. This is the
+// path a crashed or SIGKILLed node takes, so a leak here is not an edge case.
+void test_case_do_exit_releases_notify_context(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  const pid_t subscriber_pid = PID_BASE;
+  const int eventfd = 0;
+  setup_one_process(test, subscriber_pid);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    eventfd, &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
+
+  // Act
+  agnocast_enqueue_exit_pid(subscriber_pid);
+  msleep(10);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
+
+  // Assert
+  const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+  KUNIT_ASSERT_NOT_NULL(test, slot);
+  KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
