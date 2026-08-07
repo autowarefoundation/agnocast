@@ -4,7 +4,7 @@
 
 #ifndef TRACETOOLS_DISABLED
 
-#ifdef TRACETOOLS_LTTNG_ENABLED
+#ifndef TRACETOOLS_TRACEPOINTS_EXCLUDED
 #define TRACEPOINT_CREATE_PROBES
 #define TRACEPOINT_DEFINE
 #include "agnocast/agnocast_tracepoint_call.h"
