@@ -21,6 +21,7 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_discovery_agent.o \
   agnocast_kunit_set_ros2_subscriber_num.o \
   agnocast_kunit_set_ros2_publisher_num.o \
+  agnocast_kunit_gpu_region.o \
   agnocast_kunit_do_exit.o \
   agnocast_kunit_get_node_subscriber_topics.o \
   agnocast_kunit_get_node_names.o \

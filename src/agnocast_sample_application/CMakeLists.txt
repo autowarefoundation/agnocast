@@ -196,4 +196,30 @@ install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/
 )
 
+# GPU samples build only where the CUDA headers are present, matching how the
+# agnocast_gpu package itself is gated.
+find_package(agnocast_gpu QUIET)
+find_package(sensor_msgs REQUIRED)
+find_package(CUDAToolkit QUIET)
+# check_language reports CUDA availability without enabling it, which
+# enable_language cannot do: CMAKE_CUDA_COMPILER does not exist until after it
+# runs, so testing that variable first silently disables these targets.
+include(CheckLanguage)
+check_language(CUDA)
+if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
+  # The samples launch kernels, so they are compiled as CUDA.
+  enable_language(CUDA)
+  foreach(gpu_target gpu_talker gpu_listener gpu_listen_talker)
+    add_executable(${gpu_target} src/${gpu_target}.cpp)
+    set_source_files_properties(src/${gpu_target}.cpp PROPERTIES LANGUAGE CUDA)
+    target_include_directories(${gpu_target} PRIVATE
+      ${CUDAToolkit_INCLUDE_DIRS} ${agnocast_gpu_INCLUDE_DIRS})
+    target_link_libraries(${gpu_target} CUDA::cudart)
+    ament_target_dependencies(${gpu_target} agnocastlib rclcpp agnocast_gpu sensor_msgs)
+    install(TARGETS ${gpu_target} DESTINATION lib/${PROJECT_NAME})
+  endforeach()
+else()
+  message(STATUS "agnocast_sample_application: CUDA headers not found; skipping GPU samples.")
+endif()
+
 ament_package()

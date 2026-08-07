@@ -384,6 +384,69 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_REMOVE_PUBLISHER_CMD _IOW(0xA6, 18, struct ioctl_remove_publisher_args)
 #define AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD \
   _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
+// GPU device-memory region sharing. Mirrors agnocast_kmod/agnocast.h; the two
+// copies are hand-maintained and the major.minor version gate is what stands
+// between a missed edit and silent memory corruption.
+//
+// A region belongs to exactly one publisher, so publisher_id identifies it and
+// no separate region id exists. The kernel module stores the export without
+// interpreting it: it holds the region's liveness reference so the memory
+// survives the publishing process, and installs a fresh descriptor for each
+// importer rather than having descriptors passed between processes.
+#define GPU_DEVICE_UUID_SIZE 16
+#define MAX_GPU_HANDLE_BLOB_SIZE 4096
+
+union ioctl_add_gpu_region_args {
+  struct
+  {
+    struct name_info topic_name;
+    topic_local_id_t publisher_id;
+    uint32_t backend_type;
+    uint32_t slot_size;
+    uint32_t slot_count;
+    uint64_t mapped_size;
+    uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
+    // -1 for mechanisms whose handle is not a file descriptor.
+    int32_t handle_fd;
+    uint64_t blob_addr;
+    uint32_t blob_size;
+  };
+  // Globally unique for the module's lifetime. Messages carry it so a peer can
+  // resolve a slot to its own mapping without knowing which topic or publisher
+  // produced it.
+  uint32_t ret_region_id;
+};
+
+union ioctl_get_gpu_region_args {
+  struct
+  {
+    struct name_info topic_name;
+    topic_local_id_t publisher_id;
+    // Carried because NvSciBuf export descriptors are bound to a destination
+    // endpoint. Mechanisms without that constraint serve every subscriber the
+    // same descriptor.
+    topic_local_id_t subscriber_id;
+    // The region a message names, or 0 for "any", which is what a caller that
+    // has not seen a message yet asks for.
+    uint32_t region_id;
+    uint64_t blob_buffer_addr;
+    uint32_t blob_buffer_size;
+  };
+  struct
+  {
+    uint32_t ret_backend_type;
+    uint32_t ret_slot_size;
+    uint32_t ret_slot_count;
+    uint64_t ret_mapped_size;
+    uint8_t ret_device_uuid[GPU_DEVICE_UUID_SIZE];
+    // Installed in this process for the same open file the kernel module holds,
+    // or -1 for mechanisms that do not use one.
+    int32_t ret_handle_fd;
+    uint32_t ret_blob_size;
+    uint32_t ret_region_id;
+  };
+};
+
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
@@ -391,5 +454,7 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+#define AGNOCAST_ADD_GPU_REGION_CMD _IOWR(0xA6, 34, union ioctl_add_gpu_region_args)
+#define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 35, union ioctl_get_gpu_region_args)
 
 }  // namespace agnocast

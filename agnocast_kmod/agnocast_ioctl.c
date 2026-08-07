@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
+#include <linux/file.h>
+
 #ifndef KUNIT_BUILD
 // Kernel module uses global PIDs, whereas user-space and the interface between them use local PIDs.
 // Thus, PIDs must be converted from global to local before they are passed from kernel to user.
@@ -500,6 +502,7 @@ static int insert_publisher_info(
   (*new_info)->notify_ctxs = NULL;
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
+  INIT_LIST_HEAD(&(*new_info)->gpu_regions);
   INIT_HLIST_NODE(&(*new_info)->node);
 
   // Before hash_add, so a failure needs no more undo than the free below: the fill reads only the
@@ -3020,6 +3023,158 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   return ret;
 }
 
+// Region ids are never reused, so a stale id in a message resolves to nothing
+// rather than to a different region.
+static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
+
+int agnocast_ioctl_add_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  union ioctl_add_gpu_region_args * args, struct file * handle_file, const uint8_t * blob)
+{
+  int ret = 0;
+
+  if (args->slot_size == 0 || args->slot_count == 0 ||
+      (uint64_t)args->slot_size * args->slot_count > args->mapped_size) {
+    dev_warn(
+      agnocast_device, "Region geometry does not fit its mapping (topic_name=%s). (%s)\n",
+      topic_name, __func__);
+    return -EINVAL;
+  }
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_write(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, args->publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      args->publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
+  if (!region) {
+    ret = -ENOMEM;
+    goto unlock_all;
+  }
+
+  if (args->blob_size > 0) {
+    region->blob = kmemdup(blob, args->blob_size, GFP_KERNEL);
+    if (!region->blob) {
+      kfree(region);
+      ret = -ENOMEM;
+      goto unlock_all;
+    }
+  }
+
+  region->backend_type = args->backend_type;
+  region->slot_size = args->slot_size;
+  region->slot_count = args->slot_count;
+  region->mapped_size = args->mapped_size;
+  memcpy(region->device_uuid, args->device_uuid, GPU_DEVICE_UUID_SIZE);
+  region->blob_size = args->blob_size;
+  region->handle_file = handle_file;
+  region->region_id = (uint32_t)atomic_inc_return(&next_gpu_region_id);
+
+  list_add_tail(&region->node, &pub_info->gpu_regions);
+  args->ret_region_id = region->region_id;
+
+unlock_all:
+  up_write(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_get_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
+  const uint32_t wanted_region_id, uint8_t * blob_buf, uint32_t blob_buf_size,
+  union ioctl_get_gpu_region_args * ioctl_ret, struct file ** out_handle_file)
+{
+  int ret = 0;
+  (void)subscriber_id;
+
+  *out_handle_file = NULL;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_read(&wrapper->topic->rwsem);
+
+  const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // region_id 0 means "any", which is what a caller that has not yet seen a
+  // message uses; otherwise the message names the region it was written into.
+  const struct gpu_region_info * region = NULL;
+  const struct gpu_region_info * candidate;
+  list_for_each_entry(candidate, &pub_info->gpu_regions, node)
+  {
+    if (wanted_region_id == 0 || candidate->region_id == wanted_region_id) {
+      region = candidate;
+      break;
+    }
+  }
+  if (!region) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) has no GPU region %u. (%s)\n", publisher_id,
+      wanted_region_id, __func__);
+    ret = -ENOENT;
+    goto unlock_all;
+  }
+
+  if (region->blob_size > blob_buf_size) {
+    ret = -ENOSPC;
+    goto unlock_all;
+  }
+  if (region->blob_size > 0) {
+    memcpy(blob_buf, region->blob, region->blob_size);
+  }
+
+  // Taken while the topic lock is held so the file cannot be released between
+  // the lookup and the caller installing a descriptor for it.
+  if (region->handle_file) {
+    *out_handle_file = get_file(region->handle_file);
+  }
+
+  ioctl_ret->ret_backend_type = region->backend_type;
+  ioctl_ret->ret_slot_size = region->slot_size;
+  ioctl_ret->ret_slot_count = region->slot_count;
+  ioctl_ret->ret_mapped_size = region->mapped_size;
+  memcpy(ioctl_ret->ret_device_uuid, region->device_uuid, GPU_DEVICE_UUID_SIZE);
+  ioctl_ret->ret_blob_size = region->blob_size;
+  ioctl_ret->ret_region_id = region->region_id;
+  ioctl_ret->ret_handle_fd = -1;
+
+unlock_all:
+  up_read(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
 static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
 {
   int ret = 0;
@@ -3521,6 +3676,114 @@ static long remove_subscriber_cmd(struct ioctl_remove_subscriber_args __user * a
   return ret;
 }
 
+static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_add_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  if (args.blob_size > MAX_GPU_HANDLE_BLOB_SIZE) return -EINVAL;
+
+  uint8_t * blob = NULL;
+  if (args.blob_size > 0) {
+    blob = memdup_user((const void __user *)args.blob_addr, args.blob_size);
+    if (IS_ERR(blob)) return PTR_ERR(blob);
+  }
+
+  // Resolving the descriptor here rather than in the core keeps the core free of
+  // any dependency on the calling process's file table.
+  struct file * handle_file = NULL;
+  if (args.handle_fd >= 0) {
+    handle_file = fget(args.handle_fd);
+    if (!handle_file) {
+      kfree(blob);
+      return -EBADF;
+    }
+  }
+
+  ret = agnocast_ioctl_add_gpu_region(topic_name_buf, ipc_ns, &args, handle_file, blob);
+  if (ret != 0 && handle_file) {
+    fput(handle_file);
+  }
+  kfree(blob);
+  if (ret == 0 && copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return ret;
+}
+
+static long get_gpu_region_cmd(union ioctl_get_gpu_region_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_get_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  const topic_local_id_t publisher_id = args.publisher_id;
+  const topic_local_id_t subscriber_id = args.subscriber_id;
+  const uint64_t blob_buffer_addr = args.blob_buffer_addr;
+  const uint32_t blob_buffer_size = args.blob_buffer_size;
+  const uint32_t wanted_region_id = args.region_id;
+  if (blob_buffer_size > MAX_GPU_HANDLE_BLOB_SIZE) return -EINVAL;
+
+  uint8_t * blob_buf = NULL;
+  if (blob_buffer_size > 0) {
+    blob_buf = kmalloc(blob_buffer_size, GFP_KERNEL);
+    if (!blob_buf) return -ENOMEM;
+  }
+
+  struct file * handle_file = NULL;
+  ret = agnocast_ioctl_get_gpu_region(
+    topic_name_buf, ipc_ns, publisher_id, subscriber_id, wanted_region_id, blob_buf,
+    blob_buffer_size, &args, &handle_file);
+  if (ret != 0) goto free_blob;
+
+  // Two-phase, like get_exit_process: reserve the descriptor, publish the
+  // results, and only then commit the installation. A failure after fd_install
+  // would strand a descriptor the caller never learns the number of.
+  int fd = -1;
+  if (handle_file) {
+    fd = get_unused_fd_flags(O_CLOEXEC);
+    if (fd < 0) {
+      ret = fd;
+      goto put_file;
+    }
+    args.ret_handle_fd = fd;
+  }
+
+  if (blob_buffer_size > 0 && args.ret_blob_size > 0) {
+    if (copy_to_user((void __user *)blob_buffer_addr, blob_buf, args.ret_blob_size)) {
+      ret = -EFAULT;
+      goto put_fd;
+    }
+  }
+  if (copy_to_user(arg, &args, sizeof(args))) {
+    ret = -EFAULT;
+    goto put_fd;
+  }
+
+  if (handle_file) {
+    fd_install(fd, handle_file);
+  }
+  kfree(blob_buf);
+  return 0;
+
+put_fd:
+  if (fd >= 0) put_unused_fd(fd);
+put_file:
+  if (handle_file) fput(handle_file);
+free_blob:
+  kfree(blob_buf);
+  return ret;
+}
+
 static long remove_publisher_cmd(struct ioctl_remove_publisher_args __user * arg)
 {
   int ret = 0;
@@ -3778,6 +4041,10 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
         (struct ioctl_discovery_agent_should_exit_args __user *)arg);
     case AGNOCAST_ADD_DISCOVERY_AGENT_CMD:
       return add_discovery_agent_cmd((struct ioctl_add_discovery_agent_args __user *)arg);
+    case AGNOCAST_ADD_GPU_REGION_CMD:
+      return add_gpu_region_cmd((union ioctl_add_gpu_region_args __user *)arg);
+    case AGNOCAST_GET_GPU_REGION_CMD:
+      return get_gpu_region_cmd((union ioctl_get_gpu_region_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:

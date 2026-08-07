@@ -26,6 +26,9 @@
   <depend>agnocast_components</depend>
   <depend>agnocast_sample_interfaces</depend>
   <depend>agnocastlib</depend>
+  <!-- Optional: the GPU samples build only when this and the CUDA toolkit are present. -->
+  <depend>agnocast_gpu</depend>
+  <depend>sensor_msgs</depend>
 
   <exec_depend>ros2agnocast_discovery_agent</exec_depend>
 
