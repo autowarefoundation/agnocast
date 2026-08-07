@@ -278,13 +278,11 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
-  # AsyncParametersClient integration test (requires kernel module, no mock).
-  # Black-box test of agnocast::AsyncParametersClient against a real
-  # agnocast::ParameterService on a second node in the same process.
-  ament_add_gmock(test_integration_agnocast_parameter_client_${PROJECT_NAME}
-    test/integration/test_agnocast_parameter_client.cpp)
-  target_link_libraries(test_integration_agnocast_parameter_client_${PROJECT_NAME} agnocast)
-  set_tests_properties(test_integration_agnocast_parameter_client_${PROJECT_NAME} PROPERTIES
+  # Parameter service integration test (requires kernel module, no mock).
+  ament_add_gmock(test_integration_agnocast_parameter_service_${PROJECT_NAME}
+    test/integration/test_agnocast_parameter_service.cpp)
+  target_link_libraries(test_integration_agnocast_parameter_service_${PROJECT_NAME} agnocast)
+  set_tests_properties(test_integration_agnocast_parameter_service_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 120
     LABELS "requires_kernel_module;requires_heaphook"
