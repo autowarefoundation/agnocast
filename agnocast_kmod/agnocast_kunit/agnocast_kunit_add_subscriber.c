@@ -104,9 +104,8 @@ void test_case_add_subscriber_normal(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
 }
 
-// A non-take subscriber hands the kernel the eventfd it wants publish notifications on, and the
-// kernel holds a context for it until the subscriber goes away. The matching releases are covered
-// by remove_subscriber, do_exit and exit_free_data.
+// The kernel holds a context for the subscriber's eventfd until the subscriber goes away; the
+// matching releases are covered by remove_subscriber, do_exit and exit_free_data.
 void test_case_add_subscriber_acquires_notify_context(struct kunit * test)
 {
   // Arrange
@@ -131,9 +130,8 @@ void test_case_add_subscriber_acquires_notify_context(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
 }
 
-// A take subscriber polls for messages instead of being notified, so no context may be acquired
-// for it even when a descriptor is supplied: one taken here would be a reference that no
-// destruction path knows to release.
+// A take subscriber polls instead of being notified, so a context taken here even with a
+// descriptor supplied would be a reference no destruction path knows to release.
 void test_case_add_subscriber_take_sub_acquires_no_notify_context(struct kunit * test)
 {
   // Arrange
@@ -158,8 +156,7 @@ void test_case_add_subscriber_take_sub_acquires_no_notify_context(struct kunit *
   KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
 
-// A descriptor that is not an eventfd is rejected before any topic state is created, so the
-// caller cannot leave a half-registered subscriber behind.
+// Rejected before any topic state is created, so no half-registered subscriber is left behind.
 void test_case_add_subscriber_invalid_eventfd(struct kunit * test)
 {
   // Arrange
@@ -181,9 +178,8 @@ void test_case_add_subscriber_invalid_eventfd(struct kunit * test)
   KUNIT_EXPECT_FALSE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
 }
 
-// Registration can fail after the eventfd context has already been acquired, and the unwind has to
-// hand it back. Nothing else reaches that release: the other rejection cases either fail before
-// the context is taken, or pass eventfd = -1 and never take one.
+// The only case reaching the unwind that hands the context back: the other rejections either fail
+// before it is acquired, or pass eventfd = -1 and never acquire one.
 void test_case_add_subscriber_releases_notify_context_on_failure(struct kunit * test)
 {
   // Arrange: fill the topic so the registration below is rejected by insert_subscriber_info().

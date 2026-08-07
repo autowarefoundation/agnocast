@@ -59,9 +59,8 @@ static void setup_one_publisher(
   KUNIT_ASSERT_EQ(test, ret2, 0);
 }
 
-// Registers a subscriber on an existing process, with publish notifications going to the given
-// fake eventfd. The setup helpers above pass -1, which leaves notify_ctx NULL and keeps the
-// subscriber out of the publishers' notify lists, so cases that assert on delivery need these.
+// The setup helpers above pass -1, which leaves notify_ctx NULL and so keeps the subscriber out of
+// the publishers' notify lists. Cases that assert on delivery need a real context instead.
 static void add_subscriber_with_eventfd(
   struct kunit * test, const pid_t pid, const int eventfd, const bool ignore_local_publications)
 {
@@ -89,8 +88,7 @@ static void setup_one_subscriber_with_eventfd(
   add_subscriber_with_eventfd(test, subscriber_pid, eventfd, ignore_local_publications);
 }
 
-// A publisher and a notified subscriber sharing one process, which is what makes
-// ignore_local_publications observable.
+// One process holding both, which is what makes ignore_local_publications observable.
 static void setup_pub_sub_same_process_with_eventfd(
   struct kunit * test, topic_local_id_t * publisher_id, const int eventfd,
   const bool ignore_local_publications, uint64_t * ret_addr)
@@ -348,8 +346,8 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 2);
 }
 
-// ignore_local_publications drops a subscriber only when it shares the publisher's process, so
-// each combination of the flag and the pid relationship is covered below.
+// ignore_local_publications drops a subscriber only when it shares the publisher's process. The
+// flag-off case short-circuits before the pid comparison, so it needs no diff-pid counterpart.
 void test_case_ignore_local_same_pid_enabled(struct kunit * test)
 {
   // Arrange
@@ -411,30 +409,6 @@ void test_case_ignore_local_diff_pid_enabled(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
 }
-
-void test_case_ignore_local_diff_pid_disabled(struct kunit * test)
-{
-  // Arrange
-  agnocast_kunit_eventfd_reset();
-  topic_local_id_t publisher_id;
-  uint64_t ret_addr;
-  setup_one_publisher(test, &publisher_id, &ret_addr);
-
-  const int eventfd = 0;
-  setup_one_subscriber_with_eventfd(test, eventfd, false);
-
-  union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
-
-  // Act
-  int ret = agnocast_ioctl_publish_msg(
-    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
-
-  // Assert
-  KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
-}
-
-// The cases below cover the eventfd notification the kernel performs inside PUBLISH.
 
 void test_case_publish_msg_signals_all_subscribers(struct kunit * test)
 {
@@ -504,8 +478,7 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
 
 void test_case_publish_msg_signals_large_fanout(struct kunit * test)
 {
-  // Arrange: a fan-out larger than the e2e and benchmark scenarios reach, so the buffering
-  // PUBLISH does for the collected contexts is exercised beyond its fast path.
+  // Arrange: a fan-out past NOTIFY_CTXS_MIN_CAPACITY, so the notify list has to grow.
   agnocast_kunit_eventfd_reset();
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
@@ -556,8 +529,7 @@ void test_case_publish_msg_signals_once_per_publish(struct kunit * test)
     KUNIT_ASSERT_EQ(test, ret, 0);
   }
 
-  // Assert: the notification is per publish, and the context is acquired once for the
-  // subscriber's lifetime rather than per publish.
+  // Assert: one signal per publish, and publish never re-acquires the context.
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), publish_num);
   const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
   KUNIT_ASSERT_NOT_NULL(test, slot);

@@ -37,8 +37,7 @@ void SubscriptionBase::initialize(
       topic_name_, type_name, "sub", node_name);
   }
 
-  // Non-take subscribers get an eventfd that the kernel signals on each publish; take subscribers
-  // poll and need no notification fd.
+  // Take subscribers poll and need no notification fd.
   int efd = -1;
   if (!is_take_sub) {
     efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);

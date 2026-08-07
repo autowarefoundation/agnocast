@@ -198,8 +198,8 @@ void SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
     callback_info = it->second;
   }
 
-  // Drain the eventfd counter; the value is unused (the fd is a pure wakeup, like the MQ it
-  // replaces). The eventfd is EFD_NONBLOCK, so a spurious/coalesced wake returns EAGAIN.
+  // Drain the counter; the value is unused, the fd is a pure wakeup. EFD_NONBLOCK, so a
+  // spurious or coalesced wake returns EAGAIN.
   uint64_t counter = 0;
   const ssize_t ret = read(callback_info.notify_eventfd, &counter, sizeof(counter));
   if (ret < 0) {

@@ -3,22 +3,16 @@
 
 #include <linux/types.h>
 
-// Fake eventfd contexts for the KUnit build.
-//
-// The module under test acquires an eventfd_ctx from a user-supplied fd and later signals and
-// releases it. None of that is reachable from KUnit: the suite runs in-kernel with no fd table to
-// install an eventfd into, and the kernel exports no way to create one from a module. So the
-// KUNIT_BUILD half of the agnocast_eventfd_* wrappers (see agnocast_internal.h) lands here instead,
-// handing out opaque per-fd tokens and counting what the module does with them.
-//
-// That is enough to assert the two things the real API would otherwise hide: which subscribers a
-// publish signals, and whether every destruction path releases the context it took.
+// Fake eventfd contexts backing the KUNIT_BUILD half of the agnocast_eventfd_* wrappers. KUnit
+// runs in-kernel with no fd table to install an eventfd into, and the kernel exports no way to
+// create one from a module, so real contexts are unobtainable; these hand out opaque per-fd tokens
+// and count what the module does with them. That is enough to assert what the real API would hide:
+// which subscribers a publish signals, and whether every destruction path releases its context.
 
-// Number of fake descriptors available to tests. Test fds are plain indices into [0, MAX).
+// Test fds are plain indices into [0, MAX).
 #define AGNOCAST_KUNIT_EVENTFD_MAX_FD 256
 
-// An fd outside the table. agnocast_eventfd_get() rejects it, the way the real
-// eventfd_ctx_fdget() rejects a descriptor that is not an eventfd.
+// Rejected by agnocast_eventfd_get(), as the real eventfd_ctx_fdget() rejects a non-eventfd fd.
 #define AGNOCAST_KUNIT_EVENTFD_BAD_FD AGNOCAST_KUNIT_EVENTFD_MAX_FD
 
 struct agnocast_kunit_eventfd_slot
@@ -28,13 +22,12 @@ struct agnocast_kunit_eventfd_slot
   uint32_t put_count;
 };
 
-// Clears every counter. Call at the start of each test: the suite's exit hook tears down leftover
-// state from the previous test, and those releases land on these counters too.
+// Call at the start of each test: the suite's exit hook tears down the previous test's state, and
+// those releases land on these counters too.
 void agnocast_kunit_eventfd_reset(void);
 
 // Counters for one fake fd, or NULL if fd is out of range.
 const struct agnocast_kunit_eventfd_slot * agnocast_kunit_eventfd_slot_of(int fd);
 
-// Total gets minus total puts. Zero means every context handed out has been released, which is the
-// leak check for the subscriber destruction paths.
+// Total gets minus total puts; zero means nothing leaked.
 int64_t agnocast_kunit_eventfd_outstanding(void);

@@ -204,10 +204,9 @@ static struct subscriber_info * find_subscriber_info(
   return NULL;
 }
 
-// Ensures pub_info's notify list can hold `needed` contexts. Only ever called while registering an
-// endpoint, i.e. under global_htables_rwsem (write), so the swap below cannot race a publish: those
-// hold the read side for their whole duration. The contents are rebuilt right after, so nothing is
-// worth copying across.
+// Only ever called while registering an endpoint, i.e. under global_htables_rwsem (write), so the
+// swap below cannot race a publish: those hold the read side for their whole duration. The
+// contents are rebuilt right after, so nothing is copied across.
 static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t needed)
 {
   if (needed <= pub_info->notify_capacity) return 0;
@@ -231,9 +230,8 @@ static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t 
   return 0;
 }
 
-// Recomputes which subscribers this publisher notifies. The filters below are exactly the ones
-// PUBLISH used to evaluate per message; none of them depends on the message, so evaluating them
-// here instead leaves publish with nothing to do but signal.
+// Recomputes which subscribers this publisher notifies. None of the filters below depends on the
+// message, so evaluating them here leaves publish with nothing to do but signal.
 static int rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher_info * pub_info)
 {
   // The subscriber count bounds the list, so one reservation covers the fill below.
@@ -245,9 +243,7 @@ static int rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher_
   int bkt_sub_info;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
-    // A take subscriber polls for messages and is never notified.
     if (sub_info->is_take_sub) continue;
-    // Cross-domain (bridge) delivery direction still gates notification.
     if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
       continue;
     if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
@@ -278,8 +274,8 @@ void agnocast_unlink_subscriber_info(
   hash_del(&sub_info->node);
   free_subscriber_info(sub_info);
 
-  // A rebuild after a removal never needs a bigger list than is already allocated, so this cannot
-  // fail. Warn rather than silently leave a list pointing at the context just released.
+  // A rebuild after a removal never needs to grow a list, so this cannot fail. Warn rather than
+  // silently leave a list pointing at the context just released.
   WARN_ON_ONCE(agnocast_rebuild_notify_lists(wrapper) < 0);
 }
 
@@ -345,7 +341,6 @@ static int insert_subscriber_info(
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
 
-  // The new subscriber has to appear in the notify list of every publisher that will deliver to it.
   int ret = agnocast_rebuild_notify_lists(wrapper);
   if (ret < 0) {
     hash_del(&(*new_info)->node);
@@ -453,8 +448,8 @@ static int insert_publisher_info(
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
 
-  // Build this publisher's notify list from the subscribers already on the topic; later ones are
-  // folded in as they register. Failing here beats failing in publish, which cannot report it.
+  // Later subscribers are folded in as they register. Failing here beats failing in publish,
+  // which cannot report it.
   int ret = rebuild_notify_list(wrapper, *new_info);
   if (ret < 0) {
     hash_del(&(*new_info)->node);
@@ -817,7 +812,6 @@ int agnocast_ioctl_add_subscriber(
   int ret;
   struct eventfd_ctx * notify_ctx = NULL;
 
-  // For non-take subscribers, acquire an eventfd context for publish notification.
   // eventfd < 0 means no notification (used in kunit tests).
   if (!is_take_sub && eventfd >= 0) {
     notify_ctx = agnocast_eventfd_get(eventfd);
@@ -983,8 +977,7 @@ int agnocast_ioctl_publish_msg(
 {
   int ret = 0;
 
-  // Snapshot of the publisher's notify list, taken under topic_rwsem and signaled after releasing
-  // it. Declared here so the early-error `goto unlock_all` paths reach the signal loop with
+  // Declared here so the early-error `goto unlock_all` paths reach the signal loop below with
   // notify_num == 0 (a no-op).
   struct eventfd_ctx ** notify_ctxs = NULL;
   uint32_t notify_num = 0;
@@ -1034,7 +1027,6 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  // Who to notify was settled when the endpoints registered, so there is nothing to compute here.
   notify_ctxs = pub_info->notify_ctxs;
   notify_num = pub_info->notify_num;
 

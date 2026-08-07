@@ -769,9 +769,8 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
   kvfree(mq_info_buf);
 }
 
-// A subscriber process that dies without calling REMOVE_SUBSCRIBER is cleaned up by the exit
-// handler instead, which must release the eventfd context the registration acquired. This is the
-// path a crashed or SIGKILLed node takes, so a leak here is not an edge case.
+// The path a crashed or SIGKILLed node takes: no REMOVE_SUBSCRIBER, so the exit handler is what
+// has to release the context.
 void test_case_do_exit_releases_notify_context(struct kunit * test)
 {
   // Arrange

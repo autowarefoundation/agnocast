@@ -48,11 +48,8 @@ extern struct rw_semaphore global_htables_rwsem;
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
 
-// All eventfd access goes through these three wrappers. Besides hiding the 6.8 signature change of
-// eventfd_signal(), this is the seam the KUnit build replaces: KUnit runs in-kernel with no fd
-// table to install an eventfd into, and no exported API creates one from a module, so real
-// contexts cannot be obtained in tests. agnocast_kunit/agnocast_kunit_eventfd.c provides fakes that
-// count get/signal/put per fd. The production build below is a direct call with no indirection.
+// All eventfd access goes through these wrappers so the KUnit build can substitute fakes; see
+// agnocast_kunit/agnocast_kunit_eventfd.c for why real contexts are unobtainable there.
 #ifdef KUNIT_BUILD
 struct eventfd_ctx * agnocast_eventfd_get(int fd);
 void agnocast_eventfd_signal(struct eventfd_ctx * ctx);
@@ -122,11 +119,9 @@ struct publisher_info
   bool qos_is_transient_local;
   uint32_t entries_num;
   bool is_bridge;
-  // The eventfd contexts PUBLISH signals for this publisher, in no particular order. Which
-  // subscribers belong here depends only on the endpoints themselves (take/domain/local-publication
-  // filters), never on the message, so the list is built when endpoints register and publish only
-  // reads it. Kept exactly as long as it needs to be; notify_capacity is the allocation, which only
-  // grows.
+  // The eventfd contexts PUBLISH signals, in no particular order. Membership depends only on the
+  // endpoints, never on the message, so the list is built as endpoints register and publish only
+  // reads it.
   struct eventfd_ctx ** notify_ctxs;
   uint32_t notify_num;
   uint32_t notify_capacity;
@@ -159,9 +154,8 @@ struct subscriber_info
   struct hlist_node node;
 };
 
-// Releases everything a subscriber_info owns. Use agnocast_unlink_subscriber_info() instead unless
-// the whole topic is being torn down, since a subscriber that disappears from a live topic also
-// has to disappear from the publishers' notify lists.
+// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
+// subscriber leaving a live topic must also leave the publishers' notify lists.
 static inline void free_subscriber_info(struct subscriber_info * sub_info)
 {
   if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
@@ -169,9 +163,7 @@ static inline void free_subscriber_info(struct subscriber_info * sub_info)
   kfree(sub_info);
 }
 
-// Initial allocation for publisher_info::notify_ctxs. Covers typical ROS 2 fan-out (N <= 10)
-// without reallocation at a negligible per-publisher cost; /tf-like outliers (100+) grow it
-// geometrically, always while endpoints are registering and never during publish.
+// Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
 #define NOTIFY_CTXS_MIN_CAPACITY 8
 
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
@@ -310,15 +302,14 @@ void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_nod
 // a grouped partner keeps working until it too is released.
 void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
 
-// Rebuilds every publisher's notify list on the topic from the current subscriber set. Returns
-// -ENOMEM only when a list has to grow, which can happen while registering an endpoint but never
-// while removing one. Caller holds global_htables_rwsem (write).
+// Rebuilds every publisher's notify list on the topic. Returns -ENOMEM only when a list has to
+// grow, which can happen while registering an endpoint but never while removing one.
+// Caller holds global_htables_rwsem (write).
 int agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
 
-// Removes a subscriber from the topic and releases it. This is the single place the obligations
-// that come with dropping a subscriber are discharged -- releasing its eventfd context, and
-// rebuilding the notify lists that pointed at it -- so that they cannot be honored at one call
-// site and forgotten at another. Caller holds global_htables_rwsem (write).
+// The single place a subscriber is dropped from a live topic, so that releasing its eventfd
+// context and rebuilding the notify lists pointing at it cannot be forgotten at one call site.
+// Caller holds global_htables_rwsem (write).
 void agnocast_unlink_subscriber_info(
   struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
 

@@ -35,10 +35,8 @@ static void setup_one_subscriber(struct kunit * test, const pid_t pid, const int
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
-// Module unload tears topics down with their subscribers still registered: nothing unregisters
-// them first, and the process-exit handler never runs. So this is the only path on which
-// agnocast_release_topic_wrapper() sees live subscriber_info entries, and the only one that can
-// catch a notify context it forgets to release.
+// Module unload tears topics down with their subscribers still registered, so this is the only
+// path on which agnocast_release_topic_wrapper() sees live subscriber_info entries.
 void test_case_exit_free_data_releases_notify_context(struct kunit * test)
 {
   // Arrange

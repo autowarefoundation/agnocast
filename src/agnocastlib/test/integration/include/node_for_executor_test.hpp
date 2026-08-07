@@ -20,8 +20,7 @@ private:
   std::unique_ptr<std::atomic<bool>[]> agnocast_sub_cbs_called_;
   size_t num_total_agnocast_sub_cbs_ = 0;
   std::string agnocast_topic_name_ = "/dummy_agnocast_topic";
-  // Eventfds standing in for real subscriptions: the executor epolls each one, and the timer
-  // callback writes to them to fire the agnocast callbacks (no Publisher/Subscription involved).
+  // These eventfds are used to execute the agnocast callbacks without Publisher and Subscription.
   std::vector<int> notify_eventfds_;
 
   void add_agnocast_sub_cb();

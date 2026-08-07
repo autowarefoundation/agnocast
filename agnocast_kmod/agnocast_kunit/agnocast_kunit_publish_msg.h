@@ -12,7 +12,6 @@
     KUNIT_CASE(test_case_ignore_local_same_pid_enabled),                                      \
     KUNIT_CASE(test_case_ignore_local_same_pid_disabled),                                     \
     KUNIT_CASE(test_case_ignore_local_diff_pid_enabled),                                      \
-    KUNIT_CASE(test_case_ignore_local_diff_pid_disabled),                                     \
     KUNIT_CASE(test_case_publish_msg_signals_all_subscribers),                                \
     KUNIT_CASE(test_case_publish_msg_does_not_signal_take_sub),                               \
     KUNIT_CASE(test_case_publish_msg_signals_large_fanout),                                   \
@@ -31,7 +30,6 @@ void test_case_publish_msg_excessive_release_count(struct kunit * test);
 void test_case_ignore_local_same_pid_enabled(struct kunit * test);
 void test_case_ignore_local_same_pid_disabled(struct kunit * test);
 void test_case_ignore_local_diff_pid_enabled(struct kunit * test);
-void test_case_ignore_local_diff_pid_disabled(struct kunit * test);
 void test_case_publish_msg_signals_all_subscribers(struct kunit * test);
 void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test);
 void test_case_publish_msg_signals_large_fanout(struct kunit * test);

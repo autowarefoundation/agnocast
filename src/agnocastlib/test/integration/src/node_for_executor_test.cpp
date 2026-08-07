@@ -98,8 +98,9 @@ void NodeForExecutorTest::dummy_work(std::chrono::milliseconds exec_time)
   }
 }
 
-// This stands in for a publisher: it signals each subscriber's notification eventfd exactly as the
-// kernel does at publish time, so the test drives the Executor without a real Publisher.
+// NOTE: If the implementation of agnocast is changed, this function does not
+// necessarily have to be changed as well, because this test is for the Executor.
+// It stands in for a publisher, signalling each notification eventfd as the kernel does.
 void NodeForExecutorTest::agnocast_timer_cb()
 {
   for (int notify_eventfd : notify_eventfds_) {

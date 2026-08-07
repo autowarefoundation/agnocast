@@ -87,8 +87,6 @@ union ioctl_publish_msg_args publish_core(
   publish_msg_args.publisher_id = publisher_id;
   publish_msg_args.msg_virtual_address = msg_virtual_address;
 
-  // The kernel signals each subscriber's eventfd directly inside this ioctl, so the publisher no
-  // longer performs any per-subscriber userspace notification.
   if (ioctl(agnocast_fd, AGNOCAST_PUBLISH_MSG_CMD, &publish_msg_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
