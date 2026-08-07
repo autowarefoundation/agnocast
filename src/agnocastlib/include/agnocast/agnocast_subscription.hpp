@@ -440,7 +440,7 @@ public:
  *
  * @note This class is planned to move to `autoware_agnocast_wrapper` and be removed from agnocast:
  * it reproduces Autoware's polling subscriber, which is an Autoware-specific API that agnocast does
- * not intend to maintain as public API. 
+ * not intend to maintain as public API.
  */
 AGNOCAST_PUBLIC
 template <typename MessageT>
