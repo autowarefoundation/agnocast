@@ -7,9 +7,14 @@
 // module under test: distinct per fd, non-NULL, and never dereferenced as a real context.
 static struct agnocast_kunit_eventfd_slot slots[AGNOCAST_KUNIT_EVENTFD_MAX_FD];
 
+// The slot a negative fd maps to. Kept out of slot_of() and outstanding(), so a subscriber
+// registered with one is invisible to every assertion.
+static struct agnocast_kunit_eventfd_slot unobserved_slot;
+
 void agnocast_kunit_eventfd_reset(void)
 {
   memset(slots, 0, sizeof(slots));
+  memset(&unobserved_slot, 0, sizeof(unobserved_slot));
 }
 
 const struct agnocast_kunit_eventfd_slot * agnocast_kunit_eventfd_slot_of(int fd)
@@ -31,6 +36,8 @@ static struct agnocast_kunit_eventfd_slot * slot_from_ctx(struct eventfd_ctx * c
 {
   struct agnocast_kunit_eventfd_slot * slot = (struct agnocast_kunit_eventfd_slot *)ctx;
 
+  if (slot == &unobserved_slot) return slot;
+
   // A pointer from outside the table means the module fabricated or corrupted a context, which the
   // real build would turn into a wild eventfd access. Fail loudly rather than count it.
   if (WARN_ON_ONCE(slot < slots || slot >= slots + AGNOCAST_KUNIT_EVENTFD_MAX_FD)) return NULL;
@@ -40,7 +47,8 @@ static struct agnocast_kunit_eventfd_slot * slot_from_ctx(struct eventfd_ctx * c
 
 struct eventfd_ctx * agnocast_eventfd_get(int fd)
 {
-  if (fd < 0 || fd >= AGNOCAST_KUNIT_EVENTFD_MAX_FD) return ERR_PTR(-EINVAL);
+  if (fd < 0) return (struct eventfd_ctx *)&unobserved_slot;
+  if (fd >= AGNOCAST_KUNIT_EVENTFD_MAX_FD) return ERR_PTR(-EINVAL);
 
   slots[fd].get_count++;
   return (struct eventfd_ctx *)&slots[fd];

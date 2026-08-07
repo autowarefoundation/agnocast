@@ -716,8 +716,7 @@ int agnocast_ioctl_add_subscriber(
   int ret;
   struct eventfd_ctx * notify_ctx = NULL;
 
-  // eventfd < 0 means no notification (used in kunit tests).
-  if (!is_take_sub && eventfd >= 0) {
+  if (!is_take_sub) {
     notify_ctx = agnocast_eventfd_get(eventfd);
     if (IS_ERR(notify_ctx)) {
       dev_warn(agnocast_device, "Failed to get the eventfd context (eventfd=%d).\n", eventfd);

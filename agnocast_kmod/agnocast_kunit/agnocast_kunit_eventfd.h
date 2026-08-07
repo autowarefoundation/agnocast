@@ -9,7 +9,8 @@
 // and count what the module does with them. That is enough to assert what the real API would hide:
 // which subscribers a publish signals, and whether every destruction path releases its context.
 
-// Test fds are plain indices into [0, MAX).
+// Test fds are plain indices into [0, MAX). Unlike the real eventfd_ctx_fdget(), a negative fd is
+// accepted and maps to an unobserved slot, for subscribers a case needs but asserts nothing about.
 #define AGNOCAST_KUNIT_EVENTFD_MAX_FD 256
 
 // Rejected by agnocast_eventfd_get(), as the real eventfd_ctx_fdget() rejects a non-eventfd fd.
