@@ -478,7 +478,8 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
 
 void test_case_publish_msg_signals_large_fanout(struct kunit * test)
 {
-  // Arrange: a fan-out past NOTIFY_CTXS_MIN_CAPACITY, so the notify list has to grow.
+  // Arrange: a fan-out well past what the e2e tests reach, to exercise the collection PUBLISH
+  // does at scale.
   agnocast_kunit_eventfd_reset();
   topic_local_id_t publisher_id;
   uint64_t ret_addr;

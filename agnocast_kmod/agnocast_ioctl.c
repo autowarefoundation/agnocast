@@ -204,81 +204,6 @@ static struct subscriber_info * find_subscriber_info(
   return NULL;
 }
 
-// Only ever called while registering an endpoint, i.e. under global_htables_rwsem (write), so the
-// swap below cannot race a publish: those hold the read side for their whole duration. The
-// contents are rebuilt right after, so nothing is copied across.
-static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t needed)
-{
-  if (needed <= pub_info->notify_capacity) return 0;
-
-  uint32_t new_capacity =
-    pub_info->notify_capacity ? pub_info->notify_capacity * 2 : NOTIFY_CTXS_MIN_CAPACITY;
-  if (new_capacity < needed) new_capacity = needed;
-  if (new_capacity > MAX_SUBSCRIBER_NUM) new_capacity = MAX_SUBSCRIBER_NUM;
-
-  struct eventfd_ctx ** new_ctxs = kmalloc_array(new_capacity, sizeof(*new_ctxs), GFP_KERNEL);
-  if (!new_ctxs) {
-    dev_warn(
-      agnocast_device, "Failed to grow the notify list to %u entries by kmalloc_array. (%s)\n",
-      new_capacity, __func__);
-    return -ENOMEM;
-  }
-
-  kfree(pub_info->notify_ctxs);
-  pub_info->notify_ctxs = new_ctxs;
-  pub_info->notify_capacity = new_capacity;
-  return 0;
-}
-
-// Recomputes which subscribers this publisher notifies. None of the filters below depends on the
-// message, so evaluating them here leaves publish with nothing to do but signal.
-static int rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher_info * pub_info)
-{
-  // The subscriber count bounds the list, so one reservation covers the fill below.
-  int ret = reserve_notify_ctxs(pub_info, agnocast_get_size_sub_info_htable(wrapper));
-  if (ret < 0) return ret;
-
-  uint32_t notify_num = 0;
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->is_take_sub) continue;
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
-      continue;
-    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
-    if (!sub_info->notify_ctx) continue;
-
-    pub_info->notify_ctxs[notify_num++] = sub_info->notify_ctx;
-  }
-  pub_info->notify_num = notify_num;
-
-  return 0;
-}
-
-int agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper)
-{
-  struct publisher_info * pub_info;
-  int bkt_pub_info;
-  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
-  {
-    int ret = rebuild_notify_list(wrapper, pub_info);
-    if (ret < 0) return ret;
-  }
-  return 0;
-}
-
-void agnocast_unlink_subscriber_info(
-  struct topic_wrapper * wrapper, struct subscriber_info * sub_info)
-{
-  hash_del(&sub_info->node);
-  free_subscriber_info(sub_info);
-
-  // A rebuild after a removal never needs to grow a list, so this cannot fail. Warn rather than
-  // silently leave a list pointing at the context just released.
-  WARN_ON_ONCE(agnocast_rebuild_notify_lists(wrapper) < 0);
-}
-
 static int insert_subscriber_info(
   struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
@@ -340,15 +265,6 @@ static int insert_subscriber_info(
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
-
-  int ret = agnocast_rebuild_notify_lists(wrapper);
-  if (ret < 0) {
-    hash_del(&(*new_info)->node);
-    kfree(node_name_copy);
-    kfree(*new_info);
-    // The caller releases notify_ctx on the error path, so it must not be released here.
-    return ret;
-  }
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -441,21 +357,9 @@ static int insert_publisher_info(
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
   (*new_info)->is_bridge = is_bridge;
-  (*new_info)->notify_ctxs = NULL;
-  (*new_info)->notify_num = 0;
-  (*new_info)->notify_capacity = 0;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
-
-  // Later subscribers are folded in as they register. Failing here beats failing in publish,
-  // which cannot report it.
-  int ret = rebuild_notify_list(wrapper, *new_info);
-  if (ret < 0) {
-    hash_del(&(*new_info)->node);
-    free_publisher_info(*new_info);
-    return ret;
-  }
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -1017,6 +921,21 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
+  // The subscriber count bounds how many contexts the loop below can collect. Allocated before
+  // anything is published so that a failure here cannot leave a published entry reported as an
+  // error.
+  const int sub_num = agnocast_get_size_sub_info_htable(wrapper);
+  if (sub_num > 0) {
+    notify_ctxs = kmalloc_array(sub_num, sizeof(*notify_ctxs), GFP_KERNEL);
+    if (!notify_ctxs) {
+      dev_warn(
+        agnocast_device, "Failed to allocate the notify list for %d subscribers. (%s)\n", sub_num,
+        __func__);
+      ret = -ENOMEM;
+      goto unlock_all;
+    }
+  }
+
   ret = insert_message_entry(wrapper, pub_info, msg_virtual_address, ioctl_ret);
   if (ret < 0) {
     goto unlock_all;
@@ -1027,19 +946,29 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  notify_ctxs = pub_info->notify_ctxs;
-  notify_num = pub_info->notify_num;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->is_take_sub) continue;
+    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
+      continue;
+    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+    if (!sub_info->notify_ctx) continue;
+
+    notify_ctxs[notify_num++] = sub_info->notify_ctx;
+  }
 
 unlock_all:
   up_write(&wrapper->topic->rwsem);
 
   // Signal outside topic_rwsem: RECEIVE_MSG and TAKE_MSG take it for write, so holding it here
-  // would block the very subscribers being woken. The list and the contexts both stay valid
-  // because every path that rebuilds a list or releases a context takes global_htables_rwsem for
-  // write, and it is held here for read.
+  // would block the very subscribers being woken. The contexts stay valid because every path that
+  // releases one takes global_htables_rwsem for write, and it is held here for read.
   for (uint32_t i = 0; i < notify_num; i++) {
     agnocast_eventfd_signal(notify_ctxs[i]);
   }
+  kfree(notify_ctxs);
 
 unlock_only_global:
   up_read(&global_htables_rwsem);
@@ -2053,7 +1982,8 @@ int agnocast_ioctl_remove_subscriber(
     goto unlock;
   }
 
-  agnocast_unlink_subscriber_info(wrapper, sub_info);
+  hash_del(&sub_info->node);
+  free_subscriber_info(sub_info);
 
   if (!is_parameter_service_topic(topic_name)) {
     dev_info(

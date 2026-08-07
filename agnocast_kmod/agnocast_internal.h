@@ -119,18 +119,11 @@ struct publisher_info
   bool qos_is_transient_local;
   uint32_t entries_num;
   bool is_bridge;
-  // The eventfd contexts PUBLISH signals, in no particular order. Membership depends only on the
-  // endpoints, never on the message, so the list is built as endpoints register and publish only
-  // reads it.
-  struct eventfd_ctx ** notify_ctxs;
-  uint32_t notify_num;
-  uint32_t notify_capacity;
   struct hlist_node node;
 };
 
 static inline void free_publisher_info(struct publisher_info * pub_info)
 {
-  kfree(pub_info->notify_ctxs);
   kfree(pub_info->node_name);
   kfree(pub_info);
 }
@@ -154,17 +147,12 @@ struct subscriber_info
   struct hlist_node node;
 };
 
-// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
-// subscriber leaving a live topic must also leave the publishers' notify lists.
 static inline void free_subscriber_info(struct subscriber_info * sub_info)
 {
   if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
   kfree(sub_info->node_name);
   kfree(sub_info);
 }
-
-// Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
-#define NOTIFY_CTXS_MIN_CAPACITY 8
 
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
 // Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
@@ -301,17 +289,6 @@ void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_nod
 // struct itself) is freed only when the last referencing wrapper is dropped, so
 // a grouped partner keeps working until it too is released.
 void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
-
-// Rebuilds every publisher's notify list on the topic. Returns -ENOMEM only when a list has to
-// grow, which can happen while registering an endpoint but never while removing one.
-// Caller holds global_htables_rwsem (write).
-int agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
-
-// The single place a subscriber is dropped from a live topic, so that releasing its eventfd
-// context and rebuilding the notify lists pointing at it cannot be forgotten at one call site.
-// Caller holds global_htables_rwsem (write).
-void agnocast_unlink_subscriber_info(
-  struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 
