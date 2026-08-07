@@ -367,6 +367,14 @@ public:
   AGNOCAST_PUBLIC
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
   {
+    if (allow_same_message) {
+      RCLCPP_WARN_ONCE(
+        logger,
+        "TakeSubscription::take(allow_same_message=true) is planned to be removed together with "
+        "agnocast::PollingSubscriber, which is moving to autoware_agnocast_wrapper. Keep the last "
+        "returned message on the caller side and use take(false) instead.");
+    }
+
     publisher_shm_info pub_shm_infos[MAX_PUBLISHER_NUM]{};
 
     union ioctl_take_msg_args take_args;
@@ -470,12 +478,25 @@ public:
   };
 
   /// @deprecated Use take_data() instead.
-  const agnocast::ipc_shared_ptr<const MessageT> takeData() { return subscriber_->take(true); };
-  /// @brief Retrieve the latest message. Always returns the most recent message even if already
-  /// retrieved. Returns an empty pointer if no message has been published yet.
+  [[deprecated("Use take_data() instead.")]]
+  const agnocast::ipc_shared_ptr<const MessageT> takeData()
+  {
+    return subscriber_->take(true);
+  };
+  /// @brief Retrieve the latest message, returning it again on subsequent calls if nothing newer
+  /// has been published. Returns an empty pointer if no message has been published yet.
+  /// @note Assumes a history depth of 1. With a greater depth the returned message lags the newest
+  /// one by up to `depth - 1`; see TakeSubscription::take().
   /// @return Shared pointer to the latest message.
   AGNOCAST_PUBLIC
-  const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
+  const agnocast::ipc_shared_ptr<const MessageT> take_data()
+  {
+    return subscriber_->take(true);
+  };
 };
 
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
