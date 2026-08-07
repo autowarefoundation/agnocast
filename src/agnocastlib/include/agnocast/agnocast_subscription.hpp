@@ -137,9 +137,7 @@ public:
       // subscribers
       // may share the same mmap region, requiring reference counting in kmod. Since leaving the
       // memory mapped should not cause any functional issues, this is left as future work.
-      struct ioctl_remove_subscriber_args remove_subscriber_args
-      {
-      };
+      struct ioctl_remove_subscriber_args remove_subscriber_args{};
       remove_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
       remove_subscriber_args.subscriber_id = id_;
       if (ioctl(agnocast_fd, AGNOCAST_REMOVE_SUBSCRIBER_CMD, &remove_subscriber_args) < 0) {
@@ -346,11 +344,23 @@ public:
   }
 
   /**
-   * @brief Retrieve the latest message from the topic.
-   * @param allow_same_message  If true, may return the same message as the previous call
-   *                            (useful for always having the latest value). If false, returns
-   *                            only new messages since the last take.
+   * @brief Retrieve one message from the topic.
+   *
+   * Reads are non-destructive: entries stay in shared memory and a per-subscriber watermark
+   * tracks how far this subscriber has read. Exactly one message is returned per call
+   * regardless of the history depth; the depth bounds how far back the search goes.
+   *
+   * @param allow_same_message  If true, returns the oldest entry within the subscription's
+   *                            history depth, and may return the same message as the previous
+   *                            call (useful for always having the latest value with depth 1).
+   *                            If false, returns the oldest entry not yet received by this
+   *                            subscriber, i.e. FIFO.
    * @return Shared pointer to the message, or empty if unavailable.
+   *
+   * @note `allow_same_message = true` exists only to serve `agnocast::PollingSubscriber`, which is
+   *       planned to move to `autoware_agnocast_wrapper` and be removed from agnocast. Once that is
+   *       done this mode is expected to be removed as well, leaving `take()` with a single FIFO
+   *       meaning.
    */
   AGNOCAST_PUBLIC
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
@@ -421,11 +431,15 @@ public:
 /**
  * @brief Agnocast polling subscriber for a compile-time known message type.
  *
- * Wraps TakeSubscription<MessageT> and exposes a simple take_data() API
- * that always returns the most recent message (or an empty pointer if nothing
- * has been published yet).
+ * Wraps TakeSubscription<MessageT> and exposes a simple take_data() API that returns the most
+ * recent message (or an empty pointer if nothing has been published yet).
  *
  * @tparam MessageT  ROS message type.
+ *
+ * @note　This class is planned to move to `autoware_agnocast_wrapper` and be removed from agnocast:
+ * it reproduces Autoware's polling subscriber, which is an Autoware-specific API that agnocast does
+ * not intend to maintain as public API. New code should expect to obtain a polling subscriber from
+ * the wrapper, or use TakeSubscription directly.
  */
 AGNOCAST_PUBLIC
 template <typename MessageT>

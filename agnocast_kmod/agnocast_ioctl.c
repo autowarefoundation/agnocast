@@ -1124,6 +1124,10 @@ int agnocast_ioctl_take_msg(
   ioctl_ret->ret_addr = 0;
   ioctl_ret->ret_entry_id = -1;
 
+  // allow_same_message exists only to serve agnocast::PollingSubscriber, which reproduces
+  // Autoware's polling subscriber. That class is planned to move to autoware_agnocast_wrapper and
+  // be removed from agnocast, since it is an Autoware-specific API. Once that is done this mode is
+  // expected to be removed as well, leaving take() with a single FIFO meaning.
   uint32_t searched_count = 0;
   struct entry_node * candidate_en = NULL;
   struct rb_node * node = rb_last(&wrapper->topic->entries);
@@ -1524,10 +1528,11 @@ int agnocast_ioctl_get_topic_list(
       goto unlock;
     }
 
-    if (copy_to_user(
-          (char __user *)(topic_list_args->topic_name_buffer_addr +
-                          topic_num * TOPIC_NAME_BUFFER_SIZE),
-          wrapper->key, strlen(wrapper->key) + 1)) {
+    if (
+      copy_to_user(
+        (char __user *)(topic_list_args->topic_name_buffer_addr +
+                        topic_num * TOPIC_NAME_BUFFER_SIZE),
+        wrapper->key, strlen(wrapper->key) + 1)) {
       ret = -EFAULT;
       goto unlock;
     }
@@ -1595,10 +1600,11 @@ int agnocast_ioctl_get_node_subscriber_topics(
         goto unlock;
       }
 
-      if (copy_to_user(
-            (char __user *)(node_info_args->topic_name_buffer_addr +
-                            topic_num * TOPIC_NAME_BUFFER_SIZE),
-            wrapper->key, strlen(wrapper->key) + 1)) {
+      if (
+        copy_to_user(
+          (char __user *)(node_info_args->topic_name_buffer_addr +
+                          topic_num * TOPIC_NAME_BUFFER_SIZE),
+          wrapper->key, strlen(wrapper->key) + 1)) {
         ret = -EFAULT;
         goto unlock;
       }
@@ -1657,10 +1663,11 @@ int agnocast_ioctl_get_node_publisher_topics(
         goto unlock;
       }
 
-      if (copy_to_user(
-            (char __user *)(node_info_args->topic_name_buffer_addr +
-                            topic_num * TOPIC_NAME_BUFFER_SIZE),
-            wrapper->key, strlen(wrapper->key) + 1)) {
+      if (
+        copy_to_user(
+          (char __user *)(node_info_args->topic_name_buffer_addr +
+                          topic_num * TOPIC_NAME_BUFFER_SIZE),
+          wrapper->key, strlen(wrapper->key) + 1)) {
         ret = -EFAULT;
         goto unlock;
       }
@@ -2620,9 +2627,10 @@ static long receive_msg_cmd(union ioctl_receive_msg_args __user * arg)
     &receive_msg_args);
 
   if (ret == 0 && receive_msg_args.ret_pub_shm_num > 0) {
-    if (copy_to_user(
-          (struct publisher_shm_info __user *)pub_shm_info_addr, pub_shm_infos,
-          receive_msg_args.ret_pub_shm_num * sizeof(struct publisher_shm_info))) {
+    if (
+      copy_to_user(
+        (struct publisher_shm_info __user *)pub_shm_info_addr, pub_shm_infos,
+        receive_msg_args.ret_pub_shm_num * sizeof(struct publisher_shm_info))) {
       kfree(pub_shm_infos);
       return -EFAULT;
     }
@@ -2668,9 +2676,10 @@ static long publish_msg_cmd(union ioctl_publish_msg_args __user * arg)
     // Copy subscriber IDs to user-space buffer
     uint32_t copy_count = min(publish_msg_args.ret_subscriber_num, buffer_size);
     if (copy_count > 0) {
-      if (copy_to_user(
-            (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
-            copy_count * sizeof(topic_local_id_t))) {
+      if (
+        copy_to_user(
+          (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
+          copy_count * sizeof(topic_local_id_t))) {
         kfree(subscriber_ids_buf);
         return -EFAULT;
       }
@@ -2713,9 +2722,10 @@ static long take_msg_cmd(union ioctl_take_msg_args __user * arg)
     pub_shm_info_size, &take_args);
 
   if (ret == 0 && take_args.ret_pub_shm_num > 0) {
-    if (copy_to_user(
-          (struct publisher_shm_info __user *)pub_shm_info_addr, pub_shm_infos,
-          take_args.ret_pub_shm_num * sizeof(struct publisher_shm_info))) {
+    if (
+      copy_to_user(
+        (struct publisher_shm_info __user *)pub_shm_info_addr, pub_shm_infos,
+        take_args.ret_pub_shm_num * sizeof(struct publisher_shm_info))) {
       kfree(pub_shm_infos);
       return -EFAULT;
     }
@@ -2794,9 +2804,10 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   // for the next poll (agnocast_commit_exit_process is not called).
   if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
     uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
-    if (copy_to_user(
-          (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
-          copy_count * sizeof(struct exit_subscription_mq_info))) {
+    if (
+      copy_to_user(
+        (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
+        copy_count * sizeof(struct exit_subscription_mq_info))) {
       kvfree(mq_info_buf);
       return -EFAULT;
     }
@@ -2805,9 +2816,10 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
 
   // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.
-  if (copy_to_user(
-        (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
-        sizeof(get_exit_process_args)))
+  if (
+    copy_to_user(
+      (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
+      sizeof(get_exit_process_args)))
     return -EFAULT;
 
   // Commit: delete copied entries and free proc_info. Safe because user-space already
@@ -3062,9 +3074,10 @@ static long check_and_request_bridge_shutdown_cmd(
   struct ioctl_check_and_request_bridge_shutdown_args shutdown_args;
   memset(&shutdown_args, 0, sizeof(shutdown_args));
   ret = agnocast_ioctl_check_and_request_bridge_shutdown(pid, ipc_ns, &shutdown_args);
-  if (copy_to_user(
-        (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg, &shutdown_args,
-        sizeof(shutdown_args)))
+  if (
+    copy_to_user(
+      (struct ioctl_check_and_request_bridge_shutdown_args __user *)arg, &shutdown_args,
+      sizeof(shutdown_args)))
     return -EFAULT;
   return ret;
 }
