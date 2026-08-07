@@ -55,6 +55,17 @@ void close_notify_eventfd(int)
 {
 }
 
+mqd_t open_mq_for_subscription(
+  const std::string &, const topic_local_id_t, std::pair<mqd_t, std::string> & mq_subscription)
+{
+  mq_subscription = std::make_pair(static_cast<mqd_t>(-1), std::string{});
+  return -1;
+}
+
+void remove_mq(const std::pair<mqd_t, std::string> &)
+{
+}
+
 void SubscriptionBase::initialize(
   const rclcpp::QoS & qos, const bool, const bool, SubscriptionRole, const std::string &,
   const std::string &)

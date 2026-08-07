@@ -742,8 +742,6 @@ int agnocast_ioctl_add_subscriber(
   }
 
   ioctl_ret->ret_id = sub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -776,8 +774,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;
