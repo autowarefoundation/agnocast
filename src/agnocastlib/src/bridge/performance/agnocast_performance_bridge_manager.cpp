@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstring>
 #include <deque>
@@ -381,13 +382,25 @@ void PerformanceBridgeManager::request_shutdown()
     shutdown_requested_ = true;
   }
   pending_msgs_cv_.notify_all();
+
   if (executor_) {
     executor_->cancel();
   }
+
+  // Wake up the event loop immediately by sending a SIGUSR1 to self. The signal will be delivered
+  // to the signalfd of the event loop, which in turn calls on_signal() as the callback. Note that
+  // this does not take effect if it's the event loop thread who initiated shutdown. Once
+  // request_shutdown() is called by the event loop thread, it will break out of its loop and never
+  // see this signal.
+  kill(getpid(), SIGUSR1);
 }
 
 void PerformanceBridgeManager::on_signal()
 {
+  if (shutdown_requested_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
   if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
     RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
   }

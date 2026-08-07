@@ -17,7 +17,7 @@ PerformanceBridgeIpcEventLoop::PerformanceBridgeIpcEventLoop(const rclcpp::Logge
     // 2. Upper bound on any single received message
     BRIDGE_MSG_MAX_SIZE,
     // 3. Block Signals
-    {SIGTERM, SIGINT},
+    {SIGTERM, SIGINT, SIGUSR1},
     // 4. Ignore Signals
     {SIGPIPE, SIGHUP})
 {
