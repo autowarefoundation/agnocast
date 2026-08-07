@@ -1034,9 +1034,9 @@ unlock_all:
   up_write(&wrapper->topic->rwsem);
 
   // Signal outside topic_rwsem: RECEIVE_MSG and TAKE_MSG take it for write, so holding it here
-  // would block the very subscribers being woken, and each eventfd_signal() costs ~100-200 ns.
-  // The list and the contexts both stay valid because every path that rebuilds a list or releases
-  // a context takes global_htables_rwsem for write, and it is held here for read.
+  // would block the very subscribers being woken. The list and the contexts both stay valid
+  // because every path that rebuilds a list or releases a context takes global_htables_rwsem for
+  // write, and it is held here for read.
   for (uint32_t i = 0; i < notify_num; i++) {
     agnocast_eventfd_signal(notify_ctxs[i]);
   }
