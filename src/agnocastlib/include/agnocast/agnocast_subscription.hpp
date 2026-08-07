@@ -137,7 +137,9 @@ public:
       // subscribers
       // may share the same mmap region, requiring reference counting in kmod. Since leaving the
       // memory mapped should not cause any functional issues, this is left as future work.
-      struct ioctl_remove_subscriber_args remove_subscriber_args{};
+      struct ioctl_remove_subscriber_args remove_subscriber_args
+      {
+      };
       remove_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
       remove_subscriber_args.subscriber_id = id_;
       if (ioctl(agnocast_fd, AGNOCAST_REMOVE_SUBSCRIBER_CMD, &remove_subscriber_args) < 0) {
@@ -436,7 +438,7 @@ public:
  *
  * @tparam MessageT  ROS message type.
  *
- * @note　This class is planned to move to `autoware_agnocast_wrapper` and be removed from agnocast:
+ * @note This class is planned to move to `autoware_agnocast_wrapper` and be removed from agnocast:
  * it reproduces Autoware's polling subscriber, which is an Autoware-specific API that agnocast does
  * not intend to maintain as public API. New code should expect to obtain a polling subscriber from
  * the wrapper, or use TakeSubscription directly.
