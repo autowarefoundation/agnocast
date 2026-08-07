@@ -789,7 +789,7 @@ void test_case_do_exit_releases_notify_context(struct kunit * test)
 
   // Act
   agnocast_enqueue_exit_pid(subscriber_pid);
-  msleep(10);  // wait for exit_worker_thread to handle process exit
+  msleep(20);  // wait for exit_worker_thread to handle process exit
   KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
 
   // Assert

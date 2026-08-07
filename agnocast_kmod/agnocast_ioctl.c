@@ -928,9 +928,6 @@ int agnocast_ioctl_publish_msg(
   if (sub_num > 0) {
     notify_ctxs = kmalloc_array(sub_num, sizeof(*notify_ctxs), GFP_KERNEL);
     if (!notify_ctxs) {
-      dev_warn(
-        agnocast_device, "Failed to allocate the notify list for %d subscribers. (%s)\n", sub_num,
-        __func__);
       ret = -ENOMEM;
       goto unlock_all;
     }

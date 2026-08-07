@@ -10,11 +10,11 @@ static const pid_t PID_BASE = 1000;
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 static const uint32_t QOS_DEPTH = 1;
-static const bool QOS_IS_TRANSIENT_LOCAL = false;
-static const bool QOS_IS_RELIABLE = true;
-static const bool IS_TAKE_SUB = false;
-static const bool IGNORE_LOCAL_PUBLICATIONS = false;
-static const bool IS_BRIDGE = false;
+#define QOS_IS_TRANSIENT_LOCAL false
+#define QOS_IS_RELIABLE true
+#define IS_TAKE_SUB false
+#define IGNORE_LOCAL_PUBLICATIONS false
+#define IS_BRIDGE false
 
 static void setup_one_process(struct kunit * test, const pid_t pid)
 {

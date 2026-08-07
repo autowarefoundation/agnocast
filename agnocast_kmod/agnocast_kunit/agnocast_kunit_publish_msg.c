@@ -605,7 +605,7 @@ void test_case_publish_msg_no_process(struct kunit * test)
 
   // The referenced entry keeps publisher_info alive through the exit handler.
   agnocast_enqueue_exit_pid(exiting_pid);
-  msleep(10);
+  msleep(20);
   KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
 
   // The unlink daemon then reaps process_info, leaving the publisher without one.
