@@ -94,6 +94,12 @@ struct publisher_info
   struct hlist_node node;
 };
 
+static inline void free_publisher_info(struct publisher_info * pub_info)
+{
+  kfree(pub_info->node_name);
+  kfree(pub_info);
+}
+
 struct subscriber_info
 {
   topic_local_id_t id;
@@ -111,6 +117,12 @@ struct subscriber_info
   bool is_bridge;
   struct hlist_node node;
 };
+
+static inline void free_subscriber_info(struct subscriber_info * sub_info)
+{
+  kfree(sub_info->node_name);
+  kfree(sub_info);
+}
 
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
 // Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
