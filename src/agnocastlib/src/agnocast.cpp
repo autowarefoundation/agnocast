@@ -63,12 +63,8 @@ std::mutex mmap_mtx;
 // same subscriber would read the same sub_info->latest_received_entry_id and walk the same
 // entries, and the loser would fail the ioctl with -EALREADY, which every call site below treats
 // as fatal.
-// The kernel does not enforce this -- it never checks that the caller's pid matches the
-// subscriber's -- so it is an agnocastlib invariant, not a guarantee. There are exactly two
-// RECEIVE_CMD/TAKE_CMD call sites (receive_and_execute_message in agnocast_callback_info.cpp and
-// TakeSubscription::take in agnocast_subscription.hpp); any new one must take this mutex across
-// both the ioctl and the mapping that follows. RELEASE_SUB_REF_CMD deliberately stays outside it,
-// to keep the ipc_shared_ptr destructor path from contending on the receive fast path.
+// RELEASE_SUB_REF_CMD deliberately stays outside this mutex, to keep the ipc_shared_ptr
+// destructor path from contending on the receive fast path.
 
 void * map_area(
   const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)
