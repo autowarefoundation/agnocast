@@ -1141,14 +1141,19 @@ int agnocast_ioctl_receive_msg(
   // id and drive its receives concurrently -- which the topic read lock does not prevent.
   //
   // caller_pid is passed in rather than read from current->tgid here, matching what every other
-  // ioctl in this file does (add_subscriber, add_publisher, add_process, ...). That is what lets
-  // KUnit cover this check: the suite registers subscribers under synthetic pids from a thread
-  // that is not itself a registered Agnocast process, so reading current->tgid would fail -EPERM
-  // in every case. Note the contrast with get_current_domain_id(), which this path also reaches:
-  // there an unregistered pid falls back to domain 0 and happens to yield the right answer, while
-  // an ownership check has no such benign fallback. Rewriting the tests around it is not an option
-  // either, since cases like receive_msg_with_exited_publisher need two subscribers in two
-  // distinct processes, which a single ambient pid cannot express.
+  // ioctl in this file does (add_subscriber, add_publisher, add_process, ...). It is never
+  // attacker-controlled: the only callers are receive_msg_cmd and take_msg_cmd, which both pass
+  // current->tgid. The untrusted input is subscriber_id, which is what this check validates.
+  //
+  // The parameter exists so the KUnit suite keeps working, not to exercise the rejection above.
+  // KUnit calls these functions directly, having registered subscribers under synthetic pids, from
+  // a thread that is not itself a registered Agnocast process -- so reading current->tgid here
+  // would make every existing case fail -EPERM. Rewriting the tests around that is not possible
+  // either: cases like receive_msg_with_exited_publisher need two subscribers in two distinct
+  // processes, which a single ambient pid cannot express. Note the contrast with
+  // get_current_domain_id(), which this path also reaches: there an unregistered pid falls back to
+  // domain 0 and happens to yield the right answer, while an ownership check has no such benign
+  // fallback.
   if (sub_info->pid != caller_pid) {
     dev_warn(
       agnocast_device,

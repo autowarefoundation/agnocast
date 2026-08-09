@@ -443,8 +443,8 @@ int agnocast_ioctl_release_message_entry_reference(
 
 // caller_pid must be the calling process's pid; receive/take are rejected with -EPERM unless it
 // owns the subscriber. It is a parameter rather than a current->tgid read inside the two functions
-// so that KUnit, which drives them with synthetic pids, can cover the check -- see the comment at
-// the check in agnocast_ioctl_receive_msg.
+// only so the KUnit suite, which drives them with synthetic pids, keeps working -- see the comment
+// at the check in agnocast_ioctl_receive_msg.
 int agnocast_ioctl_receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t caller_pid,
   const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
