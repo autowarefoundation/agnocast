@@ -63,8 +63,9 @@ static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
   return add_subscriber_named(test, pid, TOPIC_NAME);
 }
 
-// The helpers above pass -1, which leaves notify_ctx NULL and keeps the subscriber out of the
-// publishers' notify lists. Cases that assert on delivery need a real context to observe.
+// The helpers above pass -1, which the fake maps to its unobserved slot: the subscriber is still
+// collected and signaled on publish, but no assertion can see it. Cases that assert on delivery
+// need a real fd to observe instead.
 static topic_local_id_t add_subscriber_named_with_eventfd(
   struct kunit * test, const pid_t pid, const char * topic_name, const int eventfd)
 {

@@ -59,8 +59,9 @@ static void setup_one_publisher(
   KUNIT_ASSERT_EQ(test, ret2, 0);
 }
 
-// The setup helpers above pass -1, which leaves notify_ctx NULL and so keeps the subscriber out of
-// the publishers' notify lists. Cases that assert on delivery need a real context instead.
+// The setup helpers above pass -1, which the fake maps to its unobserved slot: the subscriber is
+// still collected and signaled on publish, but no assertion can see it. Cases that assert on
+// delivery need a real fd instead.
 static void add_subscriber_with_eventfd(
   struct kunit * test, const pid_t pid, const int eventfd, const bool ignore_local_publications)
 {
