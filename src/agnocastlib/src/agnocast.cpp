@@ -13,6 +13,7 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -245,12 +246,13 @@ void poll_for_bridge_manager()
 // RCLCPP_ERROR, no strerror().
 void write_stderr_with_errno(const std::string_view msg, const int err)
 {
-  char buf[256];
-  const int len =
-    snprintf(buf, sizeof(buf), "%.*s (errno=%d)\n", static_cast<int>(msg.size()), msg.data(), err);
+  constexpr size_t buf_size = 256;
+  std::array<char, buf_size> buf = {};
+  const int len = snprintf(
+    buf.data(), buf.size(), "%.*s (errno=%d)\n", static_cast<int>(msg.size()), msg.data(), err);
   if (len > 0) {
     const ssize_t written =
-      write(STDERR_FILENO, buf, std::min(static_cast<size_t>(len), sizeof(buf) - 1));
+      write(STDERR_FILENO, buf.data(), std::min(static_cast<size_t>(len), buf.size() - 1));
     static_cast<void>(written);
   }
 }
@@ -292,9 +294,11 @@ claim_result claim_discovery_agent(const uint32_t domain_id)
 [[noreturn]] void exec_discovery_agent(const char * agent_path)
 {
   // const_cast is safe: execv does not modify argv.
-  char * const argv[] = {
+  // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
+  std::array<char *, 3> argv = {
     const_cast<char *>(agent_path), const_cast<char *>("--exit-when-idle"), nullptr};
-  execv(agent_path, argv);
+  // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
+  execv(agent_path, argv.data());
   // The kmod releases the claim on process exit, so the slot is not leaked.
   write_stderr_with_errno("[ERROR] [Agnocast] Failed to exec the discovery agent", errno);
   _exit(EXIT_FAILURE);
