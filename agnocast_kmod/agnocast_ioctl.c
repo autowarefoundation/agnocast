@@ -1137,8 +1137,18 @@ int agnocast_ioctl_receive_msg(
   }
 
   // Only the owning process may drive a subscriber. Subscriber ids are small sequential integers
-  // and /dev/agnocast is world-accessible, so without this a process could guess another's id and
-  // race its receives, which the topic read lock no longer prevents.
+  // and /dev/agnocast is world-accessible, so without this check a process could guess another's
+  // id and drive its receives concurrently -- which the topic read lock does not prevent.
+  //
+  // caller_pid is passed in rather than read from current->tgid here, matching what every other
+  // ioctl in this file does (add_subscriber, add_publisher, add_process, ...). That is what lets
+  // KUnit cover this check: the suite registers subscribers under synthetic pids from a thread
+  // that is not itself a registered Agnocast process, so reading current->tgid would fail -EPERM
+  // in every case. Note the contrast with get_current_domain_id(), which this path also reaches:
+  // there an unregistered pid falls back to domain 0 and happens to yield the right answer, while
+  // an ownership check has no such benign fallback. Rewriting the tests around it is not an option
+  // either, since cases like receive_msg_with_exited_publisher need two subscribers in two
+  // distinct processes, which a single ambient pid cannot express.
   if (sub_info->pid != caller_pid) {
     dev_warn(
       agnocast_device,
