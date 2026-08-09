@@ -145,7 +145,11 @@ struct topic_struct
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
-  // Per-topic rwsem: read for receive/take/read-only ops, write for publish/modify.
+  // Per-topic rwsem. Write is taken by publish and by the Bridge Manager's ros2_*_num setters;
+  // read by receive/take, message-entry reference release, and the query ioctls. Structural
+  // changes -- adding or removing publishers and subscribers, tearing down entries or this
+  // struct -- run under global_htables_rwsem WRITE and take this rwsem not at all, which is why
+  // holding global read for a whole receive is what keeps the tree and this struct alive.
   struct rw_semaphore rwsem;
   // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
   // bridge rule groups two domains' wrappers onto one entry/id space. The struct
