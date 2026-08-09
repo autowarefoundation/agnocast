@@ -246,7 +246,7 @@ void test_case_increment_rc_already_referenced(struct kunit * test)
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   union ioctl_receive_msg_args receive_msg_args;
   int ret4 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_pid, add_subscriber_args.ret_id, pub_shm_infos,
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
     KUNIT_PUB_SHM_BUF_SIZE, &receive_msg_args);
   KUNIT_ASSERT_EQ(test, ret4, 0);
   KUNIT_ASSERT_EQ(test, receive_msg_args.ret_entry_num, 1);

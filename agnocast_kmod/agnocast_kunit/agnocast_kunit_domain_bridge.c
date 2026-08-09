@@ -329,8 +329,8 @@ void test_case_domain_bridge_shm_info_skips_undelivered_publisher(struct kunit *
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_receive_msg(
-      TOPIC_NAME, current->nsproxy->ipc_ns, current->tgid, sub_id, pub_shm_infos,
-      KUNIT_PUB_SHM_BUF_SIZE, &receive_args),
+      TOPIC_NAME, current->nsproxy->ipc_ns, sub_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+      &receive_args),
     0);
 
   KUNIT_EXPECT_EQ(test, receive_args.ret_pub_shm_num, (uint32_t)1);
