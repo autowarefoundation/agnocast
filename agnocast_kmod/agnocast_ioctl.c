@@ -2670,6 +2670,11 @@ static long publish_msg_cmd(union ioctl_publish_msg_args __user * arg)
     topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
     &publish_msg_args);
 
+  // NOTE: the entry is already inserted and every subscriber eventfd already signalled, so
+  // -EFAULT here means the publication happened and only its results failed to reach the
+  // publisher; the woken subscribers still receive a valid entry. The signalling cannot be
+  // deferred past this copy because the contexts are only valid under global_htables_rwsem,
+  // which agnocast_ioctl_publish_msg() drops on return.
   if (ret == 0) {
     if (copy_to_user(arg, &publish_msg_args, sizeof(publish_msg_args))) return -EFAULT;
   }
