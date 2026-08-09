@@ -60,10 +60,7 @@ struct process_info
 {
   bool exited;
   // Tracks whether this process is the alive Bridge Manager for the IPC namespace.
-  // The name is kept as "is_performance_bridge_manager" for ABI compatibility with existing
-  // kmod interfaces, even though the Standard Bridge has been removed and this now refers
-  // to the single unified Bridge Manager.
-  bool is_performance_bridge_manager;
+  bool is_bridge_manager;
   pid_t global_pid;
   pid_t local_pid;
   struct mempool_entry * mempool_entry;

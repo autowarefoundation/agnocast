@@ -54,7 +54,7 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    bool is_bridge_manager;
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -62,7 +62,7 @@ union ioctl_add_process_args {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
 };
