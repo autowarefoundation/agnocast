@@ -441,8 +441,10 @@ int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 
+// caller_pid must be the calling process's pid; receive/take are rejected with -EPERM unless it
+// owns the subscriber. See agnocast_ioctl_receive_msg for why this ownership check matters.
 int agnocast_ioctl_receive_msg(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t caller_pid,
   const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
   uint32_t pub_shm_infos_size, union ioctl_receive_msg_args * ioctl_ret);
 
@@ -452,7 +454,7 @@ int agnocast_ioctl_publish_msg(
   uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret);
 
 int agnocast_ioctl_take_msg(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t caller_pid,
   const topic_local_id_t subscriber_id, bool allow_same_message,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   union ioctl_take_msg_args * ioctl_ret);

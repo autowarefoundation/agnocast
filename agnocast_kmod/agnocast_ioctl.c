@@ -390,20 +390,30 @@ static int insert_publisher_info(
 
 // Add subscriber reference to entry (set boolean flag to true).
 // Called when subscriber first receives/takes the message.
-static int add_subscriber_reference(struct entry_node * en, const topic_local_id_t id)
+//
+// Returns -EALREADY if this subscriber already held a reference. Pass allow_existing=true when
+// that is an expected outcome (a repeated take of the same entry) to suppress the warning.
+//
+// The test and the set are deliberately one atomic operation rather than a test_bit followed by a
+// conditional set: agnocast_ioctl_release_message_entry_reference holds only the topic read lock,
+// so it can clear this bit at any point and a separate test would already be stale by the time the
+// set ran.
+static int add_subscriber_reference(
+  struct entry_node * en, const topic_local_id_t id, const bool allow_existing)
 {
   if (id < 0 || id >= MAX_TOPIC_LOCAL_ID) {
     pr_err("subscriber id %d out of range [0, %d). (%s)\n", id, MAX_TOPIC_LOCAL_ID, __func__);
     return -EINVAL;
   }
 
-  // Already referenced by this subscriber - unexpected
   if (test_and_set_bit(id, en->referencing_subscribers)) {
-    dev_warn(
-      agnocast_device,
-      "subscriber id=%d already holds a reference for entry_id=%lld. "
-      "(%s)\n",
-      id, en->entry_id, __func__);
+    if (!allow_existing) {
+      dev_warn(
+        agnocast_device,
+        "subscriber id=%d already holds a reference for entry_id=%lld. "
+        "(%s)\n",
+        id, en->entry_id, __func__);
+    }
     return -EALREADY;
   }
   return 0;
@@ -1018,7 +1028,7 @@ static int receive_msg_core(
       continue;
     }
 
-    int ret = add_subscriber_reference(en, subscriber_id);
+    int ret = add_subscriber_reference(en, subscriber_id, false);
     if (ret < 0) {
       return ret;
     }
@@ -1036,7 +1046,7 @@ static int receive_msg_core(
 }
 
 int agnocast_ioctl_receive_msg(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t caller_pid,
   const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
   uint32_t pub_shm_infos_size, union ioctl_receive_msg_args * ioctl_ret)
 {
@@ -1059,31 +1069,40 @@ int agnocast_ioctl_receive_msg(
   //
   // Everything this path touches is either guarded by a lock held here, or self-synchronized:
   //
-  // 1. Entries rbtree: structurally mutated only under topic->rwsem WRITE (insert_message_entry
-  //    and release_msgs_to_meet_depth, both reached from publish) or global_htables_rwsem WRITE
-  //    (subscriber/publisher removal, process-exit cleanup, module unload). The global-write class
-  //    takes no topic lock at all -- it relies on global write excluding all readers -- and it
-  //    also frees topic_struct, this rwsem included. Neither lock is dropped between here and the
-  //    single exit below, so both classes stay excluded for the whole traversal.
+  // 1. Entries rbtree: two classes of writer mutate it, and both are excluded here.
+  //      - Publish (insert_message_entry, release_msgs_to_meet_depth) takes topic->rwsem WRITE,
+  //        which a read lock excludes.
+  //      - Subscriber/publisher removal, process-exit cleanup and module unload take
+  //        global_htables_rwsem WRITE. Those never take topic->rwsem at all: global write is what
+  //        excludes them, and it has to be, because they also free topic_struct with this rwsem
+  //        inside it. Holding global read is therefore what keeps this very lock alive.
+  //    Neither lock is released before the single exit below, so the tree stays intact for the
+  //    whole traversal.
   //
-  // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update): each subscriber has its
-  //    own sub_info, so receivers of different subscribers write disjoint memory. What is NOT
-  //    disjoint is the mmap bookkeeping: reference_memory dedupes by *pid*, so a second receiver
-  //    in the same process gets -EEXIST, skips that publisher and clears need_mmap_update,
-  //    returning to a caller that may dereference a message before the first receiver has mmap'd
-  //    it. What prevents that is agnocastlib holding mmap_mtx across the ioctl *and* the mapping
-  //    that follows (see mmap_mtx in agnocast.cpp): the requirement is process-wide atomicity of
-  //    ioctl+mmap, not merely per-subscriber serialization.
-  //    The kernel enforces none of this -- it never compares sub_info->pid against current->tgid,
-  //    so a process passing a foreign subscriber_id bypasses mmap_mtx entirely. Kernel memory
-  //    stays safe (the tree is untouched and bitmap updates are atomic), but the subscriber-visible
-  //    outcome is not: two racing receives for one subscriber read the same
-  //    latest_received_entry_id and either split the range (silently duplicated or skipped
-  //    messages) or collide on one entry, whereupon add_subscriber_reference returns -EALREADY.
-  //    Note what -EALREADY costs: receive_msg_core aborts mid-loop with reference bits already set
-  //    on the entries it processed, nothing unwinds them, receive_msg_cmd skips copy_to_user on
-  //    error so userspace never learns those entry ids, and agnocastlib treats any ioctl failure
-  //    as fatal. Those references are reclaimed only at process exit.
+  // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update) live in disjoint
+  //    sub_info structs, so receivers of *different* subscribers write different memory.
+  //
+  //    The mmap bookkeeping is the exception, and is worth spelling out. When a subscriber has
+  //    need_mmap_update set, set_publisher_shm_info reports the publishers whose shared memory the
+  //    caller still has to map, and records having done so by calling reference_memory. That
+  //    record is keyed on the *process* id, not on the subscriber, so each publisher is reported
+  //    to a given process exactly once. Two receivers in one process therefore split the work:
+  //    the first is told to map publisher P, the second gets -EEXIST for P and is told nothing.
+  //    Were the second to return first, its caller would dereference a message living in P's
+  //    memory that nobody had mapped yet, and take a SIGSEGV.
+  //    Userspace closes this by holding mmap_mtx across the ioctl *and* the mmap that follows it
+  //    (see agnocast.cpp), so the first receiver finishes mapping before the second's ioctl runs.
+  //    Note what that implies about this lock: what the kernel needs from userspace is
+  //    process-wide atomicity of ioctl+mmap, which is stronger than per-subscriber serialization.
+  //
+  //    Two receives for one *same* subscriber would also race on latest_received_entry_id and
+  //    split the entry range, silently duplicating or skipping messages, or collide on one entry
+  //    and get -EALREADY. The caller_pid check below makes that unreachable from another process;
+  //    inside the owning process mmap_mtx serializes it. -EALREADY is worth avoiding rather than
+  //    handling: receive_msg_core aborts mid-loop with reference bits already set on the entries
+  //    it processed, nothing unwinds them, receive_msg_cmd skips copy_to_user on error so
+  //    userspace never learns those entry ids, and agnocastlib treats any ioctl failure as fatal.
+  //    Those references are then reclaimed only at process exit.
   //    CAUTION: the read lock is sufficient only while every write on this path is either confined
   //    to *this call's own* sub_info -- not another subscriber's, and not topic_struct,
   //    topic_wrapper, publisher_info, process_info or the mempool bookkeeping, all of which this
@@ -1117,6 +1136,19 @@ int agnocast_ioctl_receive_msg(
     goto unlock_all;
   }
 
+  // Only the owning process may drive a subscriber. Subscriber ids are small sequential integers
+  // and /dev/agnocast is world-accessible, so without this a process could guess another's id and
+  // race its receives, which the topic read lock no longer prevents.
+  if (sub_info->pid != caller_pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) cannot receive for subscriber (id=%d) owned by pid=%d "
+      "in the topic (topic_name=%s). (%s)\n",
+      caller_pid, subscriber_id, sub_info->pid, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
   ret = receive_msg_core(wrapper, sub_info, subscriber_id, ioctl_ret);
   if (ret < 0) {
     goto unlock_all;
@@ -1144,7 +1176,7 @@ unlock_only_global:
 }
 
 int agnocast_ioctl_take_msg(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t caller_pid,
   const topic_local_id_t subscriber_id, bool allow_same_message,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   union ioctl_take_msg_args * ioctl_ret)
@@ -1175,21 +1207,17 @@ int agnocast_ioctl_take_msg(
   //    (insert_subscriber_info, agnocast_ioctl_add_publisher) -- exclusive with the global READ
   //    held here.
   //
-  // 3. Reference bitmap updates use atomic bitops -- but note that the test_bit at the
-  //    allow_same_message check below and the test_and_set_bit inside add_subscriber_reference are
-  //    atomic individually, NOT as a pair. agnocast_ioctl_release_message_entry_reference holds
-  //    only the topic read lock, so it can test_and_clear_bit this subscriber's bit between the
-  //    two, after which take returns an entry holding no reference and a later publish may reclaim
-  //    the payload underneath the caller. Reaching that needs one thread taking while another
-  //    drops the previous ipc_shared_ptr for the same subscriber and entry; the release ioctl is
-  //    issued outside mmap_mtx, and TakeSubscription defers old_ptr destruction past its own lock,
-  //    so the pairing is not structurally excluded. The fix, should it become reachable, is to
-  //    make the skip decision a single test_and_set_bit rather than to widen the lock.
+  // 3. The reference bitmap update is a single atomic test_and_set_bit that both claims the
+  //    reference and reports whether this subscriber already held one. It has to stay a single
+  //    operation: agnocast_ioctl_release_message_entry_reference holds only the topic read lock,
+  //    so a test_bit followed by a conditional set could have the bit cleared in between, after
+  //    which take would return an entry holding no reference at all and a later publish could
+  //    reclaim the payload from underneath the caller.
   //
   // 4. set_publisher_shm_info: as in agnocast_ioctl_receive_msg.
   //
   // Publish takes topic->rwsem WRITE, so it is never concurrent with take. The read lock permits
-  // take-vs-take, take-vs-receive and take-vs-release, subject to the caveat in 3.
+  // take-vs-take, take-vs-receive and take-vs-release, all safe per the above.
   down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
@@ -1198,6 +1226,17 @@ int agnocast_ioctl_take_msg(
       agnocast_device, "Subscriber (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
       subscriber_id, topic_name, __func__);
     ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // Only the owning process may drive a subscriber; see agnocast_ioctl_receive_msg.
+  if (sub_info->pid != caller_pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) cannot take for subscriber (id=%d) owned by pid=%d "
+      "in the topic (topic_name=%s). (%s)\n",
+      caller_pid, subscriber_id, sub_info->pid, topic_name, __func__);
+    ret = -EPERM;
     goto unlock_all;
   }
 
@@ -1249,19 +1288,14 @@ int agnocast_ioctl_take_msg(
   }
 
   if (candidate_en) {
-    // When allow_same_message is true and the subscriber already holds a reference,
-    // skip adding a duplicate reference.
-    bool already_referenced = false;
-    if (allow_same_message) {
-      already_referenced = test_bit(subscriber_id, candidate_en->referencing_subscribers);
+    // Claim the reference with a single atomic operation. When allow_same_message is set, this
+    // entry may be one the subscriber already holds, so -EALREADY is the expected outcome and the
+    // existing reference is reused rather than duplicated.
+    ret = add_subscriber_reference(candidate_en, subscriber_id, allow_same_message);
+    if (ret < 0 && !(allow_same_message && ret == -EALREADY)) {
+      goto unlock_all;
     }
-
-    if (!already_referenced) {
-      ret = add_subscriber_reference(candidate_en, subscriber_id);
-      if (ret < 0) {
-        goto unlock_all;
-      }
-    }
+    ret = 0;
 
     ioctl_ret->ret_addr = candidate_en->msg_virtual_address;
     ioctl_ret->ret_entry_id = candidate_en->entry_id;
@@ -2694,8 +2728,8 @@ static long receive_msg_cmd(union ioctl_receive_msg_args __user * arg)
   }
 
   ret = agnocast_ioctl_receive_msg(
-    topic_name_buf, ipc_ns, receive_msg_args.subscriber_id, pub_shm_infos, pub_shm_info_size,
-    &receive_msg_args);
+    topic_name_buf, ipc_ns, current->tgid, receive_msg_args.subscriber_id, pub_shm_infos,
+    pub_shm_info_size, &receive_msg_args);
 
   if (ret == 0 && receive_msg_args.ret_pub_shm_num > 0) {
     if (copy_to_user(
@@ -2787,8 +2821,8 @@ static long take_msg_cmd(union ioctl_take_msg_args __user * arg)
   }
 
   ret = agnocast_ioctl_take_msg(
-    topic_name_buf, ipc_ns, take_args.subscriber_id, take_args.allow_same_message, pub_shm_infos,
-    pub_shm_info_size, &take_args);
+    topic_name_buf, ipc_ns, current->tgid, take_args.subscriber_id, take_args.allow_same_message,
+    pub_shm_infos, pub_shm_info_size, &take_args);
 
   if (ret == 0 && take_args.ret_pub_shm_num > 0) {
     if (copy_to_user(
@@ -3347,7 +3381,7 @@ int agnocast_increment_message_entry_rc(
     goto unlock_all;
   }
 
-  ret = add_subscriber_reference(en, pubsub_id);
+  ret = add_subscriber_reference(en, pubsub_id, false);
   if (ret < 0) {
     goto unlock_all;
   }
