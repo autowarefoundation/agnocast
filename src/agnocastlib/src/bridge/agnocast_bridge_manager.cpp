@@ -395,7 +395,7 @@ void BridgeManager::on_signal()
 
 std::string BridgeManager::on_socket_request() const
 {
-  return R"({"type":"performance","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+  return R"({"type":"bridge","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
          std::to_string(getpid()) + "}";
 }
 
