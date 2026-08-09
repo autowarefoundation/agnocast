@@ -2424,19 +2424,21 @@ int agnocast_ioctl_discovery_agent_should_exit(
   return 0;
 }
 
-// Atomic singleton claim; replaces the userspace flock. The first caller for a (ns, domain) wins
-// and is recorded; a later caller loses (ret_already_exists = true) and must exit.
+// Atomic singleton claim; replaces the userspace flock. Reports whether the caller owns the
+// (ns, domain) slot once the call returns; a caller that does not must exit.
 int agnocast_ioctl_add_discovery_agent(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id,
   struct ioctl_add_discovery_agent_args * ioctl_ret)
 {
   int ret = 0;
-  // Deterministic default so the -ENOMEM path never returns a stale flag to userspace.
-  ioctl_ret->ret_already_exists = false;
+  struct discovery_agent_info * existing;
+  // Not owning it is the safe answer, so every early exit including -ENOMEM leaves this false.
+  ioctl_ret->ret_owned_by_caller = false;
   down_write(&global_htables_rwsem);
 
-  if (agnocast_find_discovery_agent(ipc_ns, domain_id)) {
-    ioctl_ret->ret_already_exists = true;
+  existing = agnocast_find_discovery_agent(ipc_ns, domain_id);
+  if (existing) {
+    ioctl_ret->ret_owned_by_caller = (existing->pid == pid);
     goto unlock;
   }
 
@@ -2450,6 +2452,7 @@ int agnocast_ioctl_add_discovery_agent(
   agent->domain_id = domain_id;
   INIT_HLIST_NODE(&agent->node);
   hash_add_rcu(discovery_agent_htable, &agent->node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS));
+  ioctl_ret->ret_owned_by_caller = true;
 
 unlock:
   up_write(&global_htables_rwsem);

@@ -353,6 +353,15 @@ struct ioctl_set_ros2_publisher_num_args
   uint32_t ros2_publisher_num;
 };
 
+// Decided atomically by the kmod, which keys the singleton on the caller's IPC namespace and
+// domain, and its liveness on the calling PID: the caller must be the process that becomes the
+// agent.
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_owned_by_caller;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -377,5 +386,6 @@ struct ioctl_set_ros2_publisher_num_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 
 }  // namespace agnocast
