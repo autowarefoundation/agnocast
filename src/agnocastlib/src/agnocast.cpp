@@ -57,21 +57,18 @@ std::mutex mmap_mtx;
 //
 // (2) Serializes RECEIVE_CMD/TAKE_CMD process-wide, which the kernel module depends on.
 // agnocast_ioctl_receive_msg and agnocast_ioctl_take_msg take only a *read* lock on the topic, so
-// the kernel lets receives on one topic run concurrently. Two consequences make this mutex
-// load-bearing. First, the kernel dedupes mmap bookkeeping by pid: a second receiver in this
-// process gets -EEXIST, skips that publisher and clears need_mmap_update, then dereferences its
-// message unmapped -- the same failure as (1), reached by a different route. Second, two
-// concurrent calls for one subscriber race on sub_info->latest_received_entry_id (duplicate or
-// skipped messages) and can make the ioctl fail with -EALREADY, which every call site below treats
-// as fatal. This holds even under a Reentrant callback group, where one subscription's callback may
-// run on several threads at once.
-// The kernel does not enforce any of this -- it never checks that the caller's pid matches the
-// subscriber's -- so this is an agnocastlib invariant, not a guarantee.
-// There are exactly two RECEIVE_CMD/TAKE_CMD call sites (receive_and_execute_message in
-// agnocast_callback_info.cpp and TakeSubscription::take in agnocast_subscription.hpp); any new one
-// must take this mutex across both the ioctl and the mapping that follows. Note that
-// RELEASE_SUB_REF_CMD is deliberately NOT under this mutex, so release does run concurrently with
-// receive/take in the kernel -- see the caveat in agnocast_ioctl_take_msg.
+// the kernel lets receives on one topic run concurrently and relies on this mutex to keep two of
+// them from overlapping within one process. That matters most under a Reentrant callback group,
+// where one subscription's callback runs on several threads at once: two concurrent calls for the
+// same subscriber would read the same sub_info->latest_received_entry_id and walk the same
+// entries, and the loser would fail the ioctl with -EALREADY, which every call site below treats
+// as fatal.
+// The kernel does not enforce this -- it never checks that the caller's pid matches the
+// subscriber's -- so it is an agnocastlib invariant, not a guarantee. There are exactly two
+// RECEIVE_CMD/TAKE_CMD call sites (receive_and_execute_message in agnocast_callback_info.cpp and
+// TakeSubscription::take in agnocast_subscription.hpp); any new one must take this mutex across
+// both the ioctl and the mapping that follows. RELEASE_SUB_REF_CMD deliberately stays outside it,
+// to keep the ipc_shared_ptr destructor path from contending on the receive fast path.
 
 void * map_area(
   const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)

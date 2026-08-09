@@ -1088,23 +1088,8 @@ int agnocast_ioctl_receive_msg(
   //    latest_received_entry_id and walk the same entries, and the loser of the test_and_set_bit
   //    on the first of them would fail the ioctl with -EALREADY, which agnocastlib treats as fatal.
   //
-  //    mmap_mtx only serializes threads of one process, so it says nothing about a caller passing
-  //    a subscriber_id it does not own -- the kernel never checks that sub_info->pid matches the
-  //    caller. Correct use never does this, and such a caller could already steal a subscriber's
-  //    messages under the write lock; the read lock only makes the two genuinely concurrent on one
-  //    sub_info rather than serialized. Kernel state stays intact either way (the tree is
-  //    untouched and the bitmap is atomic), so this is a pre-existing userspace-visible hole, not
-  //    something this lock introduces. Closing it needs an ownership check here and in
-  //    agnocast_ioctl_release_message_entry_reference, which has the same gap.
-  //
   // 3. The reference bitmap update here is a single atomic test_and_set_bit. (bitmap_empty and
   //    bitmap_zero elsewhere are NOT atomic; every one of their callers holds a write lock.)
-  //
-  // 4. set_publisher_shm_info: its reference_memory call is self-synchronized via mempool_lock;
-  //    everything else it touches is read-only under the global read lock -- the pub_info_htable
-  //    walk (that table is mutated only under global write), proc_info->exited and
-  //    proc_info->mempool_entry (proc_info is freed only under global write, via kfree_rcu), and
-  //    mempool_entry->addr (written once at allocator init).
   down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
@@ -1161,32 +1146,7 @@ int agnocast_ioctl_take_msg(
     goto unlock_only_global;
   }
 
-  // The take path needs only a read lock, for the reasons documented in
-  // agnocast_ioctl_receive_msg, including the CAUTION there about keeping every write on this path
-  // caller-private or atomic:
-  //
-  // 1. Entries rbtree: the traversal below (rb_last, rb_prev) is read-only, and the tree is
-  //    structurally mutated only under topic->rwsem WRITE or global_htables_rwsem WRITE, both of
-  //    which are held for read here for the whole call.
-  //
-  // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update): disjoint per sub_info,
-  //    with the same process-wide mmap_mtx requirement and the same absence of kernel-side
-  //    ownership checking described in agnocast_ioctl_receive_msg.
-  //    need_mmap_update is only ever set true under global_htables_rwsem WRITE
-  //    (insert_subscriber_info, agnocast_ioctl_add_publisher) -- exclusive with the global READ
-  //    held here.
-  //
-  // 3. The reference bitmap update is a single atomic test_and_set_bit that both claims the
-  //    reference and reports whether this subscriber already held one. It has to stay a single
-  //    operation: agnocast_ioctl_release_message_entry_reference holds only the topic read lock,
-  //    so a test_bit followed by a conditional set could have the bit cleared in between, after
-  //    which take would return an entry holding no reference at all and a later publish could
-  //    reclaim the payload from underneath the caller.
-  //
-  // 4. set_publisher_shm_info: as in agnocast_ioctl_receive_msg.
-  //
-  // Publish takes topic->rwsem WRITE, so it is never concurrent with take. The read lock permits
-  // take-vs-take, take-vs-receive and take-vs-release, all safe per the above.
+  // See the comment above `down_read(&wrapper->topic->rwsem)` in agnocast_ioctl_receive_msg().
   down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
@@ -1246,9 +1206,9 @@ int agnocast_ioctl_take_msg(
   }
 
   if (candidate_en) {
-    // Claim the reference with a single atomic operation. When allow_same_message is set, this
-    // entry may be one the subscriber already holds, so -EALREADY is the expected outcome and the
-    // existing reference is reused rather than duplicated.
+    // Claim the reference. test_and_set_bit reports -EALREADY when this subscriber already holds
+    // one, which allow_same_message makes an expected outcome rather than a failure: the existing
+    // reference is reused instead of a second being taken.
     ret = add_subscriber_reference(candidate_en, subscriber_id, allow_same_message);
     if (ret < 0 && !(allow_same_message && ret == -EALREADY)) {
       goto unlock_all;

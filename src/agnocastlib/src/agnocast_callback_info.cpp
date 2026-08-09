@@ -46,8 +46,8 @@ void receive_and_execute_message(
 
   {
     // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
-    // mmap that makes it usable, and it is also what serializes same-subscriber receives for the
-    // kernel module, which takes only a topic read lock. See mmap_mtx in agnocast.cpp.
+    // mmap that makes it usable, and it is what serializes same-subscriber receives for the kernel
+    // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
     std::lock_guard<std::mutex> lock(mmap_mtx);
 
     if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {
