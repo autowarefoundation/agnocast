@@ -96,7 +96,7 @@ bash scripts/dev/setup.bash
 
 ### Setup pre-commit
 
-The following command allows `clang-format`, `markdownlint`, and [KUNIT Test](./agnocast_kmod/agnocast_kunit.c) to be run before each commit.
+The following command allows `clang-format`, `markdownlint`, and [KUNIT Test](./agnocast_kmod/agnocast_kunit_main.c) to be run before each commit.
 
 ```bash
 python3 -m pip install pre-commit

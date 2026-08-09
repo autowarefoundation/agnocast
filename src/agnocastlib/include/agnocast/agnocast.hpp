@@ -324,6 +324,19 @@ typename Service<ServiceT>::SharedPtr create_service(
     node, service_name, std::forward<Func>(callback), qos, group);
 }
 
+template <typename NodeT, typename Func>
+typename GenericService::SharedPtr create_generic_service(
+  NodeT * node, const std::string & service_name, const std::string & service_type,
+  Func && callback, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
+  const rclcpp::CallbackGroup::SharedPtr & group = nullptr)
+{
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
+  return std::make_shared<GenericService>(
+    node, service_name, service_type, std::forward<Func>(callback), qos, group);
+}
+
 /**
  * @brief Create a timer with a given clock.
  *

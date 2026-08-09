@@ -109,6 +109,7 @@ int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
   topic_info_args.topic_info_ret_buffer_addr =
     reinterpret_cast<uint64_t>(topic_info_buffer->data());
   topic_info_args.topic_info_ret_buffer_size = 1;
+  topic_info_args.domain_id = get_ros_domain_id();
 
   if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
     if (errno == ENOBUFS) {
@@ -252,6 +253,16 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
   state_ = ServiceBridgeState::R2A;
   entity_ = std::move(entity);
   shadow_node_ = std::move(shadow_node);
+
+  // The groups are created with auto_add=false and their agnocast entities now exist, so add them
+  // to the executor explicitly here for a deterministic (agnocast-capable) classification.
+  auto node_base = deps.container_node->get_node_base_interface();
+  if (entity_.srv_cb_group) {
+    deps.executor->add_callback_group(entity_.srv_cb_group, node_base);
+  }
+  if (entity_.client_cb_group) {
+    deps.executor->add_callback_group(entity_.client_cb_group, node_base);
+  }
   return 0;
 }
 
@@ -285,6 +296,16 @@ int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
   state_ = ServiceBridgeState::A2R;
   entity_ = std::move(entity);
   shadow_node_ = nullptr;
+
+  // The groups are created with auto_add=false and their agnocast entities now exist, so add them
+  // to the executor explicitly here for a deterministic (agnocast-capable) classification.
+  auto node_base = deps.container_node->get_node_base_interface();
+  if (entity_.srv_cb_group) {
+    deps.executor->add_callback_group(entity_.srv_cb_group, node_base);
+  }
+  if (entity_.client_cb_group) {
+    deps.executor->add_callback_group(entity_.client_cb_group, node_base);
+  }
   return 0;
 }
 
@@ -319,10 +340,14 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
     deps.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
+  // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn the
+  // group mid-teardown.
   if (entity_.srv_cb_group) {
+    deps.executor->remove_callback_group(entity_.srv_cb_group);
     deps.executor->stop_callback_group(entity_.srv_cb_group);
   }
   if (entity_.client_cb_group) {
+    deps.executor->remove_callback_group(entity_.client_cb_group);
     deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 
@@ -345,10 +370,14 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
     deps.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
+  // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn the
+  // group mid-teardown.
   if (entity_.srv_cb_group) {
+    deps.executor->remove_callback_group(entity_.srv_cb_group);
     deps.executor->stop_callback_group(entity_.srv_cb_group);
   }
   if (entity_.client_cb_group) {
+    deps.executor->remove_callback_group(entity_.client_cb_group);
     deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 

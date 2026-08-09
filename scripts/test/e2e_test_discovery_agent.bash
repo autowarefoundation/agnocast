@@ -53,14 +53,14 @@ cleanup() {
     # talker / agent as grandchildren, so also match by binary path.
     pkill -P $$ 2>/dev/null || true
     pkill -KILL -f '/agnocast_sample_application/lib/.*/talker' 2>/dev/null || true
-    pkill -KILL -f '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/discovery_agent' 2>/dev/null || true
+    pkill -KILL -f '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/agnocast_discovery_agent' 2>/dev/null || true
     sleep 1
     rm -rf "$LOG_DIR"
 }
 trap cleanup EXIT
 
 yellow "Starting agnocast_discovery_agent..."
-ros2 run ros2agnocast_discovery_agent discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
+ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
 sleep "$DAEMON_WARMUP_SEC"
 
 if ! grep -q "discovery_agent up" "$LOG_DIR/agent.log"; then

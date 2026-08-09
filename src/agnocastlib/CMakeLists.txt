@@ -44,18 +44,18 @@ add_library(agnocast SHARED
   src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
-  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
+  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
   src/cie_client_utils.cpp
   src/internal/type_registry_writer.cpp
-  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp
+  src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp src/node/node_interfaces/node_graph.cpp
   src/bridge/agnocast_bridge_utils.cpp src/bridge/agnocast_service_bridge.cpp
   src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp
-  src/vendor/rclcpp/generic_service.cpp)
+  src/vendor/rclcpp/generic_service.cpp src/vendor/rclcpp/generic_client.cpp)
 
 ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
 
@@ -136,6 +136,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
   find_package(std_msgs REQUIRED)
+  find_package(std_srvs REQUIRED)
 
   # Unit tests
   find_package(rosidl_typesupport_cpp REQUIRED)
@@ -159,7 +160,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_generic_publisher.cpp
     test/unit/test_daemon_bridge_uds.cpp
     test/unit/test_agnocast_bridge_uds.cpp
-    test/unit/test_discovery_agent_auto_fork.cpp)
+    test/unit/test_discovery_agent_auto_fork.cpp
+    test/unit/test_bridge_node_name.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
@@ -265,6 +267,17 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
+  # NodeGraphInterface integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_node_graph_${PROJECT_NAME}
+    test/integration/test_node_graph.cpp)
+  target_link_libraries(test_integration_node_graph_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_node_graph_${PROJECT_NAME} std_msgs)
+  set_tests_properties(test_integration_node_graph_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
   # diagnostic_updater integration test (requires kernel module, no mock).
   # Black-box test of agnocast::Updater observed via a real agnocast::Subscription
   # on /diagnostics.
@@ -324,6 +337,18 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_integration_generic_publisher_${PROJECT_NAME}
     std_msgs rosidl_typesupport_cpp)
   set_tests_properties(test_integration_generic_publisher_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # Client integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_client_${PROJECT_NAME}
+    test/integration/test_agnocast_client.cpp)
+  target_include_directories(test_integration_client_${PROJECT_NAME} PRIVATE include)
+  target_link_libraries(test_integration_client_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_client_${PROJECT_NAME} std_srvs)
+  set_tests_properties(test_integration_client_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 60
     LABELS "requires_kernel_module;requires_heaphook"

@@ -1953,8 +1953,7 @@ int agnocast_ioctl_remove_subscriber(
   }
 
   hash_del(&sub_info->node);
-  kfree(sub_info->node_name);
-  kfree(sub_info);
+  free_subscriber_info(sub_info);
 
   if (!is_parameter_service_topic(topic_name)) {
     dev_info(
@@ -2001,8 +2000,7 @@ int agnocast_ioctl_remove_subscriber(
     pub_info->entries_num--;
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
+      free_publisher_info(pub_info);
     }
   }
 
@@ -2056,8 +2054,7 @@ int agnocast_ioctl_remove_publisher(
 
   if (pub_info->entries_num == 0) {
     hash_del(&pub_info->node);
-    kfree(pub_info->node_name);
-    kfree(pub_info);
+    free_publisher_info(pub_info);
 
     if (!is_parameter_service_topic(topic_name)) {
       dev_info(
