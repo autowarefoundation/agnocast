@@ -146,6 +146,8 @@ public:
         RCLCPP_WARN(logger, "Failed to remove subscriber (id=%d) from kernel.", id_);
       }
     }
+
+    close_notify_eventfd(notify_eventfd_);
   }
 };
 
@@ -248,15 +250,12 @@ public:
   ~Subscription()
   {
     // Remove from callback info map to prevent stale references on re-subscription and to avoid
-    // fd reuse conflicts. When the eventfd is closed below, the OS may later reuse the same fd
-    // number for a new subscription. If the old entry remains in id2_callback_info, adding the new
-    // fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still associates that fd
-    // number with the stale entry.
-    {
-      std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-      id2_callback_info.erase(callback_info_id_);
-    }
-    close_notify_eventfd(notify_eventfd_);
+    // fd reuse conflicts. ~SubscriptionBase() closes the eventfd once this body returns, after
+    // which the OS may reuse the same fd number for a new subscription. If the old entry remained
+    // in id2_callback_info, adding the new fd to epoll (EPOLL_CTL_ADD) could fail with EEXIST
+    // because epoll would still associate that fd number with the stale entry.
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info.erase(callback_info_id_);
   }
 };
 
