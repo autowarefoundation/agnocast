@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_eventfd.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -10,8 +11,6 @@
 #include <linux/string.h>
 
 static const pid_t PID_BASE = 1000;
-
-static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
@@ -67,7 +66,7 @@ static topic_local_id_t setup_one_subscriber_on_topic(
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -89,8 +88,7 @@ static uint64_t setup_one_entry(
 {
   union ioctl_publish_msg_args publish_msg_args;
   int ret = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
-    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, &publish_msg_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_TRUE(
@@ -769,4 +767,34 @@ void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
 
   kvfree(mq_info_buf);
+}
+
+// The path a crashed or SIGKILLed node takes: no REMOVE_SUBSCRIBER, so the exit handler is what
+// has to release the context.
+void test_case_do_exit_releases_notify_context(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  const pid_t subscriber_pid = PID_BASE;
+  const int eventfd = 0;
+  setup_one_process(test, subscriber_pid);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    eventfd, &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
+
+  // Act
+  agnocast_enqueue_exit_pid(subscriber_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
+
+  // Assert
+  const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+  KUNIT_ASSERT_NOT_NULL(test, slot);
+  KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
