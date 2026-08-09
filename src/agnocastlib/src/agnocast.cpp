@@ -33,7 +33,11 @@ int agnocast_fd = -1;
 std::vector<int> shm_fds;
 std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
-// mmap_mtx: Prevents a race condition and segfault between two threads
+// mmap_mtx serves two distinct purposes. Both require it to be held across the whole
+// receive/take ioctl *and* the shared-memory mapping that follows it, so it must stay
+// process-global and must not be narrowed to per-subscription or per-executor scope.
+//
+// (1) Prevents a race condition and segfault between two threads
 // in a multithreaded executor using the same mqueue_fd.
 //
 // Race Scenario:
@@ -50,6 +54,17 @@ std::mutex mmap_mtx;
 // Root Cause: T2's callback uses `shm_addr` that T1 fetched but hadn't initialized/mapped yet.
 // This mutex ensures atomicity for T1's critical section: from ioctl fetching publisher
 // info through to completing shared memory setup.
+//
+// (2) Serializes RECEIVE_CMD/TAKE_CMD for the same subscriber, which the kernel module depends on.
+// agnocast_ioctl_receive_msg and agnocast_ioctl_take_msg take only a *read* lock on the topic, so
+// the kernel lets two receives on one topic run concurrently. That is safe across subscribers,
+// since each has its own sub_info, but two concurrent calls for the *same* subscriber would race
+// on sub_info->latest_received_entry_id (duplicate or skipped messages) and
+// sub_info->need_mmap_update (duplicate mmap). A subscriber belongs to exactly one process, and
+// this mutex is process-global and wraps every RECEIVE_CMD/TAKE_CMD call site, so no such pair can
+// arise -- including under a Reentrant callback group, where one subscription's callback may run
+// on several threads at once. Moving either ioctl outside this mutex requires adding per-subscriber
+// serialization in the kernel module first (see the CAUTION in agnocast_ioctl_receive_msg).
 
 void * map_area(
   const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)

@@ -1051,39 +1051,45 @@ int agnocast_ioctl_receive_msg(
     goto unlock_only_global;
   }
 
-  // Read lock is sufficient here. It still excludes the publish path (which takes topic->rwsem
-  // write), so receive never races with publish; the only newly-allowed concurrency is
-  // receive-vs-receive (and receive-vs-release, see agnocast_ioctl_release_message_entry_reference)
-  // on the same topic. The read path respects the two locks that guard everything it touches:
+  // A read lock -- not a write lock -- is what the receive path needs. This lets subscribers in
+  // different processes receive concurrently on one topic instead of queueing O(S) deep on a write
+  // lock, which otherwise dominates tail latency under high subscriber fan-out. (Subscribers
+  // inside a single process are serialized by that process's mmap_mtx; see agnocastlib.)
+  //
+  // The read lock therefore permits, on the same topic: receive-vs-receive, receive-vs-take, and
+  // receive-vs-agnocast_ioctl_release_message_entry_reference (which holds the same topic read
+  // lock). Publish takes topic->rwsem WRITE, so it is never concurrent with receive.
+  //
+  // Everything the receive path touches is either guarded by a lock this function already holds,
+  // or self-synchronized:
   //
   // 1. Entries rbtree: structurally mutated only under topic->rwsem WRITE (publish: insert /
   //    depth-release) or global_htables_rwsem WRITE (subscriber/publisher removal, process-exit
-  //    cleanup, module unload). We hold topic->rwsem read AND global_htables_rwsem read for the
-  //    entire duration, so both write classes are mutually exclusive with us: the tree can never
-  //    be mutated or freed underneath a receiver.
+  //    cleanup, module unload). This function holds topic->rwsem read AND global_htables_rwsem
+  //    read for its entire duration, so both write classes are mutually exclusive with it: the
+  //    tree can never be mutated or freed underneath a receiver.
   //
   // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update): these live in disjoint
-  //    sub_info structs (subscriber ids are unique per topic), so cross-process receivers never
-  //    collide. Same-subscriber receives are serialized in userspace by agnocastlib's
-  //    process-global mmap_mtx, which is held across every receive/take ioctl regardless of
-  //    callback-group type. The kernel does not rely on that mutex for memory safety: a duplicate
-  //    same-subscriber receive merely returns -EALREADY and never touches the tree.
-  //    Note also that need_mmap_update is set to true by agnocast_ioctl_add_publisher, which holds
-  //    global_htables_rwsem WRITE -- exclusive with our global READ here. So the write from
-  //    add_publisher and the read/clear here are fully serialized regardless of the topic lock.
+  //    sub_info structs (subscriber ids are unique per topic), so receivers of different
+  //    subscribers never touch the same memory. Two receives for the *same* subscriber are
+  //    serialized in userspace by agnocastlib's process-global mmap_mtx, which is held across
+  //    every receive/take ioctl regardless of callback-group type; a subscriber belongs to exactly
+  //    one process, so that covers every caller. Memory safety does not depend on that mutex: a
+  //    duplicate same-subscriber receive only returns -EALREADY and never touches the tree.
+  //    CAUTION: the read lock stops being sufficient as soon as a write on this path escapes the
+  //    per-subscriber sub_info. Before adding a field written here, confirm that (a) it lives in
+  //    sub_info rather than in topic_struct, publisher_info or entry_node, and (b) a torn
+  //    read-modify-write of it is harmless, or the update is atomic. Anything shared across
+  //    subscribers -- a per-topic counter or list, say -- needs its own atomic or spinlock, or a
+  //    return to the write lock both here and in agnocast_ioctl_take_msg.
+  //    Note that need_mmap_update is set to true by agnocast_ioctl_add_publisher, which holds
+  //    global_htables_rwsem WRITE -- exclusive with the global READ held here. So that write and
+  //    the read/clear below are fully serialized regardless of the topic lock.
   //
   // 3. Reference bitmap updates are atomic (test_and_set_bit / test_and_clear_bit).
   //
   // 4. set_publisher_shm_info -> reference_memory (mmap bookkeeping) is self-synchronized via
   //    mempool_lock; proc_info is freed only under global_htables_rwsem write (kfree_rcu).
-  //
-  // agnocast_ioctl_release_message_entry_reference already used this exact topic-read +
-  // atomic-bitop pattern, so this extends an established, proven-safe discipline to receive.
-  //
-  // Using a read lock here allows subscribers in different processes to receive simultaneously on
-  // the same topic, eliminating the O(S) sequential lock-wait serialization that previously
-  // dominated tail latency under high subscriber fan-out. (Subscribers within one process remain
-  // serialized by that process's mmap_mtx, as they were before.)
   down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
@@ -1140,27 +1146,29 @@ int agnocast_ioctl_take_msg(
     goto unlock_only_global;
   }
 
-  // Read lock is sufficient here -- same reasoning as agnocast_ioctl_receive_msg above:
+  // A read lock is what the take path needs -- same reasoning as agnocast_ioctl_receive_msg above,
+  // including the CAUTION there about keeping every write on this path inside sub_info:
   //
   // 1. Entries rbtree: the traversal below (rb_last, rb_prev) is read-only, and the tree is
-  //    structurally mutated only under topic->rwsem WRITE or global_htables_rwsem WRITE. We hold
-  //    both for read throughout, so it can never be mutated or freed underneath us.
+  //    structurally mutated only under topic->rwsem WRITE or global_htables_rwsem WRITE. This
+  //    function holds both for read throughout, so the tree cannot be mutated or freed underneath
+  //    it.
   //
   // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update): disjoint per sub_info,
-  //    so cross-process takers never collide. Same-subscriber takes are serialized in userspace by
-  //    agnocastlib's process-global mmap_mtx (held across every receive/take ioctl, regardless of
-  //    callback-group type), and the kernel does not rely on that mutex for memory safety.
-  //    Note also that need_mmap_update is set to true by agnocast_ioctl_add_publisher, which holds
-  //    global_htables_rwsem WRITE -- exclusive with our global READ here.
+  //    so takers of different subscribers never collide. Two takes for the same subscriber are
+  //    serialized in userspace by agnocastlib's process-global mmap_mtx (held across every
+  //    receive/take ioctl, regardless of callback-group type), and memory safety does not depend
+  //    on that mutex.
+  //    Note that need_mmap_update is set to true by agnocast_ioctl_add_publisher, which holds
+  //    global_htables_rwsem WRITE -- exclusive with the global READ held here.
   //
   // 3. Reference bitmap updates are atomic (test_bit, test_and_set_bit).
   //
   // 4. set_publisher_shm_info -> reference_memory: self-synchronized via mempool_lock; proc_info
   //    is freed only under global_htables_rwsem write (kfree_rcu).
   //
-  // A read lock still excludes the publish path (topic->rwsem write), so take never races with
-  // publish; only take-vs-take (and take-vs-release) concurrency is newly allowed, and that is safe
-  // per the above.
+  // Publish takes topic->rwsem WRITE, so it is never concurrent with take; the read lock permits
+  // take-vs-take, take-vs-receive and take-vs-release, all safe per the above.
   down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);

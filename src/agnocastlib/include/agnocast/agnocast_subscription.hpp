@@ -365,6 +365,9 @@ public:
     take_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
     {
+      // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
+      // mmap that makes it usable, and it is also what serializes same-subscriber takes for the
+      // kernel module, which takes only a topic read lock. See mmap_mtx in agnocast.cpp.
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {
