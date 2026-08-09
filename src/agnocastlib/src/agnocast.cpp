@@ -65,8 +65,8 @@ std::mutex mmap_mtx;
 // skipped messages) and can make the ioctl fail with -EALREADY, which every call site below treats
 // as fatal. This holds even under a Reentrant callback group, where one subscription's callback may
 // run on several threads at once.
-// The kernel rejects receive/take from a process that does not own the subscriber (-EPERM), so
-// only threads of this process can reach either race; serializing them here is what closes it.
+// The kernel does not enforce any of this -- it never checks that the caller's pid matches the
+// subscriber's -- so this is an agnocastlib invariant, not a guarantee.
 // There are exactly two RECEIVE_CMD/TAKE_CMD call sites (receive_and_execute_message in
 // agnocast_callback_info.cpp and TakeSubscription::take in agnocast_subscription.hpp); any new one
 // must take this mutex across both the ioctl and the mapping that follows. Note that
