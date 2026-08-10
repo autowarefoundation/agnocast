@@ -60,7 +60,7 @@ void test_case_get_topic_pub_info_no_publishers(struct kunit * test)
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_info_args.topic_info_ret_buffer_size = MAX_PUBLISHER_NUM;

@@ -70,8 +70,7 @@ static void pre_handler_subscriber_exit(
     }
 
     hash_del(&sub_info->node);
-    kfree(sub_info->node_name);
-    kfree(sub_info);
+    free_subscriber_info(sub_info);
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
@@ -111,8 +110,7 @@ static void pre_handler_subscriber_exit(
       pub_info->entries_num--;
       if (pub_info->entries_num == 0) {
         hash_del(&pub_info->node);
-        kfree(pub_info->node_name);
-        kfree(pub_info);
+        free_publisher_info(pub_info);
       }
     }
   }
@@ -147,8 +145,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
+      free_publisher_info(pub_info);
     }
   }
 }
@@ -216,8 +213,7 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
     hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub, tmp_pub, pub_info, node)
     {
       hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
+      free_publisher_info(pub_info);
     }
 
     struct subscriber_info * sub_info;
@@ -226,8 +222,7 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
     hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub, tmp_sub, sub_info, node)
     {
       hash_del(&sub_info->node);
-      kfree(sub_info->node_name);
-      kfree(sub_info);
+      free_subscriber_info(sub_info);
     }
 
     kfree(wrapper->topic);
