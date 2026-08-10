@@ -627,8 +627,8 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A performance bridge manager is per-(ipc_ns, domain): its MQ name carries the
-// domain suffix, so each domain needs its own manager. Gate on the domain too,
+// A performance bridge manager is per-(ipc_ns, domain): its UDS address carries
+// the domain suffix, so each domain needs its own manager. Gate on the domain too,
 // otherwise a manager in one domain would suppress spawning in another.
 static bool has_alive_performance_bridge_manager(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
