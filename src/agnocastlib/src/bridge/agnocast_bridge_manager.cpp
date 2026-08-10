@@ -380,9 +380,14 @@ void BridgeManager::request_shutdown()
     shutdown_requested_ = true;
   }
   pending_msgs_cv_.notify_all();
+
   if (executor_) {
     executor_->cancel();
   }
+
+  // Wake up the event loop immediately so that spin_once() returns and the run() loop can observe
+  // shutdown_requested_.
+  event_loop_.wakeup();
 }
 
 void BridgeManager::on_signal()
