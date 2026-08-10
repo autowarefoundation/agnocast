@@ -22,7 +22,7 @@ class InterfaceType(Enum):
     SERVICE = auto()
 
 class GenerateBridgePluginsVerb(VerbExtension):
-    """Generate bridge plugins for Performance Bridge mode."""
+    """Generate bridge plugins for Bridge mode."""
 
     def add_arguments(self, parser, cli_name):
         parser.formatter_class = argparse.RawDescriptionHelpFormatter

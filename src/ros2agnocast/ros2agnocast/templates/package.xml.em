@@ -5,7 +5,7 @@
 <package format="3">
   <name>agnocast_bridge_plugins</name>
   <version>@(version)</version>
-  <description>Bridge plugins for Agnocast Performance Bridge mode</description>
+  <description>Bridge plugins for Agnocast Bridge mode</description>
   <maintainer email="maintainer@@example.com">Maintainer Name</maintainer>
   <license>Apache-2.0</license>
 
