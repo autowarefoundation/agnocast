@@ -627,8 +627,8 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A bridge manager is per-(ipc_ns, domain): its MQ name carries the
-// domain suffix, so each domain needs its own manager. Gate on the domain too,
+// A bridge manager is per-(ipc_ns, domain): its UDS address carries
+// the domain suffix, so each domain needs its own manager. Gate on the domain too,
 // otherwise a manager in one domain would suppress spawning in another.
 static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
@@ -674,8 +674,6 @@ int agnocast_ioctl_add_process(
 
   new_proc_info->exited = false;
   new_proc_info->is_bridge_manager = is_bridge_manager;
-  INIT_LIST_HEAD(&new_proc_info->exit_subscription_list);
-  new_proc_info->exit_subscription_count = 0;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -1396,26 +1394,19 @@ int agnocast_ioctl_get_publisher_num(
 }
 
 // Two-phase ioctl for exit process cleanup:
-//   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
-//   buffer.
-//   Phase 2 (agnocast_commit_exit_process): delete entries and free proc_info.
+//   Phase 1 (agnocast_ioctl_get_exit_process): report the exited pid, leaving proc_info in place.
+//   Phase 2 (agnocast_commit_exit_process): free proc_info.
 //
-// The primary motivation for the two-phase split is to avoid holding the global write lock during
-// copy_to_user, which can trigger page faults with potentially unbounded latency. Since the write
-// lock blocks all publish/receive operations across every topic, a page fault during copy_to_user
-// would stall the entire data plane. By releasing the lock between phases, the dispatch handler
-// performs copy_to_user without any lock held.
-//
-// As a secondary benefit, Phase 2 runs only after the critical copies (ret_pid and
-// ret_subscription_mq_info_num) succeed, so subscription entries are never permanently lost.
-// ret_daemon_should_exit is patched via a separate copy_to_user after Phase 2; if that final copy
-// fails, the daemon merely stays alive one extra poll cycle — no resource leak.
+// Splitting the two lets the dispatch handler copy ret_pid out with no lock held, and only commit
+// once that copy succeeded: a failed copy leaves the entry for the next poll instead of dropping
+// the pid whose shm the daemon still has to unlink. ret_daemon_should_exit is patched by a
+// separate copy_to_user after Phase 2; if that one fails the daemon merely stays alive one extra
+// poll cycle -- no resource leak.
 int agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
+  pid_t * out_global_pid)
 {
   ioctl_ret->ret_pid = -1;
-  ioctl_ret->ret_subscription_mq_info_num = 0;
   ioctl_ret->ret_daemon_should_exit = false;
   *out_global_pid = -1;
 
@@ -1429,46 +1420,8 @@ int agnocast_ioctl_get_exit_process(
       continue;
     }
 
-    // If there are subscription entries but no buffer to receive them, discard the entries
-    // and warn. The subscription MQs will leak, but shm/bridge cleanup can still proceed and
-    // the daemon won't hang indefinitely.
-    if (
-      !list_empty(&proc_info->exit_subscription_list) &&
-      (mq_info_buf == NULL || mq_info_buf_size == 0)) {
-      dev_warn(
-        agnocast_device,
-        "No MQ info buffer provided for pid=%d with %u subscription entries; "
-        "subscription MQs will leak. (%s)\n",
-        proc_info->global_pid, proc_info->exit_subscription_count, __func__);
-      agnocast_free_exit_subscription_list(proc_info);
-    }
-
     ioctl_ret->ret_pid = proc_info->local_pid;
     *out_global_pid = proc_info->global_pid;
-
-    // Read-only copy of subscription info to kernel buffer. Entries are NOT deleted here;
-    // deletion is deferred to agnocast_commit_exit_process() after copy_to_user succeeds.
-    uint32_t count = 0;
-    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
-      struct exit_subscription_entry * entry;
-      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
-      {
-        // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard
-        // above
-        if (count >= mq_info_buf_size) {
-          dev_warn(
-            agnocast_device,
-            "mq_info_buf is full, remaining entries kept for next poll. "
-            "(%s)\n",
-            __func__);
-          break;
-        }
-        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
-        mq_info_buf[count].subscriber_id = entry->subscriber_id;
-        count++;
-      }
-    }
-    ioctl_ret->ret_subscription_mq_info_num = count;
     break;
   }
 
@@ -1477,34 +1430,15 @@ int agnocast_ioctl_get_exit_process(
 }
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
-  bool * ret_daemon_should_exit)
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit)
 {
   down_write(&global_htables_rwsem);
 
   if (global_pid >= 0) {
     struct process_info * proc_info = agnocast_find_process_info(global_pid);
     if (proc_info) {
-      // Delete the first committed_count entries (matching the read-only copy order).
-      uint32_t deleted = 0;
-      struct exit_subscription_entry * entry;
-      struct exit_subscription_entry * tmp_entry;
-      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
-      {
-        // cppcheck-suppress unsignedLessThanZero ; both are uint32_t, committed_count == 0
-        // correctly skips the loop
-        if (deleted >= committed_count) break;
-        list_del(&entry->list);
-        kfree(entry);
-        proc_info->exit_subscription_count--;
-        deleted++;
-      }
-
-      // Free proc_info only when all subscription entries have been consumed.
-      if (list_empty(&proc_info->exit_subscription_list)) {
-        hash_del_rcu(&proc_info->node);
-        kfree_rcu(proc_info, rcu_head);
-      }
+      hash_del_rcu(&proc_info->node);
+      kfree_rcu(proc_info, rcu_head);
     }
   }
 
@@ -2765,50 +2699,22 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   int ret = 0;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
-  struct ioctl_get_exit_process_args get_exit_process_args;
-  if (copy_from_user(&get_exit_process_args, arg, sizeof(get_exit_process_args))) return -EFAULT;
-
-  uint32_t mq_buf_size = get_exit_process_args.subscription_mq_info_buffer_size;
-  if (mq_buf_size > MAX_SUBSCRIPTION_NUM_PER_PROCESS) return -EINVAL;
-
-  uint64_t mq_buf_addr = get_exit_process_args.subscription_mq_info_buffer_addr;
-  if (mq_buf_size > 0 && mq_buf_addr == 0) return -EINVAL;
-
-  struct exit_subscription_mq_info * mq_info_buf = NULL;
-  if (mq_buf_size > 0) {
-    mq_info_buf = kvcalloc(mq_buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
-    if (!mq_info_buf) return -ENOMEM;
-  }
+  // Output-only args, so nothing is read back from user-space.
+  struct ioctl_get_exit_process_args get_exit_process_args = {};
 
   pid_t global_pid = -1;
-  agnocast_ioctl_get_exit_process(
-    ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
+  agnocast_ioctl_get_exit_process(ipc_ns, &get_exit_process_args, &global_pid);
 
-  // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
-  // for the next poll (agnocast_commit_exit_process is not called).
-  if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
-    uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
-    if (copy_to_user(
-          (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
-          copy_count * sizeof(struct exit_subscription_mq_info))) {
-      kvfree(mq_info_buf);
-      return -EFAULT;
-    }
-  }
-  kvfree(mq_info_buf);
-
-  // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
+  // Copy ret_pid to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.
   if (copy_to_user(
         (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
         sizeof(get_exit_process_args)))
     return -EFAULT;
 
-  // Commit: delete copied entries and free proc_info. Safe because user-space already
-  // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
+  // Commit: free proc_info. Safe because user-space already has ret_pid.
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+  agnocast_commit_exit_process(ipc_ns, global_pid, &daemon_should_exit);
 
   // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
   // alive one extra poll cycle — no resource leak.

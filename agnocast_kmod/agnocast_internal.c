@@ -24,16 +24,7 @@ int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
-// The topic name a topic's endpoints notify on. Endpoints of a bridged (incl. renamed) topic share
-// one topic_struct but keep their own per-domain names, so return the rule's canonical name -- a
-// publisher and a renamed subscriber then derive the same publish-notification MQ name.
-const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper)
-{
-  return wrapper->topic->rule ? wrapper->topic->rule->topic_name_a : wrapper->key;
-}
-
-static void pre_handler_subscriber_exit(
-  struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)
+static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
 {
   struct subscriber_info * sub_info;
   int bkt_sub_info;
@@ -43,31 +34,6 @@ static void pre_handler_subscriber_exit(
     if (sub_info->pid != pid) continue;
 
     const topic_local_id_t subscriber_id = sub_info->id;
-
-    // Save subscription info for daemon cleanup before deleting the subscriber
-    if (proc_info->exit_subscription_count >= MAX_SUBSCRIPTION_NUM_PER_PROCESS) {
-      dev_warn(
-        agnocast_device,
-        "exit_subscription_list is full for pid=%d, subscription MQ may leak. "
-        "(%s)\n",
-        pid, __func__);
-    } else {
-      struct exit_subscription_entry * exit_entry =
-        kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
-      if (exit_entry) {
-        strscpy(
-          exit_entry->topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
-        exit_entry->subscriber_id = subscriber_id;
-        list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
-        proc_info->exit_subscription_count++;
-      } else {
-        dev_warn(
-          agnocast_device,
-          "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
-          "(%s)\n",
-          __func__);
-      }
-    }
 
     hash_del(&sub_info->node);
     free_subscriber_info(sub_info);
@@ -249,18 +215,6 @@ struct process_info * agnocast_find_process_info(const pid_t pid)
   return NULL;
 }
 
-void agnocast_free_exit_subscription_list(struct process_info * proc_info)
-{
-  struct exit_subscription_entry * entry;
-  struct exit_subscription_entry * tmp_entry;
-  list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
-  {
-    list_del(&entry->list);
-    kfree(entry);
-  }
-  proc_info->exit_subscription_count = 0;
-}
-
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
 {
   rb_erase(&en->node, &wrapper->topic->entries);
@@ -393,7 +347,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
-    pre_handler_subscriber_exit(wrapper, pid, proc_info);
+    pre_handler_subscriber_exit(wrapper, pid);
 
     // Release this wrapper once its own domain has no endpoints left.
     if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {

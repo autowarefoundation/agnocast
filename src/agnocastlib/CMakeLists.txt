@@ -191,7 +191,7 @@ if(BUILD_TESTING)
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
 
-  # tf2 transform listener unit tests (own subscription-side mocks for kmod / mqueue bypass)
+  # tf2 transform listener unit tests (own subscription-side mocks for kmod / eventfd bypass)
   ament_add_gmock(test_unit_tf2_transform_listener_${PROJECT_NAME}
     test/unit/tf2/test_transform_listener.cpp)
   target_include_directories(test_unit_tf2_transform_listener_${PROJECT_NAME} PRIVATE include src)

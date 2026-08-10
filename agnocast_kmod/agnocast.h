@@ -171,28 +171,10 @@ union ioctl_get_publisher_num_args {
   };
 };
 
-/* Max subscription MQ info entries buffered per process during exit cleanup.
- * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
- * These entries live in kernel memory from process exit until the daemon polls them (typically
- * ~1s). If the daemon is dead, they persist until module unload — but that scenario already leaves
- * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
-
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -528,12 +510,10 @@ int agnocast_ioctl_discovery_agent_exists(
 
 int agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
   pid_t * out_global_pid);
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
-  bool * ret_daemon_should_exit);
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 
