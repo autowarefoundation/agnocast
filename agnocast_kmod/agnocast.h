@@ -508,9 +508,9 @@ int agnocast_ioctl_add_discovery_agent(
 int agnocast_ioctl_discovery_agent_exists(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
 
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  pid_t * out_global_pid);
+// Returns the exited process's global pid, or -1 if the namespace has none.
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
 
 void agnocast_commit_exit_process(
   const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit);

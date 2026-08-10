@@ -1402,13 +1402,12 @@ int agnocast_ioctl_get_publisher_num(
 // the pid whose shm the daemon still has to unlink. ret_daemon_should_exit is patched by a
 // separate copy_to_user after Phase 2; if that one fails the daemon merely stays alive one extra
 // poll cycle -- no resource leak.
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  pid_t * out_global_pid)
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret)
 {
   ioctl_ret->ret_pid = -1;
   ioctl_ret->ret_daemon_should_exit = false;
-  *out_global_pid = -1;
+  pid_t global_pid = -1;
 
   down_write(&global_htables_rwsem);
 
@@ -1421,12 +1420,12 @@ int agnocast_ioctl_get_exit_process(
     }
 
     ioctl_ret->ret_pid = proc_info->local_pid;
-    *out_global_pid = proc_info->global_pid;
+    global_pid = proc_info->global_pid;
     break;
   }
 
   up_write(&global_htables_rwsem);
-  return 0;
+  return global_pid;
 }
 
 void agnocast_commit_exit_process(
@@ -2700,8 +2699,7 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
 
   struct ioctl_get_exit_process_args get_exit_process_args = {};
 
-  pid_t global_pid = -1;
-  agnocast_ioctl_get_exit_process(ipc_ns, &get_exit_process_args, &global_pid);
+  const pid_t global_pid = agnocast_ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
 
   // Copy ret_pid to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.

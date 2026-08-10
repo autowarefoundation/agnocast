@@ -612,10 +612,9 @@ void test_case_publish_msg_no_process(struct kunit * test)
   // The unlink daemon then reaps process_info, leaving the publisher without one.
   struct ioctl_get_exit_process_args get_exit_args;
   memset(&get_exit_args, 0, sizeof(get_exit_args));
-  pid_t global_pid = -1;
-  KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args, &global_pid),
-    0);
+  const pid_t global_pid =
+    agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args);
+  KUNIT_ASSERT_EQ(test, global_pid, exiting_pid);
   KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
   bool daemon_should_exit = false;
   agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
