@@ -2,108 +2,117 @@
 #include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <thread>
+
 using namespace std::chrono_literals;
+
+using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
+using Request = agnocast_sample_interfaces::srv::SumIntArray::Request;
+using Response = agnocast_sample_interfaces::srv::SumIntArray::Response;
+
+struct NodeParams
+{
+  std::string service_name;
+  int64_t qos_depth;
+  bool use_response_callback;
+  // Whether to wait for a response before sending the next request. If `use_response_callback` is
+  // false, this field is coerced to true.
+  bool wait_response;
+  // The number of responses to receive before shutting down.
+  int64_t target_count;
+};
+
+NodeParams get_node_params(rclcpp::Node * node)
+{
+  node->declare_parameter<std::string>("service_name", "/test_service");
+  node->declare_parameter<int64_t>("qos_depth", 10);
+  node->declare_parameter<bool>("use_response_callback", false);
+  node->declare_parameter<bool>("wait_response", true);
+  node->declare_parameter<int64_t>("target_count", 1);
+
+  NodeParams params;
+  params.service_name = node->get_parameter("service_name").as_string();
+  params.qos_depth = node->get_parameter("qos_depth").as_int();
+  params.use_response_callback = node->get_parameter("use_response_callback").as_bool();
+  params.wait_response =
+    !params.use_response_callback || node->get_parameter("wait_response").as_bool();
+  params.target_count = node->get_parameter("target_count").as_int();
+  return params;
+}
 
 class TestClient : public rclcpp::Node
 {
-  using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
-  using Request = agnocast_sample_interfaces::srv::SumIntArray::Request;
-  using Response = agnocast_sample_interfaces::srv::SumIntArray::Response;
-
   bool use_response_callback_;
-  int target_count_;
-  int iteration_ = 0;
+  bool wait_response_;
+  int64_t target_count_;
+
+  rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Client<ServiceT>::SharedPtr client_;
-  rclcpp::TimerBase::SharedPtr timer_;
-  std::shared_future<agnocast::ipc_shared_ptr<Response>> fut_;
 
-  void future_based()
+  std::int64_t response_count_ = 0;
+
+  bool step_once(int64_t iteration)
   {
-    // Check that the response for the previous request has been received.
-    if (iteration_ > 0) {
-      if (fut_.wait_for(0s) == std::future_status::timeout) {
-        RCLCPP_ERROR(this->get_logger(), "Timeout waiting for response.");
-        rclcpp::shutdown();
-        return;
-      }
+    auto request = client_->borrow_loaned_request();
+    request->data.push_back(iteration);
 
-      RCLCPP_INFO(this->get_logger(), "Receiving %ld.", fut_.get()->sum);
-
-      if (iteration_ >= target_count_) {
-        RCLCPP_INFO(this->get_logger(), "All responses have been received. Shutting down.");
-        rclcpp::shutdown();
-        return;
-      }
-    }
-
-    // Send the next request.
-    if (iteration_ < target_count_) {
-      auto request = client_->borrow_loaned_request();
-      request->data.push_back(iteration_);
-      fut_ = client_->async_send_request(std::move(request)).share();
-    }
-
-    iteration_++;
-  }
-
-  void callback_based()
-  {
-    // Check that the response for the previous request has been received.
-    if (iteration_ > 0) {
-      if (fut_.wait_for(0s) == std::future_status::timeout) {
-        RCLCPP_ERROR(this->get_logger(), "Timeout waiting for response.");
-        rclcpp::shutdown();
-        return;
-      }
-
-      if (iteration_ >= target_count_) {
-        RCLCPP_INFO(this->get_logger(), "All responses have been received. Shutting down.");
-        rclcpp::shutdown();
-        return;
-      }
-    }
-
-    // Send the next request.
-    if (iteration_ < target_count_) {
-      auto request = client_->borrow_loaned_request();
-      request->data.push_back(iteration_);
-      fut_ = client_
-               ->async_send_request(
-                 std::move(request),
-                 [this](agnocast::Client<ServiceT>::SharedFuture sfut) {
-                   RCLCPP_INFO(this->get_logger(), "Receiving %ld.", sfut.get()->sum);
-                 })
-               .future;
-    }
-
-    iteration_++;
-  }
-
-  void timer_callback()
-  {
+    std::shared_future<agnocast::ipc_shared_ptr<Response>> sfut;
     if (use_response_callback_) {
-      callback_based();
+      sfut =
+        client_
+          ->async_send_request(
+            std::move(request),
+            [this](agnocast::Client<ServiceT>::SharedFuture sfut) {
+              RCLCPP_INFO(this->get_logger(), "Receiving %ld.", sfut.get()->sum);
+
+              response_count_++;
+              if (response_count_ >= target_count_) {
+                RCLCPP_INFO(this->get_logger(), "All responses have been received. Shutting down.");
+                rclcpp::shutdown();
+              }
+            })
+          .future;
     } else {
-      future_based();
+      sfut = client_->async_send_request(std::move(request)).share();
     }
+
+    if (!wait_response_) {
+      return true;
+    }
+
+    if (sfut.wait_for(2s) == std::future_status::timeout) {
+      RCLCPP_ERROR(this->get_logger(), "Timeout waiting for response.");
+      rclcpp::shutdown();
+      return false;
+    }
+
+    if (!use_response_callback_) {
+      RCLCPP_INFO(this->get_logger(), "Receiving %ld.", sfut.get()->sum);
+
+      response_count_++;
+      if (response_count_ >= target_count_) {
+        RCLCPP_INFO(this->get_logger(), "All responses have been received. Shutting down.");
+        rclcpp::shutdown();
+        return false;
+      }
+    }
+
+    return true;
   }
 
 public:
   explicit TestClient(const rclcpp::NodeOptions & options) : Node("test_client", options)
   {
-    this->declare_parameter<std::string>("service_name", "/test_service");
-    this->declare_parameter<int64_t>("qos_depth", 10);
-    this->declare_parameter<bool>("use_response_callback", false);
-    this->declare_parameter<int>("target_count", 1);
+    auto params = get_node_params(this);
+    use_response_callback_ = params.use_response_callback;
+    wait_response_ = params.wait_response;
+    // If the peer is a ROS 2 server, use a longer interval to account for the overhead introduced
+    // by the service bridge.
+    target_count_ = params.target_count;
 
-    std::string service_name = this->get_parameter("service_name").as_string();
-    int64_t qos_depth = this->get_parameter("qos_depth").as_int();
-    use_response_callback_ = this->get_parameter("use_response_callback").as_bool();
-    target_count_ = this->get_parameter("target_count").as_int();
-
-    auto cbg = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    rclcpp::QoS qos{rclcpp::KeepLast(qos_depth)};
-    client_ = agnocast::create_client<ServiceT>(this, service_name, qos, cbg);
+    cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
+    client_ = agnocast::create_client<ServiceT>(this, params.service_name, qos, cbg_);
 
     if (!client_->wait_for_service(5s)) {
       RCLCPP_ERROR(this->get_logger(), "Service not available after waiting for 5 seconds.");
@@ -111,9 +120,87 @@ public:
       return;
     }
 
-    timer_ = this->create_wall_timer(150ms, std::bind(&TestClient::timer_callback, this));
+    std::thread([this]() {
+      for (int64_t i = 0; i < target_count_; i++) {
+        if (!step_once(i)) {
+          break;
+        }
+      }
+    }).detach();
+  }
+};
+
+class TestROS2Client : public rclcpp::Node
+{
+  bool wait_response_;
+  int64_t target_count_;
+
+  rclcpp::CallbackGroup::SharedPtr cbg_;
+  rclcpp::Client<ServiceT>::SharedPtr client_;
+
+  std::int64_t response_count_;
+
+  bool step_once(int64_t iteration)
+  {
+    auto request = std::make_shared<Request>();
+    request->data.push_back(iteration);
+
+    auto sfut =
+      client_
+        ->async_send_request(
+          request,
+          [this](rclcpp::Client<ServiceT>::SharedFuture sfut) {
+            RCLCPP_INFO(this->get_logger(), "Receiving %ld.", sfut.get()->sum);
+
+            response_count_++;
+            if (response_count_ >= target_count_) {
+              RCLCPP_INFO(this->get_logger(), "All responses have been received. Shutting down.");
+              rclcpp::shutdown();
+            }
+          })
+        .future;
+
+    if (!wait_response_) {
+      return true;
+    }
+
+    if (sfut.wait_for(2s) == std::future_status::timeout) {
+      RCLCPP_ERROR(this->get_logger(), "Timeout waiting for response.");
+      rclcpp::shutdown();
+      return false;
+    }
+
+    return true;
+  }
+
+public:
+  explicit TestROS2Client(const rclcpp::NodeOptions & options) : Node("test_ros2_client", options)
+  {
+    auto params = get_node_params(this);
+    assert(params.use_response_callback && "TestROS2Client must use response callback");
+    wait_response_ = params.wait_response;
+    target_count_ = params.target_count;
+
+    cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
+    client_ = this->create_client<ServiceT>(params.service_name, qos.get_rmw_qos_profile(), cbg_);
+
+    if (!client_->wait_for_service(5s)) {
+      RCLCPP_ERROR(this->get_logger(), "Service not available after waiting for 5 seconds.");
+      rclcpp::shutdown();
+      return;
+    }
+
+    std::thread([this]() {
+      for (int64_t i = 0; i < target_count_; i++) {
+        if (!step_once(i)) {
+          break;
+        }
+      }
+    }).detach();
   }
 };
 
 #include <rclcpp_components/register_node_macro.hpp>
 RCLCPP_COMPONENTS_REGISTER_NODE(TestClient)
+RCLCPP_COMPONENTS_REGISTER_NODE(TestROS2Client)

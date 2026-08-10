@@ -12,29 +12,41 @@ from launch_testing.asserts import EXIT_OK, assertExitCodes, assertInStderr
 
 SERVICE_NAME = "/test_service"
 QOS_DEPTH = 10
-TARGET_COUNT = 2
+TARGET_COUNT = 3
 
 
 @launch_testing.parametrize(
-    "server_plugin, client_plugin, use_deferred_callback, use_response_callback",
+    "server_plugin, use_deferred_callback, client_plugin, use_response_callback, wait_response",
     [
+        # === synchronous client (wait_response = true) ===
         # basic arrangement
-        ("TestServer", "TestClient", False, False),
+        ("TestServer", False, "TestClient", False, True),
         # deferred server callback
-        ("TestServer", "TestClient", True, False),
+        ("TestServer", True, "TestClient", False, True),
         # callback-based async_send_request()
-        ("TestServer", "TestClient", False, True),
+        ("TestServer", False, "TestClient", True, True),
         # ROS2 server to test A2R service bridge
-        ("TestROS2Server", "TestClient", False, False),
+        ("TestROS2Server", False, "TestClient", False, True),
         # ROS2 client to test R2A service bridge
-        ("TestServer", "TestROS2Client", False, False),
+        ("TestServer", False, "TestROS2Client", False, True),
+
+        # === asynchronous client (wait_response = false) ===
+        # basic arrangement
+        ("TestServer", False, "TestClient", True, False),
+        # deferred server callback
+        ("TestServer", True, "TestClient", True, False),
+        # ROS2 server to test A2R service bridge
+        ("TestROS2Server", False, "TestClient", True, False),
+        # ROS2 client to test R2A service bridge
+        ("TestServer", False, "TestROS2Client", True, False),
     ],
 )
 def generate_test_description(
     server_plugin,
-    client_plugin,
     use_deferred_callback,
-    use_response_callback
+    client_plugin,
+    use_response_callback,
+    wait_response,
 ):
     server_container = ComposableNodeContainer(
         name="test_server_container",
@@ -76,6 +88,7 @@ def generate_test_description(
                         "service_name": SERVICE_NAME,
                         "qos_depth": QOS_DEPTH,
                         "use_response_callback": use_response_callback,
+                        "wait_response": wait_response,
                         "target_count": TARGET_COUNT,
                     }
                 ],
