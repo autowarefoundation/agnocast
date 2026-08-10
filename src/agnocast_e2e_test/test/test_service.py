@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 import launch_testing
@@ -6,7 +7,8 @@ from launch import LaunchDescription
 from launch.actions import SetEnvironmentVariable
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
-from launch_testing.asserts import assertInStderr
+from launch_testing.actions import ReadyToTest
+from launch_testing.asserts import EXIT_OK, assertExitCodes, assertInStderr
 
 SERVICE_NAME = "/test_service"
 QOS_DEPTH = 10
@@ -90,7 +92,7 @@ def generate_test_description(
                 SetEnvironmentVariable("RCUTILS_LOGGING_BUFFERED_STREAM", "0"),
                 server_container,
                 client_container,
-                launch_testing.actions.ReadyToTest(),
+                ReadyToTest(),
             ]
         ),
         { "server_container": server_container, "client_container": client_container },
@@ -105,6 +107,12 @@ class TestWaitForAllShutdown(unittest.TestCase):
 
 @launch_testing.post_shutdown_test()
 class TestService(unittest.TestCase):
+
+    # Ensure that the server and client exit successfully.  It also sleeps for two seconds to avoid
+    # the known issue with the bridge manager (#1501).
+    def test_exit_codes(self, proc_info):
+        assertExitCodes(proc_info, allowable_exit_codes=[EXIT_OK])
+        time.sleep(2)
 
     def test_server_received_all_requests(self, proc_output, server_container):
         for i in range(TARGET_COUNT):
