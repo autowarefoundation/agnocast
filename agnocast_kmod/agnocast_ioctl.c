@@ -208,7 +208,7 @@ static int insert_subscriber_info(
   struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
   const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
-  struct subscriber_info ** new_info)
+  struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
 {
   int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
@@ -261,6 +261,7 @@ static int insert_subscriber_info(
   (*new_info)->ignore_local_publications = ignore_local_publications;
   (*new_info)->need_mmap_update = true;
   (*new_info)->is_bridge = is_bridge;
+  (*new_info)->notify_ctx = notify_ctx;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
@@ -635,11 +636,10 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A performance bridge manager is per-(ipc_ns, domain): its MQ name carries the
+// A bridge manager is per-(ipc_ns, domain): its MQ name carries the
 // domain suffix, so each domain needs its own manager. Gate on the domain too,
 // otherwise a manager in one domain would suppress spawning in another.
-static bool has_alive_performance_bridge_manager(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   struct process_info * proc_info;
   int bkt;
@@ -647,7 +647,7 @@ static bool has_alive_performance_bridge_manager(
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->is_performance_bridge_manager && !proc_info->exited) {
+      proc_info->is_bridge_manager && !proc_info->exited) {
       return true;
     }
   }
@@ -655,7 +655,7 @@ static bool has_alive_performance_bridge_manager(
 }
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
@@ -668,11 +668,10 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
-  ioctl_ret->ret_performance_bridge_daemon_exist =
-    has_alive_performance_bridge_manager(ipc_ns, domain_id);
+  ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
-  if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+  if (is_bridge_manager && ioctl_ret->ret_bridge_daemon_exist) {
     goto unlock;
   }
 
@@ -683,7 +682,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
-  new_proc_info->is_performance_bridge_manager = is_performance_bridge_manager;
+  new_proc_info->is_bridge_manager = is_bridge_manager;
   INIT_LIST_HEAD(&new_proc_info->exit_subscription_list);
   new_proc_info->exit_subscription_count = 0;
   new_proc_info->global_pid = pid;
@@ -719,9 +718,18 @@ int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret)
+  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret)
 {
   int ret;
+  struct eventfd_ctx * notify_ctx = NULL;
+
+  if (!is_take_sub) {
+    notify_ctx = agnocast_eventfd_get(eventfd);
+    if (IS_ERR(notify_ctx)) {
+      dev_warn(agnocast_device, "Failed to get the eventfd context (eventfd=%d).\n", eventfd);
+      return PTR_ERR(notify_ctx);
+    }
+  }
 
   down_write(&global_htables_rwsem);
 
@@ -734,17 +742,18 @@ int agnocast_ioctl_add_subscriber(
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
     wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
-    is_take_sub, ignore_local_publications, is_bridge, &sub_info);
+    is_take_sub, ignore_local_publications, is_bridge, notify_ctx, &sub_info);
   if (ret < 0) {
     goto unlock;
   }
 
   ioctl_ret->ret_id = sub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
 unlock:
   up_write(&global_htables_rwsem);
+  if (ret < 0 && notify_ctx) {
+    agnocast_eventfd_put(notify_ctx);
+  }
   return ret;
 }
 
@@ -771,8 +780,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-  strscpy(
-    ioctl_ret->ret_mq_topic_name, agnocast_notify_mq_topic_name(wrapper), TOPIC_NAME_BUFFER_SIZE);
 
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;
@@ -872,19 +879,14 @@ static int release_msgs_to_meet_depth(
 
 int agnocast_ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
-  uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret)
+  const uint64_t msg_virtual_address, union ioctl_publish_msg_args * ioctl_ret)
 {
   int ret = 0;
 
-  if (subscriber_ids_buffer_size != MAX_SUBSCRIBER_NUM) {
-    dev_warn(
-      agnocast_device,
-      "subscriber_ids_buffer_size must be MAX_SUBSCRIBER_NUM (%d), but got %u. "
-      "(%s)\n",
-      MAX_SUBSCRIBER_NUM, subscriber_ids_buffer_size, __func__);
-    return -EINVAL;
-  }
+  // Declared here so the early-error `goto unlock_all` paths reach the signal loop below with
+  // notify_num == 0 (a no-op).
+  struct eventfd_ctx ** notify_ctxs = NULL;
+  uint32_t notify_num = 0;
 
   down_read(&global_htables_rwsem);
 
@@ -921,6 +923,18 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
+  // The subscriber count bounds how many contexts the loop below can collect. Allocated before
+  // anything is published so that a failure here cannot leave a published entry reported as an
+  // error.
+  const int sub_num = agnocast_get_size_sub_info_htable(wrapper);
+  if (sub_num > 0) {
+    notify_ctxs = kmalloc_array(sub_num, sizeof(*notify_ctxs), GFP_KERNEL);
+    if (!notify_ctxs) {
+      ret = -ENOMEM;
+      goto unlock_all;
+    }
+  }
+
   ret = insert_message_entry(wrapper, pub_info, msg_virtual_address, ioctl_ret);
   if (ret < 0) {
     goto unlock_all;
@@ -931,7 +945,6 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  uint32_t subscriber_num = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
@@ -939,16 +952,23 @@ int agnocast_ioctl_publish_msg(
     if (sub_info->is_take_sub) continue;
     if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
       continue;
-    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
-      continue;
-    }
-    subscriber_ids_out[subscriber_num] = sub_info->id;
-    subscriber_num++;
+    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+    if (!sub_info->notify_ctx) continue;
+
+    notify_ctxs[notify_num++] = sub_info->notify_ctx;
   }
-  ioctl_ret->ret_subscriber_num = subscriber_num;
 
 unlock_all:
   up_write(&wrapper->topic->rwsem);
+
+  // Signal outside topic_rwsem: RECEIVE_MSG and TAKE_MSG take it for write, so holding it here
+  // would block the very subscribers being woken. The contexts stay valid because every path that
+  // releases one takes global_htables_rwsem for write, and it is held here for read.
+  for (uint32_t i = 0; i < notify_num; i++) {
+    agnocast_eventfd_signal(notify_ctxs[i]);
+  }
+  kfree(notify_ctxs);
+
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -2407,7 +2427,7 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
-    proc_info->is_performance_bridge_manager = false;
+    proc_info->is_bridge_manager = false;
   }
   up_write(&global_htables_rwsem);
   return 0;
@@ -2505,14 +2525,14 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret)
 {
   down_write(&global_htables_rwsem);
-  // A performance bridge manager is per (ipc_ns, domain), so it must shut down once its
+  // A bridge manager is per (ipc_ns, domain), so it must shut down once its
   // own domain is empty -- counting the whole namespace would keep it alive while an
   // unrelated domain is busy. The manager itself is the remaining process (count == 1),
   // and poll_for_unlink is not registered here, so it is excluded.
   if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
-      proc_info->is_performance_bridge_manager = false;
+      proc_info->is_bridge_manager = false;
     }
     ioctl_ret->ret_should_shutdown = true;
   } else {
@@ -2541,10 +2561,9 @@ static long add_process_cmd(union ioctl_add_process_args __user * arg)
 
   union ioctl_add_process_args add_process_args;
   if (copy_from_user(&add_process_args, arg, sizeof(add_process_args))) return -EFAULT;
-  bool is_performance_bridge_manager = add_process_args.is_performance_bridge_manager;
+  bool is_bridge_manager = add_process_args.is_bridge_manager;
   uint32_t domain_id = add_process_args.domain_id;
-  ret = agnocast_ioctl_add_process(
-    pid, ipc_ns, is_performance_bridge_manager, domain_id, &add_process_args);
+  ret = agnocast_ioctl_add_process(pid, ipc_ns, is_bridge_manager, domain_id, &add_process_args);
   if (ret == 0) {
     if (copy_to_user(arg, &add_process_args, sizeof(add_process_args))) return -EFAULT;
   }
@@ -2571,7 +2590,7 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   ret = agnocast_ioctl_add_subscriber(
     topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
     sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, &sub_args);
+    sub_args.is_bridge, sub_args.eventfd, &sub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
@@ -2677,37 +2696,15 @@ static long publish_msg_cmd(union ioctl_publish_msg_args __user * arg)
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &publish_msg_args.topic_name);
   if (ret) return ret;
 
-  // Allocate kernel buffer for subscriber IDs
-  uint32_t buffer_size = publish_msg_args.subscriber_ids_buffer_size;
-  if (buffer_size != MAX_SUBSCRIBER_NUM) {
-    return -EINVAL;
-  }
-  topic_local_id_t * subscriber_ids_buf =
-    kcalloc(buffer_size, sizeof(topic_local_id_t), GFP_KERNEL);
-  if (!subscriber_ids_buf) {
-    return -ENOMEM;
-  }
-
-  uint64_t subscriber_ids_buffer_addr = publish_msg_args.subscriber_ids_buffer_addr;
-
   ret = agnocast_ioctl_publish_msg(
     topic_name_buf, ipc_ns, publish_msg_args.publisher_id, publish_msg_args.msg_virtual_address,
-    subscriber_ids_buf, buffer_size, &publish_msg_args);
+    &publish_msg_args);
 
-  if (ret == 0) {
-    // Copy subscriber IDs to user-space buffer
-    uint32_t copy_count = min(publish_msg_args.ret_subscriber_num, buffer_size);
-    if (copy_count > 0) {
-      if (copy_to_user(
-            (topic_local_id_t __user *)subscriber_ids_buffer_addr, subscriber_ids_buf,
-            copy_count * sizeof(topic_local_id_t))) {
-        kfree(subscriber_ids_buf);
-        return -EFAULT;
-      }
-    }
-  }
-  kfree(subscriber_ids_buf);
-
+  // NOTE: the entry is already inserted and every subscriber eventfd already signalled, so
+  // -EFAULT here means the publication happened and only its results failed to reach the
+  // publisher; the woken subscribers still receive a valid entry. The signalling cannot be
+  // deferred past this copy because the contexts are only valid under global_htables_rwsem,
+  // which agnocast_ioctl_publish_msg() drops on return.
   if (ret == 0) {
     if (copy_to_user(arg, &publish_msg_args, sizeof(publish_msg_args))) return -EFAULT;
   }

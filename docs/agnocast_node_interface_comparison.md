@@ -103,7 +103,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
-| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
+| Parameter Service | ✓ | **Full Support** | - | |
+| Parameter Client | ✓ | **Partial Support** | - | `AsyncParametersClient` is supported while `SyncParametersClient` is not yet |
 
 **Other differences from rclcpp::NodeParameters**:
 
