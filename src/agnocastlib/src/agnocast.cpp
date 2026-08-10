@@ -3,7 +3,7 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
+#include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
 #include <dlfcn.h>
 #include <strings.h>
@@ -158,13 +158,13 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
 initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_performance_bridge_manager = true;
+  add_process_args.is_bridge_manager = true;
   add_process_args.domain_id = get_ros_domain_id();
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (add_process_args.ret_performance_bridge_daemon_exist) {
+  if (add_process_args.ret_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -230,7 +230,7 @@ void poll_for_bridge_manager()
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-    PerformanceBridgeManager manager;
+    BridgeManager manager;
     manager.run();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "BridgeManager crashed: %s", e.what());
@@ -507,7 +507,7 @@ struct initialize_agnocast_result initialize_agnocast(
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
-  if (bridge_mode == BridgeMode::On && !add_process_args.ret_performance_bridge_daemon_exist) {
+  if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
 

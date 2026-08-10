@@ -51,6 +51,10 @@ void release_subscriber_reference(const std::string &, const topic_local_id_t, c
 {
 }
 
+void close_notify_eventfd(int)
+{
+}
+
 mqd_t open_mq_for_subscription(
   const std::string &, const topic_local_id_t, std::pair<mqd_t, std::string> & mq_subscription)
 {

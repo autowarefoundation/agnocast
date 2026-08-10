@@ -54,7 +54,7 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    bool is_bridge_manager;
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -62,7 +62,7 @@ union ioctl_add_process_args {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
 };
@@ -81,14 +81,11 @@ union ioctl_add_subscriber_args {
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    int32_t eventfd;
   };
   struct
   {
     topic_local_id_t ret_id;
-    // Topic name to use for the publish-notification MQ: the requested topic for a plain topic, or
-    // the domain-bridge pair's canonical name for a bridged (incl. renamed) topic, so a publisher
-    // and a renamed subscriber sharing one topic_struct derive the same MQ name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -107,8 +104,6 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
-    // See ioctl_add_subscriber_args::ret_mq_topic_name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -155,16 +150,10 @@ union ioctl_publish_msg_args {
     struct name_info topic_name;
     topic_local_id_t publisher_id;
     uint64_t msg_virtual_address;
-    // Unlike ret_* fields which are returned via the union copy, subscriber IDs are written
-    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
-    // remains valid until the ioctl returns.
-    uint64_t subscriber_ids_buffer_addr;
-    uint32_t subscriber_ids_buffer_size;
   };
   struct
   {
     int64_t ret_entry_id;
-    uint32_t ret_subscriber_num;
     uint32_t ret_released_num;
     uint64_t ret_released_addrs[MAX_RELEASE_NUM];
   };
