@@ -14,7 +14,7 @@
 
 #include "@(header_path)"
 
-extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_name)(
+extern "C" PubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
@@ -47,7 +47,7 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_n
     });
 }
 
-extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_name)(
+extern "C" PubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
