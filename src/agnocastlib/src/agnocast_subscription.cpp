@@ -7,6 +7,7 @@
 
 #include <rmw/rmw.h>
 #include <rmw/serialized_message.h>
+#include <sys/eventfd.h>
 
 namespace agnocast
 {
@@ -36,6 +37,17 @@ void SubscriptionBase::initialize(
       topic_name_, type_name, "sub", node_name);
   }
 
+  // Take subscribers poll and need no notification fd.
+  int efd = -1;
+  if (!is_take_sub) {
+    efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (efd == -1) {
+      RCLCPP_ERROR(logger, "eventfd creation failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+  }
+
   union ioctl_add_subscriber_args add_subscriber_args = {};
   add_subscriber_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
   add_subscriber_args.node_name = {node_name.c_str(), node_name.size()};
@@ -46,15 +58,18 @@ void SubscriptionBase::initialize(
   add_subscriber_args.is_take_sub = is_take_sub;
   add_subscriber_args.ignore_local_publications = ignore_local_publications;
   add_subscriber_args.is_bridge = (role == SubscriptionRole::BridgeInternal);
+  add_subscriber_args.eventfd = efd;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &add_subscriber_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_SUBSCRIBER_CMD failed: %s", strerror(errno));
+    if (efd >= 0) {
+      close(efd);
+    }
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
   id_ = add_subscriber_args.ret_id;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-  mq_topic_name_ = add_subscriber_args.ret_mq_topic_name;
+  notify_eventfd_ = efd;
 
   if (role == SubscriptionRole::Default) {
     if (!type_name.empty()) {
@@ -124,6 +139,13 @@ uint32_t get_publisher_count_core(const std::string & topic_name)
   }
 
   return count + ros2_count;
+}
+
+void close_notify_eventfd(int notify_eventfd)
+{
+  if (notify_eventfd >= 0) {
+    close(notify_eventfd);
+  }
 }
 
 mqd_t open_mq_for_subscription(

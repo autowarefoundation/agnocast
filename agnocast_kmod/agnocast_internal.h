@@ -5,6 +5,7 @@
 #include "agnocast_memory_allocator.h"
 
 #include <linux/device.h>
+#include <linux/eventfd.h>
 #include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
@@ -46,6 +47,33 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PROC_INFO_HASH_BITS 10
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
+
+// All eventfd access goes through these wrappers so the KUnit build can substitute fakes; see
+// agnocast_kunit/agnocast_kunit_eventfd.c for why real contexts are unobtainable there.
+#ifdef KUNIT_BUILD
+struct eventfd_ctx * agnocast_eventfd_get(int fd);
+void agnocast_eventfd_signal(struct eventfd_ctx * ctx);
+void agnocast_eventfd_put(struct eventfd_ctx * ctx);
+#else
+static inline struct eventfd_ctx * agnocast_eventfd_get(int fd)
+{
+  return eventfd_ctx_fdget(fd);
+}
+
+static inline void agnocast_eventfd_signal(struct eventfd_ctx * ctx)
+{
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+  eventfd_signal(ctx);
+#else
+  eventfd_signal(ctx, 1);
+#endif
+}
+
+static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
+{
+  eventfd_ctx_put(ctx);
+}
+#endif
 
 // Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
 // the daemon successfully copies the data to user-space.
@@ -112,11 +140,13 @@ struct subscriber_info
   bool ignore_local_publications;
   bool need_mmap_update;
   bool is_bridge;
+  struct eventfd_ctx * notify_ctx;  // eventfd for publish notifications (NULL for take_sub)
   struct hlist_node node;
 };
 
 static inline void free_subscriber_info(struct subscriber_info * sub_info)
 {
+  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
   kfree(sub_info->node_name);
   kfree(sub_info);
 }
