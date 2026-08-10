@@ -2699,7 +2699,6 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   int ret = 0;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
-  // Output-only args, so nothing is read back from user-space.
   struct ioctl_get_exit_process_args get_exit_process_args = {};
 
   pid_t global_pid = -1;
