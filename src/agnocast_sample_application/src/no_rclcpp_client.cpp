@@ -34,8 +34,10 @@ int main(int argc, char * argv[])
   }
   auto params_fut = params_client->get_parameters({"qos.depth"});
   auto const & params = params_fut.get();
-  if (params.size() >= 1) {
+  if (!params.empty()) {
     RCLCPP_INFO(node->get_logger(), "Server QoS depth: %ld", params[0].as_int());
+  } else {
+    RCLCPP_INTO(node->get_logger(), "Server QoS depth: N/A (parameter not declared)")
   }
 
   // === Use Client to call the service ===
