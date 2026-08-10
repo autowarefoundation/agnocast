@@ -143,7 +143,7 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
     } else if (fd == wakeup_efd_) {
       uint64_t val;
       ssize_t s = read(wakeup_efd_, &val, sizeof(val));
-      if (s == -1 && errno != EINTR) {
+      if (s == -1 && !(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
         RCLCPP_WARN(logger_, "read() on wakeup eventfd failed: %s", strerror(errno));
       }
     } else if (fd == socket_fd_) {
