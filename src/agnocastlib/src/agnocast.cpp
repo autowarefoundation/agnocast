@@ -188,7 +188,6 @@ void poll_for_unlink()
 
     struct ioctl_get_exit_process_args get_exit_process_args = {};
     do {
-      get_exit_process_args = {};
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
