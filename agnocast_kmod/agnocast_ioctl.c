@@ -627,11 +627,10 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A performance bridge manager is per-(ipc_ns, domain): its MQ name carries the
+// A bridge manager is per-(ipc_ns, domain): its MQ name carries the
 // domain suffix, so each domain needs its own manager. Gate on the domain too,
 // otherwise a manager in one domain would suppress spawning in another.
-static bool has_alive_performance_bridge_manager(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   struct process_info * proc_info;
   int bkt;
@@ -639,7 +638,7 @@ static bool has_alive_performance_bridge_manager(
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->is_performance_bridge_manager && !proc_info->exited) {
+      proc_info->is_bridge_manager && !proc_info->exited) {
       return true;
     }
   }
@@ -647,7 +646,7 @@ static bool has_alive_performance_bridge_manager(
 }
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
@@ -660,11 +659,10 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
   ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
-  ioctl_ret->ret_performance_bridge_daemon_exist =
-    has_alive_performance_bridge_manager(ipc_ns, domain_id);
+  ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
-  if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+  if (is_bridge_manager && ioctl_ret->ret_bridge_daemon_exist) {
     goto unlock;
   }
 
@@ -675,7 +673,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
-  new_proc_info->is_performance_bridge_manager = is_performance_bridge_manager;
+  new_proc_info->is_bridge_manager = is_bridge_manager;
   INIT_LIST_HEAD(&new_proc_info->exit_subscription_list);
   new_proc_info->exit_subscription_count = 0;
   new_proc_info->global_pid = pid;
@@ -2396,7 +2394,7 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
-    proc_info->is_performance_bridge_manager = false;
+    proc_info->is_bridge_manager = false;
   }
   up_write(&global_htables_rwsem);
   return 0;
@@ -2494,14 +2492,14 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret)
 {
   down_write(&global_htables_rwsem);
-  // A performance bridge manager is per (ipc_ns, domain), so it must shut down once its
+  // A bridge manager is per (ipc_ns, domain), so it must shut down once its
   // own domain is empty -- counting the whole namespace would keep it alive while an
   // unrelated domain is busy. The manager itself is the remaining process (count == 1),
   // and poll_for_unlink is not registered here, so it is excluded.
   if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
-      proc_info->is_performance_bridge_manager = false;
+      proc_info->is_bridge_manager = false;
     }
     ioctl_ret->ret_should_shutdown = true;
   } else {
@@ -2530,10 +2528,9 @@ static long add_process_cmd(union ioctl_add_process_args __user * arg)
 
   union ioctl_add_process_args add_process_args;
   if (copy_from_user(&add_process_args, arg, sizeof(add_process_args))) return -EFAULT;
-  bool is_performance_bridge_manager = add_process_args.is_performance_bridge_manager;
+  bool is_bridge_manager = add_process_args.is_bridge_manager;
   uint32_t domain_id = add_process_args.domain_id;
-  ret = agnocast_ioctl_add_process(
-    pid, ipc_ns, is_performance_bridge_manager, domain_id, &add_process_args);
+  ret = agnocast_ioctl_add_process(pid, ipc_ns, is_bridge_manager, domain_id, &add_process_args);
   if (ret == 0) {
     if (copy_to_user(arg, &add_process_args, sizeof(add_process_args))) return -EFAULT;
   }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/bridge/agnocast_bridge_loader.hpp"
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -19,7 +19,7 @@ struct ServiceBridgeDeps
   rclcpp::Node::SharedPtr container_node;
   std::shared_ptr<CallbackIsolatedAgnocastExecutor> executor;
   rclcpp::Logger logger;
-  std::shared_ptr<PerformanceBridgeLoader> performance_loader;
+  std::shared_ptr<BridgeLoader> bridge_loader;
 };
 
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };

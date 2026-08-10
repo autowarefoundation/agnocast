@@ -1,10 +1,10 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/bridge/agnocast_bridge_ipc_event_loop.hpp"
+#include "agnocast/bridge/agnocast_bridge_loader.hpp"
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_service_bridge.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_ipc_event_loop.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -22,11 +22,11 @@
 namespace agnocast
 {
 
-class PerformanceBridgeManager
+class BridgeManager
 {
 public:
-  PerformanceBridgeManager();
-  ~PerformanceBridgeManager();
+  BridgeManager();
+  ~BridgeManager();
 
   void run();
 
@@ -50,8 +50,8 @@ private:
   // container_node_, since throttled logging happens on the event loop thread.
   std::shared_ptr<rclcpp::Clock> clock_;
   uint64_t self_ipc_ns_inode_;
-  PerformanceBridgeIpcEventLoop event_loop_;
-  std::shared_ptr<PerformanceBridgeLoader> loader_;
+  BridgeIpcEventLoop event_loop_;
+  std::shared_ptr<BridgeLoader> loader_;
 
   std::shared_ptr<rclcpp::Node> container_node_;
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
@@ -64,8 +64,8 @@ private:
 
   std::atomic_bool shutdown_requested_ = false;
 
-  std::unordered_map<std::string, PerformancePubsubBridgeResult> active_pubsub_r2a_bridges_;
-  std::unordered_map<std::string, PerformancePubsubBridgeResult> active_pubsub_a2r_bridges_;
+  std::unordered_map<std::string, PubsubBridgeResult> active_pubsub_r2a_bridges_;
+  std::unordered_map<std::string, PubsubBridgeResult> active_pubsub_a2r_bridges_;
   std::unordered_map<std::string, RequestMap> request_cache_;
 
   // Daemon-forced cross-NS requests, keyed by topic, split by direction.
