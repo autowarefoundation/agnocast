@@ -37,7 +37,7 @@ int main(int argc, char * argv[])
   if (!params.empty()) {
     RCLCPP_INFO(node->get_logger(), "Server QoS depth: %ld", params[0].as_int());
   } else {
-    RCLCPP_INTO(node->get_logger(), "Server QoS depth: N/A (parameter not declared)")
+    RCLCPP_INFO(node->get_logger(), "Server QoS depth: N/A (parameter not declared)");
   }
 
   // === Use Client to call the service ===
