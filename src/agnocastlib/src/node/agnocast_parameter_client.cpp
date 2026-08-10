@@ -14,7 +14,7 @@ namespace agnocast
 
 AsyncParametersClient::AsyncParametersClient(
   agnocast::Node * node, const std::string & remote_node_name, const rclcpp::QoS & qos,
-  rclcpp::CallbackGroup::SharedPtr group)
+  const rclcpp::CallbackGroup::SharedPtr & group)
 {
   remote_node_name_ =
     remote_node_name.empty() ? node->get_fully_qualified_name() : remote_node_name;
@@ -47,7 +47,7 @@ std::shared_future<std::vector<rclcpp::Parameter>> AsyncParametersClient::get_pa
   get_parameters_client_->async_send_request(
     std::move(request),
     [names, promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::GetParameters>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::GetParameters>::SharedFuture & response_future) {
       const auto & response = response_future.get();
 
       const size_t count = std::min(names.size(), response->values.size());
@@ -62,7 +62,7 @@ std::shared_future<std::vector<rclcpp::Parameter>> AsyncParametersClient::get_pa
 
       promise->set_value(std::move(parameters));
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 
@@ -82,7 +82,7 @@ std::shared_future<std::vector<rclcpp::ParameterType>> AsyncParametersClient::ge
   get_parameter_types_client_->async_send_request(
     std::move(request),
     [promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::GetParameterTypes>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::GetParameterTypes>::SharedFuture & response_future) {
       const auto & response = response_future.get();
 
       std::vector<rclcpp::ParameterType> types;
@@ -93,7 +93,7 @@ std::shared_future<std::vector<rclcpp::ParameterType>> AsyncParametersClient::ge
 
       promise->set_value(std::move(types));
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 
@@ -119,11 +119,11 @@ AsyncParametersClient::set_parameters(
   set_parameters_client_->async_send_request(
     std::move(request),
     [promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::SetParameters>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::SetParameters>::SharedFuture & response_future) {
       const auto & response = response_future.get();
       promise->set_value(response->results);
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 
@@ -147,11 +147,11 @@ AsyncParametersClient::set_parameters_atomically(
   set_parameters_atomically_client_->async_send_request(
     std::move(request),
     [promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::SetParametersAtomically>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::SetParametersAtomically>::SharedFuture & response_future) {
       const auto & response = response_future.get();
       promise->set_value(response->result);
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 
@@ -174,11 +174,11 @@ AsyncParametersClient::describe_parameters(
   describe_parameters_client_->async_send_request(
     std::move(request),
     [promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::DescribeParameters>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::DescribeParameters>::SharedFuture & response_future) {
       const auto & response = response_future.get();
       promise->set_value(response->descriptors);
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 
@@ -200,11 +200,11 @@ AsyncParametersClient::list_parameters(
   list_parameters_client_->async_send_request(
     std::move(request),
     [promise = std::move(promise), future, callback = std::move(callback)](
-      Client<rcl_interfaces::srv::ListParameters>::SharedFuture response_future) {
+      const Client<rcl_interfaces::srv::ListParameters>::SharedFuture & response_future) {
       const auto & response = response_future.get();
       promise->set_value(response->result);
       if (callback != nullptr) {
-        callback(std::move(future));
+        callback(future);
       }
     });
 

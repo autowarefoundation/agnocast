@@ -39,7 +39,7 @@ public:
   explicit AsyncParametersClient(
     agnocast::Node * node, const std::string & remote_node_name = "",
     const rclcpp::QoS & qos = rclcpp::ParametersQoS(),
-    rclcpp::CallbackGroup::SharedPtr group = nullptr);
+    const rclcpp::CallbackGroup::SharedPtr & group = nullptr);
 
   /// @brief Read parameters from the remote node.
   /// @param names Parameter names to read.
