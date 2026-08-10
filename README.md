@@ -206,16 +206,13 @@ If you encounter `mq_open failed: No space left on device`, the system has reach
 
 ## Documents
 
+User-facing documentation (setup, migration guide, API reference, ros2 CLI) is on the [Agnocast documentation site](https://autowarefoundation.github.io/agnocast_doc/). The design documents below are for developers:
+
 - [shared memory](./docs/shared_memory.md)
 - [message queue](./docs/message_queue.md)
-- [Autoware integration](./docs/autoware_integration.md)
 - [Memory format in heaphook](./docs/heaphook_alignment.md)
 - [Clang-tidy Suppressions](./docs/clang_tidy_suppression.md)
-- [Environment Variables](https://autowarefoundation.github.io/agnocast_doc/api/environment-variables/)
-- [ros2 command extension](./docs/ros2_command_extension.md)
 - [agnocast::Node and rclcpp::Node interface comparison](./docs/agnocast_node_interface_comparison.md)
-- [Callback Isolated Executor for Agnocast](./docs/callback_isolated_executor_for_agnocast.md)
-- [Agnocast-ROS 2 Bridge](./docs/agnocast_ros2_bridge.md)
+- [Agnocast-ROS 2 Bridge Internal Design](./docs/agnocast_ros2_bridge.md)
 - [Message Filters Design Document](./docs/message_filters_design_document.md)
-- [Message Filters Migration Guide](https://autowarefoundation.github.io/agnocast_doc/migration-guide/message-filters/)
 - [ApproximateTime Algorithm](./docs/approximate_time_algorithm.md)
