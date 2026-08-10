@@ -229,9 +229,9 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
   }
 
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_r2a_service_bridge(
+      entity = deps.bridge_loader->create_r2a_service_bridge(
         deps.container_node, service_name_, *service_type_, service_qos);
     } catch (const std::exception & e) {
       set_error_string(e.what());
@@ -272,9 +272,9 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 {
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_a2r_service_bridge(
+      entity = deps.bridge_loader->create_a2r_service_bridge(
         deps.container_node, service_name_, *service_type_, rclcpp::ServicesQoS());
     } catch (const std::exception & e) {
       set_error_string(e.what());

@@ -11,7 +11,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/bridge/agnocast_bridge_plugin_api.hpp"
 #include "agnocast/message_filters/pass_through.hpp"
 #include "agnocast/message_filters/subscriber.hpp"
 #include "agnocast/message_filters/sync_policies/approximate_time.hpp"

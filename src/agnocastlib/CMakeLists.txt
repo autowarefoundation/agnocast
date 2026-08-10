@@ -47,12 +47,12 @@ add_library(agnocast SHARED
   src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
-  src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
+  src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp src/node/agnocast_parameter_client.cpp
   src/cie_client_utils.cpp
   src/internal/type_registry_writer.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp src/node/node_interfaces/node_graph.cpp
   src/bridge/agnocast_bridge_utils.cpp src/bridge/agnocast_service_bridge.cpp
-  src/bridge/performance/agnocast_performance_bridge_ipc_event_loop.cpp src/bridge/performance/agnocast_performance_bridge_loader.cpp src/bridge/performance/agnocast_performance_bridge_manager.cpp
+  src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp
   src/vendor/rclcpp/generic_service.cpp src/vendor/rclcpp/generic_client.cpp)
@@ -275,6 +275,16 @@ if(BUILD_TESTING)
   set_tests_properties(test_integration_node_graph_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
     TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
+  # Parameter service integration test (requires kernel module, no mock).
+  ament_add_gmock(test_integration_agnocast_parameter_service_${PROJECT_NAME}
+    test/integration/test_agnocast_parameter_service.cpp)
+  target_link_libraries(test_integration_agnocast_parameter_service_${PROJECT_NAME} agnocast)
+  set_tests_properties(test_integration_agnocast_parameter_service_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 120
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
