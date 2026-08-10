@@ -2696,7 +2696,6 @@ static long get_publisher_num_cmd(union ioctl_get_publisher_num_args __user * ar
 
 static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg)
 {
-  int ret = 0;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
   struct ioctl_get_exit_process_args get_exit_process_args = {};
@@ -2706,10 +2705,7 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
 
   // Copy ret_pid to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.
-  if (copy_to_user(
-        (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
-        sizeof(get_exit_process_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_exit_process_args, sizeof(get_exit_process_args))) return -EFAULT;
 
   // Commit: free proc_info. Safe because user-space already has ret_pid.
   bool daemon_should_exit = false;
@@ -2719,7 +2715,7 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   // alive one extra poll cycle — no resource leak.
   if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit)))
     return -EFAULT;
-  return ret;
+  return 0;
 }
 
 static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
