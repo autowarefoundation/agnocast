@@ -1398,10 +1398,8 @@ int agnocast_ioctl_get_publisher_num(
 //   Phase 2 (agnocast_commit_exit_process): free proc_info.
 //
 // Splitting the two lets the dispatch handler copy ret_pid out with no lock held, and only commit
-// once that copy succeeded: a failed copy leaves the entry for the next poll instead of dropping
-// the pid whose shm the daemon still has to unlink. ret_daemon_should_exit is patched by a
-// separate copy_to_user after Phase 2; if that one fails the daemon merely stays alive one extra
-// poll cycle -- no resource leak.
+// once that copy succeeded: a failed copy returns -EFAULT before Phase 2, so the entry is not
+// dropped kernel-side.
 pid_t agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret)
 {
@@ -2709,8 +2707,7 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   bool daemon_should_exit = false;
   agnocast_commit_exit_process(ipc_ns, global_pid, &daemon_should_exit);
 
-  // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
-  // alive one extra poll cycle — no resource leak.
+  // Patch ret_daemon_should_exit in user-space, after Phase 2 has committed.
   if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit)))
     return -EFAULT;
   return 0;
