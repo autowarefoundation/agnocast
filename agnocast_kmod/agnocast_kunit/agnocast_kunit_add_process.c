@@ -67,7 +67,7 @@ void test_case_add_process_twice(struct kunit * test)
 // A bridge manager is gated per-(ipc_ns, domain): a manager in one
 // domain must not suppress spawning a manager in another domain, while a second
 // manager in the same domain is suppressed.
-void test_case_add_process_perf_manager_per_domain(struct kunit * test)
+void test_case_add_process_bridge_manager_per_domain(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 0);
 
