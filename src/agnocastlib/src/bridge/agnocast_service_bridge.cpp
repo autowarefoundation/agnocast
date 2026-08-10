@@ -336,7 +336,7 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -366,7 +366,7 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -407,7 +407,7 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
   }
 
   if (!agno_client_exists()) {
-    RCLCPP_WARN(
+    RCLCPP_DEBUG(
       deps.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
       get_error_string());
 
