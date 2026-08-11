@@ -152,6 +152,43 @@ void test_case_add_domain_bridge_rejected_when_endpoint_exists(struct kunit * te
   KUNIT_EXPECT_EQ(test, ret, -EBUSY);
 }
 
+// The endpoint check has one disjunct per cell, and the case above only fills the from side. Under
+// a rename the to side differs in both name and domain, so it is the disjunct that a name-keyed
+// lookup would miss.
+void test_case_add_domain_bridge_rejected_when_target_endpoint_exists(struct kunit * test)
+{
+  // Arrange
+  setup_process_in_domain(test, 1001, 2);
+  add_publisher_named(test, 1001, RN_DST);
+
+  // Act
+  const int ret = agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, -EBUSY);
+}
+
+// from_domain > to_domain flips the pair into canonical order, and each name has to travel with its
+// own domain: the rule is reachable from RN_DST@1, and 2 -> 1 is recorded as b_to_a.
+void test_case_add_domain_bridge_rename_reverse_order(struct kunit * test)
+{
+  // Act
+  const int ret = agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 2, 1, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+
+  uint32_t domain_a = 0, domain_b = 0;
+  bool a_to_b = false, b_to_a = false;
+  KUNIT_ASSERT_TRUE(
+    test, agnocast_get_domain_rule(
+            RN_DST, current->nsproxy->ipc_ns, 1, &domain_a, &domain_b, &a_to_b, &b_to_a));
+  KUNIT_EXPECT_EQ(test, domain_a, 1);
+  KUNIT_EXPECT_EQ(test, domain_b, 2);
+  KUNIT_EXPECT_FALSE(test, a_to_b);
+  KUNIT_EXPECT_TRUE(test, b_to_a);
+}
+
 void test_case_domain_bridge_groups_wrappers(struct kunit * test)
 {
   KUNIT_ASSERT_EQ(
@@ -443,4 +480,53 @@ void test_case_domain_bridge_rename_multi_publisher(struct kunit * test)
 
   // Woken exactly once, regardless of the other publishers sharing the struct.
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
+// The rename counterpart of domain_bridge_exit_frees_shared_struct. Renamed wrappers land in
+// different topic_hashtable buckets, so agnocast_process_exit_cleanup walks them in an order the
+// same-name case never produces.
+void test_case_domain_bridge_rename_exit_frees_shared_struct(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+  setup_process_in_domain(test, 1000, 1);
+  add_publisher_named(test, 1000, RN_SRC);
+  setup_process_in_domain(test, 1001, 2);
+  add_subscriber_named(test, 1001, RN_DST);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(RN_SRC, current->nsproxy->ipc_ns, 1), 2);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(RN_DST, current->nsproxy->ipc_ns, 2), 2);
+
+  // Act
+  agnocast_enqueue_exit_pid(1000);
+  agnocast_enqueue_exit_pid(1001);
+  msleep(20);  // let exit_worker_thread drain both pids
+
+  // Assert: the shared struct goes with the second wrapper, exactly once (KASAN checks the free).
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(RN_SRC, current->nsproxy->ipc_ns, 1), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(RN_DST, current->nsproxy->ipc_ns, 2), 0);
+}
+
+// The exit-path counterpart of domain_bridge_partial_remove_sub_keeps_struct, under a rename rule.
+// Only the subscriber's process exits, so the released wrapper has to be picked by domain rather
+// than by name: the two wrappers share one pub/sub table but carry different names.
+void test_case_domain_bridge_rename_exit_partial_keeps_struct(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+  setup_process_in_domain(test, 1000, 1);
+  add_publisher_named(test, 1000, RN_SRC);
+  setup_process_in_domain(test, 1001, 2);
+  add_subscriber_named(test, 1001, RN_DST);
+  KUNIT_ASSERT_EQ(test, agnocast_topic_wrapper_refcnt(RN_SRC, current->nsproxy->ipc_ns, 1), 2);
+
+  // Act
+  agnocast_enqueue_exit_pid(1001);
+  msleep(20);  // let exit_worker_thread drain the subscriber
+
+  // Assert: the shared struct survives for the domain-1 publisher that is still alive; freeing it
+  // here would be a UAF.
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(RN_DST, current->nsproxy->ipc_ns, 2), 0);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(RN_SRC, current->nsproxy->ipc_ns, 1), 1);
 }

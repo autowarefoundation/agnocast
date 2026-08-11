@@ -700,3 +700,96 @@ void test_case_do_exit_releases_notify_context(struct kunit * test)
   KUNIT_EXPECT_EQ(test, slot->put_count, 1);
   KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
+
+// The daemon's poll_for_unlink() loop terminates on ret_daemon_should_exit, which Phase 2 raises
+// once get_process_num() drops to 0.
+void test_case_do_exit_reports_daemon_should_exit(struct kunit * test)
+{
+  // Arrange
+  const pid_t exiting_pid = PID_BASE;
+  setup_one_process(test, exiting_pid);
+
+  agnocast_enqueue_exit_pid(exiting_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
+
+  // Act
+  struct ioctl_get_exit_process_args get_exit_args = {};
+  const pid_t global_pid =
+    agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args);
+  KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
+
+  bool daemon_should_exit = false;
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+
+  // Assert
+  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 0);
+
+  // Phase 2 freed proc_info, so there is nothing left to report.
+  struct ioctl_get_exit_process_args second_get_args = {};
+  KUNIT_EXPECT_EQ(
+    test, agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &second_get_args), (pid_t)-1);
+  KUNIT_EXPECT_EQ(test, second_get_args.ret_pid, -1);
+}
+
+// The counterpart of the case above: one process of two exits, so the daemon has to stay up. It
+// then commits the -1 that an empty Phase 1 reported, which must leave the remaining process alone.
+void test_case_do_exit_keeps_daemon_alive_for_remaining_process(struct kunit * test)
+{
+  // Arrange
+  const pid_t exiting_pid = PID_BASE;
+  const pid_t remaining_pid = PID_BASE + 1;
+  setup_one_process(test, exiting_pid);
+  setup_one_process(test, remaining_pid);
+
+  agnocast_enqueue_exit_pid(exiting_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
+
+  // Act
+  struct ioctl_get_exit_process_args get_exit_args = {};
+  const pid_t global_pid =
+    agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args);
+  KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
+
+  bool daemon_should_exit = true;
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+
+  // Assert
+  KUNIT_EXPECT_FALSE(test, daemon_should_exit);
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 1);
+  KUNIT_EXPECT_FALSE(test, agnocast_is_proc_exited(remaining_pid));
+
+  struct ioctl_get_exit_process_args second_get_args = {};
+  const pid_t no_pid = agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &second_get_args);
+  KUNIT_ASSERT_EQ(test, no_pid, (pid_t)-1);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, no_pid, &daemon_should_exit);
+  KUNIT_EXPECT_FALSE(test, daemon_should_exit);
+  KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 1);
+}
+
+// A crashed bridge process sends no REMOVE_BRIDGE, so the exit handler is what has to drop its
+// bridge_info.
+void test_case_do_exit_frees_bridge_info(struct kunit * test)
+{
+  // Arrange
+  const pid_t bridge_pid = PID_BASE;
+  setup_one_process(test, bridge_pid);
+
+  struct ioctl_add_bridge_args add_bridge_args = {0};
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_bridge(
+      TOPIC_NAME, bridge_pid, true, current->nsproxy->ipc_ns, &add_bridge_args),
+    0);
+  KUNIT_ASSERT_TRUE(test, agnocast_is_in_bridge_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
+
+  // Act
+  agnocast_enqueue_exit_pid(bridge_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(bridge_pid));
+
+  // Assert
+  KUNIT_EXPECT_FALSE(test, agnocast_is_in_bridge_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
+}
