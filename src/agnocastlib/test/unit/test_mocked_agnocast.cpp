@@ -53,7 +53,7 @@ union ioctl_publish_msg_args publish_core(
 
 BridgeMode get_bridge_mode()
 {
-  return BridgeMode::Off;  // Skip MQ sending in tests
+  return BridgeMode::Off;  // Skip bridge registration requests in tests
 }
 
 PublisherBase::~PublisherBase() = default;

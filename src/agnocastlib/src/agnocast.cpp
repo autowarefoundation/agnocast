@@ -1,7 +1,6 @@
 #include "agnocast/agnocast.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
@@ -34,16 +33,16 @@ std::vector<int> shm_fds;
 std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
 // mmap_mtx: Prevents a race condition and segfault between two threads
-// in a multithreaded executor using the same mqueue_fd.
+// in a multithreaded executor using the same notification eventfd.
 //
 // Race Scenario:
 // 1. Thread 1 (T1):
-//    - Calls epoll_wait(), mq_receive(), then ioctl(RECEIVE_CMD), initially obtaining
+//    - Calls epoll_wait(), reads the eventfd, then ioctl(RECEIVE_CMD), initially obtaining
 //      publisher info (PID, shared memory address `shm_addr`).
 //    - Critical: OS context switch occurs *after* ioctl() but *before* T1 fully
 //      processes/maps `shm_addr`.
 // 2. Thread 2 (T2):
-//    - Calls epoll_wait(), mq_receive(), then ioctl(RECEIVE_CMD) on the same mqueue_fd,
+//    - Calls epoll_wait(), reads the eventfd, then ioctl(RECEIVE_CMD) on the same eventfd,
 //      but does *not* receive publisher info (assuming it's already set up).
 //    - Proceeds to a callback which attempts to use `shm_addr`, leading to a SEGFAULT.
 //
@@ -184,18 +183,11 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 
 void poll_for_unlink()
 {
-  std::vector<exit_subscription_mq_info> mq_info_buf(MAX_SUBSCRIPTION_NUM_PER_PROCESS);
-
   while (true) {
     sleep(1);
 
     struct ioctl_get_exit_process_args get_exit_process_args = {};
     do {
-      get_exit_process_args = {};
-      get_exit_process_args.subscription_mq_info_buffer_addr =
-        reinterpret_cast<uint64_t>(mq_info_buf.data());
-      get_exit_process_args.subscription_mq_info_buffer_size =
-        static_cast<uint32_t>(mq_info_buf.size());
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
@@ -205,15 +197,6 @@ void poll_for_unlink()
       if (get_exit_process_args.ret_pid > 0) {
         const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
         shm_unlink(shm_name.c_str());
-
-        // Unlink subscription MQs that the exited process owned
-        for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-          const std::string topic_name(mq_info_buf[i].topic_name);
-          const std::string sub_mq_name =
-            create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
-          mq_unlink(sub_mq_name.c_str());
-        }
       }
     } while (get_exit_process_args.ret_pid > 0);
 
