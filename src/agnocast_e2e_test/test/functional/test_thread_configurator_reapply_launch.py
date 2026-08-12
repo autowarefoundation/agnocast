@@ -25,6 +25,10 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'template.yaml')
 
 REAPPLY_SERVICE = '/thread_configurator_node/reapply_config'
 
+# The node this test launches itself, and the only one whose callback groups
+# are guaranteed to still be running when reapply is called.
+TARGET_NODE = '/test_publisher_component'
+
 
 def _run_prerun():
     """Run prerun_node alongside test_cie_publisher to generate config YAML."""
@@ -90,6 +94,24 @@ def _read_config():
 def _write_config(cfg):
     with open(CONFIG_FILE, 'w') as f:
         yaml.safe_dump(cfg, f)
+
+
+def _target_node_entries(cfg):
+    """Return the prerun entries announced by TARGET_NODE.
+
+    prerun also captures callback groups from every other node alive in the
+    same ROS domain, and the CallbackGroupInfo topic is transient_local, so a
+    leftover bridge daemon replays groups whose threads have already exited.
+    Those cannot be applied, and they sort ahead of the publisher's entries
+    ('Client(' < 'Service(' < 'Subscription('), so a test that needs a live
+    target must select TARGET_NODE instead of taking whatever comes first.
+    Its id also carries no pid, so it is stable across the prerun and launch
+    phases, unlike the bridge node's own group.
+    """
+    return [
+        e for e in cfg.get('callback_groups', [])
+        if e['id'].split('@', 1)[0] == TARGET_NODE
+    ]
 
 
 def _call_reapply(timeout_sec=10.0):
@@ -200,16 +222,17 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         )
 
         cfg = _read_config()
+        target_entries = _target_node_entries(cfg)
         self.assertGreater(
-            len(cfg.get('callback_groups', [])), 0,
-            'prerun must produce at least one callback_group',
+            len(target_entries), 0,
+            f'prerun must produce a callback_group for {TARGET_NODE}',
         )
-        first = cfg['callback_groups'][0]
+        target = target_entries[0]
         # SCHED_OTHER + positive nice value: lowering priority needs no
         # CAP_SYS_NICE, which is not guaranteed in CI sandboxes.
-        first['policy'] = 'SCHED_OTHER'
-        first['priority'] = 10
-        first.setdefault('affinity', [])
+        target['policy'] = 'SCHED_OTHER'
+        target['priority'] = 10
+        target.setdefault('affinity', [])
         _write_config(cfg)
 
         response = _call_reapply()
@@ -229,9 +252,9 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             len(cfg['callback_groups']),
             'reapply must visit every callback_group entry exactly once',
         )
-        first_key = f"{first['domain_id']}:{first['id']}"
+        target_key = f"{target['domain_id']}:{target['id']}"
         self.assertIn(
-            first_key, list(response.applied_callback_groups),
+            target_key, list(response.applied_callback_groups),
             'modified callback_group must appear in applied_callback_groups',
         )
 
@@ -278,11 +301,16 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         )
 
         cfg = _read_config()
+        target_entries = _target_node_entries(cfg)
         self.assertGreater(
-            len(cfg.get('callback_groups', [])), 0,
-            'prerun must produce at least one callback_group',
+            len(target_entries), 0,
+            f'prerun must produce a callback_group for {TARGET_NODE}',
         )
-        removed = cfg['callback_groups'].pop(0)
+        # Removing an announced, still-running group is what makes the
+        # assertions below meaningful: a dead foreign entry would be absent
+        # from every outcome array anyway.
+        removed = target_entries[0]
+        cfg['callback_groups'].remove(removed)
         _write_config(cfg)
 
         response = _call_reapply()
@@ -369,9 +397,12 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         )
 
         cfg = _read_config()
-        if len(cfg.get('callback_groups', [])) == 0:
-            self.skipTest('no callback_groups produced by prerun')
-        cfg['callback_groups'][0]['policy'] = 'NOT_A_POLICY'
+        target_entries = _target_node_entries(cfg)
+        self.assertGreater(
+            len(target_entries), 0,
+            f'prerun must produce a callback_group for {TARGET_NODE}',
+        )
+        target_entries[0]['policy'] = 'NOT_A_POLICY'
         _write_config(cfg)
 
         response = _call_reapply()
