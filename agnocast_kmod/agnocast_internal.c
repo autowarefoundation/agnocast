@@ -35,8 +35,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
 
     const topic_local_id_t subscriber_id = sub_info->id;
 
-    hash_del(&sub_info->node);
-    free_subscriber_info(sub_info);
+    agnocast_unlink_subscriber_info(wrapper, sub_info);
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
