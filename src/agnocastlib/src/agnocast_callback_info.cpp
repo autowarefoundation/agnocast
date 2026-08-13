@@ -2,7 +2,6 @@
 
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_executor.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 
 #include <sys/epoll.h>

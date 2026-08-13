@@ -171,28 +171,10 @@ union ioctl_get_publisher_num_args {
   };
 };
 
-/* Max subscription MQ info entries buffered per process during exit cleanup.
- * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
- * These entries live in kernel memory from process exit until the daemon polls them (typically
- * ~1s). If the daemon is dead, they persist until module unload — but that scenario already leaves
- * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
-
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -321,7 +303,7 @@ struct ioctl_add_domain_bridge_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -526,14 +508,12 @@ int agnocast_ioctl_add_discovery_agent(
 int agnocast_ioctl_discovery_agent_exists(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
 
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
-  pid_t * out_global_pid);
+// Returns the exited process's global pid, or -1 if the namespace has none.
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
-  bool * ret_daemon_should_exit);
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 

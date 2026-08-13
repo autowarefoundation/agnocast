@@ -22,7 +22,6 @@ static void remove_all_process_info(void)
   struct hlist_node * tmp;
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
-    agnocast_free_exit_subscription_list(proc_info);
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }

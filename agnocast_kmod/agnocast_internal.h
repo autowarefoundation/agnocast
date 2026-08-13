@@ -75,15 +75,6 @@ static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
 }
 #endif
 
-// Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
-// the daemon successfully copies the data to user-space.
-struct exit_subscription_entry
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-  struct list_head list;
-};
-
 struct process_info
 {
   bool exited;
@@ -96,8 +87,6 @@ struct process_info
   // The process's ROS_DOMAIN_ID (0 if unset), fixed for the process's lifetime.
   // Used as the domain component of the topic key for this process's operations.
   uint32_t domain_id;
-  struct list_head exit_subscription_list;
-  uint32_t exit_subscription_count;
   struct hlist_node node;
   struct rcu_head rcu_head;
 };
@@ -276,13 +265,7 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 
 bool agnocast_is_referenced(struct entry_node * en);
 
-// The canonical topic name whose publish-notification MQ this wrapper's endpoints use. Shared
-// between registration (returned to userspace) and exit cleanup so both derive the same MQ name.
-const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper);
-
 struct process_info * agnocast_find_process_info(const pid_t pid);
-
-void agnocast_free_exit_subscription_list(struct process_info * proc_info);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
