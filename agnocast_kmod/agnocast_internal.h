@@ -113,7 +113,9 @@ struct publisher_info
   // reads it.
   struct eventfd_ctx ** notify_ctxs;
   uint32_t notify_num;
-  uint32_t notify_capacity;  // Always the whole subscriber count, so only a join can grow it.
+  // Never below the topic's notifiable subscriber count, and never shrinks, so only a join can grow
+  // it and every other rebuild is allocation-free.
+  uint32_t notify_capacity;
   struct hlist_node node;
 };
 
