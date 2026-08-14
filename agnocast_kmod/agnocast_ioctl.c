@@ -475,18 +475,18 @@ static int insert_publisher_info(
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
   INIT_HLIST_NODE(&(*new_info)->node);
-  uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
-  hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
 
-  // Later subscribers are folded in as they register. Failing here beats failing in publish,
-  // which cannot report it.
+  // Before hash_add, so a failure needs no more undo than the free below: the fill reads only the
+  // subscriber table and the fields set above, so the publisher need not be linked yet.
   int ret = reserve_notify_ctxs(*new_info, notifiable_subscriber_num(wrapper));
   if (ret < 0) {
-    hash_del(&(*new_info)->node);
     free_publisher_info(*new_info);
     return ret;
   }
   rebuild_notify_list(wrapper, *new_info);
+
+  uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
+  hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
