@@ -204,6 +204,19 @@ static struct subscriber_info * find_subscriber_info(
   return NULL;
 }
 
+// Take subs are excluded, so they cannot inflate every publisher's array.
+static uint32_t notifiable_subscriber_num(const struct topic_wrapper * wrapper)
+{
+  uint32_t num = 0;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->notify_ctx) num++;
+  }
+  return num;
+}
+
 // Caller holds global_htables_rwsem (write), so the swap below cannot race a publish: those hold
 // the read side for their whole duration. The current list is carried across, so that a caller who
 // fails partway through reserving has invalidated no one's list and owes no undo.
@@ -278,10 +291,12 @@ static void rebuild_all_notify_lists(struct topic_wrapper * wrapper)
 void agnocast_unlink_subscriber_info(
   struct topic_wrapper * wrapper, struct subscriber_info * sub_info)
 {
+  const bool was_notifiable = sub_info->notify_ctx;
   hash_del(&sub_info->node);
 
-  // Before the release below, so that no list is ever left pointing at a freed context.
-  rebuild_all_notify_lists(wrapper);
+  // Take subs are in no list, so rebuilding for one would land on the same result. Otherwise this
+  // must precede the release below, so that no list is left pointing at a freed context.
+  if (was_notifiable) rebuild_all_notify_lists(wrapper);
 
   free_subscriber_info(sub_info);
 }
@@ -330,8 +345,7 @@ static int insert_subscriber_info(
   // Last failure point: reserving while nothing is committed yet is what lets the rebuild below be
   // infallible, and leaves the id counters untouched on failure.
   if (notify_ctx) {
-    int reserve_ret =
-      reserve_all_notify_ctxs(wrapper, agnocast_get_size_sub_info_htable(wrapper) + 1);
+    int reserve_ret = reserve_all_notify_ctxs(wrapper, notifiable_subscriber_num(wrapper) + 1);
     if (reserve_ret < 0) {
       kfree(node_name_copy);
       kfree(*new_info);
@@ -466,7 +480,7 @@ static int insert_publisher_info(
 
   // Later subscribers are folded in as they register. Failing here beats failing in publish,
   // which cannot report it.
-  int ret = reserve_notify_ctxs(*new_info, agnocast_get_size_sub_info_htable(wrapper));
+  int ret = reserve_notify_ctxs(*new_info, notifiable_subscriber_num(wrapper));
   if (ret < 0) {
     hash_del(&(*new_info)->node);
     free_publisher_info(*new_info);
