@@ -142,7 +142,7 @@ class Publisher : public PublisherBase
     const PublisherOptions & options, const PublisherRole role)
   {
     // Gated to message types only — service types pulled in by
-    // BasicService<ServiceT> have no rosidl message name. The empty string
+    // Service<ServiceT> have no rosidl message name. The empty string
     // signals "skip registry" to initialize_publisher.
     std::string type_name;
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {

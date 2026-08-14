@@ -282,7 +282,7 @@ private:
     SubscriptionRole role)
   {
     // Gated to message types — service types pulled in by
-    // BasicService<ServiceT> have no rosidl message name. The empty string
+    // Service<ServiceT> have no rosidl message name. The empty string
     // signals "skip registry" to initialize().
     std::string type_name;
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
