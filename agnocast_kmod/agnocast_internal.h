@@ -290,6 +290,10 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
 void agnocast_unlink_subscriber_info(
   struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
 
+// Recomputes the publishers' notify lists, for the one caller that unlinks subscribers in bulk and
+// so cannot use agnocast_unlink_subscriber_info(). Caller holds global_htables_rwsem (write).
+void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
+
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 
 // Ring buffer to hold exited pids.

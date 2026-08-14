@@ -288,6 +288,11 @@ static void rebuild_all_notify_lists(struct topic_wrapper * wrapper)
   }
 }
 
+void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper)
+{
+  rebuild_all_notify_lists(wrapper);
+}
+
 void agnocast_unlink_subscriber_info(
   struct topic_wrapper * wrapper, struct subscriber_info * sub_info)
 {

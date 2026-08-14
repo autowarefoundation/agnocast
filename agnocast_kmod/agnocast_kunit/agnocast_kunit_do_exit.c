@@ -700,3 +700,39 @@ void test_case_do_exit_releases_notify_context(struct kunit * test)
   KUNIT_EXPECT_EQ(test, slot->put_count, 1);
   KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
+
+// A process holding several subscribers on one topic drops them as a batch, which unlinks and
+// releases on separate passes. A context freed on the wrong pass would leave a list pointing at it.
+void test_case_do_exit_releases_notify_contexts_of_multiple_subscribers(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  const pid_t subscriber_pid = PID_BASE;
+  const int subscriber_num = 3;
+  setup_one_process(test, subscriber_pid);
+
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    union ioctl_add_subscriber_args add_subscriber_args;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_add_subscriber(
+        TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+        QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+        eventfd, &add_subscriber_args),
+      0);
+  }
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)subscriber_num);
+
+  // Act
+  agnocast_enqueue_exit_pid(subscriber_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
+
+  // Assert
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+    KUNIT_ASSERT_NOT_NULL(test, slot);
+    KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  }
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
+}
