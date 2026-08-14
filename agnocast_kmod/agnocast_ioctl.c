@@ -205,7 +205,8 @@ static struct subscriber_info * find_subscriber_info(
 }
 
 // Caller holds global_htables_rwsem (write), so the swap below cannot race a publish: those hold
-// the read side for their whole duration. The caller refills the list, so nothing is copied across.
+// the read side for their whole duration. The current list is carried across, so that a caller who
+// fails partway through reserving has invalidated no one's list and owes no undo.
 static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t needed)
 {
   if (needed <= pub_info->notify_capacity) return 0;
@@ -219,24 +220,32 @@ static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t 
   struct eventfd_ctx ** new_ctxs = kvmalloc_array(new_capacity, sizeof(*new_ctxs), GFP_KERNEL);
   if (!new_ctxs) return -ENOMEM;
 
+  if (pub_info->notify_ctxs)
+    memcpy(new_ctxs, pub_info->notify_ctxs, pub_info->notify_num * sizeof(*new_ctxs));
   kvfree(pub_info->notify_ctxs);
   pub_info->notify_ctxs = new_ctxs;
   pub_info->notify_capacity = new_capacity;
   return 0;
 }
 
-// Recomputes which subscribers this publisher notifies. None of the filters below depends on the
-// message, so evaluating them here leaves publish with nothing to do but signal.
-static int rebuild_notify_list(
-  struct topic_wrapper * wrapper, struct publisher_info * pub_info, const uint32_t sub_num)
+// The fallible half of a rebuild, split out so callers can do it before the change they are about
+// to make, while backing out is still free.
+static int reserve_all_notify_ctxs(struct topic_wrapper * wrapper, const uint32_t needed)
 {
-  // The subscriber count bounds the list, so one reservation covers the fill below. Reserving for
-  // the whole count (not just the matches) keeps capacity >= the topic's subscriber count for
-  // every publisher, which is what makes every rebuild but a subscriber's insertion allocation-
-  // free, and so infallible.
-  int ret = reserve_notify_ctxs(pub_info, sub_num);
-  if (ret < 0) return ret;
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    int ret = reserve_notify_ctxs(pub_info, needed);
+    if (ret < 0) return ret;
+  }
+  return 0;
+}
 
+// None of the filters below depends on the message, so evaluating them here leaves publish with
+// nothing to do but signal. Infallible: the caller reserved the capacity.
+static void rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher_info * pub_info)
+{
   uint32_t notify_num = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
@@ -248,28 +257,22 @@ static int rebuild_notify_list(
       continue;
     if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
 
+    if (WARN_ON_ONCE(notify_num == pub_info->notify_capacity)) break;
     pub_info->notify_ctxs[notify_num++] = sub_info->notify_ctx;
   }
   pub_info->notify_num = notify_num;
-
-  return 0;
 }
 
-// Rebuilds every publisher's notify list on the topic. Caller holds global_htables_rwsem (write).
-// On failure the earlier publishers keep their new lists, so the caller must undo its own change
-// and rebuild again.
-static int rebuild_all_notify_lists(struct topic_wrapper * wrapper)
+// Caller holds global_htables_rwsem (write). Infallible, so it can run once a change is already
+// visible: only a join needs to grow a list, and it reserves upfront.
+static void rebuild_all_notify_lists(struct topic_wrapper * wrapper)
 {
-  const uint32_t sub_num = agnocast_get_size_sub_info_htable(wrapper);
-
   struct publisher_info * pub_info;
   int bkt_pub_info;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
-    int ret = rebuild_notify_list(wrapper, pub_info, sub_num);
-    if (ret < 0) return ret;
+    rebuild_notify_list(wrapper, pub_info);
   }
-  return 0;
 }
 
 void agnocast_unlink_subscriber_info(
@@ -277,9 +280,8 @@ void agnocast_unlink_subscriber_info(
 {
   hash_del(&sub_info->node);
 
-  // Before the release below, so that no list is ever left pointing at a freed context. Cannot
-  // fail: removal only lowers the subscriber count, so no list has to grow.
-  WARN_ON_ONCE(rebuild_all_notify_lists(wrapper) < 0);
+  // Before the release below, so that no list is ever left pointing at a freed context.
+  rebuild_all_notify_lists(wrapper);
 
   free_subscriber_info(sub_info);
 }
@@ -325,6 +327,19 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
+  // Last failure point: reserving while nothing is committed yet is what lets the rebuild below be
+  // infallible, and leaves the id counters untouched on failure.
+  if (notify_ctx) {
+    int reserve_ret =
+      reserve_all_notify_ctxs(wrapper, agnocast_get_size_sub_info_htable(wrapper) + 1);
+    if (reserve_ret < 0) {
+      kfree(node_name_copy);
+      kfree(*new_info);
+      // The caller releases notify_ctx on the error path, so it must not be released here.
+      return reserve_ret;
+    }
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
@@ -349,18 +364,7 @@ static int insert_subscriber_info(
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
 
-  int ret = rebuild_all_notify_lists(wrapper);
-  if (ret < 0) {
-    hash_del(&(*new_info)->node);
-    // The publishers rebuilt before the failing one already hold this subscriber's notify_ctx, so
-    // they have to be rebuilt again before it is released. Cannot fail: the unlink above put the
-    // subscriber count back, so no list has to grow.
-    WARN_ON_ONCE(rebuild_all_notify_lists(wrapper) < 0);
-    kfree(node_name_copy);
-    kfree(*new_info);
-    // The caller releases notify_ctx on the error path, so it must not be released here.
-    return ret;
-  }
+  if (notify_ctx) rebuild_all_notify_lists(wrapper);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -462,12 +466,13 @@ static int insert_publisher_info(
 
   // Later subscribers are folded in as they register. Failing here beats failing in publish,
   // which cannot report it.
-  int ret = rebuild_notify_list(wrapper, *new_info, agnocast_get_size_sub_info_htable(wrapper));
+  int ret = reserve_notify_ctxs(*new_info, agnocast_get_size_sub_info_htable(wrapper));
   if (ret < 0) {
     hash_del(&(*new_info)->node);
     free_publisher_info(*new_info);
     return ret;
   }
+  rebuild_notify_list(wrapper, *new_info);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -2266,8 +2271,7 @@ int agnocast_ioctl_add_domain_bridge(
       // topic_struct once grouped, so either wrapper reaches every publisher.
       struct topic_wrapper * wrapper = find_topic(name_a, ipc_ns, domain_a);
       if (!wrapper) wrapper = find_topic(name_b, ipc_ns, domain_b);
-      // Cannot fail: more subscribers may match, but no new one joined, so no list has to grow.
-      if (wrapper) WARN_ON_ONCE(rebuild_all_notify_lists(wrapper) < 0);
+      if (wrapper) rebuild_all_notify_lists(wrapper);
     } else {
       ret = -EBUSY;
     }
