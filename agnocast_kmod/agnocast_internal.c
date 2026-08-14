@@ -26,6 +26,9 @@ struct tracepoint * tp_sched_process_exit;
 
 static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
 {
+  // Unlinked as a batch so the notify lists are rebuilt once instead of once per subscriber, which
+  // would repeat the same work and land on the same result.
+  HLIST_HEAD(leaving);
   struct subscriber_info * sub_info;
   int bkt_sub_info;
   struct hlist_node * tmp_sub_info;
@@ -33,9 +36,21 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
   {
     if (sub_info->pid != pid) continue;
 
+    hash_del(&sub_info->node);
+    hlist_add_head(&sub_info->node, &leaving);
+  }
+
+  if (hlist_empty(&leaving)) return;
+
+  // Before the frees below, so that no list is left pointing at a released context.
+  agnocast_rebuild_notify_lists(wrapper);
+
+  struct hlist_node * tmp_leaving;
+  hlist_for_each_entry_safe(sub_info, tmp_leaving, &leaving, node)
+  {
     const topic_local_id_t subscriber_id = sub_info->id;
 
-    hash_del(&sub_info->node);
+    hlist_del(&sub_info->node);
     free_subscriber_info(sub_info);
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
