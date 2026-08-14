@@ -1517,7 +1517,7 @@ pid_t agnocast_ioctl_get_exit_process(
   ioctl_ret->ret_daemon_should_exit = false;
   pid_t global_pid = -1;
 
-  down_write(&global_htables_rwsem);
+  down_read(&global_htables_rwsem);
 
   struct process_info * proc_info;
   int bkt;
@@ -1532,7 +1532,7 @@ pid_t agnocast_ioctl_get_exit_process(
     break;
   }
 
-  up_write(&global_htables_rwsem);
+  up_read(&global_htables_rwsem);
   return global_pid;
 }
 
@@ -2823,9 +2823,12 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
   bool daemon_should_exit = false;
   agnocast_commit_exit_process(ipc_ns, global_pid, &daemon_should_exit);
 
-  // Patch ret_daemon_should_exit in user-space, after Phase 2 has committed.
-  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit)))
-    return -EFAULT;
+  // Patch ret_daemon_should_exit. Not fatal: when a pid was returned, its proc_info has already
+  // been committed, so -EFAULT would make the daemon exit while discarding the ret_pid whose shm
+  // needs unlinking; the flag is advisory and re-derived on the next poll.
+  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit))) {
+    dev_warn(agnocast_device, "Failed to report the daemon exit flag. (%s)\n", __func__);
+  }
   return 0;
 }
 
