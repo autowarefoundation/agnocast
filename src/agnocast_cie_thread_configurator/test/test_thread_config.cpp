@@ -135,14 +135,77 @@ TEST(ParseYaml, RejectsNiceOutOfRange)
   }
 }
 
-TEST(ParseYaml, RejectsNiceKeyOnRtPolicy)
+TEST(ParseYaml, TreatsNullNiceAsMissing)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice:
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("requires 'nice'"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ParseYaml, ReportsEntryOnNonIntegerNice)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice: low
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("'nice' must be an integer"), std::string::npos) << what;
+    EXPECT_NE(what.find("id=my_cbg"), std::string::npos) << what;
+  }
+}
+
+TEST(ParseYaml, ReportsEntryOnNonIntegerRtPriority)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
   - id: my_cbg
     domain_id: 0
     policy: SCHED_FIFO
-    nice: 0
+    priority: high
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("'priority' must be an integer"), std::string::npos) << what;
+    EXPECT_NE(what.find("id=my_cbg"), std::string::npos) << what;
+  }
+}
+
+TEST(ParseYaml, RejectsMissingPriorityOnRtPolicy)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
     affinity: []
 non_ros_threads: []
 )YAML");

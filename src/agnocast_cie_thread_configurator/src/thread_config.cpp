@@ -31,10 +31,17 @@ bool is_cfs_policy(const std::string & policy)
 int parse_nice(const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
 {
   const YAML::Node nice = entry["nice"];
-  if (!nice) {
+  // A key with an empty value ("nice:") is a defined null node, so `!nice`
+  // alone would pass it on to as<int>()'s context-free BadConversion.
+  if (!nice || nice.IsNull()) {
     throw std::runtime_error("Policy '" + policy + "' requires 'nice' for " + entry_desc);
   }
-  const int value = nice.as<int>();
+  int value = 0;
+  try {
+    value = nice.as<int>();
+  } catch (const YAML::Exception &) {
+    throw std::runtime_error("'nice' must be an integer for " + entry_desc);
+  }
   if (value < k_nice_min || value > k_nice_max) {
     // setpriority(2) would silently clamp an out-of-range value to
     // [-20, 19]; reject it here so a misunderstanding of the scale
@@ -49,10 +56,15 @@ int parse_rt_priority(
   const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
 {
   const YAML::Node priority = entry["priority"];
-  if (!priority) {
+  if (!priority || priority.IsNull()) {
     throw std::runtime_error("Policy '" + policy + "' requires 'priority' for " + entry_desc);
   }
-  const int value = priority.as<int>();
+  int value = 0;
+  try {
+    value = priority.as<int>();
+  } catch (const YAML::Exception &) {
+    throw std::runtime_error("'priority' must be an integer for " + entry_desc);
+  }
   if (value < k_rt_priority_min || value > k_rt_priority_max) {
     throw std::runtime_error(
       "'priority' must be in [1, 99] for " + entry_desc + ", got " + std::to_string(value));
