@@ -12,6 +12,56 @@
 namespace agnocast_cie_thread_configurator
 {
 
+namespace
+{
+
+constexpr int k_nice_min = -20;
+constexpr int k_nice_max = 19;
+constexpr int k_rt_priority_min = 1;
+constexpr int k_rt_priority_max = 99;
+
+bool is_cfs_policy(const std::string & policy)
+{
+  return policy == "SCHED_OTHER" || policy == "SCHED_BATCH" || policy == "SCHED_IDLE";
+}
+
+// 'nice' is required for the CFS policies (SCHED_OTHER/BATCH/IDLE);
+// parse_rt_priority is the mirror image for SCHED_FIFO/SCHED_RR. `entry_desc`
+// is the "id=..."/"name=..." fragment used in messages.
+int parse_nice(const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
+{
+  const YAML::Node nice = entry["nice"];
+  if (!nice) {
+    throw std::runtime_error("Policy '" + policy + "' requires 'nice' for " + entry_desc);
+  }
+  const int value = nice.as<int>();
+  if (value < k_nice_min || value > k_nice_max) {
+    // setpriority(2) would silently clamp an out-of-range value to
+    // [-20, 19]; reject it here so a misunderstanding of the scale
+    // (e.g. an rt_priority-style 50) fails loudly instead.
+    throw std::runtime_error(
+      "'nice' must be in [-20, 19] for " + entry_desc + ", got " + std::to_string(value));
+  }
+  return value;
+}
+
+int parse_rt_priority(
+  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
+{
+  const YAML::Node priority = entry["priority"];
+  if (!priority) {
+    throw std::runtime_error("Policy '" + policy + "' requires 'priority' for " + entry_desc);
+  }
+  const int value = priority.as<int>();
+  if (value < k_rt_priority_min || value > k_rt_priority_max) {
+    throw std::runtime_error(
+      "'priority' must be in [1, 99] for " + entry_desc + ", got " + std::to_string(value));
+  }
+  return value;
+}
+
+}  // namespace
+
 const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
@@ -87,8 +137,10 @@ void parse_yaml(
       cfg.runtime = cg["runtime"].as<unsigned int>();
       cfg.period = cg["period"].as<unsigned int>();
       cfg.deadline = cg["deadline"].as<unsigned int>();
+    } else if (is_cfs_policy(cfg.policy)) {
+      cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str);
     } else {
-      cfg.priority = cg["priority"].as<int>();
+      cfg.priority = parse_rt_priority(cg, cfg.policy, "id=" + cfg.thread_str);
     }
   }
 
@@ -111,8 +163,10 @@ void parse_yaml(
       cfg.runtime = nrt["runtime"].as<unsigned int>();
       cfg.period = nrt["period"].as<unsigned int>();
       cfg.deadline = nrt["deadline"].as<unsigned int>();
+    } else if (is_cfs_policy(cfg.policy)) {
+      cfg.nice = parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str);
     } else {
-      cfg.priority = nrt["priority"].as<int>();
+      cfg.priority = parse_rt_priority(nrt, cfg.policy, "name=" + cfg.thread_str);
     }
   }
 
