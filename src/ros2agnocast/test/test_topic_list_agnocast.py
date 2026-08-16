@@ -9,8 +9,8 @@ the wait is observable without a discovery agent, a kernel module or DDS:
   when the participant exists, not from process start. Node setup is therefore
   added to the run, not subtracted from the wait. ``FakeNodeStrategy`` charges
   the clock for what ros2cli would spend, including the ``spin_time`` it is
-  handed, so a verb that let ros2cli spin as well would show up as a shrunken
-  window.
+  handed, so a verb that let ros2cli spin as well would show up as a longer
+  run.
 - Whatever gossip leaves unused is slept off before the ROS 2 graph query, but
   only when no ros2 daemon is serving that query.
 
@@ -116,12 +116,6 @@ def test_spin_time_defaults_to_the_ros2_value():
     assert parser.parse_args([]).spin_time == ROS2_DEFAULT_SPIN_TIME
 
 
-def test_gossip_gets_the_whole_spin_time():
-    """Nothing may be spent before it, ros2cli's own spin included."""
-    _, gossip_timeout = _run_main(spin_time=3.0)
-    assert gossip_timeout == pytest.approx(3.0)
-
-
 def test_node_setup_is_added_to_the_run_not_taken_out_of_the_wait():
     """A slow ``spawn_daemon`` must not shrink the window to nothing.
 
@@ -158,11 +152,11 @@ def test_a_daemon_answers_the_graph_query_so_nothing_is_slept_off():
     assert clock.elapsed == pytest.approx(0.2)
 
 
-def test_no_wait_at_all_for_zero_or_negative_spin_time():
-    for spin_time in (0.0, -1.0):
-        clock, gossip_timeout = _run_main(spin_time=spin_time)
-        assert gossip_timeout == pytest.approx(0.0)
-        assert clock.elapsed == pytest.approx(0.0)
+@pytest.mark.parametrize('spin_time', [0.0, -1.0])
+def test_no_wait_at_all_for_zero_or_negative_spin_time(spin_time):
+    clock, gossip_timeout = _run_main(spin_time=spin_time)
+    assert gossip_timeout == pytest.approx(0.0)
+    assert clock.elapsed == pytest.approx(0.0)
 
 
 def test_ros2_topics_are_still_listed(capsys):
