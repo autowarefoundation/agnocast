@@ -1,6 +1,27 @@
+#include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_callback_info.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 
+#include "std_msgs/msg/string.hpp"
+
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <string>
+
+namespace agnocast
+{
+// Stubbed so a subscription can be constructed without a kernel module. init_base(), which
+// resolves the QoS, still runs for real and calls this with its result. id_ is left at -1 so
+// ~SubscriptionBase() issues no ioctl either.
+void SubscriptionBase::initialize(
+  const rclcpp::QoS &, const bool, const bool, SubscriptionRole, const std::string &,
+  const std::string &)
+{
+}
+}  // namespace agnocast
 
 class GetValidCallbackGroupTest : public ::testing::Test
 {
@@ -46,4 +67,93 @@ TEST_F(GetValidCallbackGroupTest, get_valid_callback_group_nullptr)
 
   auto result = agnocast::get_valid_callback_group(node.get(), options);
   EXPECT_EQ(result, node->get_node_base_interface()->get_default_callback_group());
+}
+
+using StringMsg = std_msgs::msg::String;
+
+class GetActualQosTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    // SubscriptionBase's constructor calls validate_ld_preload(), which exits the process when
+    // the variable is unset. It cannot be stubbed here because test_agnocast_utils.cpp tests the
+    // real one in this same binary, so satisfy it instead -- it only inspects the variable.
+    setenv("LD_PRELOAD", "libagnocast_heaphook.so", 1);
+    rclcpp::init(0, nullptr);
+  }
+
+  void TearDown() override
+  {
+    rclcpp::shutdown();
+    unsetenv("LD_PRELOAD");
+  }
+};
+
+TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_passed_at_construction)
+{
+  // Arrange
+  auto node = std::make_shared<rclcpp::Node>("test_actual_qos");
+  const rclcpp::QoS qos = rclcpp::QoS(rclcpp::KeepLast(7)).best_effort();
+
+  // Act
+  auto sub = agnocast::create_subscription<StringMsg>(
+    node.get(), "/test_actual_qos", qos, [](const agnocast::ipc_shared_ptr<const StringMsg> &) {});
+
+  // Assert
+  EXPECT_EQ(sub->get_actual_qos(), qos);
+}
+
+TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_of_a_take_subscription)
+{
+  // Arrange
+  auto node = std::make_shared<rclcpp::Node>("test_actual_qos_take");
+  const rclcpp::QoS qos = rclcpp::QoS(rclcpp::KeepLast(4)).best_effort();
+
+  // Act
+  agnocast::TakeSubscription<StringMsg> sub(node.get(), "/test_actual_qos_take", qos);
+
+  // Assert
+  EXPECT_EQ(sub.get_actual_qos(), qos);
+}
+
+TEST_F(GetActualQosTest, get_actual_qos_reflects_a_qos_parameter_override)
+{
+  // Arrange: a node that overrides the subscription depth to 9.
+  rclcpp::NodeOptions node_options;
+  node_options.parameter_overrides(
+    {rclcpp::Parameter("qos_overrides./test_actual_qos_override.subscription.depth", 9)});
+  auto node = std::make_shared<rclcpp::Node>("test_actual_qos_override", node_options);
+
+  agnocast::SubscriptionOptions options;
+  options.qos_overriding_options = rclcpp::QosOverridingOptions({rclcpp::QosPolicyKind::Depth});
+
+  // Act: construct with depth 1, which the override is expected to replace.
+  auto sub = agnocast::create_subscription<StringMsg>(
+    node.get(), "/test_actual_qos_override", rclcpp::QoS{1},
+    [](const agnocast::ipc_shared_ptr<const StringMsg> &) {}, options);
+
+  // Assert
+  EXPECT_EQ(sub->get_actual_qos().depth(), 9u);
+}
+
+TEST_F(GetActualQosTest, the_resolved_durability_reaches_the_callback_registry)
+{
+  // Arrange
+  const std::string topic = "/test_actual_qos_durability";
+  auto node = std::make_shared<rclcpp::Node>("test_actual_qos_durability");
+
+  // Act
+  auto sub = agnocast::create_subscription<StringMsg>(
+    node.get(), topic, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local(),
+    [](const agnocast::ipc_shared_ptr<const StringMsg> &) {});
+
+  // Assert: register_callback() consumed the resolved QoS during construction. The other cases
+  // read it back afterwards, so they cannot tell when it was stored.
+  std::lock_guard<std::mutex> lock(agnocast::id2_callback_info_mtx);
+  const auto entry = std::find_if(
+    agnocast::id2_callback_info.begin(), agnocast::id2_callback_info.end(),
+    [&topic](const auto & e) { return e.second.topic_name == topic; });
+  ASSERT_NE(entry, agnocast::id2_callback_info.end());
+  EXPECT_TRUE(entry->second.is_transient_local);
 }
