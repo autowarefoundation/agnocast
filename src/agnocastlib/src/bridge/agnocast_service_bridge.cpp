@@ -425,15 +425,18 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
+  // A live Agnocast service makes R2A the only bridge this item may build: it already answers every
+  // Agnocast client directly, so an A2R bridge would put a second Agnocast service on the same
+  // request topic and answer each request twice. Hence the unconditional return -- the A2R and drop
+  // branches below stay unevaluated even when the demand gate keeps the bridge from starting. See
+  // the state diagram in the header.
   if (may_start_r2a_bridge_ && agno_service_exists()) {
     // Demand gate: stand up the R2A bridge only when an external ROS 2 client is actually present.
     // Otherwise stay PENDING, which costs no thread, epoll or file descriptor, and wait for one.
-    if (ros2_client_exists(deps)) {
-      if (start_r2a_bridge(deps) != 0) {
-        RCLCPP_WARN(
-          deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
-          get_error_string());
-      }
+    if (ros2_client_exists(deps) && start_r2a_bridge(deps) != 0) {
+      RCLCPP_WARN(
+        deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
+        get_error_string());
     }
     return;
   }
