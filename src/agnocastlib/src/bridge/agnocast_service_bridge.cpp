@@ -2,6 +2,10 @@
 
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+// Defines RCLCPP_VERSION_MAJOR, which the preprocessor guards below rely on. Nothing else in this
+// translation unit pulls it in, and an undefined identifier in `#if` evaluates to 0, so without
+// this include every guard would silently take its pre-Jazzy fallback branch.
+#include "rclcpp/version.h"
 
 #include <sys/ioctl.h>
 
@@ -173,6 +177,39 @@ bool ServiceBridgeItem::ros2_service_exists(const ServiceBridgeDeps & deps)
   }
 }
 
+// Returns false if no external ROS 2 client for the target service exists or if an exception occurs
+// while checking it (the reason will be set in the error string).
+//
+// This is the ROS 2 side demand signal for an R2A service bridge, symmetric with
+// has_external_ros2_subscriber() for pub/sub: an R2A bridge costs a callback group, and
+// CallbackIsolatedAgnocastExecutor gives every callback group its own thread and epoll, so it is
+// stood up only while a client is actually present and reaped once the last one leaves. Without
+// this gate the cost is paid per service unconditionally, which at scale (every agnocast::Node
+// auto-creates six parameter services) exhausts the manager's file descriptors.
+bool ServiceBridgeItem::ros2_client_exists(const ServiceBridgeDeps & deps)
+{
+  try {
+#if RCLCPP_VERSION_MAJOR >= 28
+    const bool exists = deps.container_node->count_clients(this->service_name_) > 0;
+    if (!exists) {
+      set_error_string("No external ROS 2 client found");
+    }
+    return exists;
+#else
+    // Pre-Jazzy rclcpp has no service-client count in the graph API, so demand cannot be observed.
+    // Fall back to the previous eager behavior rather than never bridging.
+    (void)deps;
+    return true;
+#endif
+  } catch (const std::exception & e) {
+    set_error_string(e.what());
+    return false;
+  } catch (...) {
+    set_error_string("Unknown error");
+    return false;
+  }
+}
+
 // Returns false if the target Agnocast service does not exist or if an error occurs while checking
 // it (the reason will be set in the error string).
 bool ServiceBridgeItem::agno_service_exists()
@@ -332,7 +369,10 @@ void ServiceBridgeItem::update_configuration(const BridgeMsgServicePayload & pay
 
 void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 {
-  if (agno_service_exists()) {
+  // Keep the bridge only while it is still justified: an Agnocast service to forward to, and at
+  // least one external ROS 2 client to serve. Once the last client leaves, fall through and reap
+  // the bridge (freeing its thread and epoll) back to PENDING to await the next one.
+  if (agno_service_exists() && ros2_client_exists(deps)) {
     return;
   }
 
@@ -389,10 +429,14 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
   if (may_start_r2a_bridge_ && agno_service_exists()) {
-    if (start_r2a_bridge(deps) != 0) {
-      RCLCPP_WARN(
-        deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
-        get_error_string());
+    // Demand gate: stand up the R2A bridge only when an external ROS 2 client is actually present.
+    // Otherwise stay PENDING, which costs no thread, epoll or file descriptor, and wait for one.
+    if (ros2_client_exists(deps)) {
+      if (start_r2a_bridge(deps) != 0) {
+        RCLCPP_WARN(
+          deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
+          get_error_string());
+      }
     }
     return;
   }
@@ -432,32 +476,22 @@ void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
   }
 }
 
-void ServiceBridgeItem::handle_request_with_direction(
-  BridgeDirection direction, const ServiceBridgeDeps & deps)
-{
-  switch (direction) {
-    case BridgeDirection::ROS2_TO_AGNOCAST:
-      if (state_ == ServiceBridgeState::NONE || state_ == ServiceBridgeState::PENDING) {
-        if (start_r2a_bridge(deps) != 0) {
-          RCLCPP_WARN(
-            deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
-            get_error_string());
-        }
-      }
-      break;
-    case BridgeDirection::AGNOCAST_TO_ROS2:
-      if (state_ == ServiceBridgeState::NONE) {
-        state_ = ServiceBridgeState::PENDING;
-      }
-      break;
-  }
-}
-
 void ServiceBridgeItem::handle_request(
   const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps)
 {
+  // Bridge creation is deferred to the demand-gated maintenance loop in both directions, so a
+  // request only promotes the state machine into PENDING. R2A used to be created eagerly here; it
+  // now waits for check_and_update_pending() to observe an external ROS 2 client, mirroring how A2R
+  // waits for an external ROS 2 service. The requested direction is recorded by
+  // update_configuration() into may_start_{r2a,a2r}_bridge_, which is what that loop keys off, so
+  // nothing here needs to branch on it.
+  (void)deps;
+
   update_configuration(payload);
-  handle_request_with_direction(payload.direction, deps);
+
+  if (state_ == ServiceBridgeState::NONE) {
+    state_ = ServiceBridgeState::PENDING;
+  }
 }
 
 }  // namespace agnocast

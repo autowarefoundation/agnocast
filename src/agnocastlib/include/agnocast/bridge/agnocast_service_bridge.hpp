@@ -50,6 +50,7 @@ class ServiceBridgeItem
   int get_agno_service_qos(rclcpp::QoS & qos);
 
   bool ros2_service_exists(const ServiceBridgeDeps & deps);
+  bool ros2_client_exists(const ServiceBridgeDeps & deps);
   bool agno_service_exists();
   bool agno_client_exists();
 
@@ -61,8 +62,6 @@ class ServiceBridgeItem
   void check_and_update_r2a(const ServiceBridgeDeps & deps);
   void check_and_update_a2r(const ServiceBridgeDeps & deps);
   void check_and_update_pending(const ServiceBridgeDeps & deps);
-
-  void handle_request_with_direction(BridgeDirection direction, const ServiceBridgeDeps & deps);
 
 public:
   ServiceBridgeState state() const { return state_; }
