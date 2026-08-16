@@ -22,11 +22,10 @@ struct ServiceBridgeDeps
   std::shared_ptr<BridgeLoader> bridge_loader;
 };
 
-// Lifecycle of one service's bridge. NONE is not a stored state: the manager keeps an entry in
-// active_service_bridges_ only while the machine is out of NONE, so reaching NONE destroys the
-// item. Only edge (1) is request-driven; check_and_update() re-derives every other edge from the
-// current world once per maintenance tick and caches nothing, so a bridge appears at most one tick
-// after the demand for it does, and is reaped at most one tick after that demand goes away.
+// Lifecycle of one service's bridge. NONE is not a stored state: the manager drops the item once
+// the machine reaches it. Only (1) is request-driven. The other edges are re-derived from the
+// current world once per maintenance tick, so a bridge is created, and reaped, within one tick of
+// its demand changing.
 //
 //                        ┌──────────────┐
 //                        │  (no bridge  │
@@ -49,32 +48,22 @@ struct ServiceBridgeDeps
 //       │  A2R  ├─────────┘       └─────────┤  R2A  │
 //       └───────┘                           └───────┘
 //
-// Which directions this item may build is fixed at registration and deliberately kept out of the
-// state: handle_request() latches may_start_r2a_bridge_ (an Agnocast service announced itself) and
-// may_start_a2r_bridge_ (an Agnocast client did), and clears neither. Both are true in the ordinary
-// Agnocast-service-to-Agnocast-client topology, which is why direction is a pair of flags rather
-// than a pair of Pending states.
+// (1) an Agnocast service or client registered
+// (2) !agno_client_exists(), and neither (3) nor (5) applied
+// (3) may_start_a2r_bridge_ && ros2_service_exists()
+// (4) !ros2_service_exists()
+// (5) may_start_r2a_bridge_ && agno_service_exists() && ros2_client_exists()
+// (6) !agno_service_exists() || !ros2_client_exists()
 //
-// (1) An Agnocast service or client registered. handle_request() only enters Pending; every
-//     creation decision is deferred to the tick below.
-// (2) No Agnocast client publishes on the request topic, and neither (3) nor (5) applied.
-// (3) may_start_a2r_bridge_ && ros2_service_exists().
-// (4) !ros2_service_exists().
-// (5) may_start_r2a_bridge_ && agno_service_exists() && ros2_client_exists(). The client check is
-//     the demand gate: an R2A bridge costs a callback group, which the callback-isolated executor
-//     backs with its own thread and epoll, so it is built only while a client is there to use it.
-//     Waiting in Pending instead costs nothing, which is what stops N nodes' parameter services
-//     from each pinning a thread whether or not anyone reads a parameter.
-// (6) !agno_service_exists() || !ros2_client_exists(), the mirror of (5): the bridge and its thread
-//     are reaped as soon as the last ROS 2 client leaves.
+// Direction lives in flags, not in the state. handle_request() latches may_start_r2a_bridge_ (an
+// Agnocast service registered) and may_start_a2r_bridge_ (an Agnocast client registered), and
+// clears neither. Both are true in the ordinary Agnocast-to-Agnocast topology, so one state value
+// could not carry it.
 //
-// A live Agnocast service excludes (3) and (2). While may_start_r2a_bridge_ &&
-// agno_service_exists() holds, neither is evaluated -- not even when (5) itself does not fire for
-// want of a client. This is deliberate: that service already receives every Agnocast client's
-// request directly, and an A2R bridge would put a second Agnocast service on the same request
-// topic, so each request would be answered twice. The item therefore waits in Pending and ignores
-// any same-named ROS 2 service until the Agnocast service goes away, at which point (3) applies as
-// usual.
+// (5) excludes (3) and (2). While its first two conjuncts hold, neither is evaluated, even when no
+// ROS 2 client is there to complete (5). An A2R bridge would add a second Agnocast service to the
+// request topic, so every request would be answered twice. A same-named ROS 2 service is therefore
+// ignored until the Agnocast service goes away.
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem
