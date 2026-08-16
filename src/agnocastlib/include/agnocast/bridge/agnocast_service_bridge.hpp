@@ -22,10 +22,11 @@ struct ServiceBridgeDeps
   std::shared_ptr<BridgeLoader> bridge_loader;
 };
 
-// Lifecycle of one service's bridge. NONE is not a stored state: the manager drops the item once
-// the machine reaches it. Only (1) is request-driven. The other edges are re-derived from the
-// current world once per maintenance tick, so a bridge is created, and reaped, within one tick of
-// its demand changing.
+// Lifecycle of one service's bridge. NONE is not a stored state: the manager destroys the item as
+// soon as the machine reaches it. Arrow (1) is taken when a bridge request arrives; every other
+// arrow is checked once per maintenance tick by check_and_update(), which re-tests the numbered
+// conditions below from scratch each time. A bridge therefore appears, and is torn down, within
+// one tick of the demand for it changing.
 //
 //                        ┌──────────────┐
 //                        │  (no bridge  │
@@ -64,6 +65,11 @@ struct ServiceBridgeDeps
 // ROS 2 client is there to complete (5). An A2R bridge would add a second Agnocast service to the
 // request topic, so every request would be answered twice. A same-named ROS 2 service is therefore
 // ignored until the Agnocast service goes away.
+//
+// A running Agnocast service does not always block (2). may_start_r2a_bridge_ is set only by a
+// ServiceRole::Default service, so an AgnocastOnly one never guards the item; and
+// agno_service_exists() reads at most one entry, so it reports false when two or more Agnocast
+// services share the name. Either way (2) destroys the item while a service is still running.
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem

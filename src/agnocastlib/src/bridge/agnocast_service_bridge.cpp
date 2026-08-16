@@ -178,11 +178,11 @@ bool ServiceBridgeItem::ros2_service_exists(const ServiceBridgeDeps & deps)
 // while checking it (the reason will be set in the error string).
 //
 // This is the ROS 2 side demand signal for an R2A service bridge, symmetric with
-// has_external_ros2_subscriber() for pub/sub: an R2A bridge costs a callback group, and
-// CallbackIsolatedAgnocastExecutor gives every callback group its own thread and epoll, so it is
-// stood up only while a client is actually present and reaped once the last one leaves. Without
-// this gate the cost is paid per service unconditionally, which at scale (every agnocast::Node
-// auto-creates six parameter services) exhausts the manager's file descriptors.
+// has_external_ros2_subscriber() for pub/sub. An R2A bridge costs a callback group, which
+// CallbackIsolatedAgnocastExecutor backs with a thread and an epoll of its own. Gating on this
+// signal keeps that cost proportional to actual use. Ungated, every service pays it
+// unconditionally, and at scale (every agnocast::Node auto-creates six parameter services) that
+// exhausts the manager's file descriptors.
 bool ServiceBridgeItem::ros2_client_exists(const ServiceBridgeDeps & deps)
 {
   try {
@@ -194,7 +194,8 @@ bool ServiceBridgeItem::ros2_client_exists(const ServiceBridgeDeps & deps)
     return exists;
 #else
     // Pre-Jazzy rclcpp has no service-client count in the graph API, so demand cannot be observed.
-    // Fall back to the previous eager behavior rather than never bridging.
+    // Claiming a client unconditionally leaves R2A bridges ungated on those distros -- each still
+    // costs a thread and an epoll -- but returning false would keep them from ever being built.
     (void)deps;
     return true;
 #endif
@@ -208,7 +209,9 @@ bool ServiceBridgeItem::ros2_client_exists(const ServiceBridgeDeps & deps)
 }
 
 // Returns false if the target Agnocast service does not exist or if an error occurs while checking
-// it (the reason will be set in the error string).
+// it (the reason will be set in the error string). "Two or more services share this name" is one
+// such error: the probe below reads at most one entry, so a name collision reads as absence rather
+// than presence.
 bool ServiceBridgeItem::agno_service_exists()
 {
   // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
@@ -364,11 +367,9 @@ void ServiceBridgeItem::update_configuration(const BridgeMsgServicePayload & pay
   }
 }
 
+// Stays in R2A, or takes arrow (6) back to PENDING.
 void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 {
-  // Keep the bridge only while it is still justified: an Agnocast service to forward to, and at
-  // least one external ROS 2 client to serve. Once the last client leaves, fall through and reap
-  // the bridge (freeing its thread and epoll) back to PENDING to await the next one.
   if (agno_service_exists() && ros2_client_exists(deps)) {
     return;
   }
@@ -397,6 +398,7 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
   }
 }
 
+// Stays in A2R, or takes arrow (4) back to PENDING.
 void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 {
   if (ros2_service_exists(deps)) {
@@ -423,16 +425,11 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
   shadow_node_ = nullptr;
 }
 
+// Stays in PENDING, or takes arrow (5), (3) or (2), in that order of precedence.
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
-  // A live Agnocast service makes R2A the only bridge this item may build: it already answers every
-  // Agnocast client directly, so an A2R bridge would put a second Agnocast service on the same
-  // request topic and answer each request twice. Hence the unconditional return -- the A2R and drop
-  // branches below stay unevaluated even when the demand gate keeps the bridge from starting. See
-  // the state diagram in the header.
+  // Arrow (5). The two conditions below also exclude (3) and (2), hence the unconditional return.
   if (may_start_r2a_bridge_ && agno_service_exists()) {
-    // Demand gate: stand up the R2A bridge only when an external ROS 2 client is actually present.
-    // Otherwise stay PENDING, which costs no thread, epoll or file descriptor, and wait for one.
     if (ros2_client_exists(deps) && start_r2a_bridge(deps) != 0) {
       RCLCPP_WARN(
         deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
@@ -441,6 +438,7 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
     return;
   }
 
+  // Arrow (3).
   if (may_start_a2r_bridge_ && ros2_service_exists(deps)) {
     if (start_a2r_bridge(deps) != 0) {
       RCLCPP_WARN(
@@ -450,6 +448,7 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
     return;
   }
 
+  // Arrow (2).
   if (!agno_client_exists()) {
     RCLCPP_DEBUG(
       deps.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
@@ -459,6 +458,9 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
   }
 }
 
+// Runs one maintenance tick. Every arrow except (1) is taken from here; the state diagram in
+// agnocast_service_bridge.hpp defines them all, and the "arrow (n)" markers in this file refer to
+// its numbering.
 void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
 {
   switch (state_) {
@@ -476,6 +478,7 @@ void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
   }
 }
 
+// Takes arrow (1). Creating a bridge is left to check_and_update() above.
 void ServiceBridgeItem::handle_request(const BridgeMsgServicePayload & payload)
 {
   update_configuration(payload);
