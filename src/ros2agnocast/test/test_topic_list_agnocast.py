@@ -5,15 +5,18 @@ participant is created) and the Agnocast gossip. ``--spin-time`` is the budget
 for both, and the two overlap. These tests drive ``main()`` with a fake clock so
 the wait is observable without a discovery agent, a kernel module or DDS:
 
-- The gossip collection gets what is left of the budget, so node construction
-  eats into it rather than adding to it. ``FakeNodeStrategy`` charges the clock
-  for what ros2cli would spend, including the ``spin_time`` it is handed, so a
-  verb that let ros2cli sleep as well would show up as a shrunken window.
+- The budget is measured the way ros2cli measures its own ``--spin-time``: from
+  when the participant exists, not from process start. Node setup is therefore
+  added to the run, not subtracted from the wait. ``FakeNodeStrategy`` charges
+  the clock for what ros2cli would spend, including the ``spin_time`` it is
+  handed, so a verb that let ros2cli spin as well would show up as a shrunken
+  window.
+- ros2cli builds that node lazily while a daemon serves the graph queries, so
+  the fake does too. A verb that did not force the build would start its budget
+  before setup under a daemon and after setup otherwise.
 - Whatever gossip leaves unused is slept off before the ROS 2 graph query, but
   only when no ros2 daemon is serving that query.
 
-Only ``time.sleep`` counts as waiting here; spinning and node construction pass
-time without sleeping, so the clock separates ``sleep()`` from ``advance()``.
 Assertions look at the total time slept, not at individual sleep calls, so that
 skipping a zero-length sleep stays a free implementation choice.
 """
@@ -62,8 +65,23 @@ class FakeNodeStrategy:
 
     def __init__(self, args, *, clock, daemon_node, construction_cost):
         self.daemon_node = daemon_node
-        clock.advance(construction_cost)  # rclpy.init, create_node, spawn_daemon
-        clock.advance(args.spin_time)     # DirectNode's own pre-gossip sleep
+        self._clock = clock
+        self._args = args
+        self._construction_cost = construction_cost
+        self._direct_node = None
+        if daemon_node is None:
+            self._build_direct_node()
+
+    def _build_direct_node(self):
+        self._clock.advance(self._construction_cost)  # rclpy.init, create_node, spawn_daemon
+        self._clock.advance(self._args.spin_time)     # DirectNode's own fixed spin
+        self._direct_node = object()
+
+    @property
+    def direct_node(self):
+        if self._direct_node is None:
+            self._build_direct_node()
+        return self._direct_node
 
     def __enter__(self):
         return self
@@ -110,16 +128,11 @@ def _run_main(spin_time=None, gossip_elapsed=0.0, daemon=False, construction_cos
     return clock, gossip_timeout[0]
 
 
-# --- argument wiring --------------------------------------------------------
-
 def test_spin_time_defaults_to_the_ros2_value():
-    """The default tracks ros2cli's constant instead of a literal of our own."""
     parser = argparse.ArgumentParser()
     tl.ListAgnocastVerb().add_arguments(parser, 'list_agnocast')
     assert parser.parse_args([]).spin_time == ROS2_DEFAULT_SPIN_TIME
 
-
-# --- the gossip window ------------------------------------------------------
 
 def test_gossip_gets_the_whole_spin_time():
     """Nothing may be spent before it, ros2cli's own spin included."""
@@ -127,16 +140,21 @@ def test_gossip_gets_the_whole_spin_time():
     assert gossip_timeout == pytest.approx(3.0)
 
 
-def test_gossip_window_absorbs_node_construction_time():
-    """`rclpy.init` and friends eat into the budget instead of adding to it."""
-    _, gossip_timeout = _run_main(spin_time=3.0, construction_cost=0.4)
-    assert gossip_timeout == pytest.approx(2.6)
+@pytest.mark.parametrize('daemon', [False, True])
+def test_node_setup_is_added_to_the_run_not_taken_out_of_the_wait(daemon):
+    """A slow ``spawn_daemon`` must not shrink the window to nothing.
 
-    _, gossip_timeout = _run_main(spin_time=0.5, construction_cost=0.8)
-    assert gossip_timeout == pytest.approx(0.0)
+    That would drop the cross-NS view without the operator ever asking for a
+    shorter wait.
+    """
+    clock, gossip_timeout = _run_main(
+        spin_time=3.0, construction_cost=0.4, gossip_elapsed=3.0, daemon=daemon)
+    assert gossip_timeout == pytest.approx(3.0)
+    assert clock.elapsed == pytest.approx(3.4)
 
+    _, gossip_timeout = _run_main(spin_time=0.5, construction_cost=0.8, daemon=daemon)
+    assert gossip_timeout == pytest.approx(0.5)
 
-# --- the top-up wait --------------------------------------------------------
 
 def test_time_gossip_leaves_unused_is_slept_off():
     """Without a daemon the ROS 2 graph query must see the full spin time."""
@@ -165,8 +183,6 @@ def test_no_wait_at_all_for_zero_or_negative_spin_time():
         assert gossip_timeout == pytest.approx(0.0)
         assert clock.elapsed == pytest.approx(0.0)
 
-
-# --- output -----------------------------------------------------------------
 
 def test_ros2_topics_are_still_listed(capsys):
     _run_main(spin_time=1.0)

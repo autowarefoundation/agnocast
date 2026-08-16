@@ -132,6 +132,16 @@ def _resolve_spin_node(node):
     return getattr(direct, 'node', direct)
 
 
+def ensure_spin_node(node) -> None:
+    """Build ros2cli's ``DirectNode`` now rather than on first use.
+
+    ``NodeStrategy`` defers it while a daemon answers the graph queries, so a
+    caller that starts a discovery budget before touching it would measure that
+    build in one setup and not the other.
+    """
+    _resolve_spin_node(node)
+
+
 def warn_if_using_fallback(
     node, used_fallback: bool, timeout_sec: float, snapshots: list[AgnocastDaemonState]
 ) -> None:
