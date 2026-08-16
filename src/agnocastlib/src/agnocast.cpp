@@ -32,8 +32,12 @@ int agnocast_fd = -1;
 std::vector<int> shm_fds;
 std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
-// mmap_mtx: Prevents a race condition and segfault between two threads
-// in a multithreaded executor using the same notification eventfd.
+// mmap_mtx serves two distinct purposes. Both require it to be held across the whole
+// receive/take ioctl *and* the shared-memory mapping that follows it, so it must stay
+// process-global and must not be narrowed to per-subscription or per-executor scope.
+//
+// (1) Prevents a race condition and segfault between two threads
+// in a multithreaded executor using the same eventfd.
 //
 // Race Scenario:
 // 1. Thread 1 (T1):
@@ -49,6 +53,17 @@ std::mutex mmap_mtx;
 // Root Cause: T2's callback uses `shm_addr` that T1 fetched but hadn't initialized/mapped yet.
 // This mutex ensures atomicity for T1's critical section: from ioctl fetching publisher
 // info through to completing shared memory setup.
+//
+// (2) Serializes RECEIVE_CMD/TAKE_CMD process-wide, which the kernel module depends on.
+// agnocast_ioctl_receive_msg and agnocast_ioctl_take_msg take only a *read* lock on the topic, so
+// the kernel lets receives on one topic run concurrently and relies on this mutex to keep two of
+// them from overlapping within one process. That matters most under a Reentrant callback group,
+// where one subscription's callback runs on several threads at once: two concurrent calls for the
+// same subscriber would read the same sub_info->latest_received_entry_id and walk the same
+// entries, and the loser would fail the ioctl with -EALREADY, which every call site below treats
+// as fatal.
+// RELEASE_SUB_REF_CMD deliberately stays outside this mutex, to keep the ipc_shared_ptr
+// destructor path from contending on the receive fast path.
 
 void * map_area(
   const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)
