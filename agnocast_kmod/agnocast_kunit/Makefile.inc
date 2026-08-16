@@ -8,6 +8,7 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_publish_msg.o \
   agnocast_kunit_receive_msg.o \
   agnocast_kunit_take_msg.o \
+  agnocast_kunit_get_exit_process.o \
   agnocast_kunit_get_publisher_num.o \
   agnocast_kunit_get_publisher_qos.o \
   agnocast_kunit_get_subscriber_num.o \

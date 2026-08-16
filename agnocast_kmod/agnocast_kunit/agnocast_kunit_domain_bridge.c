@@ -61,9 +61,9 @@ static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
   return add_subscriber_named(test, pid, TOPIC_NAME);
 }
 
-// The helpers above pass -1, which the fake maps to its unobserved slot: the subscriber is still
-// collected and signaled on publish, but no assertion can see it. Cases that assert on delivery
-// need a real fd to observe instead.
+// The helpers above pass -1, which the fake maps to its unobserved slot: the subscriber still
+// enters the publishers' notify lists and is signaled on publish, but no assertion can see it.
+// Cases that assert on delivery need a real fd to observe instead.
 static topic_local_id_t add_subscriber_named_with_eventfd(
   struct kunit * test, const pid_t pid, const char * topic_name, const int eventfd)
 {
@@ -216,6 +216,36 @@ void test_case_domain_bridge_direction_respected(struct kunit * test)
 
   // The domain-1 subscriber must not be woken by a domain-2 publication (no 2 -> 1).
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 0);
+}
+
+void test_case_domain_bridge_late_reverse_direction_delivers(struct kunit * test)
+{
+  // Same setup as above, but 2 -> 1 is declared after both endpoints have registered, so the
+  // publisher's notify list was built while that direction was still denied.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+
+  agnocast_kunit_eventfd_reset();
+  const uint64_t msg_addr = setup_process_in_domain(test, current->tgid, 2);
+  const topic_local_id_t pub_id = add_publisher_for(test, current->tgid);
+
+  setup_process_in_domain(test, 1001, 1);
+  const int eventfd = 0;
+  add_subscriber_named_with_eventfd(test, 1001, TOPIC_NAME, eventfd);
+
+  // Act
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+
+  union ioctl_publish_msg_args publish_args;
+  int ret = agnocast_ioctl_publish_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, pub_id, msg_addr, &publish_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Assert: the newly allowed direction reaches the domain-1 subscriber.
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
 }
 
 void test_case_domain_bridge_partial_remove_keeps_struct(struct kunit * test)
