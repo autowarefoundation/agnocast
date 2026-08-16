@@ -8,11 +8,10 @@
 #
 # Set E2E_REMAP=/some/topic to exercise the cross-domain *rename* path (the rule
 # maps ${TOPIC}@from to ${E2E_REMAP}@to). Rename runs TWO exchanges so one run
-# covers both notification-MQ cases: the publish-notification MQ name is the
-# bridge pair's canonical name = the *lower-numbered domain's* name, so exactly
-# one endpoint per exchange has to switch to it. The forward exchange puts the
-# source in the lower domain (the subscriber switches); the swapped exchange puts
-# the source in the higher domain (the publisher switches). The two use distinct
+# covers both orientations of the pair's canonical ordering (domain_a < domain_b,
+# each domain keeping its own name): the forward exchange publishes from domain_a
+# and subscribes in domain_b, the swapped exchange the reverse, so each side of
+# the rule is exercised as both source and destination. The two use distinct
 # cells ({TOPIC@from, REMAP@to} vs {TOPIC@to, REMAP@from}), so both rules and
 # their endpoints coexist on one kmod without a reload.
 #
@@ -141,11 +140,11 @@ XML
 }
 
 if [ -n "$REMAP" ]; then
-    # Forward: source in the lower domain -> the subscriber switches to the canonical name.
+    # Forward: source in the lower-numbered domain (domain_a).
     run_exchange "$FROM_DOMAIN" "$TO_DOMAIN" || exit 1
-    # Swapped: source in the higher domain -> the publisher switches to the canonical name.
+    # Swapped: source in the higher-numbered domain (domain_b).
     run_exchange "$TO_DOMAIN" "$FROM_DOMAIN" || exit 1
-    echo "ALL RENAME EXCHANGES PASSED (subscriber-switch + publisher-switch)."
+    echo "ALL RENAME EXCHANGES PASSED (both canonical orientations)."
 else
     run_exchange "$FROM_DOMAIN" "$TO_DOMAIN" || exit 1
 fi

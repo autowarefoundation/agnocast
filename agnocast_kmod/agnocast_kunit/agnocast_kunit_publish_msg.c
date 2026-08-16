@@ -59,10 +59,10 @@ static void setup_one_publisher(
   KUNIT_ASSERT_EQ(test, ret2, 0);
 }
 
-// The setup helpers above pass -1, which the fake maps to its unobserved slot: the subscriber is
-// still collected and signaled on publish, but no assertion can see it. Cases that assert on
-// delivery need a real fd instead.
-static void add_subscriber_with_eventfd(
+// The setup helpers above pass -1, which the fake maps to its unobserved slot: the subscriber
+// still enters the publishers' notify lists and is signaled on publish, but no assertion can see
+// it. Cases that assert on delivery need a real fd instead.
+static topic_local_id_t add_subscriber_with_eventfd(
   struct kunit * test, const pid_t pid, const int eventfd, const bool ignore_local_publications)
 {
   union ioctl_add_subscriber_args add_subscriber_args;
@@ -72,10 +72,11 @@ static void add_subscriber_with_eventfd(
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
+  return add_subscriber_args.ret_id;
 }
 
 // Same, but in a process of its own.
-static void setup_one_subscriber_with_eventfd(
+static topic_local_id_t setup_one_subscriber_with_eventfd(
   struct kunit * test, const int eventfd, const bool ignore_local_publications)
 {
   subscriber_pid++;
@@ -86,7 +87,7 @@ static void setup_one_subscriber_with_eventfd(
     agnocast_ioctl_add_process(
       subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
     0);
-  add_subscriber_with_eventfd(test, subscriber_pid, eventfd, ignore_local_publications);
+  return add_subscriber_with_eventfd(test, subscriber_pid, eventfd, ignore_local_publications);
 }
 
 // One process holding both, which is what makes ignore_local_publications observable.
@@ -479,8 +480,7 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
 
 void test_case_publish_msg_signals_large_fanout(struct kunit * test)
 {
-  // Arrange: a fan-out well past what the e2e tests reach, to exercise the collection PUBLISH
-  // does at scale.
+  // Arrange: a fan-out past a notify list's initial capacity, so the list has to grow.
   agnocast_kunit_eventfd_reset();
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
@@ -505,6 +505,35 @@ void test_case_publish_msg_signals_large_fanout(struct kunit * test)
     topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
 
   // Assert: every subscriber woken exactly once, none missed and none woken twice.
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+  }
+}
+
+// A publisher registering onto a topic that already has subscribers must pick them up right then,
+// since no later rebuild is coming. Missing them would leave the publisher signaling no one.
+void test_case_publish_msg_signals_subscribers_registered_before_publisher(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+
+  const int subscriber_num = 3;
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    setup_one_subscriber_with_eventfd(test, eventfd, false);
+  }
+
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
     KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
@@ -536,6 +565,68 @@ void test_case_publish_msg_signals_once_per_publish(struct kunit * test)
   const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
   KUNIT_ASSERT_NOT_NULL(test, slot);
   KUNIT_EXPECT_EQ(test, slot->get_count, 1);
+}
+
+// A publisher's notify list is built as endpoints register, so a subscriber leaving has to be taken
+// out of it. Leaving it behind would make the next publish signal a released context.
+void test_case_publish_msg_stops_signaling_removed_subscriber(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  const int removed_eventfd = 0;
+  const int kept_eventfd = 1;
+  const topic_local_id_t removed_id =
+    setup_one_subscriber_with_eventfd(test, removed_eventfd, false);
+  setup_one_subscriber_with_eventfd(test, kept_eventfd, false);
+
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_remove_subscriber(topic_name, current->nsproxy->ipc_ns, removed_id), 0);
+
+  // Act
+  union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(removed_eventfd), 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(kept_eventfd), 1);
+}
+
+// A subscriber also has to leave the notify lists when its process exits, which reaches the unlink
+// through the exit handler instead of REMOVE_SUBSCRIBER. Leaving it behind would make the next
+// publish signal a released context.
+void test_case_publish_msg_stops_signaling_exited_subscriber(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+
+  const int exited_eventfd = 0;
+  const int kept_eventfd = 1;
+  setup_one_subscriber_with_eventfd(test, exited_eventfd, false);
+  const pid_t exiting_pid = subscriber_pid;  // the helper advanced it to the pid it used
+  setup_one_subscriber_with_eventfd(test, kept_eventfd, false);
+
+  agnocast_enqueue_exit_pid(exiting_pid);
+  msleep(20);
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
+
+  // Act
+  union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(exited_eventfd), 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(kept_eventfd), 1);
 }
 
 // The publisher's message must live in that publisher process's own mempool. Both sides of the
@@ -612,18 +703,12 @@ void test_case_publish_msg_no_process(struct kunit * test)
   // The unlink daemon then reaps process_info, leaving the publisher without one.
   struct ioctl_get_exit_process_args get_exit_args;
   memset(&get_exit_args, 0, sizeof(get_exit_args));
-  struct exit_subscription_mq_info mq_info_buf[1];
-  pid_t global_pid = -1;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_get_exit_process(
-      current->nsproxy->ipc_ns, &get_exit_args, mq_info_buf, ARRAY_SIZE(mq_info_buf), &global_pid),
-    0);
+  const pid_t global_pid =
+    agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args);
+  KUNIT_ASSERT_EQ(test, global_pid, exiting_pid);
   KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
-    &daemon_should_exit);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 

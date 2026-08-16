@@ -2,7 +2,6 @@
 
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_executor.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 
 #include <sys/epoll.h>
@@ -45,6 +44,9 @@ void receive_and_execute_message(
   receive_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
   {
+    // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
+    // mmap that makes it usable, and it is what serializes same-subscriber receives for the kernel
+    // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
     std::lock_guard<std::mutex> lock(mmap_mtx);
 
     if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {

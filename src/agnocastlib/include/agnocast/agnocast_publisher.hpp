@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
@@ -74,7 +73,8 @@ enum class PublisherRole : uint8_t {
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
-// shared with all Agnocast publishers, such as kernel registration and message queue management.
+// shared with all Agnocast publishers, such as kernel registration, GID generation, and
+// bridge registration.
 class PublisherBase
 {
   void generate_gid();

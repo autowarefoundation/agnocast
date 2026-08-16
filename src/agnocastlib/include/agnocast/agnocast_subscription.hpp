@@ -12,7 +12,6 @@
 #include "rcpputils/shared_library.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <mqueue.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -75,12 +74,6 @@ enum class SubscriptionRole : uint8_t {
 
 // These are cut out of the class for information hiding.
 void close_notify_eventfd(int notify_eventfd);
-// No longer called: publish notification moved to eventfd. Removed together with the rest of the
-// MQ machinery in a follow-up.
-mqd_t open_mq_for_subscription(
-  const std::string & topic_name, const topic_local_id_t subscriber_id,
-  std::pair<mqd_t, std::string> & mq_subscription);
-void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription);
 uint32_t get_publisher_count_core(const std::string & topic_name);
 
 template <typename NodeT>
@@ -362,6 +355,9 @@ public:
     take_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
     {
+      // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
+      // mmap that makes it usable, and it is what serializes same-subscriber takes for the kernel
+      // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {
