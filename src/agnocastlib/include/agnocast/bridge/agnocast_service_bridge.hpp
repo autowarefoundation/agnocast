@@ -69,7 +69,7 @@ public:
 
   void check_and_update(const ServiceBridgeDeps & deps);
 
-  void handle_request(const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps);
+  void handle_request(const BridgeMsgServicePayload & payload);
 };
 
 }  // namespace agnocast

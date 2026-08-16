@@ -2,9 +2,6 @@
 
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
-// Defines RCLCPP_VERSION_MAJOR, which the preprocessor guards below rely on. Nothing else in this
-// translation unit pulls it in, and an undefined identifier in `#if` evaluates to 0, so without
-// this include every guard would silently take its pre-Jazzy fallback branch.
 #include "rclcpp/version.h"
 
 #include <sys/ioctl.h>
@@ -476,17 +473,8 @@ void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
   }
 }
 
-void ServiceBridgeItem::handle_request(
-  const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps)
+void ServiceBridgeItem::handle_request(const BridgeMsgServicePayload & payload)
 {
-  // Bridge creation is deferred to the demand-gated maintenance loop in both directions, so a
-  // request only promotes the state machine into PENDING. R2A used to be created eagerly here; it
-  // now waits for check_and_update_pending() to observe an external ROS 2 client, mirroring how A2R
-  // waits for an external ROS 2 service. The requested direction is recorded by
-  // update_configuration() into may_start_{r2a,a2r}_bridge_, which is what that loop keys off, so
-  // nothing here needs to branch on it.
-  (void)deps;
-
   update_configuration(payload);
 
   if (state_ == ServiceBridgeState::NONE) {
