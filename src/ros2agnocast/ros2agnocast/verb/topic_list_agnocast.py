@@ -13,7 +13,6 @@ from ros2agnocast.discovery import (
     CIE_THREAD_CONFIGURATOR_NAMESPACE,
     collect_announcements_with_fallback,
     collect_bridge_roles,
-    ensure_spin_node,
     warn_if_using_fallback,
 )
 
@@ -39,7 +38,6 @@ class ListAgnocastVerb(VerbExtension):
         node_args = copy.copy(args)
         node_args.spin_time = 0.0
         with NodeStrategy(node_args) as node:
-            ensure_spin_node(node)
             # ros2cli measures its own --spin-time from here too: after the
             # participant exists, not from process start.
             deadline = time.monotonic() + spin_time

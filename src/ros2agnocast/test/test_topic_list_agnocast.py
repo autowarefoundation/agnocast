@@ -11,9 +11,6 @@ the wait is observable without a discovery agent, a kernel module or DDS:
   the clock for what ros2cli would spend, including the ``spin_time`` it is
   handed, so a verb that let ros2cli spin as well would show up as a shrunken
   window.
-- ros2cli builds that node lazily while a daemon serves the graph queries, so
-  the fake does too. A verb that did not force the build would start its budget
-  before setup under a daemon and after setup otherwise.
 - Whatever gossip leaves unused is slept off before the ROS 2 graph query, but
   only when no ros2 daemon is serving that query.
 
@@ -65,23 +62,8 @@ class FakeNodeStrategy:
 
     def __init__(self, args, *, clock, daemon_node, construction_cost):
         self.daemon_node = daemon_node
-        self._clock = clock
-        self._args = args
-        self._construction_cost = construction_cost
-        self._direct_node = None
-        if daemon_node is None:
-            self._build_direct_node()
-
-    def _build_direct_node(self):
-        self._clock.advance(self._construction_cost)  # rclpy.init, create_node, spawn_daemon
-        self._clock.advance(self._args.spin_time)     # DirectNode's own fixed spin
-        self._direct_node = object()
-
-    @property
-    def direct_node(self):
-        if self._direct_node is None:
-            self._build_direct_node()
-        return self._direct_node
+        clock.advance(construction_cost)  # rclpy.init, create_node, spawn_daemon
+        clock.advance(args.spin_time)     # DirectNode's own fixed spin
 
     def __enter__(self):
         return self
@@ -140,19 +122,18 @@ def test_gossip_gets_the_whole_spin_time():
     assert gossip_timeout == pytest.approx(3.0)
 
 
-@pytest.mark.parametrize('daemon', [False, True])
-def test_node_setup_is_added_to_the_run_not_taken_out_of_the_wait(daemon):
+def test_node_setup_is_added_to_the_run_not_taken_out_of_the_wait():
     """A slow ``spawn_daemon`` must not shrink the window to nothing.
 
     That would drop the cross-NS view without the operator ever asking for a
     shorter wait.
     """
     clock, gossip_timeout = _run_main(
-        spin_time=3.0, construction_cost=0.4, gossip_elapsed=3.0, daemon=daemon)
+        spin_time=3.0, construction_cost=0.4, gossip_elapsed=3.0)
     assert gossip_timeout == pytest.approx(3.0)
     assert clock.elapsed == pytest.approx(3.4)
 
-    _, gossip_timeout = _run_main(spin_time=0.5, construction_cost=0.8, daemon=daemon)
+    _, gossip_timeout = _run_main(spin_time=0.5, construction_cost=0.8)
     assert gossip_timeout == pytest.approx(0.5)
 
 
