@@ -14,7 +14,8 @@
     KUNIT_CASE(test_case_do_exit_with_entry_with_subscriber_reference),                        \
     KUNIT_CASE(test_case_do_exit_with_multi_references_publisher_exit_first),                  \
     KUNIT_CASE(test_case_do_exit_with_multi_references_subscriber_exit_first),                 \
-    KUNIT_CASE(test_case_do_exit_releases_notify_context)
+    KUNIT_CASE(test_case_do_exit_releases_notify_context),                                     \
+    KUNIT_CASE(test_case_do_exit_releases_notify_contexts_of_multiple_subscribers)
 
 void test_case_is_agnocast_pid(struct kunit * test);
 void test_case_do_exit(struct kunit * test);
@@ -33,3 +34,4 @@ void test_case_do_exit_with_entry_with_subscriber_reference(struct kunit * test)
 void test_case_do_exit_with_multi_references_publisher_exit_first(struct kunit * test);
 void test_case_do_exit_with_multi_references_subscriber_exit_first(struct kunit * test);
 void test_case_do_exit_releases_notify_context(struct kunit * test);
+void test_case_do_exit_releases_notify_contexts_of_multiple_subscribers(struct kunit * test);
