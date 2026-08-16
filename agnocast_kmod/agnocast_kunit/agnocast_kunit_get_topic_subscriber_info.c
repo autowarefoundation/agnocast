@@ -37,7 +37,7 @@ void test_case_get_topic_sub_info_one_subscriber(struct kunit * test)
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   // copy_to_user inside agnocast_ioctl_get_topic_subscriber_info returns -EFAULT in KUnit
@@ -93,7 +93,7 @@ void test_case_get_topic_sub_info_selects_by_domain(struct kunit * test)
   setup_process_domain(test, pid_d1, 1);
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid_d1, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   // domain 1: the topic exists -> the subscriber is counted (copy_to_user

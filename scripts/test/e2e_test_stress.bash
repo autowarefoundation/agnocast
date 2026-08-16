@@ -12,11 +12,6 @@ PERCENTAGES=($(seq 5 5 95))   # You can change this
 TIMEOUT_EACH_TEST_CASE_S="60" # You can change this
 
 NUM_PERCENTAGES=${#PERCENTAGES[@]}
-MAX_MQ_NUM=$(cat /proc/sys/fs/mqueue/queues_max)
-declare -a MQ_PERCENT
-for ((i = 0; i < NUM_PERCENTAGES; i++)); do
-    MQ_PERCENT[$i]=$((MAX_MQ_NUM * ${PERCENTAGES[i]} / 100))
-done
 TIMEOUT=680s # based on the measurement time of e2e tests
 
 cleanup() {
@@ -32,19 +27,14 @@ run-stress-ng() {
         echo "Run stress-ng with CPU load ${PERCENTAGES[$1]}%" | sudo tee /dev/kmsg
         stress-ng --cpu $(nproc) --cpu-load ${PERCENTAGES[$1]} --timeout $TIMEOUT &
 
-    elif [ "$1" -lt "$((NUM_PERCENTAGES * 2))" ]; then
+    else
         index=$(($1 - NUM_PERCENTAGES))
         echo "Run stress-ng with VM ${PERCENTAGES[$index]}%" | sudo tee /dev/kmsg
         stress-ng --vm 1 --vm-bytes ${PERCENTAGES[$index]}% --timeout $TIMEOUT &
-
-    else
-        index=$(($1 - NUM_PERCENTAGES * 2))
-        echo "Run stress-ng with MQ ${MQ_PERCENT[$index]}" | sudo tee /dev/kmsg
-        stress-ng --mq ${MQ_PERCENT[$index]} --timeout $TIMEOUT &
     fi
 }
 
-NUM_LOOP=$((NUM_PERCENTAGES * 3)) # cpu_load, vm, mq
+NUM_LOOP=$((NUM_PERCENTAGES * 2)) # cpu_load, vm
 for i in $(seq 1 $NUM_LOOP); do
     echo "============================================================================" | sudo tee /dev/kmsg
     echo "============================ Outer Loop $i / $NUM_LOOP ============================" | sudo tee /dev/kmsg

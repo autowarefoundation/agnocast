@@ -19,7 +19,6 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace
@@ -51,14 +50,7 @@ void release_subscriber_reference(const std::string &, const topic_local_id_t, c
 {
 }
 
-mqd_t open_mq_for_subscription(
-  const std::string &, const topic_local_id_t, std::pair<mqd_t, std::string> & mq_subscription)
-{
-  mq_subscription = std::make_pair(static_cast<mqd_t>(-1), std::string{});
-  return -1;
-}
-
-void remove_mq(const std::pair<mqd_t, std::string> &)
+void close_notify_eventfd(int)
 {
 }
 
