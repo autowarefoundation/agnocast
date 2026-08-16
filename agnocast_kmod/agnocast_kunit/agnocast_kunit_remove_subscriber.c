@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_eventfd.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -16,8 +17,6 @@ static const bool QOS_IS_RELIABLE = true;
 static const bool IS_TAKE_SUB = false;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const bool IS_BRIDGE = false;
-
-static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
@@ -46,7 +45,7 @@ static topic_local_id_t setup_one_subscriber(struct kunit * test, const pid_t su
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -63,8 +62,7 @@ static uint64_t setup_one_entry(
 {
   union ioctl_publish_msg_args publish_msg_args;
   int ret = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
-    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, &publish_msg_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_TRUE(
@@ -219,4 +217,34 @@ void test_case_remove_subscriber_shared_ref_gc(struct kunit * test)
   agnocast_ioctl_remove_subscriber(TOPIC_NAME, current->nsproxy->ipc_ns, sub2_id);
   KUNIT_EXPECT_FALSE(
     test, agnocast_is_in_topic_entries(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id));
+}
+
+// The eventfd context acquired at registration must be released here, otherwise a subscriber that
+// unregisters cleanly leaks it for the lifetime of the module.
+void test_case_remove_subscriber_releases_notify_context(struct kunit * test)
+{
+  // Arrange
+  agnocast_kunit_eventfd_reset();
+  const pid_t subscriber_pid = PID_BASE;
+  const int eventfd = 0;
+  setup_one_process(test, subscriber_pid);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    eventfd, &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
+
+  // Act
+  ret = agnocast_ioctl_remove_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+  KUNIT_ASSERT_NOT_NULL(test, slot);
+  KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }

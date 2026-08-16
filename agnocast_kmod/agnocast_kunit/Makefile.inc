@@ -8,6 +8,7 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_publish_msg.o \
   agnocast_kunit_receive_msg.o \
   agnocast_kunit_take_msg.o \
+  agnocast_kunit_get_exit_process.o \
   agnocast_kunit_get_publisher_num.o \
   agnocast_kunit_get_publisher_qos.o \
   agnocast_kunit_get_subscriber_num.o \
@@ -26,6 +27,8 @@ KUNIT_TEST_OBJS := \
   agnocast_kunit_check_and_request_bridge_shutdown.o \
   agnocast_kunit_get_topic_subscriber_info.o \
   agnocast_kunit_get_topic_publisher_info.o \
-  agnocast_kunit_init_memory_allocator.o
+  agnocast_kunit_init_memory_allocator.o \
+  agnocast_kunit_eventfd.o \
+  agnocast_kunit_exit_free_data.o
 
 agnocast_kunit-objs += $(addprefix agnocast_kunit/, $(KUNIT_TEST_OBJS))

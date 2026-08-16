@@ -1,9 +1,8 @@
 #include "agnocast/agnocast.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
+#include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
 #include <dlfcn.h>
 #include <strings.h>
@@ -33,23 +32,38 @@ int agnocast_fd = -1;
 std::vector<int> shm_fds;
 std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
-// mmap_mtx: Prevents a race condition and segfault between two threads
-// in a multithreaded executor using the same mqueue_fd.
+// mmap_mtx serves two distinct purposes. Both require it to be held across the whole
+// receive/take ioctl *and* the shared-memory mapping that follows it, so it must stay
+// process-global and must not be narrowed to per-subscription or per-executor scope.
+//
+// (1) Prevents a race condition and segfault between two threads
+// in a multithreaded executor using the same eventfd.
 //
 // Race Scenario:
 // 1. Thread 1 (T1):
-//    - Calls epoll_wait(), mq_receive(), then ioctl(RECEIVE_CMD), initially obtaining
+//    - Calls epoll_wait(), reads the eventfd, then ioctl(RECEIVE_CMD), initially obtaining
 //      publisher info (PID, shared memory address `shm_addr`).
 //    - Critical: OS context switch occurs *after* ioctl() but *before* T1 fully
 //      processes/maps `shm_addr`.
 // 2. Thread 2 (T2):
-//    - Calls epoll_wait(), mq_receive(), then ioctl(RECEIVE_CMD) on the same mqueue_fd,
+//    - Calls epoll_wait(), reads the eventfd, then ioctl(RECEIVE_CMD) on the same eventfd,
 //      but does *not* receive publisher info (assuming it's already set up).
 //    - Proceeds to a callback which attempts to use `shm_addr`, leading to a SEGFAULT.
 //
 // Root Cause: T2's callback uses `shm_addr` that T1 fetched but hadn't initialized/mapped yet.
 // This mutex ensures atomicity for T1's critical section: from ioctl fetching publisher
 // info through to completing shared memory setup.
+//
+// (2) Serializes RECEIVE_CMD/TAKE_CMD process-wide, which the kernel module depends on.
+// agnocast_ioctl_receive_msg and agnocast_ioctl_take_msg take only a *read* lock on the topic, so
+// the kernel lets receives on one topic run concurrently and relies on this mutex to keep two of
+// them from overlapping within one process. That matters most under a Reentrant callback group,
+// where one subscription's callback runs on several threads at once: two concurrent calls for the
+// same subscriber would read the same sub_info->latest_received_entry_id and walk the same
+// entries, and the loser would fail the ioctl with -EALREADY, which every call site below treats
+// as fatal.
+// RELEASE_SUB_REF_CMD deliberately stays outside this mutex, to keep the ipc_shared_ptr
+// destructor path from contending on the receive fast path.
 
 void * map_area(
   const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)
@@ -158,13 +172,13 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
 initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_performance_bridge_manager = true;
+  add_process_args.is_bridge_manager = true;
   add_process_args.domain_id = get_ros_domain_id();
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
-  if (add_process_args.ret_performance_bridge_daemon_exist) {
+  if (add_process_args.ret_bridge_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
   }
@@ -184,18 +198,11 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 
 void poll_for_unlink()
 {
-  std::vector<exit_subscription_mq_info> mq_info_buf(MAX_SUBSCRIPTION_NUM_PER_PROCESS);
-
   while (true) {
     sleep(1);
 
     struct ioctl_get_exit_process_args get_exit_process_args = {};
     do {
-      get_exit_process_args = {};
-      get_exit_process_args.subscription_mq_info_buffer_addr =
-        reinterpret_cast<uint64_t>(mq_info_buf.data());
-      get_exit_process_args.subscription_mq_info_buffer_size =
-        static_cast<uint32_t>(mq_info_buf.size());
       if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
@@ -205,15 +212,6 @@ void poll_for_unlink()
       if (get_exit_process_args.ret_pid > 0) {
         const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
         shm_unlink(shm_name.c_str());
-
-        // Unlink subscription MQs that the exited process owned
-        for (uint32_t i = 0; i < get_exit_process_args.ret_subscription_mq_info_num; i++) {
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-          const std::string topic_name(mq_info_buf[i].topic_name);
-          const std::string sub_mq_name =
-            create_mq_name_for_agnocast_publish(topic_name, mq_info_buf[i].subscriber_id);
-          mq_unlink(sub_mq_name.c_str());
-        }
       }
     } while (get_exit_process_args.ret_pid > 0);
 
@@ -230,7 +228,7 @@ void poll_for_bridge_manager()
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
-    PerformanceBridgeManager manager;
+    BridgeManager manager;
     manager.run();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "BridgeManager crashed: %s", e.what());
@@ -507,7 +505,7 @@ struct initialize_agnocast_result initialize_agnocast(
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
-  if (bridge_mode == BridgeMode::On && !add_process_args.ret_performance_bridge_daemon_exist) {
+  if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
 

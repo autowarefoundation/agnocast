@@ -38,7 +38,7 @@ struct ioctl_get_version_args
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    bool is_bridge_manager;
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -46,7 +46,7 @@ union ioctl_add_process_args {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
 };
@@ -62,14 +62,11 @@ union ioctl_add_subscriber_args {
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    int32_t eventfd;  // eventfd created by userspace, passed to the kernel for publish notification
   };
   struct
   {
     topic_local_id_t ret_id;
-    // Topic name to use for the publish-notification MQ. Equal to the requested topic for a plain
-    // topic, but for a domain-bridged (incl. renamed) topic it is the pair's canonical name, so a
-    // publisher and a renamed subscriber that share one topic_struct derive the same MQ name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 
@@ -85,8 +82,6 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
-    // See ioctl_add_subscriber_args::ret_mq_topic_name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 
@@ -124,16 +119,10 @@ union ioctl_publish_msg_args {
     struct name_info topic_name;
     topic_local_id_t publisher_id;
     uint64_t msg_virtual_address;
-    // Unlike ret_* fields which are returned via the union copy, subscriber IDs are written
-    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
-    // remains valid until the ioctl returns.
-    uint64_t subscriber_ids_buffer_addr;
-    uint32_t subscriber_ids_buffer_size;
   };
   struct
   {
     int64_t ret_entry_id;
-    uint32_t ret_subscriber_num;
     uint32_t ret_released_num;
     uint64_t ret_released_addrs[MAX_RELEASE_NUM];
   };
@@ -182,28 +171,10 @@ union ioctl_get_publisher_num_args {
   };
 };
 
-/* Max subscription MQ info entries buffered per process during exit cleanup.
- * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
- * These entries live in kernel memory from process exit until the daemon polls them (typically
- * ~1s). If the daemon is dead, they persist until module unload — but that scenario already leaves
- * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
-
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -332,7 +303,7 @@ struct ioctl_add_domain_bridge_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -430,7 +401,7 @@ int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
+  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
@@ -448,8 +419,7 @@ int agnocast_ioctl_receive_msg(
 
 int agnocast_ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
-  uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret);
+  const uint64_t msg_virtual_address, union ioctl_publish_msg_args * ioctl_ret);
 
 int agnocast_ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
@@ -458,7 +428,7 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
@@ -538,14 +508,12 @@ int agnocast_ioctl_add_discovery_agent(
 int agnocast_ioctl_discovery_agent_exists(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
 
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
-  pid_t * out_global_pid);
+// Returns the exited process's global pid, or -1 if the namespace has none.
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
-  bool * ret_daemon_should_exit);
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 

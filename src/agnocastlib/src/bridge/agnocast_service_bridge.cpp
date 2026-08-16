@@ -266,9 +266,9 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
   }
 
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_r2a_service_bridge(
+      entity = deps.bridge_loader->create_r2a_service_bridge(
         deps.container_node, service_name_, *service_type_, service_qos);
     } catch (const std::exception & e) {
       set_error_string(e.what());
@@ -309,9 +309,9 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 {
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_a2r_service_bridge(
+      entity = deps.bridge_loader->create_a2r_service_bridge(
         deps.container_node, service_name_, *service_type_, rclcpp::ServicesQoS());
     } catch (const std::exception & e) {
       set_error_string(e.what());
@@ -376,7 +376,7 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -406,7 +406,7 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -451,7 +451,7 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
   }
 
   if (!agno_client_exists()) {
-    RCLCPP_WARN(
+    RCLCPP_DEBUG(
       deps.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
       get_error_string());
 
