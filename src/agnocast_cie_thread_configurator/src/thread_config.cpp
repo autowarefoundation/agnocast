@@ -86,7 +86,7 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
 {
   const YAML::Node affinity = entry["affinity"];
   std::vector<int> cpus;
-  // Absent or null keeps its meaning of "do not manage affinity".
+  // Absent or null means "do not manage affinity".
   if (!affinity || affinity.IsNull()) {
     return cpus;
   }

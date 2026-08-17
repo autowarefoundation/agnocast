@@ -586,8 +586,8 @@ non_ros_threads:
 
 TEST(ParseYaml, NormalizesAffinityToSortedUnique)
 {
-  // Only CPUs 0 and 1 are used so the test also passes on small CI machines
-  // now that parse_affinity bounds values by the actual CPU count.
+  // parse_affinity bounds values by the machine CPU count, so only CPUs 0
+  // and 1 are used to keep this test valid on small CI machines.
   auto y = yaml_from_str(R"YAML(
 callback_groups:
   - id: my_cbg
@@ -679,8 +679,8 @@ TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
 
 TEST(ParseYaml, RejectsScalarAffinity)
 {
-  // A scalar iterates zero times, so before validation these were silently
-  // treated as "no affinity".
+  // A scalar iterates zero times and would otherwise silently mean
+  // "no affinity".
   for (const char * bad_affinity : {"2", "\"0-3\""}) {
     auto y = yaml_from_str(("callback_groups: []\n"
                             "non_ros_threads:\n"
