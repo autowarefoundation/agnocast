@@ -367,7 +367,7 @@ NodeParameters::NodeParameters(
   // but did not get declared explicitly by this point.
   if (automatically_declare_parameters_from_overrides) {
     local_perform_automatically_declare_parameters_from_overrides(
-      this->get_parameter_overrides(),
+      parameter_overrides_,
       [this](const std::string & name) { return NodeParameters::has_parameter(name); },
       [this](
         const std::string & name, const rclcpp::ParameterValue & default_value,
