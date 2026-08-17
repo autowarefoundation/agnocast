@@ -90,8 +90,6 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
   if (!affinity || affinity.IsNull()) {
     return cpus;
   }
-  // A scalar ("affinity: 2" or the kernel cpu-list string "0-3") iterates
-  // zero times, which would silently drop the user's setting.
   if (!affinity.IsSequence()) {
     throw std::runtime_error(
       "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
