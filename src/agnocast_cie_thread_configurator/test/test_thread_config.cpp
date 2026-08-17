@@ -1,6 +1,7 @@
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
 #include <gtest/gtest.h>
+#include <sched.h>
 #include <yaml-cpp/yaml.h>
 
 #include <stdexcept>
@@ -630,14 +631,15 @@ TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
 {
   // CPU_SET(3) would silently ignore both, shrinking the mask without any
   // error report.
-  for (const char * bad_affinity : {"[-1]", "[2, 1024]"}) {
+  for (const std::string & bad_affinity :
+       {std::string("[-1]"), "[2, " + std::to_string(CPU_SETSIZE) + "]"}) {
     auto y = yaml_from_str(("callback_groups:\n"
                             "  - id: my_cbg\n"
                             "    domain_id: 0\n"
                             "    policy: SCHED_FIFO\n"
                             "    priority: 50\n"
                             "    affinity: " +
-                            std::string(bad_affinity) +
+                            bad_affinity +
                             "\n"
                             "non_ros_threads: []\n")
                              .c_str());
@@ -645,6 +647,25 @@ TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
     EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
       << "affinity=" << bad_affinity;
   }
+}
+
+TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
+{
+  // Pins the accept side of the [0, CPU_SETSIZE) boundary.
+  auto y = yaml_from_str(("callback_groups:\n"
+                          "  - id: my_cbg\n"
+                          "    domain_id: 0\n"
+                          "    policy: SCHED_FIFO\n"
+                          "    priority: 50\n"
+                          "    affinity: [" +
+                          std::to_string(CPU_SETSIZE - 1) +
+                          "]\n"
+                          "non_ros_threads: []\n")
+                           .c_str());
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_EQ(cb[0].affinity, (std::vector<int>{CPU_SETSIZE - 1}));
 }
 
 TEST(ParseYaml, RejectsScalarAffinity)

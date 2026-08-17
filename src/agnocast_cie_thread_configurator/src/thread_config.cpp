@@ -97,7 +97,9 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
     try {
       cpu = cpu_node.as<int>();
     } catch (const YAML::Exception &) {
-      throw std::runtime_error("'affinity' must contain only integers for " + entry_desc);
+      throw std::runtime_error(
+        "'affinity' must contain only integers for " + entry_desc + ", got '" +
+        (cpu_node.IsScalar() ? cpu_node.Scalar() : std::string("<non-scalar>")) + "'");
     }
     if (cpu < 0 || cpu >= CPU_SETSIZE) {
       throw std::runtime_error(
