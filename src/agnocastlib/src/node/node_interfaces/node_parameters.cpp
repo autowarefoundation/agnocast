@@ -364,7 +364,7 @@ NodeParameters::NodeParameters(
     resolve_parameter_overrides(combined_name, parameter_overrides, local_args, global_args);
 
   // If asked, initialize any parameters that ended up in the initial parameter values,
-  // but did not get declared explcitily by this point.
+  // but did not get declared explicitly by this point.
   if (automatically_declare_parameters_from_overrides) {
     local_perform_automatically_declare_parameters_from_overrides(
       this->get_parameter_overrides(),
