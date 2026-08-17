@@ -4,5 +4,6 @@
     <node pkg="agnocast_sample_application" exec="no_rclcpp_server" name="no_rclcpp_server_node" output="screen">
         <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
         <param name="use_sim_time" value="$(var use_sim_time)" />
+        <param name="qos.depth" value="10" />
     </node>
 </launch>

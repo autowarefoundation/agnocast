@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if ! grep -q "^agnocast " /proc/modules; then
+    echo "ERROR: agnocast kernel module is not loaded." >&2
+    echo "Load it first: sudo insmod agnocast_kmod/agnocast.ko" >&2
+    exit 1
+fi
+
 # Signal handling: kill all descendant processes on exit
 cleanup() {
     trap - SIGINT SIGTERM SIGHUP
@@ -80,7 +86,7 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
-CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"standard (default)"}
+CURRENT_BRIDGE_DISPLAY=${LOWER_BRIDGE_MODE:-"on (default)"}
 echo "Bridge mode: $CURRENT_BRIDGE_DISPLAY" | sudo tee /dev/kmsg
 
 # Run test
@@ -124,6 +130,22 @@ generate_test_id() {
     echo "${pub_type}_${launch_order}_pub_depth${pub_qos_depth}_${pub_tl}_sub_depth${sub_qos_depth}_${sub_tl}_${sub_type}"
 }
 
+# When bridge is OFF, only test Agnocast publisher
+if [ "$BRIDGE_OFF" = true ]; then
+    USE_AGNOCAST_PUB=(true)
+else
+    USE_AGNOCAST_PUB=(true false)
+fi
+
+LAUNCH_PUB_BEFORE_SUB=(true false)
+PUB_QOS_DEPTH=(1 10)
+PUB_TRANSIENT_LOCAL=(true false)
+SUB_QOS_DEPTH=(1 10)
+SUB_TRANSIENT_LOCAL=(true false)
+USE_TAKE_SUB=(true false)
+
+TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
+
 FAILURE_COUNT=0
 if [ "$RUN_SINGLE" = true ]; then
     show_config
@@ -134,22 +156,6 @@ if [ "$RUN_SINGLE" = true ]; then
     fi
 elif [ "$PARALLEL" -gt 1 ]; then
     # ===== Parallel execution mode =====
-    # When bridge is OFF, only test Agnocast publisher
-    if [ "$BRIDGE_OFF" = true ]; then
-        USE_AGNOCAST_PUB=(true)
-    else
-        USE_AGNOCAST_PUB=(true false)
-    fi
-
-    LAUNCH_PUB_BEFORE_SUB=(true false)
-    PUB_QOS_DEPTH=(1 10)
-    PUB_TRANSIENT_LOCAL=(true false)
-    SUB_QOS_DEPTH=(1 10)
-    SUB_TRANSIENT_LOCAL=(true false)
-    USE_TAKE_SUB=(true false)
-
-    TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
-
     LOG_DIR="/tmp/e2e_1to1_logs"
     rm -rf "$LOG_DIR"
     mkdir -p "$LOG_DIR"
@@ -290,22 +296,7 @@ WORKER_EOF
     fi
 else
     # ===== Sequential execution mode (original behavior) =====
-    # When bridge is OFF, only test Agnocast publisher
-    if [ "$BRIDGE_OFF" = true ]; then
-        USE_AGNOCAST_PUB=(true)
-    else
-        USE_AGNOCAST_PUB=(true false)
-    fi
-
-    LAUNCH_PUB_BEFORE_SUB=(true false)
-    PUB_QOS_DEPTH=(1 10)
-    PUB_TRANSIENT_LOCAL=(true false)
-    SUB_QOS_DEPTH=(1 10)
-    SUB_TRANSIENT_LOCAL=(true false)
-    USE_TAKE_SUB=(true false)
-
     COUNT=0
-    TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
 
     for use_agnocast_pub in ${USE_AGNOCAST_PUB[@]}; do
         for launch_pub_before_sub in ${LAUNCH_PUB_BEFORE_SUB[@]}; do

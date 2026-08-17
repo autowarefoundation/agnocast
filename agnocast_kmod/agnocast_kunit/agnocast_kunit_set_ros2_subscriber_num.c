@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_set_ros2_subscriber_num.h"
 
 #include "../agnocast.h"
@@ -16,13 +17,13 @@ static void setup_one_subscriber(struct kunit * test, char * topic_name)
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
-  int ret1 =
-    agnocast_ioctl_add_process(subscriber_pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret1 = agnocast_ioctl_add_process(
+    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, -1,
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret1, 0);

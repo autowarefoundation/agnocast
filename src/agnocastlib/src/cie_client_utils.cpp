@@ -88,6 +88,10 @@ create_rclcpp_client_publisher()
   // Disable global arguments so that global "__node" remapping cannot override this name
   // and cause duplicate node names for these per-client nodes.
   options.use_global_arguments(false);
+  options.start_parameter_services(false);
+  options.start_parameter_event_publisher(false);
+  options.enable_rosout(false);
+  options.use_clock_thread(false);
   auto node = std::make_shared<rclcpp::Node>(
     "client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator", options);
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
@@ -103,6 +107,10 @@ create_agnocast_client_publisher()
   // Disable global arguments so that global "__node" remapping cannot override this name
   // and cause duplicate node names for these per-client nodes.
   options.use_global_arguments(false);
+  options.start_parameter_services(false);
+  options.start_parameter_event_publisher(false);
+  options.enable_rosout(false);
+  options.use_clock_thread(false);
   auto node = std::make_shared<agnocast::Node>(
     "agnocast_client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator",
     options);
@@ -110,7 +118,7 @@ create_agnocast_client_publisher()
     // Note: agnocast Publisher does not support keep_all(), so KeepLast is used here
     // (unlike the rclcpp variant which uses keep_all()).
     "/agnocast_cie_thread_configurator/callback_group_info",
-    rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).transient_local());
+    rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).reliable().transient_local());
   return publisher;
 }
 

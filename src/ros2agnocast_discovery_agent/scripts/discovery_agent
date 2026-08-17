@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Deprecated alias of `agnocast_discovery_agent`, kept so existing callers keep working.
+
+Installed to `lib/<pkg>/discovery_agent` for `ros2 run` (and as a `bin/` console script),
+alongside the new name. Warns on stderr and then runs the agent.
+"""
+import sys
+
+from ros2agnocast_discovery_agent.agent import main_deprecated_alias
+
+if __name__ == '__main__':
+    sys.exit(main_deprecated_alias(sys.argv))

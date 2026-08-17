@@ -1,8 +1,8 @@
 import os
+import time
 import unittest
 
 import launch_testing
-import launch_testing.asserts
 import launch_testing.markers
 import yaml
 from launch import LaunchDescription
@@ -26,7 +26,7 @@ EXPECT_ROS2_SUB_NUM: int
 
 BRIDGE_OFF = check_bridge_mode()
 TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
-TIMEOUT = os.environ.get('STRESS_TEST_TIMEOUT')
+TIMEOUT = float(os.environ.get('STRESS_TEST_TIMEOUT', 0.0))
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
 
 
@@ -64,7 +64,13 @@ def calc_action_delays(config: dict) -> tuple:
     unit_delay = 1.0
     pub_delay = 0.0 if config['launch_pub_before_sub'] else unit_delay
     sub_delay = 0.01 * EXPECT_INIT_PUB_NUM + unit_delay if config['launch_pub_before_sub'] else 0.0
-    ready_delay = float(TIMEOUT) if TIMEOUT else pub_delay + sub_delay + 10.0
+    # ReadyToTest must fire within launch_testing's ~15s limit; the stress
+    # soak is done in Test1To1.setUpClass.
+    ready_delay = pub_delay + sub_delay + 10.0
+    assert ready_delay < 15.0, (
+        f'ready_delay={ready_delay:.2f}s exceeds launch_testing\'s ~15s cap; '
+        f'reduce pub_qos_depth or the soak buffer'
+    )
     return pub_delay, sub_delay, ready_delay
 
 
@@ -259,17 +265,24 @@ def generate_test_description():
 
 class Test1To1(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        # Stress soak: forever=True nodes keep running while we sleep here.
+        if FOREVER:
+            time.sleep(TIMEOUT)
+
     def test_pub(self, proc_output, test_pub):
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_pub) as cm:
-            proc_output = "".join(cm._output)
+        output_text = "".join(
+            output.text.decode('utf-8') for output in proc_output[test_pub]
+        )
 
-            total_expected_count = EXPECT_INIT_PUB_NUM + EXPECT_PUB_NUM
-            self.assertGreater(total_expected_count, 0, "Expected publisher count must be greater than 0.")
+        total_expected_count = EXPECT_INIT_PUB_NUM + EXPECT_PUB_NUM
+        self.assertGreater(total_expected_count, 0, "Expected publisher count must be greater than 0.")
 
-            # The display order is not guaranteed, so the message order is not checked.
-            for i in range(total_expected_count):
-                self.assertEqual(proc_output.count(f"Publishing {i}."), 1)
-            self.assertEqual(proc_output.count("All messages published. Shutting down."), 1)
+        # The display order is not guaranteed, so the message order is not checked.
+        for i in range(total_expected_count):
+            self.assertEqual(output_text.count(f"Publishing {i}."), 1)
+        self.assertEqual(output_text.count("All messages published. Shutting down."), 1)
 
     # Bridges's Behavior Analysis: A2R vs R2A (Transient Local)
     # Both scenarios ultimately follow ROS 2 (DDS) semantics, but the burst location differs.
@@ -286,94 +299,96 @@ class Test1To1(unittest.TestCase):
     #        The Agnocast Sub sees this as a high-speed stream of "fresh" messages, not history lookup.
     # -> Agnocast Sub receives a "fast replay" of the history.
     def test_sub(self, proc_output, test_sub):
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_sub) as cm:
-            output_str = "".join(cm._output)
+        output_str = "".join(
+            output.text.decode('utf-8') for output in proc_output[test_sub]
+        )
 
-            start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
-            total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
-            
-            if total_expected_count > 0:
-                if USE_AGNOCAST_PUB:
-                    # ---------------------------------------------------------
-                    # Pattern A: Agnocast Publisher
-                    # ---------------------------------------------------------
-                    # Agnocast uses a pull mechanism via shared memory.
-                    # The subscriber strictly respects the history depth, ensuring deterministic behavior.
-                    # We verify that exactly the expected sequence is received.
-                    for i in range(start_index, start_index + total_expected_count):
-                        self.assertEqual(output_str.count(f"Receiving {i}."), 1)
-                    self.assertEqual(output_str.count("All messages received. Shutting down."), 1)
-                else:
-                    # ---------------------------------------------------------
-                    # Pattern B: ROS 2 Publisher (R2A Bridge [Case 2])
-                    # ---------------------------------------------------------
-                    # [Context: ROS 2 Transient Local behavior with depth mismatch]
-                    # ROS 2 (DDS) bursts history data. If the Subscriber's depth is smaller than the Publisher's,
-                    # the receive buffer in the Bridge may be overwritten before processing.
-                    #
-                    # 1. History (Init) Check: Fuzzy
-                    # We expect to receive *at least* the minimum required history.
-                    actual_init_count = sum(
-                        1 for i in range(EXPECT_INIT_PUB_NUM)
-                        if output_str.count(f"Receiving {i}.") > 0
-                    )
-                    self.assertGreaterEqual(actual_init_count, EXPECT_INIT_SUB_NUM)
-                    
-                    # 2. Live Message Check: Strict
-                    # New messages arriving after connection should be received reliably.
-                    for i in range(EXPECT_INIT_PUB_NUM, EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM):
-                        self.assertEqual(output_str.count(f"Receiving {i}."), 1)
-                    self.assertEqual(output_str.count("All messages received. Shutting down."), 1)
-            else:
-                # ---------------------------------------------------------
-                # Pattern C: Incompatible QoS (Connection Rejected)
-                # ---------------------------------------------------------
-                # The Bridge's ROS 2 Subscriber inherits settings.
-                # Violation of RxO rules (e.g., Volatile Pub vs. Transient Local Sub) prevents connection.
-                self.assertEqual(output_str.count("Receiving"), 0)
-                
-                # Scan full log for the incompatibility warning.
-                full_log = "".join([
-                    line.text.decode() if isinstance(line.text, bytes) else line.text
-                    for line in proc_output
-                ])
-                self.assertIn("incompatible QoS", full_log)
+        start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
+        total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
 
-    def test_ros2_sub(self, proc_output, test_ros2_sub):
-        with launch_testing.asserts.assertSequentialStdout(proc_output, process=test_ros2_sub) as cm:
-            output_str = "".join(cm._output)
-
-            total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
-            if total_expected_count > 0:
+        if total_expected_count > 0:
+            if USE_AGNOCAST_PUB:
                 # ---------------------------------------------------------
-                # Pattern B: Agnocast Publisher (A2R Bridge [Case 1]) or ROS 2 Publisher
+                # Pattern A: Agnocast Publisher
                 # ---------------------------------------------------------
-                # Similar to the Bridge case, standard ROS 2 subscribers are subject to DDS burst behavior
-                # when Transient Local is used with small depth (Depth Mismatch).
-                
-                # 1. History (Init) Check: Fuzzy
-                actual_init_count = sum(
-                    1 for i in range(EXPECT_INIT_PUB_NUM)
-                    if output_str.count(f"Receiving {i}.") > 0
-                )
-                self.assertGreaterEqual(actual_init_count, EXPECT_INIT_ROS2_SUB_NUM)
-                
-                # 2. Live Message Check: Strict
-                for i in range(EXPECT_INIT_PUB_NUM, EXPECT_INIT_PUB_NUM + EXPECT_ROS2_SUB_NUM):
+                # Agnocast uses a pull mechanism via shared memory.
+                # The subscriber strictly respects the history depth, ensuring deterministic behavior.
+                # We verify that exactly the expected sequence is received.
+                for i in range(start_index, start_index + total_expected_count):
                     self.assertEqual(output_str.count(f"Receiving {i}."), 1)
                 self.assertEqual(output_str.count("All messages received. Shutting down."), 1)
             else:
                 # ---------------------------------------------------------
-                # Pattern C: Incompatible QoS (Connection Rejected)
+                # Pattern B: ROS 2 Publisher (R2A Bridge [Case 2])
                 # ---------------------------------------------------------
-                self.assertEqual(output_str.count("Receiving"), 0)
-                
-                # Scan full log for the incompatibility warning.
-                full_log = "".join([
-                    line.text.decode() if isinstance(line.text, bytes) else line.text
-                    for line in proc_output
-                ])
-                self.assertIn("incompatible QoS", full_log)
+                # [Context: ROS 2 Transient Local behavior with depth mismatch]
+                # ROS 2 (DDS) bursts history data. If the Subscriber's depth is smaller than the Publisher's,
+                # the receive buffer in the Bridge may be overwritten before processing.
+                #
+                # 1. History (Init) Check: Fuzzy
+                # We expect to receive *at least* the minimum required history.
+                actual_init_count = sum(
+                    1 for i in range(EXPECT_INIT_PUB_NUM)
+                    if output_str.count(f"Receiving {i}.") > 0
+                )
+                self.assertGreaterEqual(actual_init_count, EXPECT_INIT_SUB_NUM)
+
+                # 2. Live Message Check: Strict
+                # New messages arriving after connection should be received reliably.
+                for i in range(EXPECT_INIT_PUB_NUM, EXPECT_INIT_PUB_NUM + EXPECT_SUB_NUM):
+                    self.assertEqual(output_str.count(f"Receiving {i}."), 1)
+                self.assertEqual(output_str.count("All messages received. Shutting down."), 1)
+        else:
+            # ---------------------------------------------------------
+            # Pattern C: Incompatible QoS (Connection Rejected)
+            # ---------------------------------------------------------
+            # The Bridge's ROS 2 Subscriber inherits settings.
+            # Violation of RxO rules (e.g., Volatile Pub vs. Transient Local Sub) prevents connection.
+            self.assertEqual(output_str.count("Receiving"), 0)
+
+            # Scan full log for the incompatibility warning.
+            full_log = "".join([
+                line.text.decode() if isinstance(line.text, bytes) else line.text
+                for line in proc_output
+            ])
+            self.assertIn("incompatible QoS", full_log)
+
+    def test_ros2_sub(self, proc_output, test_ros2_sub):
+        output_str = "".join(
+            output.text.decode('utf-8') for output in proc_output[test_ros2_sub]
+        )
+
+        total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
+        if total_expected_count > 0:
+            # ---------------------------------------------------------
+            # Pattern B: Agnocast Publisher (A2R Bridge [Case 1]) or ROS 2 Publisher
+            # ---------------------------------------------------------
+            # Similar to the Bridge case, standard ROS 2 subscribers are subject to DDS burst behavior
+            # when Transient Local is used with small depth (Depth Mismatch).
+
+            # 1. History (Init) Check: Fuzzy
+            actual_init_count = sum(
+                1 for i in range(EXPECT_INIT_PUB_NUM)
+                if output_str.count(f"Receiving {i}.") > 0
+            )
+            self.assertGreaterEqual(actual_init_count, EXPECT_INIT_ROS2_SUB_NUM)
+
+            # 2. Live Message Check: Strict
+            for i in range(EXPECT_INIT_PUB_NUM, EXPECT_INIT_PUB_NUM + EXPECT_ROS2_SUB_NUM):
+                self.assertEqual(output_str.count(f"Receiving {i}."), 1)
+            self.assertEqual(output_str.count("All messages received. Shutting down."), 1)
+        else:
+            # ---------------------------------------------------------
+            # Pattern C: Incompatible QoS (Connection Rejected)
+            # ---------------------------------------------------------
+            self.assertEqual(output_str.count("Receiving"), 0)
+
+            # Scan full log for the incompatibility warning.
+            full_log = "".join([
+                line.text.decode() if isinstance(line.text, bytes) else line.text
+                for line in proc_output
+            ])
+            self.assertIn("incompatible QoS", full_log)
 
 if BRIDGE_OFF:
     del Test1To1.test_ros2_sub

@@ -11,7 +11,8 @@
 
 extern "C" {
 
-struct topic_info_ret * get_agnocast_sub_nodes(const char * topic_name, int * topic_info_ret_count)
+struct topic_info_ret * get_agnocast_sub_nodes(
+  const char * topic_name, int * topic_info_ret_count, uint32_t domain_id)
 {
   *topic_info_ret_count = 0;
 
@@ -39,6 +40,7 @@ struct topic_info_ret * get_agnocast_sub_nodes(const char * topic_name, int * to
   topic_info_args.topic_info_ret_buffer_addr =
     reinterpret_cast<uint64_t>(agnocast_topic_info_ret_buffer);
   topic_info_args.topic_info_ret_buffer_size = MAX_TOPIC_INFO_RET_NUM;
+  topic_info_args.domain_id = domain_id;
   if (ioctl(fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
     perror("AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD failed");
     free(agnocast_topic_info_ret_buffer);
@@ -53,10 +55,12 @@ struct topic_info_ret * get_agnocast_sub_nodes(const char * topic_name, int * to
   }
 
   *topic_info_ret_count = static_cast<int>(topic_info_args.ret_topic_info_ret_num);
+  close(fd);
   return agnocast_topic_info_ret_buffer;
 }
 
-struct topic_info_ret * get_agnocast_pub_nodes(const char * topic_name, int * topic_info_ret_count)
+struct topic_info_ret * get_agnocast_pub_nodes(
+  const char * topic_name, int * topic_info_ret_count, uint32_t domain_id)
 {
   *topic_info_ret_count = 0;
 
@@ -84,6 +88,7 @@ struct topic_info_ret * get_agnocast_pub_nodes(const char * topic_name, int * to
   topic_info_args.topic_info_ret_buffer_addr =
     reinterpret_cast<uint64_t>(agnocast_topic_info_ret_buffer);
   topic_info_args.topic_info_ret_buffer_size = MAX_TOPIC_INFO_RET_NUM;
+  topic_info_args.domain_id = domain_id;
   if (ioctl(fd, AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD, &topic_info_args) < 0) {
     perror("AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD failed");
     free(agnocast_topic_info_ret_buffer);
@@ -98,6 +103,7 @@ struct topic_info_ret * get_agnocast_pub_nodes(const char * topic_name, int * to
   }
 
   *topic_info_ret_count = static_cast<int>(topic_info_args.ret_topic_info_ret_num);
+  close(fd);
   return agnocast_topic_info_ret_buffer;
 }
 

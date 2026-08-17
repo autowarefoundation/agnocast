@@ -1,68 +1,80 @@
 #pragma once
 
+#include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
+#include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
-#include "agnocast_cie_config_msgs/msg/non_ros_thread_info.hpp"
+#include "agnocast_cie_config_msgs/srv/reapply_config.hpp"
 
+#include <atomic>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 class ThreadConfiguratorNode : public rclcpp::Node
 {
-  struct ThreadConfig
-  {
-    std::string thread_str;  // callback_group_id or thread_name
-    size_t domain_id;
-    int64_t thread_id = -1;
-    std::vector<int> affinity;
-    std::string policy;
-    int priority;
+  using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
 
-    // For SCHED_DEADLINE
-    unsigned int runtime;
-    unsigned int period;
-    unsigned int deadline;
-
-    bool applied = false;
-  };
+  // Concurrency:
+  // - callback_group_configs_ / id_to_callback_group_config_ /
+  //   node_to_wildcard_config_ (incl. each entry's matched_tids): written by
+  //   the subscription callbacks AND the reapply service handler, all on the
+  //   same SingleThreadedExecutor — no mutex needed.
+  // - non_ros_thread_configs_ / id_to_non_ros_thread_config_: written by both
+  //   the NonRosThreadInfoListener reader thread and the reapply handler;
+  //   all access must hold non_ros_state_mutex_.
+  // - print_all_unapplied(): called only after stop() + executor return, so
+  //   reads need no lock.
 
 public:
-  explicit ThreadConfiguratorNode(const YAML::Node & yaml);
+  explicit ThreadConfiguratorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
   ~ThreadConfiguratorNode();
+  void stop() noexcept;
   void print_all_unapplied();
-  bool has_configured_once() const;
 
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
 private:
+  void validate_hardware_info(const YAML::Node & yaml);
   void validate_rt_throttling(const YAML::Node & yaml);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
-  bool issue_syscalls(const ThreadConfig & config);
+  // thread_id is passed explicitly because a wildcard entry applies to many
+  // threads (one per matched_tids element), not just config.thread_id.
+  bool issue_syscalls(const ThreadConfig & config, int64_t thread_id);
   void callback_group_callback(
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
-  void non_ros_thread_callback(
-    const agnocast_cie_config_msgs::msg::NonRosThreadInfo::SharedPtr msg);
-  void apply_deadline_configs();
+  void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
+
+  void on_reapply_config_request(
+    const std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Request> request,
+    std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Response> response);
 
   std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
   std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
     subs_for_each_domain_;
-  rclcpp::Subscription<agnocast_cie_config_msgs::msg::NonRosThreadInfo>::SharedPtr
-    non_ros_thread_sub_;
+  std::unique_ptr<agnocast_cie_thread_configurator::NonRosThreadInfoListener>
+    non_ros_thread_listener_;
+  rclcpp::Service<agnocast_cie_config_msgs::srv::ReapplyConfig>::SharedPtr reapply_service_;
 
   std::vector<ThreadConfig> callback_group_configs_;
-  // (domain_id, callback_group_id) -> ThreadConfig*
+  // (domain_id, callback_group_id) -> ThreadConfig*, exact entries only
   std::map<std::pair<size_t, std::string>, ThreadConfig *> id_to_callback_group_config_;
+  // (domain_id, wildcard_prefix) -> ThreadConfig*, wildcard ("<node>/*") entries only
+  std::map<std::pair<size_t, std::string>, ThreadConfig *> node_to_wildcard_config_;
 
   std::vector<ThreadConfig> non_ros_thread_configs_;
   // thread_name -> ThreadConfig*
   std::map<std::string, ThreadConfig *> id_to_non_ros_thread_config_;
 
-  int unapplied_num_;
-  int cgroup_num_;
-  bool configured_at_least_once_ = false;
+  std::atomic<int> unapplied_num_{0};
+  std::atomic<int> cgroup_num_{0};
+  std::atomic<bool> configured_at_least_once_{false};
 
-  std::vector<ThreadConfig *> deadline_configs_;
+  const std::string config_file_;
+  const size_t default_domain_id_;
+  std::mutex non_ros_state_mutex_;
 };

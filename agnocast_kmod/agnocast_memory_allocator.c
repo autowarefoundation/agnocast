@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_memory_allocator.h"
 
 #include <linux/mm.h>
@@ -32,7 +33,7 @@ int mempool_size_gb = DEFAULT_MEMPOOL_SIZE_GB;
 module_param(mempool_size_gb, int, 0444);
 MODULE_PARM_DESC(mempool_size_gb, "Default mempool size in GB (default: 16)");
 
-uint64_t mempool_size_bytes = 0;
+uint64_t mempool_size_bytes;
 
 int init_memory_allocator(void)
 {
@@ -69,7 +70,6 @@ int init_memory_allocator(void)
 
   mempool_entries = kvcalloc(mempool_num, sizeof(*mempool_entries), GFP_KERNEL);
   if (!mempool_entries) {
-    pr_err("Agnocast: Failed to allocate mempool_entries array\n");
     return -ENOMEM;
   }
 

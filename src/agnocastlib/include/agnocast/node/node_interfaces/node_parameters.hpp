@@ -18,6 +18,14 @@
 #include <string>
 #include <vector>
 
+namespace agnocast
+{
+
+class Node;
+class ParameterService;
+
+}  // namespace agnocast
+
 namespace agnocast::node_interfaces
 {
 
@@ -32,10 +40,18 @@ public:
   using CallbacksContainerType =
     std::list<rclcpp::node_interfaces::OnSetParametersCallbackHandle::WeakPtr>;
 
+  /// Constructor.
+  /**
+   * If using automatically_declare_parameters_from_overrides, overrides of
+   * get_parameter_overrides(), has_parameter(), declare_parameter() will not be respected.
+   * If this is an issue, pass false for automatically_declare_parameters_from_overrides and
+   * invoke perform_automatically_declare_parameters_from_overrides() manually after construction.
+   */
   explicit NodeParameters(
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base,
     const std::vector<rclcpp::Parameter> & parameter_overrides, const rcl_arguments_t * local_args,
-    bool allow_undeclared_parameters = false);
+    bool use_global_arguments = true, bool allow_undeclared_parameters = false,
+    bool automatically_declare_parameters_from_overrides = false);
 
   virtual ~NodeParameters() = default;
 
@@ -110,7 +126,13 @@ public:
 
   const std::map<std::string, rclcpp::ParameterValue> & get_parameter_overrides() const override;
 
+protected:
+  void perform_automatically_declare_parameters_from_overrides();
+
 private:
+  friend class agnocast::Node;
+  void start_parameter_services(agnocast::Node * node);
+
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base_;
 
   mutable std::recursive_mutex parameters_mutex_;
@@ -126,6 +148,8 @@ private:
   CallbacksContainerType on_parameters_set_callback_container_;
 
   bool allow_undeclared_ = false;
+
+  std::shared_ptr<ParameterService> parameter_service_;
 };
 
 }  // namespace agnocast::node_interfaces

@@ -4,24 +4,30 @@
 class NoRclcppServer : public agnocast::Node
 {
   using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
-  using RequestT = agnocast::Service<ServiceT>::RequestT;
-  using ResponseT = agnocast::Service<ServiceT>::ResponseT;
 
   typename agnocast::Service<ServiceT>::SharedPtr service_;
 
 public:
   explicit NoRclcppServer() : Node("no_rclcpp_server")
   {
+    declare_parameter("qos.depth", rclcpp::ParameterValue(int64_t(1)));
+
+    int64_t qos_depth = 1;
+    get_parameter("qos.depth", qos_depth);
+    rclcpp::QoS qos(qos_depth);
+
     service_ = this->create_service<ServiceT>(
-      "sum_int_array", [this](
-                         const agnocast::ipc_shared_ptr<RequestT> & request,
-                         agnocast::ipc_shared_ptr<ResponseT> & response) {
+      "sum_int_array",
+      [this](
+        const agnocast::ipc_shared_ptr<typename ServiceT::Request> & request,
+        const agnocast::ipc_shared_ptr<typename ServiceT::Response> & response) {
         response->sum = 0;
         for (int64_t value : request->data) {
           response->sum += value;
         }
         RCLCPP_INFO(this->get_logger(), "Sending back response: [%ld]", response->sum);
-      });
+      },
+      qos);
   }
 };
 

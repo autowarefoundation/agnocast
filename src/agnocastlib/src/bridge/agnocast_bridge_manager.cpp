@@ -1,0 +1,670 @@
+
+#include "agnocast/bridge/agnocast_bridge_manager.hpp"
+
+#include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/agnocast_utils.hpp"
+#include "agnocast/bridge/agnocast_bridge_msg.hpp"
+#include "agnocast/bridge/agnocast_bridge_utils.hpp"
+
+#include <sys/prctl.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <string>
+
+namespace agnocast
+{
+
+BridgeManager::BridgeManager()
+: logger_(rclcpp::get_logger("agnocast_bridge_manager")),
+  clock_(std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME)),
+  self_ipc_ns_inode_(get_self_ipc_ns_inode()),
+  event_loop_(logger_),
+  loader_(std::make_shared<BridgeLoader>(logger_))
+{
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
+
+  rclcpp::InitOptions init_options{};
+  init_options.shutdown_on_signal = false;
+  rclcpp::init(0, nullptr, init_options);
+}
+
+BridgeManager::~BridgeManager()
+{
+  request_shutdown();
+
+  // Join before any member is destroyed: the worker uses container_node_,
+  // executor_ and the pending_msgs_ mutex/CV, which live only until this returns.
+  if (worker_thread_.joinable()) {
+    worker_thread_.join();
+  }
+
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
+}
+
+void BridgeManager::run()
+{
+  constexpr int EVENT_LOOP_TIMEOUT_MS = 1000;
+
+  std::string proc_name = "agno_pbr_" + std::to_string(getpid());
+  prctl(PR_SET_NAME, proc_name.c_str(), 0, 0, 0);
+
+  start_ros_execution();
+  start_worker_thread();
+
+  event_loop_.set_message_handler(
+    [this](const void * data, std::size_t size) { this->parse_and_enqueue(data, size); });
+  event_loop_.set_signal_handler([this]() { this->on_signal(); });
+  event_loop_.set_socket_handler([this]() { return this->on_socket_request(); });
+
+  while (!shutdown_requested_) {
+    if (!event_loop_.spin_once(EVENT_LOOP_TIMEOUT_MS)) {
+      RCLCPP_ERROR(logger_, "Event loop spin failed.");
+      request_shutdown();
+      break;
+    }
+  }
+}
+
+void BridgeManager::worker_loop()
+{
+  // Also the maintenance polling interval, not just a safety net for the CV: the
+  // sweep below must run periodically (bridge teardown, daemon lease expiry) even
+  // while no message arrives. Do not drop it in favour of a plain wait().
+  constexpr auto WORKER_TIMEOUT = std::chrono::milliseconds(1000);
+
+  while (!shutdown_requested_) {
+    std::deque<BridgeMsg> batch;
+    {
+      std::unique_lock<std::mutex> lk(pending_msgs_mtx_);
+      pending_msgs_cv_.wait_for(lk, WORKER_TIMEOUT, [this]() {
+        return shutdown_requested_.load(std::memory_order_relaxed) || !pending_msgs_.empty();
+      });
+      batch.swap(pending_msgs_);
+    }
+
+    for (const auto & msg : batch) {
+      if (shutdown_requested_.load(std::memory_order_relaxed)) {
+        break;
+      }
+      dispatch_bridge_message(msg);
+    }
+
+    // Gate the creating steps and re-check between them: each can dlopen a plugin
+    // and build DDS entities, so shutdown may arrive mid-sweep. The reclaiming
+    // steps are left ungated; letting them finish keeps the state consistent.
+    const auto shutting_down = [this]() {
+      return shutdown_requested_.load(std::memory_order_relaxed);
+    };
+
+    if (shutting_down()) {
+      break;
+    }
+    check_and_create_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
+    create_daemon_forced_bridges();
+
+    check_and_remove_pubsub_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
+    check_and_update_service_bridges();
+
+    check_and_remove_request_cache();
+    check_and_request_shutdown();
+  }
+}
+
+void BridgeManager::start_ros_execution()
+{
+  const std::string node_name = get_bridge_node_name(self_ipc_ns_inode_);
+  container_node_ = std::make_shared<rclcpp::Node>(node_name);
+
+  // We must not use single-threaded executors because of how service bridges work. Service bridges
+  // require two callback groups to execute concurrently. If a single-threaded executor is used, it
+  // can deadlock. See the service bridge implementation for details.
+  executor_ = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>();
+  executor_->add_node(container_node_);
+
+  executor_thread_ = std::thread([this]() {
+    try {
+      this->executor_->spin();
+    } catch (const std::exception & e) {
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
+      request_shutdown();
+      RCLCPP_ERROR(logger_, "Executor Thread CRASHED: %s", e.what());
+    }
+  });
+}
+
+void BridgeManager::start_worker_thread()
+{
+  worker_thread_ = std::thread([this]() { this->worker_loop(); });
+}
+
+void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
+{
+  if (shutdown_requested_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
+  if (size < offsetof(BridgeMsg, payload)) {
+    RCLCPP_WARN(
+      logger_,
+      "bridge msg too small to carry a discriminator: got %zu bytes, expected at least %zu", size,
+      offsetof(BridgeMsg, payload));
+    return;
+  }
+
+  BridgeMsg msg{};
+  const size_t copy_size = std::min(size, sizeof(BridgeMsg));
+  std::memcpy(&msg, data, copy_size);
+
+  const auto validate_variant_size = [&](size_t expected) -> bool {
+    if (size < expected) {
+      RCLCPP_WARN(
+        logger_, "bridge msg (type=%u) truncated: got %zu bytes, expected at least %zu",
+        static_cast<uint32_t>(msg.type), size, expected);
+      return false;
+    }
+    return true;
+  };
+
+  switch (msg.type) {
+    case BridgeMsgType::Service:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgServicePayload>())) {
+        return;
+      }
+      break;
+    case BridgeMsgType::PubSub:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgPubSubPayload>())) {
+        return;
+      }
+      break;
+    case BridgeMsgType::DaemonPubSub:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonPubSubPayload>())) {
+        return;
+      }
+      break;
+    default:
+      RCLCPP_WARN(
+        logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
+      return;
+  }
+
+  constexpr size_t PENDING_MSGS_WARN_THRESHOLD = 2000;
+  bool exceeded_threshold = false;
+  {
+    std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
+    pending_msgs_.push_back(msg);
+    exceeded_threshold = pending_msgs_.size() > PENDING_MSGS_WARN_THRESHOLD;
+  }
+  pending_msgs_cv_.notify_one();
+
+  if (exceeded_threshold) {
+    constexpr int BACKLOG_WARN_INTERVAL_MS = 10000;
+    RCLCPP_WARN_THROTTLE(
+      logger_, *clock_, BACKLOG_WARN_INTERVAL_MS,
+      "Pending bridge message backlog exceeded %zu; worker thread may not be keeping up.",
+      PENDING_MSGS_WARN_THRESHOLD);
+  }
+}
+
+void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
+{
+  switch (msg.type) {
+    case BridgeMsgType::Service: {
+      const auto & payload = msg.payload.service;
+      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+      std::string service_name = static_cast<const char *>(payload.service_name);
+      ServiceBridgeItem sb_item;
+
+      auto it = active_service_bridges_.find(service_name);
+      if (it != active_service_bridges_.end()) {
+        sb_item = std::move(it->second);
+        active_service_bridges_.erase(it);
+      }
+
+      sb_item.handle_request(payload, deps);
+      if (sb_item.state() != ServiceBridgeState::NONE) {
+        active_service_bridges_.emplace(service_name, std::move(sb_item));
+      }
+      break;
+    }
+    case BridgeMsgType::PubSub: {
+      const auto & payload = msg.payload.pubsub;
+      std::string topic_name = static_cast<const char *>(payload.topic_name);
+      topic_local_id_t target_id = payload.target_id;
+      std::string message_type = static_cast<const char *>(payload.message_type);
+
+      request_cache_[topic_name][target_id] = payload;
+
+      create_pubsub_bridge_if_needed(
+        topic_name, request_cache_[topic_name], message_type, payload.direction);
+      break;
+    }
+    case BridgeMsgType::DaemonPubSub: {
+      register_daemon_pubsub_request(msg.payload.daemon_pubsub);
+      break;
+    }
+    default: {
+      // parse_and_enqueue() must reject every unknown type before enqueuing,
+      // so reaching here means the two switches drifted out of sync.
+      RCLCPP_ERROR(
+        logger_,
+        "Agnocast internal implementation error: dispatch_bridge_message got unknown type %u",
+        static_cast<uint32_t>(msg.type));
+      break;
+    }
+  }
+}
+
+void BridgeManager::register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPayload & req)
+{
+  const std::string topic_name = static_cast<const char *>(req.topic_name);
+  const std::string message_type = static_cast<const char *>(req.type_name);
+
+  const auto forced_until = daemon_force_deadline(std::chrono::steady_clock::now());
+  auto & forced =
+    (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
+  forced.insert_or_assign(
+    topic_name, DaemonForcedRequest{message_type, daemon_request_qos(req), forced_until});
+}
+
+bool BridgeManager::is_daemon_forced(
+  const std::string & topic_name, BridgeDirection direction) const
+{
+  const auto & forced =
+    (direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
+  const auto it = forced.find(topic_name);
+  return it != forced.end() &&
+         is_daemon_force_active(it->second.forced_until, std::chrono::steady_clock::now());
+}
+
+void BridgeManager::create_daemon_forced_bridges()
+{
+  for (const bool is_r2a : {true, false}) {
+    auto & forced = is_r2a ? daemon_forced_r2a_ : daemon_forced_a2r_;
+    for (auto it = forced.begin(); it != forced.end();) {
+      const std::string & topic_name = it->first;
+
+      // Lease expired: drop the force and let the normal on-demand lifecycle resume.
+      if (std::chrono::steady_clock::now() >= it->second.forced_until) {
+        it = forced.erase(it);
+        continue;
+      }
+
+      const bool already_active = is_r2a ? active_pubsub_r2a_bridges_.count(topic_name) > 0
+                                         : active_pubsub_a2r_bridges_.count(topic_name) > 0;
+      // The same-graph DDS counterpart check is skipped while forced, but a live
+      // local Agnocast endpoint is still required for the bridge to carry traffic.
+      const auto count = is_r2a ? get_agnocast_subscriber_count(topic_name).count
+                                : get_agnocast_publisher_count(topic_name).count;
+      if (!already_active && count > 0) {
+        activate_daemon_forced_bridge(topic_name, it->second.message_type, it->second.qos, is_r2a);
+      }
+      ++it;
+    }
+  }
+}
+
+void BridgeManager::activate_daemon_forced_bridge(
+  const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
+  bool is_r2a)
+{
+  try {
+    PubsubBridgeResult result =
+      is_r2a ? loader_->create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos)
+             : loader_->create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
+    if (!result.entity_handle) {
+      return;
+    }
+
+    if (is_r2a) {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
+      if (result.callback_group) {
+        executor_->add_callback_group(
+          result.callback_group, container_node_->get_node_base_interface());
+      }
+      active_pubsub_r2a_bridges_[topic_name] = result;
+    } else {
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+      }
+      if (result.callback_group) {
+        executor_->add_callback_group(
+          result.callback_group, container_node_->get_node_base_interface());
+      }
+      active_pubsub_a2r_bridges_[topic_name] = result;
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(
+      logger_, "Failed to create daemon-forced bridge for '%s': %s", topic_name.c_str(), e.what());
+  } catch (...) {
+    RCLCPP_WARN(
+      logger_, "Unknown error creating daemon-forced bridge for '%s'", topic_name.c_str());
+  }
+}
+
+void BridgeManager::request_shutdown()
+{
+  // Write the flag under the same mutex that the worker's cv predicate reads.
+  // Without this pairing, a shutdown could be missed if the worker evaluates
+  // the predicate just before this store and then sleeps.
+  {
+    std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
+    shutdown_requested_ = true;
+  }
+  pending_msgs_cv_.notify_all();
+
+  if (executor_) {
+    executor_->cancel();
+  }
+
+  // Wake up the event loop immediately so that spin_once() returns and the run() loop can observe
+  // shutdown_requested_.
+  event_loop_.wakeup();
+}
+
+void BridgeManager::on_signal()
+{
+  if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+    RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+  }
+  request_shutdown();
+}
+
+std::string BridgeManager::on_socket_request() const
+{
+  return R"({"type":"bridge","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+         std::to_string(getpid()) + "}";
+}
+
+void BridgeManager::check_and_create_pubsub_bridges()
+{
+  for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
+    const auto & topic_name = cache_it->first;
+    auto & requests = cache_it->second;
+
+    if (requests.empty()) {
+      cache_it = request_cache_.erase(cache_it);
+      continue;
+    }
+
+    const std::string message_type =
+      static_cast<const char *>(requests.begin()->second.message_type);
+
+    create_pubsub_bridge_if_needed(
+      topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
+    create_pubsub_bridge_if_needed(
+      topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
+
+    if (requests.empty()) {
+      cache_it = request_cache_.erase(cache_it);
+    } else {
+      ++cache_it;
+    }
+  }
+}
+
+void BridgeManager::check_and_remove_pubsub_bridges()
+{
+  auto r2a_it = active_pubsub_r2a_bridges_.begin();
+  while (r2a_it != active_pubsub_r2a_bridges_.end()) {
+    const std::string & topic_name = r2a_it->first;
+    auto result = get_agnocast_subscriber_count(topic_name);
+    bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
+    if (result.count == -1) {
+      RCLCPP_ERROR(
+        logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
+        topic_name.c_str());
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
+      request_shutdown();
+      return;
+    }
+
+    // A daemon-forced cross-NS bridge is kept alive without a same-graph DDS
+    // counterpart; only a vanished local Agnocast endpoint (count <= 0) removes it.
+    const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::ROS2_TO_AGNOCAST);
+    if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
+      if (r2a_it->second.callback_group) {
+        // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn
+        // the group mid-teardown.
+        executor_->remove_callback_group(r2a_it->second.callback_group);
+        executor_->stop_callback_group(r2a_it->second.callback_group);
+      }
+      r2a_it = active_pubsub_r2a_bridges_.erase(r2a_it);
+    } else {
+      if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+      }
+      ++r2a_it;
+    }
+  }
+
+  auto a2r_it = active_pubsub_a2r_bridges_.begin();
+  while (a2r_it != active_pubsub_a2r_bridges_.end()) {
+    const std::string & topic_name = a2r_it->first;
+    auto result = get_agnocast_publisher_count(topic_name);
+    bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
+    if (result.count == -1) {
+      RCLCPP_ERROR(
+        logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
+        topic_name.c_str());
+      if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
+        RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
+      }
+      request_shutdown();
+      return;
+    }
+
+    const bool keep_forced = is_daemon_forced(topic_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    if (result.count <= 0 || (!is_demanded_by_ros2 && !keep_forced)) {
+      if (a2r_it->second.callback_group) {
+        // Mirror the add at creation. Remove before stop so the monitoring loop cannot re-spawn
+        // the group mid-teardown.
+        executor_->remove_callback_group(a2r_it->second.callback_group);
+        executor_->stop_callback_group(a2r_it->second.callback_group);
+      }
+      a2r_it = active_pubsub_a2r_bridges_.erase(a2r_it);
+    } else {
+      if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+        RCLCPP_ERROR(
+          logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+      }
+      ++a2r_it;
+    }
+  }
+}
+
+void BridgeManager::check_and_update_service_bridges()
+{
+  ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+
+  auto it = active_service_bridges_.begin();
+  while (it != active_service_bridges_.end()) {
+    it->second.check_and_update(deps);
+
+    if (it->second.state() != ServiceBridgeState::NONE) {
+      ++it;
+      continue;
+    }
+
+    it = active_service_bridges_.erase(it);
+  }
+}
+
+void BridgeManager::check_and_remove_request_cache()
+{
+  for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
+    const auto & topic_name = cache_it->first;
+    auto & requests = cache_it->second;
+
+    remove_invalid_requests(topic_name, requests);
+
+    if (requests.empty()) {
+      cache_it = request_cache_.erase(cache_it);
+    } else {
+      ++cache_it;
+    }
+  }
+}
+
+void BridgeManager::check_and_request_shutdown()
+{
+  struct ioctl_check_and_request_bridge_shutdown_args args = {};
+  if (ioctl(agnocast_fd, AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger_, "Failed to check bridge shutdown from kernel module.");
+    return;
+  }
+
+  if (args.ret_should_shutdown) {
+    request_shutdown();
+  }
+}
+
+bool BridgeManager::should_create_pubsub_bridge(
+  const std::string & topic_name, BridgeDirection direction) const
+{
+  if (direction == BridgeDirection::ROS2_TO_AGNOCAST) {
+    if (active_pubsub_r2a_bridges_.count(topic_name) > 0) {
+      return false;
+    }
+
+    const auto stats = get_agnocast_subscriber_count(topic_name);
+    if (stats.count <= 0) {
+      return false;
+    }
+
+    return has_external_ros2_publisher(container_node_.get(), topic_name);
+  }
+  if (active_pubsub_a2r_bridges_.count(topic_name) > 0) {
+    return false;
+  }
+
+  const auto stats = get_agnocast_publisher_count(topic_name);
+  if (stats.count <= 0) {
+    return false;
+  }
+
+  return has_external_ros2_subscriber(container_node_.get(), topic_name);
+}
+
+void BridgeManager::create_pubsub_bridge_if_needed(
+  const std::string & topic_name, RequestMap & requests, const std::string & message_type,
+  BridgeDirection direction)
+{
+  if (!should_create_pubsub_bridge(topic_name, direction)) {
+    return;
+  }
+
+  topic_local_id_t qos_source_id = -1;
+  for (const auto & [id, req] : requests) {
+    if (req.direction == direction) {
+      qos_source_id = id;
+      break;
+    }
+  }
+  if (qos_source_id == -1) {
+    return;
+  }
+
+  try {
+    const bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
+
+    PubsubBridgeResult result;
+    if (is_r2a) {
+      auto qos = get_subscriber_qos(topic_name, qos_source_id);
+      result = loader_->create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos);
+    } else {
+      auto qos = get_publisher_qos(topic_name, qos_source_id);
+      result = loader_->create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
+    }
+
+    if (result.entity_handle) {
+      if (is_r2a) {
+        if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
+          RCLCPP_ERROR(
+            logger_, "Failed to update ROS 2 publisher count for topic '%s'.", topic_name.c_str());
+        }
+        if (result.callback_group) {
+          executor_->add_callback_group(
+            result.callback_group, container_node_->get_node_base_interface());
+        }
+        active_pubsub_r2a_bridges_[topic_name] = result;
+      } else {
+        if (!update_ros2_subscriber_num(container_node_.get(), topic_name)) {
+          RCLCPP_ERROR(
+            logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
+        }
+        if (result.callback_group) {
+          executor_->add_callback_group(
+            result.callback_group, container_node_->get_node_base_interface());
+        }
+        active_pubsub_a2r_bridges_[topic_name] = result;
+      }
+    }
+
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(
+      logger_, "Failed to create bridge for '%s': %s. Removing invalid request ID %d.",
+      topic_name.c_str(), e.what(), qos_source_id);
+    requests.erase(qos_source_id);
+  } catch (...) {
+    RCLCPP_WARN(
+      logger_, "Unknown error creating bridge for '%s'. Removing invalid request ID %d.",
+      topic_name.c_str(), qos_source_id);
+    requests.erase(qos_source_id);
+  }
+}
+
+void BridgeManager::remove_invalid_requests(
+  const std::string & topic_name, RequestMap & request_map)
+{
+  for (auto req_it = request_map.begin(); req_it != request_map.end();) {
+    const auto target_id = req_it->first;
+    const auto & msg = req_it->second;
+
+    // Verify liveness by attempting to retrieve QoS.
+    // If the target no longer exists, an exception is thrown.
+    try {
+      if (msg.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
+        get_subscriber_qos(topic_name, target_id);
+      } else {
+        get_publisher_qos(topic_name, target_id);
+      }
+      ++req_it;
+    } catch (...) {
+      req_it = request_map.erase(req_it);
+    }
+  }
+}
+
+}  // namespace agnocast

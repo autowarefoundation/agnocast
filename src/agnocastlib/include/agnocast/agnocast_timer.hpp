@@ -4,14 +4,18 @@
 #include "rclcpp/clock.hpp"
 #include "rclcpp/macros.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <type_traits>
 
 namespace agnocast
 {
+
+struct TimerInfo;
 
 /**
  * @brief Base class for Agnocast timers providing periodic callback execution.
@@ -27,14 +31,55 @@ public:
 
   virtual ~TimerBase();
 
-  // TODO: The following methods are planned to be added for rclcpp API compatibility:
-  // void cancel(), bool is_canceled(), void reset(), std::chrono::nanoseconds time_until_trigger(),
-  // etc.
+  AGNOCAST_PUBLIC
+  void cancel() { canceled_.store(true); }
+
+  // Non-const to align with rclcpp::TimerBase::is_canceled().
+  AGNOCAST_PUBLIC
+  bool is_canceled() { return canceled_.load(); }
+
+  AGNOCAST_PUBLIC
+  void reset();
+
+  AGNOCAST_PUBLIC
+  std::chrono::nanoseconds time_until_trigger();
+
+  /** @brief Update the timer's period.
+   *
+   * Aligned with `rcl_timer_exchange_period`: the already-scheduled next firing keeps its
+   * time; only subsequent firings adopt the new period. Throws on an invalidated timer
+   * (rcl's equivalent is `RCL_RET_TIMER_INVALID`).
+   *
+   * @param period New firing period.
+   * @throw std::runtime_error If the underlying TimerInfo has been unregistered. */
+  void set_period(std::chrono::nanoseconds period);
 
   /** @brief Return whether this timer uses a steady clock.
    *  @return True if the clock is steady. */
   AGNOCAST_PUBLIC
-  virtual bool is_steady() const { return true; }
+  virtual bool is_steady() const = 0;
+
+  /**
+   * @brief Sets a callback to be invoked each time the timer is reset.
+   *
+   * This function aligns with `rclcpp::set_on_reset_callback`. For extended
+   * details regarding best practices (e.g., keeping the callback non-blocking),
+   * please refer to the rclcpp documentation.
+   *
+   * This function is thread-safe. Calling it again will override any previously
+   * set callback.
+   *
+   * @param callback The functor to be called at reset. It receives the number of
+   * times the timer has been reset as an argument.
+   * @throw std::invalid_argument If the provided callback is not callable.
+   */
+  AGNOCAST_PUBLIC
+  void set_on_reset_callback(std::function<void(size_t)> callback);
+
+  /** @brief Clear the callback registered for reset timer.
+   */
+  AGNOCAST_PUBLIC
+  void clear_on_reset_callback();
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
@@ -44,13 +89,24 @@ public:
   virtual void execute_callback() = 0;
 
 protected:
-  TimerBase(uint32_t timer_id, std::chrono::nanoseconds period)
-  : timer_id_(timer_id), period_(period)
+  TimerBase(uint32_t timer_id, [[maybe_unused]] std::chrono::nanoseconds period)
+  : timer_id_(timer_id), timer_info_(), canceled_(false)
   {
   }
 
   uint32_t timer_id_;
-  std::chrono::nanoseconds period_;
+  std::weak_ptr<TimerInfo> timer_info_;
+  std::atomic<bool> canceled_;
+  std::function<void(size_t)> on_reset_callback_{nullptr};
+  size_t reset_counter_{0};
+  mutable std::recursive_mutex callback_mutex_;
+
+  // Preconditions:
+  // - callback_mutex_ must be held by the caller
+  // - on_reset_callback_ must be non-null
+  void trigger_on_reset_callback(size_t reset_count);
+
+  friend void set_timer_info(TimerBase & timer, std::weak_ptr<TimerInfo> timer_info);
 };
 
 /**

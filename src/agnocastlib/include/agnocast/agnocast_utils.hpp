@@ -14,7 +14,10 @@ extern rclcpp::Logger logger;
 extern int agnocast_fd;
 extern bool is_bridge_process;
 
-inline void validate_qos(const rclcpp::QoS & qos)
+namespace detail
+{
+
+inline void validate_qos_common(const rclcpp::QoS & qos)
 {
   if (qos.history() == rclcpp::HistoryPolicy::KeepAll) {
     RCLCPP_ERROR(logger, "Agnocast does not support KeepAll history policy. Use KeepLast instead.");
@@ -42,21 +45,56 @@ inline void validate_qos(const rclcpp::QoS & qos)
       logger,
       "Agnocast does not support liveliness_lease_duration QoS policy. It will be ignored.");
   }
+
+  if (qos.depth() == 0) {
+    RCLCPP_WARN(logger, "Agnocast does not support QoS depth=0. No messages will be delivered.");
+  }
+
+  if (rmw_qos.avoid_ros_namespace_conventions) {
+    RCLCPP_WARN(
+      logger,
+      "Agnocast does not honor avoid_ros_namespace_conventions QoS policy. It will be ignored.");
+  }
+}
+
+}  // namespace detail
+
+inline void validate_publisher_qos(const rclcpp::QoS & qos)
+{
+  detail::validate_qos_common(qos);
+
+  if (qos.reliability() == rclcpp::ReliabilityPolicy::BestEffort) {
+    RCLCPP_WARN(
+      logger,
+      "Agnocast publishers do not honor the BestEffort reliability QoS policy. "
+      "Messages are delivered through shared memory regardless of this setting.");
+  }
+}
+
+inline void validate_subscription_qos(const rclcpp::QoS & qos)
+{
+  detail::validate_qos_common(qos);
 }
 
 void validate_ld_preload();
-std::string create_mq_name_for_agnocast_publish(
-  const std::string & topic_name, const topic_local_id_t id);
-std::string create_mq_name_for_bridge(const pid_t pid);
+// Return the calling process's ROS_DOMAIN_ID parsed from the env var (0 if unset
+// or unparsable), matching ROS 2's default. Registered with the kmod so topics
+// in different domains are isolated.
+uint32_t get_ros_domain_id();
+std::string create_uds_addr_for_bridge();
 std::string create_shm_name(const pid_t pid);
+// Return the inode number of the calling process's IPC namespace
+// (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the
+// per-namespace key for the tmpfs directory
+// `${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/`.
+uint64_t get_self_ipc_ns_inode();
 std::string create_service_request_topic_name(const std::string & service_name);
 std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name);
 uint64_t agnocast_get_timestamp();
 
-// Create a dummy callback group for agnocast::Node tracepoint use.
-// Defined in .cpp to avoid circular inclusion between agnocast_publisher/subscription.hpp and
-// agnocast_node.hpp.
+// Returns a pointer to the inner node handle that can be used for the TRACEPOINT macro.
 const void * get_node_base_address(agnocast::Node * node);
+const void * get_node_base_address(rclcpp::Node * node);
 
 }  // namespace agnocast

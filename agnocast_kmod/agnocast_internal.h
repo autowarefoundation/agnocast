@@ -1,0 +1,333 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
+#pragma once
+
+#include "agnocast.h"
+#include "agnocast_memory_allocator.h"
+
+#include <linux/device.h>
+#include <linux/eventfd.h>
+#include <linux/fs.h>
+#include <linux/hashtable.h>
+#include <linux/kernel.h>
+#include <linux/kthread.h>
+#include <linux/mm.h>  // kvzalloc, kvfree
+#include <linux/module.h>
+#include <linux/rwsem.h>
+#include <linux/slab.h>  // kmalloc, kfree
+#include <linux/tracepoint.h>
+#include <linux/version.h>
+
+extern int major;
+extern struct class * agnocast_class;
+extern struct device * agnocast_device;
+
+// Locking convention:
+//   Only agnocast_ioctl_ prefixed functions acquire locks. All other internal/static functions are
+//   lock-free and rely on callers to hold the appropriate locks. Exceptions are
+//   agnocast_process_exit_cleanup, agnocast_exit_free_data, and
+//   agnocast_increment_message_entry_rc, which manage locks directly.
+//
+// Lock ordering (to prevent deadlocks, always acquire in this order):
+//   1. global_htables_rwsem   (this file)
+//   2. topic->rwsem           (per-topic, in struct topic_struct)
+//   3. mempool_lock           (agnocast_memory_allocator.c)
+//
+// Global rwsem for hashtables (topic_hashtable, proc_info_htable, bridge_htable)
+// - Read lock (down_read): when searching hashtables and operating within a topic
+// - Write lock (down_write): when adding/removing entries from hashtables
+extern struct rw_semaphore global_htables_rwsem;
+
+// =========================================
+// data structure
+
+// hashtable size becomes 2^HASH_BITS
+#define TOPIC_HASH_BITS 10
+#define PUB_INFO_HASH_BITS 3
+#define SUB_INFO_HASH_BITS 5
+#define PROC_INFO_HASH_BITS 10
+// At most one agent per (IPC namespace, domain), so the table is tiny.
+#define DISCOVERY_AGENT_HASH_BITS 4
+
+// Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
+#define NOTIFY_CTXS_MIN_CAPACITY 8
+
+// All eventfd access goes through these wrappers so the KUnit build can substitute fakes; see
+// agnocast_kunit/agnocast_kunit_eventfd.c for why real contexts are unobtainable there.
+#ifdef KUNIT_BUILD
+struct eventfd_ctx * agnocast_eventfd_get(int fd);
+void agnocast_eventfd_signal(struct eventfd_ctx * ctx);
+void agnocast_eventfd_put(struct eventfd_ctx * ctx);
+#else
+static inline struct eventfd_ctx * agnocast_eventfd_get(int fd)
+{
+  return eventfd_ctx_fdget(fd);
+}
+
+static inline void agnocast_eventfd_signal(struct eventfd_ctx * ctx)
+{
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+  eventfd_signal(ctx);
+#else
+  eventfd_signal(ctx, 1);
+#endif
+}
+
+static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
+{
+  eventfd_ctx_put(ctx);
+}
+#endif
+
+struct process_info
+{
+  bool exited;
+  // Tracks whether this process is the alive Bridge Manager for the IPC namespace.
+  bool is_bridge_manager;
+  pid_t global_pid;
+  pid_t local_pid;
+  struct mempool_entry * mempool_entry;
+  const struct ipc_namespace * ipc_ns;
+  // The process's ROS_DOMAIN_ID (0 if unset), fixed for the process's lifetime.
+  // Used as the domain component of the topic key for this process's operations.
+  uint32_t domain_id;
+  struct hlist_node node;
+  struct rcu_head rcu_head;
+};
+
+extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
+
+struct publisher_info
+{
+  topic_local_id_t id;
+  // The endpoint's ROS domain. Equals the owning wrapper's domain; carried per
+  // endpoint because grouped wrappers share one htable holding both domains.
+  uint32_t domain_id;
+  pid_t pid;
+  char * node_name;
+  uint32_t qos_depth;
+  bool qos_is_transient_local;
+  uint32_t entries_num;
+  bool is_bridge;
+  // The eventfd contexts PUBLISH signals, in no particular order. Membership depends only on the
+  // endpoints, never on the message, so the list is built as endpoints register and publish only
+  // reads it.
+  struct eventfd_ctx ** notify_ctxs;
+  uint32_t notify_num;
+  // Never below the topic's notifiable subscriber count, and never shrinks, so only a join can grow
+  // it and every other rebuild is allocation-free.
+  uint32_t notify_capacity;
+  struct hlist_node node;
+};
+
+struct subscriber_info
+{
+  topic_local_id_t id;
+  // The endpoint's ROS domain (see publisher_info::domain_id).
+  uint32_t domain_id;
+  pid_t pid;
+  uint32_t qos_depth;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+  int64_t latest_received_entry_id;
+  char * node_name;
+  bool is_take_sub;
+  bool ignore_local_publications;
+  bool need_mmap_update;
+  bool is_bridge;
+  struct eventfd_ctx * notify_ctx;  // eventfd for publish notifications (NULL for take_sub)
+  struct hlist_node node;
+};
+
+// Helper to copy a name_info string from userspace to a kernel stack buffer.
+// Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
+static inline long copy_name_from_user(char * dst, size_t dst_size, const struct name_info * src)
+{
+  if (src->len >= dst_size) return -EINVAL;
+  if (copy_from_user(dst, (const char __user *)src->ptr, src->len)) return -EFAULT;
+  dst[src->len] = '\0';
+  return 0;
+}
+
+struct domain_bridge_rule;
+
+struct topic_struct
+{
+  struct rb_root entries;
+  DECLARE_HASHTABLE(pub_info_htable, PUB_INFO_HASH_BITS);
+  DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
+  DECLARE_BITMAP(pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  int64_t current_entry_id;
+  uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
+  uint32_t ros2_publisher_num;   // Updated by Bridge Manager
+  // Per-topic rwsem. Write is taken by publish and by the Bridge Manager's ros2_*_num setters;
+  // read by receive/take, message-entry reference release, and the query ioctls.
+  // Structural changes, like adding or removing publishers and subscribers, run under
+  // global_htables_rwsem WRITE and do not take this rwsem. This is why holding global read
+  // for the whole receive keeps both the tree and this struct alive.
+  struct rw_semaphore rwsem;
+  // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
+  // bridge rule groups two domains' wrappers onto one entry/id space. The struct
+  // is freed only when the last referencing wrapper is dropped.
+  uint32_t wrapper_refcnt;
+  // The domain bridge rule covering this topic, or NULL if none. Cached here so
+  // the publish/receive hot path can check delivery direction without a lookup.
+  const struct domain_bridge_rule * rule;
+};
+
+// Both frees release the endpoint's topic_local_id back to topic->pubsub_id_map, so the next
+// insert can reuse it. Callers hold global_htables_rwsem WRITE, so the bitmap update needs no
+// further serialization.
+static inline void free_publisher_info(
+  struct topic_struct * topic, struct publisher_info * pub_info)
+{
+  if (pub_info->id >= 0 && pub_info->id < MAX_TOPIC_LOCAL_ID) {
+    clear_bit(pub_info->id, topic->pubsub_id_map);
+  } else {
+    WARN_ONCE(true, "publisher_id %d out of range [0, %d)\n", pub_info->id, MAX_TOPIC_LOCAL_ID);
+  }
+  kvfree(pub_info->notify_ctxs);
+  kfree(pub_info->node_name);
+  kfree(pub_info);
+}
+
+// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
+// subscriber leaving a live topic must also leave the publishers' notify lists.
+static inline void free_subscriber_info(
+  struct topic_struct * topic, struct subscriber_info * sub_info)
+{
+  if (sub_info->id >= 0 && sub_info->id < MAX_TOPIC_LOCAL_ID) {
+    clear_bit(sub_info->id, topic->pubsub_id_map);
+  } else {
+    WARN_ONCE(true, "subscriber_id %d out of range [0, %d)\n", sub_info->id, MAX_TOPIC_LOCAL_ID);
+  }
+  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
+  kfree(sub_info->node_name);
+  kfree(sub_info);
+}
+
+struct topic_wrapper
+{
+  const struct ipc_namespace *
+    ipc_ns;  // For use in separating topic namespaces when using containers.
+  // Part of the topic identity: topics with the same name/ipc_ns but different
+  // ROS_DOMAIN_ID are distinct wrappers and do not match (ROS 2 domain isolation).
+  uint32_t domain_id;
+  char * key;
+  struct topic_struct * topic;
+  struct hlist_node node;
+};
+
+struct entry_node
+{
+  struct rb_node node;
+  int64_t entry_id;  // rbtree key
+  topic_local_id_t publisher_id;
+  uint64_t msg_virtual_address;
+  // Per-subscriber boolean flag: if bit is set, subscriber is holding a reference.
+  // When subscriber releases the reference, the bit is cleared.
+  DECLARE_BITMAP(referencing_subscribers, MAX_TOPIC_LOCAL_ID);
+};
+
+extern DECLARE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
+
+struct bridge_info
+{
+  char * topic_name;
+  pid_t pid;
+  bool has_r2a;  // ROS2 -> Agnocast
+  bool has_a2r;  // Agnocast -> ROS2
+  const struct ipc_namespace * ipc_ns;
+  struct hlist_node node;
+};
+
+extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
+
+// A domain bridge rule relays one topic between two ROS domains within one IPC
+// namespace. The pair is stored canonically (domain_a < domain_b) with the enabled
+// direction(s) in a_to_b / b_to_a. See agnocast_ioctl_add_domain_bridge for the rules
+// on adding one.
+struct domain_bridge_rule
+{
+  // Per-domain topic names. Equal when the rule does not rename; a rename pairs
+  // topic_name_a@domain_a with topic_name_b@domain_b. Delivery stays zero-copy
+  // either way -- only the two wrappers' keys differ.
+  char * topic_name_a;
+  char * topic_name_b;
+  const struct ipc_namespace * ipc_ns;
+  uint32_t domain_a;  // canonical ordering: domain_a < domain_b
+  uint32_t domain_b;
+  bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
+  bool b_to_a;
+  struct hlist_node node;
+};
+
+extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+
+// The discovery agent's liveness, owned by the kmod so the fork gate and the
+// singleton claim share one source of truth (no userspace flock). Hashed by pid
+// (removal and is_agnocast_pid() are by pid); a (ns, domain) lookup scans. Unlike
+// process_info there is no `exited` flag: the entry is removed the moment the
+// agent exits, so "registered" always means "alive".
+struct discovery_agent_info
+{
+  pid_t pid;
+  const struct ipc_namespace * ipc_ns;
+  uint32_t domain_id;
+  struct hlist_node node;
+  struct rcu_head rcu_head;  // read from the atomic sched_process_exit path via is_agnocast_pid()
+};
+
+extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+
+// Both require global_htables_rwsem held (read for find, write for remove).
+struct discovery_agent_info * agnocast_find_discovery_agent(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+void agnocast_remove_discovery_agent_by_pid(const pid_t pid);
+
+int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
+
+int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper);
+
+// True if the (possibly shared) topic_struct holds any endpoint in this wrapper's
+// own domain. Used to decide when to drop a single wrapper of a grouped pair.
+bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper);
+
+bool agnocast_is_referenced(struct entry_node * en);
+
+struct process_info * agnocast_find_process_info(const pid_t pid);
+
+void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
+
+// Unlink a wrapper and free it. The shared topic_struct (its rbtree and the
+// struct itself) is freed only when the last referencing wrapper is dropped, so
+// a grouped partner keeps working until it too is released.
+void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
+
+// The single place a subscriber is dropped from a live topic, so that releasing its eventfd
+// context and rebuilding the notify lists pointing at it cannot be forgotten at one call site.
+// Caller holds global_htables_rwsem (write).
+void agnocast_unlink_subscriber_info(
+  struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
+
+// Recomputes the publishers' notify lists, for the one caller that unlinks subscribers in bulk and
+// so cannot use agnocast_unlink_subscriber_info(). Caller holds global_htables_rwsem (write).
+void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
+
+long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
+
+// Ring buffer to hold exited pids.
+// EXIT_QUEUE_SIZE (65536) far exceeds mempool_num (default 4096), and only Agnocast PIDs are
+// enqueued (via is_agnocast_pid()), each exiting at most once, so the ring buffer cannot overflow.
+extern spinlock_t pid_queue_lock;
+extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
+extern uint32_t queue_head;
+extern uint32_t queue_tail;
+
+// For controlling the kernel thread
+extern struct task_struct * worker_task;
+extern struct wait_queue_head worker_wait;
+extern int has_new_pid;
+
+extern struct tracepoint * tp_sched_process_exit;
+
+void agnocast_process_exit(void * data, struct task_struct * task);

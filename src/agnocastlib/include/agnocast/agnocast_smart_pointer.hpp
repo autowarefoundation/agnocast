@@ -5,7 +5,6 @@
 #include "agnocast/agnocast_utils.hpp"
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -41,8 +40,10 @@ extern int agnocast_fd;
 constexpr int64_t ENTRY_ID_NOT_ASSIGNED = -1;
 
 // Forward declaration for friend access
-template <typename MessageT, typename BridgeRequestPolicy>
-class BasicPublisher;
+template <typename MessageT>
+class Publisher;
+
+class TypeErasedPublisher;
 
 namespace detail
 {
@@ -101,9 +102,11 @@ AGNOCAST_PUBLIC
 template <typename T>
 class ipc_shared_ptr
 {
-  // Allow BasicPublisher to call invalidate_all_references()
-  template <typename MessageT, typename BridgeRequestPolicy>
-  friend class BasicPublisher;
+  // Allow Publisher and TypeErasedPublisher to call invalidate_all_references()
+  template <typename MessageT>
+  friend class Publisher;
+
+  friend class TypeErasedPublisher;
 
   // Allow converting constructors to access private members of ipc_shared_ptr<U>
   template <typename U>
@@ -125,7 +128,7 @@ class ipc_shared_ptr
   // Invalidates all references sharing this handle's control block (publisher-side only).
   // After this call, any dereference (operator->, operator*) on copies will std::terminate(),
   // and get()/operator bool() will return nullptr/false.
-  // Private: only BasicPublisher::publish() should call this.
+  // Private: only Publisher::publish() should call this.
   void invalidate_all_references() noexcept
   {
     if (control_) {
@@ -135,7 +138,7 @@ class ipc_shared_ptr
 
   // Publisher-side constructor (entry_id not yet assigned).
   // Creates control block for reference counting and one-shot invalidation.
-  // Private: users must call BasicPublisher::borrow_loaned_message() instead of constructing
+  // Private: users must call Publisher::borrow_loaned_message() instead of constructing
   // directly. This ensures proper memory allocation via the heaphook allocator.
   // Note: ptr must point to heap-allocated memory; destructor calls delete if not published.
   explicit ipc_shared_ptr(T * ptr, const std::string & topic_name, const topic_local_id_t pubsub_id)
@@ -278,11 +281,29 @@ public:
     return *this;
   }
 
+  // Aliasing constructor: shares ownership with r but stores ptr.
+  template <typename U>
+  ipc_shared_ptr(const ipc_shared_ptr<U> & r, T * ptr) noexcept : ptr_(ptr), control_(r.control_)
+  {
+    if (control_) {
+      control_->increment();
+    }
+  }
+
+  // Aliasing move constructor: transfers ownership from r but stores ptr.
+  template <typename U>
+  ipc_shared_ptr(ipc_shared_ptr<U> && r, T * ptr) noexcept : ptr_(ptr), control_(r.control_)
+  {
+    r.ptr_ = nullptr;
+    r.control_ = nullptr;
+  }
+
   /// Dereference the managed message. Calls std::terminate() if the pointer has been invalidated
   /// by publish().
   /// @return Reference to the managed message.
   AGNOCAST_PUBLIC
-  T & operator*() const noexcept
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U & operator*() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
       std::fprintf(
@@ -299,7 +320,8 @@ public:
   /// invalidated by publish().
   /// @return Pointer to the managed message.
   AGNOCAST_PUBLIC
-  T * operator->() const noexcept
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U * operator->() const noexcept
   {
     if (AGNOCAST_UNLIKELY(is_invalidated_())) {
       std::fprintf(
@@ -344,14 +366,38 @@ public:
         // Publisher side, last reference, not published: delete the memory.
         // This handles the case where borrow_loaned_message() was called but publish() was not.
         decrement_borrowed_publisher_num();
-        delete ptr_;
+        if constexpr (!std::is_void_v<T>) {
+          delete ptr_;
+        } else {
+          std::fprintf(
+            stderr,
+            "[agnocast] FATAL: Type-erased message was dropped before being published.\n"
+            "This is not allowed because there is no well-defined way to free a type-erased "
+            "message.\n");
+          std::terminate();
+        }
       }
       delete control_;
     }
 
     ptr_ = nullptr;
+    // Suppress false positive from clang-tidy: atomic reference counting ensures no leak.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     control_ = nullptr;
   }
 };
+
+template <typename T, typename U>
+ipc_shared_ptr<T> static_ipc_shared_ptr_cast(const ipc_shared_ptr<U> & r) noexcept
+{
+  T * ptr = static_cast<T *>(r.get());
+  return ipc_shared_ptr<T>(r, ptr);
+}
+template <typename T, typename U>
+ipc_shared_ptr<T> static_ipc_shared_ptr_cast(ipc_shared_ptr<U> && r) noexcept
+{
+  T * ptr = static_cast<T *>(r.get());
+  return ipc_shared_ptr<T>(std::move(r), ptr);
+}
 
 }  // namespace agnocast

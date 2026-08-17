@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_kunit_get_subscriber_qos.h"
 
 #include "../agnocast.h"
@@ -13,7 +14,7 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -27,7 +28,7 @@ static void verify_subscriber_qos(struct kunit * test, bool is_transient, bool i
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, is_transient,
-    is_reliable, false, false, IS_BRIDGE, &add_sub_args);
+    is_reliable, false, false, IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   ret = agnocast_ioctl_get_subscriber_qos(
@@ -86,7 +87,7 @@ void test_case_error_subscriber_not_found(struct kunit * test)
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, false, false, false,
-    false, IS_BRIDGE, &add_sub_args);
+    false, IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_local_id_t invalid_id = add_sub_args.ret_id + 999;

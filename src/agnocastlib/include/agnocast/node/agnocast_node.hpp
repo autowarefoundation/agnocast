@@ -10,6 +10,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
 #include "agnocast/node/node_interfaces/node_clock.hpp"
+#include "agnocast/node/node_interfaces/node_graph.hpp"
 #include "agnocast/node/node_interfaces/node_logging.hpp"
 #include "agnocast/node/node_interfaces/node_parameters.hpp"
 #include "agnocast/node/node_interfaces/node_services.hpp"
@@ -127,6 +128,13 @@ public:
   rclcpp::node_interfaces::NodeClockInterface::SharedPtr get_node_clock_interface()
   {
     return node_clock_;
+  }
+
+  // Non-const to align with rclcpp::Node API
+  // cppcheck-suppress functionConst
+  rclcpp::node_interfaces::NodeGraphInterface::SharedPtr get_node_graph_interface()
+  {
+    return node_graph_;
   }
 
   // Non-const to align with rclcpp::Node API
@@ -398,19 +406,32 @@ public:
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
   /// Return the number of publishers on a topic.
+  ///
+  /// Counts the agnocast publishers in the same domain, plus the ROS 2 publishers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the publishers the application set up.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
   /// @return Publisher count.
   AGNOCAST_PUBLIC
   size_t count_publishers(const std::string & topic_name) const
   {
-    return get_publisher_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_publishers(topic_name);
   }
 
   /// Return the number of subscribers on a topic.
-  /// @return Subscriber count.
+  ///
+  /// Counts the agnocast subscribers in the same domain, plus the ROS 2 subscribers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the subscribers the application set up.
+  ///
+  /// Agnocast subscribers living in the calling process are not counted, because the underlying
+  /// query answers how many other processes receive a published message.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
+  /// @return Subscriber count, excluding agnocast subscribers in the calling process.
   AGNOCAST_PUBLIC
   size_t count_subscribers(const std::string & topic_name) const
   {
-    return get_subscription_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_subscribers(topic_name);
   }
 
   /// Create a publisher (QoS overload).
@@ -582,11 +603,12 @@ public:
   }
 
   /// Create a service client.
+  /// @tparam ServiceT ROS service type.
   /// @param service_name Service name.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created client.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT>
   typename agnocast::Client<ServiceT>::SharedPtr create_client(
     const std::string & service_name, const rclcpp::QoS & qos = rclcpp::ServicesQoS(),
@@ -596,14 +618,15 @@ public:
   }
 
   /// Create a service server.
-  /// @tparam Func Callable with signature void(const agnocast::ipc_shared_ptr<const RequestT>&,
-  /// agnocast::ipc_shared_ptr<ResponseT>&).
+  /// @tparam ServiceT ROS service type.
+  /// @tparam Func Callable that takes `ipc_shared_ptr<ServiceT::Request>` and
+  /// `ipc_shared_ptr<ServiceT::Response>` (const&, &&, or by-value) (return value ignored).
   /// @param service_name Service name.
   /// @param callback Callback invoked on each request.
-  /// @param qos Quality of service profile.
-  /// @param group Callback group (nullptr = default).
+  /// @param qos Quality of service profile. Defaults to `rclcpp::ServicesQoS()`.
+  /// @param group Callback group. Defaults to `nullptr` (default callback group).
   /// @return Shared pointer to the created service.
-  // AGNOCAST_PUBLIC
+  AGNOCAST_PUBLIC
   template <typename ServiceT, typename Func>
   typename agnocast::Service<ServiceT>::SharedPtr create_service(
     const std::string & service_name, Func && callback,
@@ -650,13 +673,14 @@ private:
   // ParsedArguments must be stored to keep rcl_arguments_t alive
   ParsedArguments local_args_;
 
-  rclcpp::Logger logger_{rclcpp::get_logger("agnocast_node")};
   node_interfaces::NodeBase::SharedPtr node_base_;
-  node_interfaces::NodeParameters::SharedPtr node_parameters_;
+  rclcpp::Logger logger_;
+  node_interfaces::NodeGraph::SharedPtr node_graph_;
   node_interfaces::NodeTopics::SharedPtr node_topics_;
+  node_interfaces::NodeServices::SharedPtr node_services_;
+  node_interfaces::NodeParameters::SharedPtr node_parameters_;
   node_interfaces::NodeClock::SharedPtr node_clock_;
   node_interfaces::NodeTimeSource::SharedPtr node_time_source_;
-  node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeLogging::SharedPtr node_logging_;
 };
 
