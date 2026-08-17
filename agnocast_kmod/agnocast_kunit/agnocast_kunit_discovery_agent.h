@@ -5,6 +5,7 @@
 #define TEST_CASES_DISCOVERY_AGENT                                      \
   KUNIT_CASE(test_case_discovery_agent_register_first_wins),            \
     KUNIT_CASE(test_case_discovery_agent_register_duplicate_loses),     \
+    KUNIT_CASE(test_case_discovery_agent_same_pid_reclaim_wins),        \
     KUNIT_CASE(test_case_discovery_agent_exist_reflects_registration),  \
     KUNIT_CASE(test_case_discovery_agent_commit_exit_when_idle),        \
     KUNIT_CASE(test_case_discovery_agent_commit_exit_vetoed_when_busy), \
@@ -15,6 +16,7 @@
 
 void test_case_discovery_agent_register_first_wins(struct kunit * test);
 void test_case_discovery_agent_register_duplicate_loses(struct kunit * test);
+void test_case_discovery_agent_same_pid_reclaim_wins(struct kunit * test);
 void test_case_discovery_agent_exist_reflects_registration(struct kunit * test);
 void test_case_discovery_agent_commit_exit_when_idle(struct kunit * test);
 void test_case_discovery_agent_commit_exit_vetoed_when_busy(struct kunit * test);

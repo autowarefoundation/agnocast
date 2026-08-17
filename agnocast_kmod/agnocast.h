@@ -261,7 +261,7 @@ struct ioctl_discovery_agent_should_exit_args
 struct ioctl_add_discovery_agent_args
 {
   uint32_t domain_id;
-  bool ret_already_exists;  // true: another agent already owns this (ns, domain); caller must exit
+  bool ret_owned_by_caller;  // false: someone else owns this (ns, domain); caller must exit
 };
 
 // The caller's IPC namespace and pid come from `current` in the kmod, so they are
