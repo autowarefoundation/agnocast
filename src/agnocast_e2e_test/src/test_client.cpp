@@ -1,6 +1,7 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 
 #include <thread>
 
@@ -183,7 +184,11 @@ public:
 
     cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
+#if RCLCPP_VERSION_MAJOR >= 28
+    client_ = this->create_client<ServiceT>(params.service_name, qos, cbg_);
+#else
     client_ = this->create_client<ServiceT>(params.service_name, qos.get_rmw_qos_profile(), cbg_);
+#endif
 
     if (!client_->wait_for_service(5s)) {
       RCLCPP_ERROR(this->get_logger(), "Service not available after waiting for 5 seconds.");

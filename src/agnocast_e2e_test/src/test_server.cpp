@@ -1,6 +1,7 @@
 #include "agnocast/agnocast.hpp"
 #include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
 
 using namespace std::chrono_literals;
 using namespace std::placeholders;
@@ -130,7 +131,11 @@ public:
 
     srv_ = this->create_service<ServiceT>(
       params.service_name, std::bind(&TestROS2Server::callback, this, _1, _2),
+#if RCLCPP_VERSION_MAJOR >= 28
+      qos, cbg_);
+#else
       qos.get_rmw_qos_profile(), cbg_);
+#endif
   }
 };
 
