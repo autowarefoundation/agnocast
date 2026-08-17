@@ -115,7 +115,7 @@ def _add_wildcard_alongside_exact_entries():
         'id': WILDCARD_ID,
         'domain_id': _PUBLISHER_ENTRIES[0].get('domain_id', 0),
         'policy': 'SCHED_OTHER',
-        'priority': 0,
+        'nice': 0,
         'affinity': [],
     }
     cfg['callback_groups'] = cfg['callback_groups'] + [wildcard_entry]
