@@ -365,9 +365,10 @@ public:
     if (allow_same_message) {
       RCLCPP_WARN_ONCE(
         logger,
-        "TakeSubscription::take(allow_same_message=true) is planned to be removed together with "
-        "agnocast::PollingSubscriber, which is moving to autoware_agnocast_wrapper. Keep the last "
-        "returned message on the caller side and use take(false) instead.");
+        "TakeSubscription::take(allow_same_message=true) is planned to be removed, so its use is "
+        "not recommended: it returns the same message repeatedly and only means 'the latest value' "
+        "with a history depth of 1. Keep the last returned message on the caller side and use "
+        "take(false) instead.");
     }
 
     publisher_shm_info pub_shm_infos[MAX_PUBLISHER_NUM]{};
