@@ -24,6 +24,8 @@
 #include <rosidl_runtime_cpp/message_initialization.hpp>
 #include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 
+#include <rmw/types.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -37,6 +39,21 @@ constexpr size_t offsetof_meta(size_t base_size)
 {
   return (base_size + 15) & (~15);
 }
+
+// Dummy types used only for compile-time layout verification.
+struct DummyRequest
+{
+  int32_t value;
+};
+struct DummyResponse
+{
+  int32_t value;
+};
+struct DummyService
+{
+  using Request = DummyRequest;
+  using Response = DummyResponse;
+};
 
 }  // namespace
 
@@ -65,6 +82,12 @@ class GenericRequestWrapper
     uint8_t client_gid[RMW_GID_STORAGE_SIZE];
     std::string node_name;
   };
+
+  // Ensure ServiceRequestWrapper and GenericRequestWrapper share the same metadata layout.
+  static_assert(
+    sizeof(ServiceRequestWrapper<DummyService>) ==
+      offsetof_meta(sizeof(DummyRequest)) + sizeof(Meta),
+    "ServiceRequestWrapper and GenericRequestWrapper diverged (Agnocast internal error)");
 
   static constexpr size_t get_wire_size(
     const rosidl_typesupport_introspection_cpp::MessageMembers * request_members)
@@ -147,6 +170,12 @@ class GenericResponseWrapper
   {
     alignas(16) int64_t seqno;
   };
+
+  // Ensure ServiceResponseWrapper and GenericResponseWrapper share the same metadata layout.
+  static_assert(
+    sizeof(ServiceResponseWrapper<DummyService>) ==
+      offsetof_meta(sizeof(DummyResponse)) + sizeof(Meta),
+    "ServiceResponseWrapper and GenericResponseWrapper diverged (Agnocast internal error)");
 
   static constexpr size_t get_wire_size(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members)
