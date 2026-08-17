@@ -60,51 +60,52 @@ struct DummyService
 namespace agnocast
 {
 
-template <typename ServiceT>
-struct ServiceRequestWrapper : public ServiceT::Request
+struct RequestMeta
 {
   alignas(16) int64_t seqno;
   uint8_t client_gid[RMW_GID_STORAGE_SIZE];
   std::string node_name;
 };
 
-template <typename ServiceT>
-struct ServiceResponseWrapper : public ServiceT::Response
+struct ResponseMeta
 {
   alignas(16) int64_t seqno;
 };
 
+template <typename ServiceT>
+struct ServiceRequestWrapper : public ServiceT::Request, public RequestMeta
+{
+};
+
+template <typename ServiceT>
+struct ServiceResponseWrapper : public ServiceT::Response, public ResponseMeta
+{
+};
+
 class GenericRequestWrapper
 {
-  struct Meta
-  {
-    alignas(16) int64_t seqno;
-    uint8_t client_gid[RMW_GID_STORAGE_SIZE];
-    std::string node_name;
-  };
-
-  // Ensure ServiceRequestWrapper and GenericRequestWrapper share the same metadata layout.
+  // sanity check: ensure template and generic versions share the same size.
   static_assert(
     sizeof(ServiceRequestWrapper<DummyService>) ==
-      offsetof_meta(sizeof(DummyRequest)) + sizeof(Meta),
-    "ServiceRequestWrapper and GenericRequestWrapper diverged (Agnocast internal error)");
+      offsetof_meta(sizeof(DummyRequest)) + sizeof(RequestMeta),
+    "ServiceRequestWrapper and GenericRequestWrapper are inconsistent (Agnocast internal error)");
 
   static constexpr size_t get_wire_size(
     const rosidl_typesupport_introspection_cpp::MessageMembers * request_members)
   {
-    return offsetof_meta(request_members->size_of_) + sizeof(Meta);
+    return offsetof_meta(request_members->size_of_) + sizeof(RequestMeta);
   }
 
-  static Meta * get_meta_ptr(
+  static RequestMeta * get_meta_ptr(
     const rosidl_typesupport_introspection_cpp::MessageMembers * request_members,
     void * request_ptr)
   {
-    return reinterpret_cast<Meta *>(
+    return reinterpret_cast<RequestMeta *>(
       static_cast<char *>(request_ptr) + offsetof_meta(request_members->size_of_));
   }
 
   ipc_shared_ptr<void> request_;
-  Meta * const meta_ptr_;
+  RequestMeta * const meta_ptr_;
 
 public:
   explicit GenericRequestWrapper(
@@ -156,7 +157,7 @@ public:
     request_members->fini_function(ptr);
 
     // Destroy node_name by calling std::destroy_at().
-    Meta * meta_ptr = get_meta_ptr(request_members, ptr);
+    RequestMeta * meta_ptr = get_meta_ptr(request_members, ptr);
     auto * node_name_ptr = &meta_ptr->node_name;
     std::destroy_at(node_name_ptr);
 
@@ -166,33 +167,28 @@ public:
 
 class GenericResponseWrapper
 {
-  struct Meta
-  {
-    alignas(16) int64_t seqno;
-  };
-
-  // Ensure ServiceResponseWrapper and GenericResponseWrapper share the same metadata layout.
+  // sanity check: ensure template and generic versions share the same size.
   static_assert(
     sizeof(ServiceResponseWrapper<DummyService>) ==
-      offsetof_meta(sizeof(DummyResponse)) + sizeof(Meta),
-    "ServiceResponseWrapper and GenericResponseWrapper diverged (Agnocast internal error)");
+      offsetof_meta(sizeof(DummyResponse)) + sizeof(ResponseMeta),
+    "ServiceResponseWrapper and GenericResponseWrapper are inconsistent (Agnocast internal error)");
 
   static constexpr size_t get_wire_size(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members)
   {
-    return offsetof_meta(response_members->size_of_) + sizeof(Meta);
+    return offsetof_meta(response_members->size_of_) + sizeof(RequestMeta);
   }
 
-  static Meta * get_meta_ptr(
+  static RequestMeta * get_meta_ptr(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members,
     void * response_ptr)
   {
-    return reinterpret_cast<Meta *>(
+    return reinterpret_cast<RequestMeta *>(
       static_cast<char *>(response_ptr) + offsetof_meta(response_members->size_of_));
   }
 
   ipc_shared_ptr<void> response_;
-  Meta * const meta_ptr_;
+  RequestMeta * const meta_ptr_;
 
 public:
   explicit GenericResponseWrapper(
