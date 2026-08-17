@@ -349,14 +349,17 @@ public:
    * @brief Retrieve one message from the topic.
    *
    * Reads are non-destructive: entries stay in shared memory and a per-subscriber watermark
-   * tracks how far this subscriber has read. Exactly one message is returned per call
-   * regardless of the history depth; the depth bounds how far back the search goes.
+   * tracks how far this subscriber has read. Exactly one message is returned per call regardless
+   * of the history depth. The search always starts at the newest entry and walks back at most
+   * `depth` deliverable entries, so a subscriber that falls behind by more than `depth` has the
+   * entries outside that window skipped silently.
    *
    * @param allow_same_message  If true, returns the oldest entry within the subscription's
    *                            history depth, and may return the same message as the previous
    *                            call (useful for always having the latest value with depth 1).
-   *                            If false, returns the oldest entry not yet received by this
-   *                            subscriber, i.e. FIFO.
+   *                            If false, returns the oldest entry within that window not yet
+   *                            received by this subscriber: messages arrive in order, but the
+   *                            sequence is not gap-free when falling behind.
    * @return Shared pointer to the message, or empty if unavailable.
    */
   AGNOCAST_PUBLIC
