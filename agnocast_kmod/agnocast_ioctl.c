@@ -1124,10 +1124,6 @@ int agnocast_ioctl_take_msg(
   ioctl_ret->ret_addr = 0;
   ioctl_ret->ret_entry_id = -1;
 
-  // allow_same_message exists only to serve agnocast::PollingSubscriber, which reproduces
-  // Autoware's polling subscriber. That class is planned to move to autoware_agnocast_wrapper and
-  // be removed from agnocast, since it is an Autoware-specific API. Once that is done this mode is
-  // expected to be removed as well, leaving take() with a single FIFO meaning.
   uint32_t searched_count = 0;
   struct entry_node * candidate_en = NULL;
   struct rb_node * node = rb_last(&wrapper->topic->entries);

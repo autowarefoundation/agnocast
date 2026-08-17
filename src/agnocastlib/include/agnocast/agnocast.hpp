@@ -199,8 +199,6 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
 /// @param topic_name Topic name.
 /// @param qos_history_depth History depth for the QoS profile.
 /// @return Shared pointer to the created polling subscription.
-/// @note agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed
-/// from agnocast, since it reproduces an Autoware-specific API.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
 [[deprecated(
@@ -224,8 +222,6 @@ typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
 /// @param topic_name Topic name.
 /// @param qos Quality of service profile.
 /// @return Shared pointer to the created polling subscription.
-/// @note agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed
-/// from agnocast, since it reproduces an Autoware-specific API.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
 [[deprecated(

@@ -358,11 +358,6 @@ public:
    *                            If false, returns the oldest entry not yet received by this
    *                            subscriber, i.e. FIFO.
    * @return Shared pointer to the message, or empty if unavailable.
-   *
-   * @note `allow_same_message = true` exists only to serve `agnocast::PollingSubscriber`, which is
-   *       planned to move to `autoware_agnocast_wrapper` and be removed from agnocast. Once that is
-   *       done this mode is expected to be removed as well, leaving `take()` with a single FIFO
-   *       meaning.
    */
   AGNOCAST_PUBLIC
   agnocast::ipc_shared_ptr<const MessageT> take(bool allow_same_message = false)
