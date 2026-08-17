@@ -3,6 +3,7 @@
 #include <linux/sched.h>
 #include <sched.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -72,6 +73,44 @@ int parse_rt_priority(
   return value;
 }
 
+// CPU_SET(3) silently ignores CPUs outside [0, CPU_SETSIZE), so a typo'd
+// "affinity: [2, 2000]" would pin to {2} yet be reported as configured (and
+// the SCHED_DEADLINE cgroup path would write the raw value into cpuset.cpus);
+// reject such values here instead. The result is sorted and deduplicated so
+// downstream consumers see a canonical list.
+std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & entry_desc)
+{
+  const YAML::Node affinity = entry["affinity"];
+  std::vector<int> cpus;
+  // Absent or null keeps its meaning of "do not manage affinity".
+  if (!affinity || affinity.IsNull()) {
+    return cpus;
+  }
+  // A scalar ("affinity: 2" or the kernel cpu-list string "0-3") iterates
+  // zero times, which would silently drop the user's setting.
+  if (!affinity.IsSequence()) {
+    throw std::runtime_error(
+      "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
+  }
+  for (const auto & cpu_node : affinity) {
+    int cpu = 0;
+    try {
+      cpu = cpu_node.as<int>();
+    } catch (const YAML::Exception &) {
+      throw std::runtime_error("'affinity' must contain only integers for " + entry_desc);
+    }
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      throw std::runtime_error(
+        "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " +
+        std::to_string(CPU_SETSIZE - 1) + "] for " + entry_desc);
+    }
+    cpus.push_back(cpu);
+  }
+  std::sort(cpus.begin(), cpus.end());
+  cpus.erase(std::unique(cpus.begin(), cpus.end()), cpus.end());
+  return cpus;
+}
+
 }  // namespace
 
 const std::unordered_map<std::string, int> policy_to_sched_const = {
@@ -135,7 +174,7 @@ void parse_yaml(
       }
     }
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
-    for (auto & cpu : cg["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+    cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str);
     cfg.policy = cg["policy"].as<std::string>();
 
     if (policy_to_sched_const.count(cfg.policy) == 0) {
@@ -161,7 +200,7 @@ void parse_yaml(
     auto & cfg = non_ros_threads_out[i];
 
     cfg.thread_str = nrt["name"].as<std::string>();
-    for (auto & cpu : nrt["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+    cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str);
     cfg.policy = nrt["policy"].as<std::string>();
 
     if (policy_to_sched_const.count(cfg.policy) == 0) {

@@ -579,6 +579,115 @@ non_ros_threads:
   EXPECT_EQ(nrt[0].thread_str, "worker/*");
 }
 
+// ---------- affinity validation ----------
+
+TEST(ParseYaml, NormalizesAffinityToSortedUnique)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+    affinity: [3, 1, 3, 2]
+non_ros_threads:
+  - name: my_thread
+    policy: SCHED_OTHER
+    nice: 0
+    affinity: [5, 5, 0]
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_EQ(cb[0].affinity, (std::vector<int>{1, 2, 3}));
+  ASSERT_EQ(nrt.size(), 1u);
+  EXPECT_EQ(nrt[0].affinity, (std::vector<int>{0, 5}));
+}
+
+TEST(ParseYaml, TreatsAbsentOrNullAffinityAsUnmanaged)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: no_key
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+  - id: null_value
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+    affinity: ~
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 2u);
+  EXPECT_TRUE(cb[0].affinity.empty());
+  EXPECT_TRUE(cb[1].affinity.empty());
+}
+
+TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
+{
+  // CPU_SET(3) would silently ignore both, shrinking the mask without any
+  // error report.
+  for (const char * bad_affinity : {"[-1]", "[2, 1024]"}) {
+    auto y = yaml_from_str(("callback_groups:\n"
+                            "  - id: my_cbg\n"
+                            "    domain_id: 0\n"
+                            "    policy: SCHED_FIFO\n"
+                            "    priority: 50\n"
+                            "    affinity: " +
+                            std::string(bad_affinity) +
+                            "\n"
+                            "non_ros_threads: []\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
+      << "affinity=" << bad_affinity;
+  }
+}
+
+TEST(ParseYaml, RejectsScalarAffinity)
+{
+  // A scalar iterates zero times, so before validation these were silently
+  // treated as "no affinity".
+  for (const char * bad_affinity : {"2", "\"0-3\""}) {
+    auto y = yaml_from_str(("callback_groups: []\n"
+                            "non_ros_threads:\n"
+                            "  - name: my_thread\n"
+                            "    policy: SCHED_OTHER\n"
+                            "    nice: 0\n"
+                            "    affinity: " +
+                            std::string(bad_affinity) + "\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
+      << "affinity=" << bad_affinity;
+  }
+}
+
+TEST(ParseYaml, ReportsEntryOnNonIntegerAffinityElement)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+    affinity: [0, all]
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("'affinity' must contain only integers"), std::string::npos) << what;
+    EXPECT_NE(what.find("id=my_cbg"), std::string::npos) << what;
+  }
+}
+
 // ---------- extract_node_part ----------
 
 TEST(ExtractNodePart, SplitsAtFirstAtSign)
