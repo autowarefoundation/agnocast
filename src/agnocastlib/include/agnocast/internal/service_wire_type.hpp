@@ -1,16 +1,19 @@
 // On-the-wire layout of Agnocast service request/response messages.
 //
-// ┌───────────┬────────────────────────┐
-// │           │  correlation metadata  │
-// │  payload  ├─────────┬──────────────┤
-// │           │  seqno  │  node_name   │
-// └───────────┼─────────┴──────────────┘
+// ┌───────────┬────────────────────────────────────┐
+// │           │        correlation metadata        │
+// │  payload  ├─────────┬──────────────┬───────────┤
+// │           │  seqno  │  client_gid  │ node_name │
+// └───────────┼─────────┴──────────────┴───────────┘
 //             └ 16-byte aligned
 //
 // payload: request/response payload (ServiceT::Request or ServiceT::Response).
 //
 // seqno: A sequence number to identify each service call (int64_t). To avoid nastiness that may be
 // caused by compiler-inserted padding, this field is conservatively aligned to 16 bytes.
+//
+// client_gid: The client GID (uint8_t array of length RMW_GID_STORAGE_SIZE). This field only exists
+// in the request.
 //
 // node_name: The node name of the caller (std::string). This field only exists in the request.
 
@@ -44,6 +47,7 @@ template <typename ServiceT>
 struct ServiceRequestWrapper : public ServiceT::Request
 {
   alignas(16) int64_t seqno;
+  uint8_t client_gid[RMW_GID_STORAGE_SIZE];
   std::string node_name;
 };
 
@@ -58,6 +62,7 @@ class GenericRequestWrapper
   struct Meta
   {
     alignas(16) int64_t seqno;
+    uint8_t client_gid[RMW_GID_STORAGE_SIZE];
     std::string node_name;
   };
 
@@ -87,6 +92,7 @@ public:
   }
 
   int64_t & seqno() { return meta_ptr_->seqno; }
+  auto client_gid() -> uint8_t (&)[RMW_GID_STORAGE_SIZE] { return meta_ptr_->client_gid; }
   std::string & node_name() { return meta_ptr_->node_name; }
 
   ipc_shared_ptr<void> && take_request() && { return std::move(request_); }
@@ -94,8 +100,8 @@ public:
   /// @brief Allocate a wire-format request buffer in shared memory.
   ///
   /// The payload buffer is initialized via the introspection init function with
-  /// MessageInitialization::SKIP. The seqno number is uninitialized (garbage), and the node_name
-  /// string is default-constructed via placement new.
+  /// MessageInitialization::SKIP. The seqno number and client_gid are uninitialized (garbage),
+  /// and the node_name string is default-constructed via placement new.
   ///
   /// @param request_members The introspection message members for the request type.
   /// @param borrow_loaned_message A callable that allocates a buffer of the given size in shared

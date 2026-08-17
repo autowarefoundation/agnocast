@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <memory>
@@ -217,6 +218,12 @@ private:
     }
   }
 
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
+
 public:
   Client(
     rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
@@ -238,8 +245,11 @@ public:
   ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
     auto request = publisher_->borrow_loaned_message();
-    request->node_name = node_name_;
+
     request->seqno = next_sequence_number_.fetch_add(1);
+    std::memcpy(request->client_gid, get_gid().data, RMW_GID_STORAGE_SIZE);
+    request->node_name = node_name_;
+
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
@@ -385,6 +395,12 @@ private:
         service_type, service_name_, BridgeDirection::AGNOCAST_TO_ROS2, std::nullopt);
     }
   }
+
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
 
 public:
   GenericClient(
