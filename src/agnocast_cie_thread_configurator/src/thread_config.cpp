@@ -74,14 +74,11 @@ int parse_rt_priority(
   return value;
 }
 
-// CPU_SET(3) silently ignores CPUs outside [0, CPU_SETSIZE) and
-// sched_setaffinity(2) silently intersects away CPUs that do not exist on
-// this machine, so a typo'd "affinity: [2, 2000]" would pin to {2} yet be
-// reported as configured (and the SCHED_DEADLINE cgroup path would write the
-// raw value into cpuset.cpus); reject such values here instead. Checking
-// against the actual CPU count is valid because the config is always parsed
-// on the machine that applies it. The result is sorted and deduplicated so
-// downstream consumers see a canonical list.
+// CPU_SET(3) and sched_setaffinity(2) silently drop out-of-range or
+// nonexistent CPUs instead of failing, so reject them at parse time. The
+// machine CPU count is a valid bound because the config is always parsed on
+// the machine that applies it. The result is sorted and deduplicated so
+// downstream consumers see a canonical form.
 std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & entry_desc)
 {
   const YAML::Node affinity = entry["affinity"];
