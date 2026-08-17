@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 #include <sched.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -259,7 +261,7 @@ callback_groups:
     runtime: 1000000
     period: 5000000
     deadline: 5000000
-    affinity: [2]
+    affinity: [0]
 non_ros_threads: []
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
@@ -327,7 +329,7 @@ non_ros_threads:
   - name: worker
     policy: SCHED_RR
     priority: 30
-    affinity: [3]
+    affinity: [0]
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
   acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
@@ -435,7 +437,7 @@ callback_groups:
     domain_id: 0
     policy: SCHED_FIFO
     priority: 50
-    affinity: [2]
+    affinity: [0]
 non_ros_threads: []
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
@@ -584,25 +586,27 @@ non_ros_threads:
 
 TEST(ParseYaml, NormalizesAffinityToSortedUnique)
 {
+  // Only CPUs 0 and 1 are used so the test also passes on small CI machines
+  // now that parse_affinity bounds values by the actual CPU count.
   auto y = yaml_from_str(R"YAML(
 callback_groups:
   - id: my_cbg
     domain_id: 0
     policy: SCHED_FIFO
     priority: 50
-    affinity: [3, 1, 3, 2]
+    affinity: [1, 0, 1]
 non_ros_threads:
   - name: my_thread
     policy: SCHED_OTHER
     nice: 0
-    affinity: [5, 5, 0]
+    affinity: [1, 1, 0]
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].affinity, (std::vector<int>{1, 2, 3}));
+  EXPECT_EQ(cb[0].affinity, (std::vector<int>{0, 1}));
   ASSERT_EQ(nrt.size(), 1u);
-  EXPECT_EQ(nrt[0].affinity, (std::vector<int>{0, 5}));
+  EXPECT_EQ(nrt[0].affinity, (std::vector<int>{0, 1}));
 }
 
 TEST(ParseYaml, TreatsAbsentOrNullAffinityAsUnmanaged)
@@ -629,10 +633,13 @@ non_ros_threads: []
 
 TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
 {
-  // CPU_SET(3) would silently ignore both, shrinking the mask without any
-  // error report.
+  // CPU_SET(3) / sched_setaffinity(2) would silently ignore all of these,
+  // shrinking the mask without any error report. The valid CPU 0 in front
+  // checks that it does not mask the error.
+  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
   for (const std::string & bad_affinity :
-       {std::string("[-1]"), "[2, " + std::to_string(CPU_SETSIZE) + "]"}) {
+       {std::string("[-1]"), "[0, " + std::to_string(num_cpus) + "]",
+        "[0, " + std::to_string(CPU_SETSIZE) + "]"}) {
     auto y = yaml_from_str(("callback_groups:\n"
                             "  - id: my_cbg\n"
                             "    domain_id: 0\n"
@@ -651,21 +658,23 @@ TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
 
 TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
 {
-  // Pins the accept side of the [0, CPU_SETSIZE) boundary.
+  // Pins the accept side of the [0, min(CPU_SETSIZE, num_cpus)) boundary.
+  const int max_cpu =
+    static_cast<int>(std::min<long>(CPU_SETSIZE, sysconf(_SC_NPROCESSORS_CONF))) - 1;
   auto y = yaml_from_str(("callback_groups:\n"
                           "  - id: my_cbg\n"
                           "    domain_id: 0\n"
                           "    policy: SCHED_FIFO\n"
                           "    priority: 50\n"
                           "    affinity: [" +
-                          std::to_string(CPU_SETSIZE - 1) +
+                          std::to_string(max_cpu) +
                           "]\n"
                           "non_ros_threads: []\n")
                            .c_str());
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].affinity, (std::vector<int>{CPU_SETSIZE - 1}));
+  EXPECT_EQ(cb[0].affinity, (std::vector<int>{max_cpu}));
 }
 
 TEST(ParseYaml, RejectsScalarAffinity)

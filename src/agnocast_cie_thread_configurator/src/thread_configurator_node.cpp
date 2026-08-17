@@ -23,30 +23,6 @@
 
 using agnocast_cie_thread_configurator::policy_to_sched_const;
 
-namespace
-{
-
-// parse_yaml only bounds affinity values by CPU_SETSIZE so that the parser
-// stays host-agnostic; whether a CPU actually exists can only be checked on
-// the machine that applies the config. Without this check, sched_setaffinity
-// silently intersects nonexistent CPUs away instead of failing.
-void validate_affinity_cpus_exist(
-  const std::vector<agnocast_cie_thread_configurator::ThreadConfig> & configs)
-{
-  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
-  for (const auto & cfg : configs) {
-    for (int cpu : cfg.affinity) {
-      if (cpu >= num_cpus) {
-        throw std::runtime_error(
-          "'affinity' CPU " + std::to_string(cpu) + " does not exist on this machine (" +
-          std::to_string(num_cpus) + " CPUs) for " + cfg.thread_str);
-      }
-    }
-  }
-}
-
-}  // namespace
-
 ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & options)
 : Node("thread_configurator_node", options),
   config_file_([this]() {
@@ -75,8 +51,6 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
   agnocast_cie_thread_configurator::parse_yaml(
     yaml, default_domain_id_, callback_group_configs_, non_ros_thread_configs_);
-  validate_affinity_cpus_exist(callback_group_configs_);
-  validate_affinity_cpus_exist(non_ros_thread_configs_);
 
   unapplied_num_.store(
     static_cast<int>(callback_group_configs_.size() + non_ros_thread_configs_.size()));
@@ -584,8 +558,6 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   std::vector<ThreadConfig> new_nrt;
   try {
     agnocast_cie_thread_configurator::parse_yaml(yaml, default_domain_id_, new_cb, new_nrt);
-    validate_affinity_cpus_exist(new_cb);
-    validate_affinity_cpus_exist(new_nrt);
   } catch (const std::exception & e) {
     response->success = false;
     response->error_message = "YAML validation error for '" + config_file_ + "': " + e.what();

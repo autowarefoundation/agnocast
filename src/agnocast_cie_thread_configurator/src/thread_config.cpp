@@ -2,6 +2,7 @@
 
 #include <linux/sched.h>
 #include <sched.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <stdexcept>
@@ -73,10 +74,13 @@ int parse_rt_priority(
   return value;
 }
 
-// CPU_SET(3) silently ignores CPUs outside [0, CPU_SETSIZE), so a typo'd
-// "affinity: [2, 2000]" would pin to {2} yet be reported as configured (and
-// the SCHED_DEADLINE cgroup path would write the raw value into cpuset.cpus);
-// reject such values here instead. The result is sorted and deduplicated so
+// CPU_SET(3) silently ignores CPUs outside [0, CPU_SETSIZE) and
+// sched_setaffinity(2) silently intersects away CPUs that do not exist on
+// this machine, so a typo'd "affinity: [2, 2000]" would pin to {2} yet be
+// reported as configured (and the SCHED_DEADLINE cgroup path would write the
+// raw value into cpuset.cpus); reject such values here instead. Checking
+// against the actual CPU count is valid because the config is always parsed
+// on the machine that applies it. The result is sorted and deduplicated so
 // downstream consumers see a canonical list.
 std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & entry_desc)
 {
@@ -92,6 +96,8 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
     throw std::runtime_error(
       "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
   }
+  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
   for (const auto & cpu_node : affinity) {
     int cpu = 0;
     try {
@@ -101,10 +107,10 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
         "'affinity' must contain only integers for " + entry_desc + ", got '" +
         (cpu_node.IsScalar() ? cpu_node.Scalar() : std::string("<non-scalar>")) + "'");
     }
-    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+    if (cpu < 0 || cpu > max_cpu) {
       throw std::runtime_error(
-        "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " +
-        std::to_string(CPU_SETSIZE - 1) + "] for " + entry_desc);
+        "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " + std::to_string(max_cpu) +
+        "] (this machine has " + std::to_string(num_cpus) + " CPUs) for " + entry_desc);
     }
     cpus.push_back(cpu);
   }
