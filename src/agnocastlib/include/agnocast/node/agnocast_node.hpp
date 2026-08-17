@@ -511,6 +511,10 @@ public:
   /// removed from agnocast, since it reproduces an Autoware-specific API.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
   {
@@ -527,6 +531,10 @@ public:
   /// removed from agnocast, since it reproduces an Autoware-specific API.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
   {

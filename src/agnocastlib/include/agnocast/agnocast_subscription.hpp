@@ -478,14 +478,25 @@ public:
   };
 
   /// @deprecated Use take_data() instead.
-  const agnocast::ipc_shared_ptr<const MessageT> takeData() { return subscriber_->take(true); };
+  [[deprecated("Use take_data() instead.")]]
+  const agnocast::ipc_shared_ptr<const MessageT> takeData()
+  {
+    return subscriber_->take(true);
+  };
   /// @brief Retrieve the latest message, returning it again on subsequent calls if nothing newer
   /// has been published. Returns an empty pointer if no message has been published yet.
   /// @note Assumes a history depth of 1. With a greater depth the returned message lags the newest
   /// one by up to `depth - 1`; see TakeSubscription::take().
   /// @return Shared pointer to the latest message.
   AGNOCAST_PUBLIC
-  const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
+  const agnocast::ipc_shared_ptr<const MessageT> take_data()
+  {
+    return subscriber_->take(true);
+  };
 };
 
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
