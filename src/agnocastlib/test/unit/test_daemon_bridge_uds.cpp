@@ -136,7 +136,7 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrIsCanonicalPerDomain)
   EXPECT_EQ(addr_for("007"), addr_for("7"));
 }
 
-// Performance-mode daemon bridges have no local endpoint to query, so the QoS
+// Daemon bridges have no local endpoint to query, so the QoS
 // must be rebuilt faithfully from the request's explicit fields.
 TEST(DaemonBridgeUdsTest, DaemonRequestQosReliableTransientLocal)
 {
@@ -164,7 +164,7 @@ TEST(DaemonBridgeUdsTest, DaemonRequestQosBestEffortVolatile)
   EXPECT_EQ(qos.durability(), rclcpp::DurabilityPolicy::Volatile);
 }
 
-// The daemon-forced lease (used by the performance bridge_manager to keep a
+// The daemon-forced lease (used by the bridge manager to keep a
 // cross-NS bridge alive without a same-graph DDS counterpart) is active for the
 // half-open window [registered, registered + DAEMON_FORCE_TTL).
 TEST(DaemonBridgeUdsTest, DaemonForceLeaseWindowIsHalfOpen)
