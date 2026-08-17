@@ -356,7 +356,10 @@ public:
    *
    * @param allow_same_message  If true, returns the oldest entry within the subscription's
    *                            history depth, and may return the same message as the previous
-   *                            call (useful for always having the latest value with depth 1).
+   *                            call. Once at least `depth` messages have been published, that
+   *                            entry lags the newest one by exactly `depth - 1` and the lag does
+   *                            not recover, so this mode yields the latest value only with
+   *                            depth 1.
    *                            If false, returns the oldest entry within that window not yet
    *                            received by this subscriber: messages arrive in order, but the
    *                            sequence is not gap-free when falling behind.
@@ -440,8 +443,10 @@ public:
 /**
  * @brief Agnocast polling subscriber for a compile-time known message type.
  *
- * Wraps TakeSubscription<MessageT> and exposes a simple take_data() API that returns the most
- * recent message (or an empty pointer if nothing has been published yet).
+ * Wraps TakeSubscription<MessageT> and exposes a simple take_data() API that keeps returning the
+ * message it last obtained until a newer one becomes available (or an empty pointer if nothing has
+ * been published yet). It is meant for a history depth of 1, the only depth at which the message
+ * it returns is the most recent one; see take_data().
  *
  * @tparam MessageT  ROS message type.
  *
@@ -476,7 +481,8 @@ public:
       std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options, role);
   };
 
-  /// @deprecated Use take_data() instead.
+  /// @deprecated Use take_data() instead. Behaves identically, including the history-depth
+  /// caveat documented there.
   [[deprecated("Use take_data() instead.")]]
   const agnocast::ipc_shared_ptr<const MessageT> takeData()
   {
@@ -485,7 +491,8 @@ public:
   /// @brief Retrieve the latest message, returning it again on subsequent calls if nothing newer
   /// has been published. Returns an empty pointer if no message has been published yet.
   /// @note Assumes a history depth of 1. With a greater depth the returned message lags the newest
-  /// one by up to `depth - 1`; see TakeSubscription::take().
+  /// one by exactly `depth - 1` once at least `depth` messages have been published, and the lag
+  /// does not recover; see TakeSubscription::take().
   /// @return Shared pointer to the latest message.
   AGNOCAST_PUBLIC
   [[deprecated(
