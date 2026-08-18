@@ -61,15 +61,23 @@ struct ServiceBridgeDeps
 // clears neither. Both are true in the ordinary Agnocast-to-Agnocast topology, so one state value
 // could not carry it.
 //
-// (5) excludes (3) and (2). While its first two conjuncts hold, neither is evaluated, even when no
-// ROS 2 client is there to complete (5). An A2R bridge would add a second Agnocast service to the
-// request topic, so every request would be answered twice. A same-named ROS 2 service is therefore
-// ignored until the Agnocast service goes away.
+// (1) does not lead straight on to (5). Registering an Agnocast service makes may_start_r2a_bridge_
+// and agno_service_exists() true, but (5) needs an external ROS 2 client as well, and usually there
+// is none. The item then waits in Pending, which is where most items spend their whole life: a
+// parameter service nobody calls is never bridged. (5) is taken on the first tick after a client
+// appears, and (6) returns the item here once the last one leaves.
 //
-// A running Agnocast service does not always block (2). may_start_r2a_bridge_ is set only by a
-// ServiceRole::Default service, so an AgnocastOnly one never guards the item; and
-// agno_service_exists() reads at most one entry, so it reports false when two or more Agnocast
-// services share the name. Either way (2) destroys the item while a service is still running.
+// That wait is stable rather than transient, because may_start_r2a_bridge_ && agno_service_exists()
+// on their own -- client or no client -- already stop (3) and (2) from being evaluated. This is
+// deliberate. The Agnocast service answers every Agnocast client directly, and an A2R bridge would
+// add a second Agnocast service to the same request topic, so each request would be answered twice.
+// A same-named ROS 2 service is therefore ignored, and the item kept alive, until that Agnocast
+// service goes away.
+//
+// Two things escape that guard, and both let (2) destroy the item while an Agnocast service is
+// still running. may_start_r2a_bridge_ is set only by a ServiceRole::Default service, so an
+// AgnocastOnly one never guards anything; and agno_service_exists() reads at most one entry, so it
+// reports false when two or more Agnocast services share the name.
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem
