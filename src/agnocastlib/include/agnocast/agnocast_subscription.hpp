@@ -183,7 +183,7 @@ class Subscription : public SubscriptionBase
   template <typename NodeT, typename Func>
   void constructor_impl(
     NodeT * node, const std::string & type_name, const rclcpp::QoS & qos, Func && callback,
-    agnocast::SubscriptionOptions options, SubscriptionRole role)
+    const agnocast::SubscriptionOptions & options, SubscriptionRole role)
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
@@ -289,7 +289,7 @@ private:
 
   template <typename NodeT>
   void constructor_impl(
-    NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options,
+    NodeT * node, const rclcpp::QoS & qos, const agnocast::SubscriptionOptions & options,
     SubscriptionRole role)
   {
     // Gated to message types — service types pulled in by
