@@ -128,11 +128,14 @@ public:
   /**
    * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
    *
-   * Counterpart of `rclcpp::SubscriptionBase::get_actual_qos()`.
+   * Unlike `rclcpp::SubscriptionBase::get_actual_qos()`, the value is not RMW-resolved:
+   * there is no DDS entity to query, so `SystemDefault` and the policies Agnocast ignores are
+   * reported as requested.
+   *
    * @return Effective QoS of this subscription.
    */
   AGNOCAST_PUBLIC
-  const rclcpp::QoS & get_actual_qos() const { return actual_qos_; }
+  rclcpp::QoS get_actual_qos() const { return actual_qos_; }
 
   virtual ~SubscriptionBase()
   {
