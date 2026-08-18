@@ -40,7 +40,8 @@ std::vector<IrqInfo> scan_irqs(
   const std::string & proc_irq_root = "/proc/irq",
   const std::string & sys_irq_root = "/sys/kernel/irq");
 
-// nullopt when the IRQ directory or its actions file is missing/unreadable.
+// nullopt when the IRQ directory or its actions file is missing, unreadable,
+// or empty (the IRQ is no longer device-backed, matching scan_irqs).
 std::optional<std::string> read_irq_actions(
   int irq, const std::string & sys_irq_root = "/sys/kernel/irq");
 
