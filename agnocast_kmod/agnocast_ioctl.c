@@ -2285,12 +2285,78 @@ static struct domain_bridge_rule * find_domain_rule(
   return NULL;
 }
 
+// The caller holds global_htables_rwsem for write and has already established that neither cell
+// is taken.
+static int insert_domain_rule(
+  const char * name_a, const char * name_b, const struct ipc_namespace * ipc_ns,
+  const uint32_t domain_a, const uint32_t domain_b, const bool from_is_a)
+{
+  struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
+  if (!rule) return -ENOMEM;
+
+  rule->topic_name_a = kstrdup(name_a, GFP_KERNEL);
+  rule->topic_name_b = kstrdup(name_b, GFP_KERNEL);
+  if (!rule->topic_name_a || !rule->topic_name_b) {
+    kfree(rule->topic_name_a);
+    kfree(rule->topic_name_b);
+    kfree(rule);
+    return -ENOMEM;
+  }
+  rule->ipc_ns = ipc_ns;
+  rule->domain_a = domain_a;
+  rule->domain_b = domain_b;
+  rule->a_to_b = from_is_a;
+  rule->b_to_a = !from_is_a;
+  INIT_HLIST_NODE(&rule->node);
+  // find_domain_rule scans every bucket, so the hash key is only for even distribution.
+  hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, name_a, strlen(name_a)));
+
+  // Report it the way it was declared, not in the canonical order it is stored in.
+  dev_info(
+    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", from_is_a ? name_a : name_b,
+    from_is_a ? domain_a : domain_b, from_is_a ? name_b : name_a, from_is_a ? domain_b : domain_a);
+  return 0;
+}
+
+// The caller holds global_htables_rwsem for write.
+static int add_domain_rule(
+  const char * name_a, const char * name_b, const struct ipc_namespace * ipc_ns,
+  const uint32_t domain_a, const uint32_t domain_b, const bool from_is_a)
+{
+  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
+  // exactly two cells. r_a == r_b (non-NULL) means an existing rule already pairs exactly
+  // these two cells -- a re-declaration or the reverse direction, so just OR in the
+  // direction. Any other overlap (a cell already paired with a different cell) is a
+  // fan-out and is rejected. This is the one place that enforces one pair per cell.
+  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
+  struct domain_bridge_rule * r_a = find_domain_rule(name_a, ipc_ns, domain_a);
+  struct domain_bridge_rule * r_b = find_domain_rule(name_b, ipc_ns, domain_b);
+  if (r_a || r_b) {
+    if (r_a != r_b) return -EBUSY;
+
+    r_a->a_to_b |= from_is_a;
+    r_a->b_to_a |= !from_is_a;
+
+    // Unlike the paths below, this one runs after endpoints may have registered, and the
+    // direction just enabled was denied when their notify lists were built. Both cells share one
+    // topic_struct once grouped, so either wrapper reaches every publisher.
+    struct topic_wrapper * wrapper = find_topic(name_a, ipc_ns, domain_a);
+    if (!wrapper) wrapper = find_topic(name_b, ipc_ns, domain_b);
+    if (wrapper) rebuild_all_notify_lists(wrapper);
+    return 0;
+  }
+
+  // Grouping merges the two domains' id and entry_id spaces, which is only safe
+  // before either side has allocated any; reject if an endpoint already joined.
+  if (find_topic(name_a, ipc_ns, domain_a) || find_topic(name_b, ipc_ns, domain_b)) return -EBUSY;
+
+  return insert_domain_rule(name_a, name_b, ipc_ns, domain_a, domain_b, from_is_a);
+}
+
 int agnocast_ioctl_add_domain_bridge(
   const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
   const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
 {
-  int ret = 0;
-
   if (from_domain == to_domain) return -EINVAL;
 
   // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
@@ -2304,67 +2370,7 @@ int agnocast_ioctl_add_domain_bridge(
   const char * name_b = from_is_a ? topic_name_to : topic_name_from;
 
   down_write(&global_htables_rwsem);
-
-  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
-  // exactly two cells. r_a == r_b (non-NULL) means an existing rule already pairs exactly
-  // these two cells -- a re-declaration or the reverse direction, so just OR in the
-  // direction. Any other overlap (a cell already paired with a different cell) is a
-  // fan-out and is rejected. This is the one place that enforces one pair per cell.
-  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
-  struct domain_bridge_rule * r_a = find_domain_rule(name_a, ipc_ns, domain_a);
-  struct domain_bridge_rule * r_b = find_domain_rule(name_b, ipc_ns, domain_b);
-  if (r_a || r_b) {
-    if (r_a == r_b) {
-      r_a->a_to_b |= from_is_a;
-      r_a->b_to_a |= !from_is_a;
-
-      // Unlike the paths below, this one runs after endpoints may have registered, and the
-      // direction just enabled was denied when their notify lists were built. Both cells share one
-      // topic_struct once grouped, so either wrapper reaches every publisher.
-      struct topic_wrapper * wrapper = find_topic(name_a, ipc_ns, domain_a);
-      if (!wrapper) wrapper = find_topic(name_b, ipc_ns, domain_b);
-      if (wrapper) rebuild_all_notify_lists(wrapper);
-    } else {
-      ret = -EBUSY;
-    }
-    goto unlock;
-  }
-
-  // Grouping merges the two domains' id and entry_id spaces, which is only safe
-  // before either side has allocated any; reject if an endpoint already joined.
-  if (find_topic(name_a, ipc_ns, domain_a) || find_topic(name_b, ipc_ns, domain_b)) {
-    ret = -EBUSY;
-    goto unlock;
-  }
-
-  struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
-  if (!rule) {
-    ret = -ENOMEM;
-    goto unlock;
-  }
-  rule->topic_name_a = kstrdup(name_a, GFP_KERNEL);
-  rule->topic_name_b = kstrdup(name_b, GFP_KERNEL);
-  if (!rule->topic_name_a || !rule->topic_name_b) {
-    kfree(rule->topic_name_a);
-    kfree(rule->topic_name_b);
-    kfree(rule);
-    ret = -ENOMEM;
-    goto unlock;
-  }
-  rule->ipc_ns = ipc_ns;
-  rule->domain_a = domain_a;
-  rule->domain_b = domain_b;
-  rule->a_to_b = from_is_a;
-  rule->b_to_a = !from_is_a;
-  INIT_HLIST_NODE(&rule->node);
-  // find_domain_rule scans every bucket, so the hash key is only for even distribution.
-  hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, name_a, strlen(name_a)));
-
-  dev_info(
-    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", topic_name_from, from_domain,
-    topic_name_to, to_domain);
-
-unlock:
+  const int ret = add_domain_rule(name_a, name_b, ipc_ns, domain_a, domain_b, from_is_a);
   up_write(&global_htables_rwsem);
   return ret;
 }
