@@ -63,7 +63,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping publisher type (agnocast/ros2), QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers. |
 | `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s`, `-c`. |
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |
-| `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM / mqueue loads. |
+| `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM loads. |
 | `test/test_rmmod_refcount.bash` | Verify `rmmod agnocast` is refused while `/dev/agnocast` is open and succeeds once the fd is closed. |
 | `test/switch_kmod.bats` | [bats](https://github.com/bats-core/bats-core) test suite for `switch_kmod.bash` (9 cases). **Destructive** — swaps installed `agnocast-kmod-v*` packages and load/unloads the module. Requires `apt install bats` and a prior run of `switch_kmod_canonical_setup.bash`. Run: `sudo bats scripts/test/switch_kmod.bats`. |
 | `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.3.5}` and caches the `.deb` for teardown recovery. |

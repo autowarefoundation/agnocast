@@ -7,8 +7,10 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 
 namespace
 {
@@ -125,6 +127,69 @@ TEST_F(AgnocastNodeConstructionTest, allow_undeclared_parameters_false_rejects_u
   EXPECT_THROW(
     { node->get_parameter("undeclared_param"); },
     rclcpp::exceptions::ParameterNotDeclaredException);
+}
+
+// Verifies that agnocast::Node forwards
+// NodeOptions::automatically_declare_parameters_from_overrides() to NodeParameters: overrides that
+// no declare_parameter() call claimed become declared parameters, so prefix lookups find them.
+TEST_F(AgnocastNodeConstructionTest, automatically_declare_parameters_from_overrides_declares_them)
+{
+  // Arrange
+  agnocast::init(0, nullptr);
+  rclcpp::NodeOptions options;
+  options.automatically_declare_parameters_from_overrides(true);
+  options.parameter_overrides(
+    {rclcpp::Parameter("group.first", 1), rclcpp::Parameter("group.second", "two")});
+
+  // Act
+  auto node = std::make_shared<agnocast::Node>("test_node_auto_declare_on", options);
+
+  // Assert: the overrides are declared and keep their values.
+  EXPECT_EQ(node->get_parameter("group.first").as_int(), 1);
+  EXPECT_EQ(node->get_parameter("group.second").as_string(), "two");
+
+  // Assert: the point of the option is that a caller which does not know the names can still
+  // enumerate them, with the prefix stripped from the keys.
+  std::map<std::string, rclcpp::Parameter> values;
+  ASSERT_TRUE(node->get_parameters("group", values));
+  ASSERT_EQ(values.size(), 2u);
+  EXPECT_EQ(values.at("first").as_int(), 1);
+  EXPECT_EQ(values.at("second").as_string(), "two");
+}
+
+// Overrides are declared with a dynamically typed descriptor, so a later set() may change the type.
+TEST_F(
+  AgnocastNodeConstructionTest, automatically_declare_parameters_from_overrides_uses_dynamic_typing)
+{
+  // Arrange
+  agnocast::init(0, nullptr);
+  rclcpp::NodeOptions options;
+  options.automatically_declare_parameters_from_overrides(true);
+  options.parameter_overrides({rclcpp::Parameter("group.first", 1)});
+  auto node = std::make_shared<agnocast::Node>("test_node_auto_declare_dynamic", options);
+
+  // Act
+  const auto descriptor = node->describe_parameter("group.first");
+
+  // Assert
+  EXPECT_TRUE(descriptor.dynamic_typing);
+}
+
+TEST_F(AgnocastNodeConstructionTest, automatically_declare_parameters_from_overrides_off_by_default)
+{
+  // Arrange
+  agnocast::init(0, nullptr);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({rclcpp::Parameter("group.first", 1)});
+
+  // Act
+  auto node = std::make_shared<agnocast::Node>("test_node_auto_declare_off", options);
+
+  // Assert: the override was resolved but never declared, so it is invisible to lookups.
+  EXPECT_FALSE(node->has_parameter("group.first"));
+  std::map<std::string, rclcpp::Parameter> values;
+  EXPECT_FALSE(node->get_parameters("group", values));
+  EXPECT_TRUE(values.empty());
 }
 
 // agnocast::Node must forward `options.use_clock_thread()` to NodeTimeSource, which creates

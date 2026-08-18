@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
@@ -10,12 +9,10 @@
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <mqueue.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <mutex>
 
 namespace agnocast
 {
@@ -26,12 +23,10 @@ const void * get_node_base_address(Node * node);
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge, const std::string & type_name, std::string & out_mq_topic_name);
+  const bool is_bridge, const std::string & type_name);
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
-  const std::string & mq_topic_name, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs);
+  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);
 uint32_t get_subscription_count_core(const std::string & topic_name);
 uint32_t get_intra_subscription_count_core(const std::string & topic_name);
 void increment_borrowed_publisher_num();
@@ -78,7 +73,8 @@ enum class PublisherRole : uint8_t {
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
-// shared with all Agnocast publishers, such as kernel registration and message queue management.
+// shared with all Agnocast publishers, such as kernel registration, GID generation, and
+// bridge registration.
 class PublisherBase
 {
   void generate_gid();
@@ -86,12 +82,6 @@ class PublisherBase
 protected:
   topic_local_id_t id_ = -1;
   std::string topic_name_;
-  // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
-  // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
-  // and a renamed subscriber derive the same MQ name.
-  std::string mq_topic_name_;
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
-  std::mutex opened_mqs_mtx_;
   rmw_gid_t gid_;
 
   template <typename NodeT>
@@ -230,12 +220,8 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    union ioctl_publish_msg_args publish_msg_args;
-    {
-      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-      publish_msg_args =
-        publish_core(this, topic_name_, mq_topic_name_, id_, msg_virtual_address, opened_mqs_);
-    }
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
@@ -314,12 +300,8 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    union ioctl_publish_msg_args publish_msg_args;
-    {
-      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-      publish_msg_args =
-        publish_core(this, topic_name_, mq_topic_name_, id_, msg_virtual_address, opened_mqs_);
-    }
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       void * release_ptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);

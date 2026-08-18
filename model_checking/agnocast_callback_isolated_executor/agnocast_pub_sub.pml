@@ -40,7 +40,7 @@ inline agnocast_timer_callback() {
 		if
 		:: epoll_added[cb_info_i] ->
 			entry_num[cb_info_i]++;// Simplification: This corresponds to `ioctl(agnocast_fd,AGNOCAST_PUBLISH_MSG_CMD,&publish_msg_args)`.
-			epoll!cb_info_i// mq_send() for publish
+			epoll!cb_info_i// eventfd signal for publish
 		:: else
 		fi
 	}

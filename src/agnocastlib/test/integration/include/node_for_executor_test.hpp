@@ -20,12 +20,11 @@ private:
   std::unique_ptr<std::atomic<bool>[]> agnocast_sub_cbs_called_;
   size_t num_total_agnocast_sub_cbs_ = 0;
   std::string agnocast_topic_name_ = "/dummy_agnocast_topic";
-  // These mqueues are used to execute the agnocast callbacks without Publisher and Subscription.
-  std::vector<std::pair<mqd_t, std::string>> mq_receivers_;
-  std::unordered_map<std::string, mqd_t> mq_senders_;
+  // These eventfds are used to execute the agnocast callbacks without Publisher and Subscription.
+  std::vector<int> notify_eventfds_;
 
   void add_agnocast_sub_cb();
-  mqd_t open_mq_for_receiver(const int64_t cb_i);
+  int create_eventfd_for_receiver();
   void dummy_work(std::chrono::milliseconds exec_time);
   void agnocast_timer_cb();
   void agnocast_sub_cb(const agnocast::ipc_shared_ptr<std_msgs::msg::Bool> & msg, int64_t cb_i);

@@ -12,7 +12,6 @@
 #include "rcpputils/shared_library.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <mqueue.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -74,10 +73,7 @@ enum class SubscriptionRole : uint8_t {
 };
 
 // These are cut out of the class for information hiding.
-mqd_t open_mq_for_subscription(
-  const std::string & topic_name, const topic_local_id_t subscriber_id,
-  std::pair<mqd_t, std::string> & mq_subscription);
-void remove_mq(const std::pair<mqd_t, std::string> & mq_subscription);
+void close_notify_eventfd(int notify_eventfd);
 uint32_t get_publisher_count_core(const std::string & topic_name);
 
 template <typename NodeT>
@@ -104,10 +100,7 @@ class SubscriptionBase
 protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;
-  // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
-  // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
-  // and a renamed subscriber derive the same MQ name.
-  std::string mq_topic_name_;
+  int notify_eventfd_ = -1;  // publish-notification eventfd (-1 for take subscriptions)
   void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
     SubscriptionRole role, const std::string & node_name, const std::string & type_name);
@@ -146,6 +139,8 @@ public:
         RCLCPP_WARN(logger, "Failed to remove subscriber (id=%d) from kernel.", id_);
       }
     }
+
+    close_notify_eventfd(notify_eventfd_);
   }
 };
 
@@ -162,7 +157,6 @@ AGNOCAST_PUBLIC
 template <typename MessageT>
 class Subscription : public SubscriptionBase
 {
-  std::pair<mqd_t, std::string> mq_subscription_;
   uint32_t callback_info_id_;
 
   // Returns rosidl message name for MessageT, or empty string if MessageT is not a rosidl message
@@ -187,12 +181,11 @@ class Subscription : public SubscriptionBase
 
     const rclcpp::QoS actual_qos = init_base(node, qos, type_name, false, options, role);
 
-    mqd_t mq = open_mq_for_subscription(mq_topic_name_, id_, mq_subscription_);
-
     const bool is_transient_local =
       actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
     callback_info_id_ = agnocast::register_callback<MessageT>(
-      std::forward<Func>(callback), topic_name_, id_, is_transient_local, mq, callback_group);
+      std::forward<Func>(callback), topic_name_, id_, is_transient_local, notify_eventfd_,
+      callback_group);
 
     {
       uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
@@ -250,15 +243,12 @@ public:
   ~Subscription()
   {
     // Remove from callback info map to prevent stale references on re-subscription and to avoid
-    // fd reuse conflicts. When mq_close() is called in remove_mq(), the OS may later reuse the
-    // same fd number for a new subscription. If the old entry remains in id2_callback_info,
-    // adding the new fd to epoll (EPOLL_CTL_ADD) can fail with EEXIST because epoll still
-    // associates that fd number with the stale entry.
-    {
-      std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-      id2_callback_info.erase(callback_info_id_);
-    }
-    remove_mq(mq_subscription_);
+    // fd reuse conflicts. ~SubscriptionBase() closes the eventfd once this body returns, after
+    // which the OS may reuse the same fd number for a new subscription. If the old entry remained
+    // in id2_callback_info, adding the new fd to epoll (EPOLL_CTL_ADD) could fail with EEXIST
+    // because epoll would still associate that fd number with the stale entry.
+    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+    id2_callback_info.erase(callback_info_id_);
   }
 };
 
@@ -388,6 +378,9 @@ public:
     take_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
     {
+      // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
+      // mmap that makes it usable, and it is what serializes same-subscriber takes for the kernel
+      // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {

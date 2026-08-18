@@ -4,7 +4,9 @@
 
 #ifndef TRACETOOLS_DISABLED
 
-#ifdef TRACETOOLS_LTTNG_ENABLED
+// Humble's tracetools has no TRACETOOLS_TRACEPOINTS_EXCLUDED, so the condition below is always
+// true on Humble. This is intended. Building with TRACETOOLS_DISABLED will be supported later.
+#ifndef TRACETOOLS_TRACEPOINTS_EXCLUDED
 #define TRACEPOINT_CREATE_PROBES
 #define TRACEPOINT_DEFINE
 #include "agnocast/agnocast_tracepoint_call.h"
