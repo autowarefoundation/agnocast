@@ -270,8 +270,9 @@ public:
 /**
  * @brief Agnocast polling take-subscription for a compile-time known message type.
  *
- * Does not use a callback; the caller retrieves the latest message by calling
- * take(). Use PollingSubscriber<MessageT> for a higher-level wrapper.
+ * Does not use a callback; the caller retrieves one message per call by calling take(), which
+ * returns the newest message only with a history depth of 1. See take() for the behaviour with a
+ * greater depth.
  *
  * @tparam MessageT  ROS message type.
  */
@@ -488,12 +489,13 @@ public:
   {
     return subscriber_->take(true);
   };
-  /// @brief Retrieve the latest message, returning it again on subsequent calls if nothing newer
-  /// has been published. Returns an empty pointer if no message has been published yet.
-  /// @note Assumes a history depth of 1. With a greater depth the returned message lags the newest
-  /// one by exactly `depth - 1` once at least `depth` messages have been published, and the lag
-  /// does not recover; see TakeSubscription::take().
-  /// @return Shared pointer to the latest message.
+  /// @brief Retrieve one message, keeping the one obtained last until it leaves the history
+  /// window. Returns an empty pointer if no message has been published yet.
+  /// @note Assumes a history depth of 1, the only depth at which the returned message is the
+  /// newest one. With a greater depth it lags the newest by exactly `depth - 1` once at least
+  /// `depth` messages have been published, and the lag does not recover; see
+  /// TakeSubscription::take().
+  /// @return Shared pointer to the retrieved message.
   AGNOCAST_PUBLIC
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
