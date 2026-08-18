@@ -50,7 +50,7 @@ struct ServiceBridgeDeps
 //       └───────┘                           └───────┘
 //
 // (1) an Agnocast service or client registered
-// (2) !agno_client_exists(), (3) false, and (5)'s first two conditions false
+// (2) !agno_client_exists(), (3) false, and !(may_start_r2a_bridge_ && agno_service_exists())
 // (3) may_start_a2r_bridge_ && ros2_service_exists()
 // (4) !ros2_service_exists()
 // (5) may_start_r2a_bridge_ && agno_service_exists() && ros2_client_exists()
