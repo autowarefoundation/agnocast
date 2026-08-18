@@ -101,12 +101,14 @@ protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;
   int notify_eventfd_ = -1;  // publish-notification eventfd (-1 for take subscriptions)
+  // The depth is a placeholder: rclcpp::QoS has no default constructor.
+  rclcpp::QoS actual_qos_{1};
   void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
     SubscriptionRole role, const std::string & node_name, const std::string & type_name);
 
   template <typename NodeT>
-  rclcpp::QoS init_base(
+  void init_base(
     NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
     const SubscriptionOptions & options, SubscriptionRole role);
 
@@ -122,6 +124,18 @@ public:
   const char * get_topic_name() const { return topic_name_.c_str(); }
 
   uint32_t get_publisher_count() const { return get_publisher_count_core(topic_name_); }
+
+  /**
+   * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
+   *
+   * Unlike `rclcpp::SubscriptionBase::get_actual_qos()`, the value is not RMW-resolved:
+   * there is no DDS entity to query, so `SystemDefault` and the policies Agnocast ignores are
+   * reported as requested.
+   *
+   * @return Effective QoS of this subscription.
+   */
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return actual_qos_; }
 
   virtual ~SubscriptionBase()
   {
@@ -172,17 +186,17 @@ class Subscription : public SubscriptionBase
   template <typename NodeT, typename Func>
   void constructor_impl(
     NodeT * node, const std::string & type_name, const rclcpp::QoS & qos, Func && callback,
-    agnocast::SubscriptionOptions options, SubscriptionRole role)
+    const agnocast::SubscriptionOptions & options, SubscriptionRole role)
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
     const void * callback_addr = static_cast<const void *>(&callback);
     const char * callback_symbol = tracetools::get_symbol(callback);
 
-    const rclcpp::QoS actual_qos = init_base(node, qos, type_name, false, options, role);
+    init_base(node, qos, type_name, false, options, role);
 
     const bool is_transient_local =
-      actual_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
+      actual_qos_.durability() == rclcpp::DurabilityPolicy::TransientLocal;
     callback_info_id_ = agnocast::register_callback<MessageT>(
       std::forward<Func>(callback), topic_name_, id_, is_transient_local, notify_eventfd_,
       callback_group);
@@ -192,7 +206,7 @@ class Subscription : public SubscriptionBase
       TRACEPOINT(
         agnocast_subscription_init, static_cast<const void *>(this), get_node_base_address(node),
         callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol,
-        topic_name_.c_str(), actual_qos.depth(), pid_callback_info_id);
+        topic_name_.c_str(), actual_qos_.depth(), pid_callback_info_id);
     }
   }
 
@@ -278,8 +292,8 @@ private:
   std::mutex last_taken_ptr_mtx_;
 
   template <typename NodeT>
-  rclcpp::QoS constructor_impl(
-    NodeT * node, const rclcpp::QoS & qos, agnocast::SubscriptionOptions options,
+  void constructor_impl(
+    NodeT * node, const rclcpp::QoS & qos, const agnocast::SubscriptionOptions & options,
     SubscriptionRole role)
   {
     // Gated to message types — service types pulled in by
@@ -289,7 +303,7 @@ private:
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     }
-    return init_base(node, qos, type_name, true, options, role);
+    init_base(node, qos, type_name, true, options, role);
   }
 
 public:
@@ -301,7 +315,7 @@ public:
     SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options, role);
+    constructor_impl(node, qos, options, role);
 
     {
       auto default_cbg = node->get_node_base_interface()->get_default_callback_group();
@@ -312,7 +326,7 @@ public:
         static_cast<const void *>(
           node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(default_cbg.get()),
-        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos.depth(), 0);
+        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos_.depth(), 0);
     }
   }
 
@@ -322,7 +336,7 @@ public:
     SubscriptionRole role = SubscriptionRole::Default)
   : SubscriptionBase(node, topic_name)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, qos, options, role);
+    constructor_impl(node, qos, options, role);
 
     {
       auto default_cbg = get_default_callback_group_for_tracepoint(node);
@@ -332,7 +346,7 @@ public:
         agnocast_subscription_init, static_cast<const void *>(this),
         static_cast<const void *>(get_node_base_address(node)),
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(default_cbg.get()),
-        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos.depth(), 0);
+        dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos_.depth(), 0);
     }
   }
 
@@ -498,6 +512,12 @@ public:
   {
     return subscriber_->take(true);
   };
+
+  /// @brief Return the QoS of the wrapped take-subscription. See
+  /// SubscriptionBase::get_actual_qos() for the contract.
+  /// @return Effective QoS of this subscriber.
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return subscriber_->get_actual_qos(); }
 };
 
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
