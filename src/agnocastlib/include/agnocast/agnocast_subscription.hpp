@@ -101,6 +101,7 @@ protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;
   int notify_eventfd_ = -1;  // publish-notification eventfd (-1 for take subscriptions)
+  // The depth is a placeholder: rclcpp::QoS has no default constructor.
   rclcpp::QoS actual_qos_{1};
   void initialize(
     const rclcpp::QoS & qos, const bool is_take_sub, const bool ignore_local_publications,
