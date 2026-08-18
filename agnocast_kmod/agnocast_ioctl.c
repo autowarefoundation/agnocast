@@ -2288,9 +2288,17 @@ static struct domain_bridge_rule * find_domain_rule(
 // The caller holds global_htables_rwsem for write and has verified, for both cells, that no
 // domain_bridge_rule covers it (find_domain_rule) and that no endpoint has joined it (find_topic).
 static int insert_domain_rule(
-  const char * name_a, const char * name_b, const struct ipc_namespace * ipc_ns,
-  const uint32_t domain_a, const uint32_t domain_b, const bool from_is_a)
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
 {
+  // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
+  // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
+  // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
+  // domain_delivery_allowed.
+  const bool from_is_a = from_domain < to_domain;
+  const char * name_a = from_is_a ? topic_name_from : topic_name_to;
+  const char * name_b = from_is_a ? topic_name_to : topic_name_from;
+
   struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
   if (!rule) return -ENOMEM;
 
@@ -2303,55 +2311,60 @@ static int insert_domain_rule(
     return -ENOMEM;
   }
   rule->ipc_ns = ipc_ns;
-  rule->domain_a = domain_a;
-  rule->domain_b = domain_b;
+  rule->domain_a = from_is_a ? from_domain : to_domain;
+  rule->domain_b = from_is_a ? to_domain : from_domain;
   rule->a_to_b = from_is_a;
   rule->b_to_a = !from_is_a;
   INIT_HLIST_NODE(&rule->node);
   // find_domain_rule scans every bucket, so the hash key is only for even distribution.
   hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, name_a, strlen(name_a)));
 
-  // Report it the way it was declared, not in the canonical order it is stored in.
   dev_info(
-    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", from_is_a ? name_a : name_b,
-    from_is_a ? domain_a : domain_b, from_is_a ? name_b : name_a, from_is_a ? domain_b : domain_a);
+    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", topic_name_from, from_domain,
+    topic_name_to, to_domain);
   return 0;
 }
 
 // The caller holds global_htables_rwsem for write.
 static int add_domain_rule(
-  const char * name_a, const char * name_b, const struct ipc_namespace * ipc_ns,
-  const uint32_t domain_a, const uint32_t domain_b, const bool from_is_a)
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
 {
   // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
-  // exactly two cells. r_a == r_b (non-NULL) means an existing rule already pairs exactly
+  // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
   // these two cells -- a re-declaration or the reverse direction, so just OR in the
   // direction. Any other overlap (a cell already paired with a different cell) is a
   // fan-out and is rejected. This is the one place that enforces one pair per cell.
   // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
-  struct domain_bridge_rule * r_a = find_domain_rule(name_a, ipc_ns, domain_a);
-  struct domain_bridge_rule * r_b = find_domain_rule(name_b, ipc_ns, domain_b);
-  if (r_a || r_b) {
-    if (r_a != r_b) return -EBUSY;
+  struct domain_bridge_rule * r_from = find_domain_rule(topic_name_from, ipc_ns, from_domain);
+  struct domain_bridge_rule * r_to = find_domain_rule(topic_name_to, ipc_ns, to_domain);
+  if (r_from || r_to) {
+    if (r_from != r_to) return -EBUSY;
 
-    r_a->a_to_b |= from_is_a;
-    r_a->b_to_a |= !from_is_a;
+    if (from_domain < to_domain) {
+      r_from->a_to_b = true;
+    } else {
+      r_from->b_to_a = true;
+    }
 
     // Unlike the new-pair path (the fallthrough, which delegates to insert_domain_rule), this
     // one runs after endpoints may have registered, and the direction just enabled was denied
     // when their notify lists were built. Both cells share one topic_struct once grouped, so
     // either wrapper reaches every publisher.
-    struct topic_wrapper * wrapper = find_topic(name_a, ipc_ns, domain_a);
-    if (!wrapper) wrapper = find_topic(name_b, ipc_ns, domain_b);
+    struct topic_wrapper * wrapper = find_topic(topic_name_from, ipc_ns, from_domain);
+    if (!wrapper) wrapper = find_topic(topic_name_to, ipc_ns, to_domain);
     if (wrapper) rebuild_all_notify_lists(wrapper);
     return 0;
   }
 
   // Grouping merges the two domains' id and entry_id spaces, which is only safe
   // before either side has allocated any; reject if an endpoint already joined.
-  if (find_topic(name_a, ipc_ns, domain_a) || find_topic(name_b, ipc_ns, domain_b)) return -EBUSY;
+  if (
+    find_topic(topic_name_from, ipc_ns, from_domain) ||
+    find_topic(topic_name_to, ipc_ns, to_domain))
+    return -EBUSY;
 
-  return insert_domain_rule(name_a, name_b, ipc_ns, domain_a, domain_b, from_is_a);
+  return insert_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, ipc_ns);
 }
 
 int agnocast_ioctl_add_domain_bridge(
@@ -2360,18 +2373,8 @@ int agnocast_ioctl_add_domain_bridge(
 {
   if (from_domain == to_domain) return -EINVAL;
 
-  // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
-  // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
-  // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
-  // domain_delivery_allowed.
-  const bool from_is_a = from_domain < to_domain;
-  const uint32_t domain_a = from_is_a ? from_domain : to_domain;
-  const uint32_t domain_b = from_is_a ? to_domain : from_domain;
-  const char * name_a = from_is_a ? topic_name_from : topic_name_to;
-  const char * name_b = from_is_a ? topic_name_to : topic_name_from;
-
   down_write(&global_htables_rwsem);
-  const int ret = add_domain_rule(name_a, name_b, ipc_ns, domain_a, domain_b, from_is_a);
+  const int ret = add_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, ipc_ns);
   up_write(&global_htables_rwsem);
   return ret;
 }
