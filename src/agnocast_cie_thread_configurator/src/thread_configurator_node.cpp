@@ -320,7 +320,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
     }
 
     // Specify nice value
-    if (setpriority(PRIO_PROCESS, thread_id, config.priority) == -1) {
+    if (setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
       RCLCPP_ERROR(
         this->get_logger(), "Failed to configure nice value (thread=%s, tid=%ld): %s",
         config.thread_str.c_str(), thread_id, strerror(errno));
