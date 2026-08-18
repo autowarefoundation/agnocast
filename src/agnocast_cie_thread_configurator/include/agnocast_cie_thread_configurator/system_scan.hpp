@@ -1,0 +1,62 @@
+#pragma once
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace agnocast_cie_thread_configurator
+{
+
+// One kernel thread observed in a /proc scan (kthreads are single-threaded,
+// so top-level /proc pid dirs suffice). All fields are file-derived, so unit
+// tests can inject a fake tree.
+struct KernelThreadInfo
+{
+  int64_t tid = -1;
+  std::string comm;             // /proc/<pid>/comm, trailing newline stripped
+  std::string policy;           // "SCHED_OTHER" etc., or "UNKNOWN(<n>)" for unmapped values
+  int priority = 0;             // nice for OTHER/BATCH/IDLE, rt_priority for FIFO/RR, 0 otherwise
+  std::string affinity;         // raw Cpus_allowed_list string, e.g. "0-15"
+  bool no_setaffinity = false;  // PF_NO_SETAFFINITY: per-CPU kthread, affinity fixed by kernel
+};
+
+// One device-backed IRQ (non-empty /sys/kernel/irq/<N>/actions).
+struct IrqInfo
+{
+  int irq = -1;
+  std::string name;      // actions file content (comma-joined for shared IRQs)
+  std::string affinity;  // /proc/irq/<N>/smp_affinity_list, "" when unreadable
+};
+
+// Sorted by (comm, tid); entries that vanish mid-scan are skipped silently.
+// kworker/* are excluded: their comms mutate at runtime, so they cannot be
+// managed per-thread.
+std::vector<KernelThreadInfo> scan_kernel_threads(const std::string & proc_root = "/proc");
+
+// Sorted by irq. Iterates numeric directories under sys_irq_root
+// (authoritative for actions); the /proc/irq affinity read is best-effort.
+std::vector<IrqInfo> scan_irqs(
+  const std::string & proc_irq_root = "/proc/irq",
+  const std::string & sys_irq_root = "/sys/kernel/irq");
+
+// nullopt when the IRQ directory or its actions file is missing/unreadable.
+std::optional<std::string> read_irq_actions(
+  int irq, const std::string & sys_irq_root = "/sys/kernel/irq");
+
+// Pointers into `scanned`, in scan order; comms are not unique (e.g. an nfsd
+// pool), so every match is returned.
+std::vector<const KernelThreadInfo *> find_kernel_threads_by_comm(
+  const std::vector<KernelThreadInfo> & scanned, const std::string & comm);
+
+// True when any /proc/<pid>/comm equals `comm` (e.g. irqbalance detection).
+bool process_with_comm_exists(const std::string & comm, const std::string & proc_root = "/proc");
+
+// {2, 3} -> "2,3": the comma list accepted by /proc/irq/<N>/smp_affinity_list.
+std::string format_cpu_list(const std::vector<int> & cpus);
+
+// Kernel cpu-list format ("0-5,8") -> sorted, deduplicated {0..5,8};
+// nullopt on empty or malformed input.
+std::optional<std::vector<int>> parse_cpu_list(const std::string & s);
+
+}  // namespace agnocast_cie_thread_configurator
