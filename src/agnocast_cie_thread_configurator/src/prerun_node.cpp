@@ -153,7 +153,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     out << YAML::Key << "domain_id" << YAML::Value << domain_id;
     out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
-    out << YAML::Key << "priority" << YAML::Value << 0;
+    out << YAML::Key << "nice" << YAML::Value << 0;
     out << YAML::EndMap;
     out << YAML::Newline;
   }
@@ -169,7 +169,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     out << YAML::Key << "name" << YAML::Value << thread_name;
     out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
-    out << YAML::Key << "priority" << YAML::Value << 0;
+    out << YAML::Key << "nice" << YAML::Value << 0;
     out << YAML::EndMap;
     out << YAML::Newline;
   }

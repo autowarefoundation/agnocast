@@ -103,7 +103,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
-| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
+| Parameter Service | ✓ | **Full Support** | - | |
+| Parameter Client | ✓ | **Partial Support** | - | `AsyncParametersClient` is supported while `SyncParametersClient` is not yet |
 
 **Other differences from rclcpp::NodeParameters**:
 
@@ -242,6 +243,8 @@ This provides equivalent functionality to rclcpp's `rclcpp::detail::resolve_para
 1. `parameter_overrides` (from NodeOptions::parameter_overrides())
 2. `local_args` (from NodeOptions::arguments())
 3. `global_args` (from command line)
+
+`NodeOptions::automatically_declare_parameters_from_overrides()` is honored: when enabled, resolved overrides that are not already declared are declared in the constructor.
 
 ### 3.3 Topic Name Resolution
 

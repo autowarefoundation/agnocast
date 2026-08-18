@@ -3,15 +3,12 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_eventfd.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
-#include <linux/mm.h>
-#include <linux/string.h>
 
 static const pid_t PID_BASE = 1000;
-
-static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
@@ -67,7 +64,7 @@ static topic_local_id_t setup_one_subscriber_on_topic(
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
@@ -89,8 +86,7 @@ static uint64_t setup_one_entry(
 {
   union ioctl_publish_msg_args publish_msg_args;
   int ret = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, subscriber_ids_buf,
-    ARRAY_SIZE(subscriber_ids_buf), &publish_msg_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_virtual_address, &publish_msg_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_TRUE(
@@ -675,98 +671,68 @@ void test_case_do_exit_with_multi_references_subscriber_exit_first(struct kunit 
   KUNIT_EXPECT_EQ(test, get_subscriber_num_args.ret_other_process_subscriber_num, 0);
 }
 
-// Test that subscription MQ info is captured on subscriber exit and returned via ioctl
-void test_case_do_exit_subscription_mq_info(struct kunit * test)
+// The path a crashed or SIGKILLed node takes: no REMOVE_SUBSCRIBER, so the exit handler is what
+// has to release the context.
+void test_case_do_exit_releases_notify_context(struct kunit * test)
 {
-  // Arrange: one process with one subscriber
+  // Arrange
+  agnocast_kunit_eventfd_reset();
   const pid_t subscriber_pid = PID_BASE;
+  const int eventfd = 0;
   setup_one_process(test, subscriber_pid);
-  topic_local_id_t sub_id = setup_one_subscriber(test, subscriber_pid);
 
-  // Act: simulate process exit
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+    eventfd, &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
+
+  // Act
   agnocast_enqueue_exit_pid(subscriber_pid);
-  msleep(10);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
 
-  // Assert: ioctl_get_exit_process returns the subscription MQ info
-  struct ioctl_get_exit_process_args get_exit_args;
-  const uint32_t buf_size = 4;
-  struct exit_subscription_mq_info * mq_info_buf =
-    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
-  KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
-
-  memset(&get_exit_args, 0, sizeof(get_exit_args));
-  pid_t global_pid = -1;
-  int ret = agnocast_ioctl_get_exit_process(
-    current->nsproxy->ipc_ns, &get_exit_args, mq_info_buf, buf_size, &global_pid);
-
-  KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, get_exit_args.ret_pid, subscriber_pid);
-  KUNIT_EXPECT_EQ(test, (int)get_exit_args.ret_subscription_mq_info_num, 1);
-  KUNIT_EXPECT_STREQ(test, mq_info_buf[0].topic_name, TOPIC_NAME);
-  KUNIT_EXPECT_EQ(test, mq_info_buf[0].subscriber_id, sub_id);
-
-  bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
-    &daemon_should_exit);
-  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
-
-  kvfree(mq_info_buf);
+  // Assert
+  const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+  KUNIT_ASSERT_NOT_NULL(test, slot);
+  KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
 
-// Test that multiple subscriptions across topics are all captured on exit
-void test_case_do_exit_subscription_mq_info_multi_topic(struct kunit * test)
+// A process holding several subscribers on one topic drops them as a batch, which unlinks and
+// releases on separate passes. A context freed on the wrong pass would leave a list pointing at it.
+void test_case_do_exit_releases_notify_contexts_of_multiple_subscribers(struct kunit * test)
 {
-  // Arrange: one process with subscribers on two different topics
-  static const char * TOPIC_NAME_2 = "/kunit_test_topic_2";
+  // Arrange
+  agnocast_kunit_eventfd_reset();
   const pid_t subscriber_pid = PID_BASE;
+  const int subscriber_num = 3;
   setup_one_process(test, subscriber_pid);
-  topic_local_id_t sub_id_1 = setup_one_subscriber_on_topic(test, subscriber_pid, TOPIC_NAME);
-  topic_local_id_t sub_id_2 = setup_one_subscriber_on_topic(test, subscriber_pid, TOPIC_NAME_2);
 
-  // Act: simulate process exit
-  agnocast_enqueue_exit_pid(subscriber_pid);
-  msleep(10);
-
-  // Assert: ioctl_get_exit_process returns both subscription MQ infos
-  struct ioctl_get_exit_process_args get_exit_args;
-  const uint32_t buf_size = 4;
-  struct exit_subscription_mq_info * mq_info_buf =
-    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
-  KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
-
-  memset(&get_exit_args, 0, sizeof(get_exit_args));
-  pid_t global_pid = -1;
-  int ret = agnocast_ioctl_get_exit_process(
-    current->nsproxy->ipc_ns, &get_exit_args, mq_info_buf, buf_size, &global_pid);
-
-  KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, get_exit_args.ret_pid, subscriber_pid);
-  KUNIT_EXPECT_EQ(test, (int)get_exit_args.ret_subscription_mq_info_num, 2);
-
-  // Order depends on hash table iteration; check both entries are present
-  bool found_topic_1 = false;
-  bool found_topic_2 = false;
-  for (uint32_t i = 0; i < get_exit_args.ret_subscription_mq_info_num; i++) {
-    if (
-      strcmp(mq_info_buf[i].topic_name, TOPIC_NAME) == 0 &&
-      mq_info_buf[i].subscriber_id == sub_id_1) {
-      found_topic_1 = true;
-    }
-    if (
-      strcmp(mq_info_buf[i].topic_name, TOPIC_NAME_2) == 0 &&
-      mq_info_buf[i].subscriber_id == sub_id_2) {
-      found_topic_2 = true;
-    }
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    union ioctl_add_subscriber_args add_subscriber_args;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_add_subscriber(
+        TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+        QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
+        eventfd, &add_subscriber_args),
+      0);
   }
-  KUNIT_EXPECT_TRUE(test, found_topic_1);
-  KUNIT_EXPECT_TRUE(test, found_topic_2);
+  KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)subscriber_num);
 
-  bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
-    &daemon_should_exit);
-  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  // Act
+  agnocast_enqueue_exit_pid(subscriber_pid);
+  msleep(20);  // wait for exit_worker_thread to handle process exit
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(subscriber_pid));
 
-  kvfree(mq_info_buf);
+  // Assert
+  for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
+    const struct agnocast_kunit_eventfd_slot * slot = agnocast_kunit_eventfd_slot_of(eventfd);
+    KUNIT_ASSERT_NOT_NULL(test, slot);
+    KUNIT_EXPECT_EQ(test, slot->put_count, 1);
+  }
+  KUNIT_EXPECT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)0);
 }
