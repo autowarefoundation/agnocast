@@ -122,8 +122,10 @@ def test_node_setup_is_added_to_the_run_not_taken_out_of_the_wait():
     That would drop the cross-NS view without the operator ever asking for a
     shorter wait.
     """
+    # Gossip returns early, so the graph-wait top-up is non-zero and the run
+    # length below covers the ROS 2 half of the budget as well.
     clock, gossip_timeout = _run_main(
-        spin_time=3.0, construction_cost=0.4, gossip_elapsed=3.0)
+        spin_time=3.0, construction_cost=0.4, gossip_elapsed=0.2)
     assert gossip_timeout == pytest.approx(3.0)
     assert clock.elapsed == pytest.approx(3.4)
 
