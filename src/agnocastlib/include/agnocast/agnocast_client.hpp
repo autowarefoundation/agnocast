@@ -188,7 +188,7 @@ private:
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
       // Get the corresponding ResponseCallInfo and remove it from the map
-      auto it = seqno2_response_call_info_.find(response->seqno);
+      auto it = seqno2_response_call_info_.find(response->ResponseMeta::seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
         RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
@@ -246,9 +246,9 @@ public:
   {
     auto request = publisher_->borrow_loaned_message();
 
-    request->seqno = next_sequence_number_.fetch_add(1);
-    std::memcpy(request->client_gid, get_gid().data, RMW_GID_STORAGE_SIZE);
-    request->node_name = node_name_;
+    request->RequestMeta::seqno = next_sequence_number_.fetch_add(1);
+    std::memcpy(request->RequestMeta::client_gid, get_gid().data, RMW_GID_STORAGE_SIZE);
+    request->RequestMeta::node_name = node_name_;
 
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
@@ -266,7 +266,7 @@ public:
   {
     SharedFuture shared_future;
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
+    int64_t seqno = internal_request->RequestMeta::seqno;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -287,7 +287,7 @@ public:
   {
     Future future;
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
+    int64_t seqno = internal_request->RequestMeta::seqno;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);

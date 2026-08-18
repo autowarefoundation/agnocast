@@ -72,6 +72,9 @@ struct ResponseMeta
   alignas(16) int64_t seqno;
 };
 
+// These wrappers combine the user payload with Agnocast correlation metadata. Since the payload may
+// declare fields that share names with metadata fields, accessing metadata fields always requires
+// explicit qualification (e.g. `wrapper->RequestMeta::seqno`) to avoid ambiguity.
 template <typename ServiceT>
 struct ServiceRequestWrapper : public ServiceT::Request, public RequestMeta
 {
