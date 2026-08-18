@@ -17,6 +17,16 @@ namespace agnocast_cie_thread_configurator
 namespace
 {
 
+// Unset = the attribute must not be applied: YAML null / absent key (the
+// user's opt-out) or the UNMANAGEABLE sentinel (a kernel/tool constraint).
+bool is_unset(const YAML::Node & node)
+{
+  if (!node || node.IsNull()) {
+    return true;
+  }
+  return node.IsScalar() && node.Scalar() == k_unmanageable;
+}
+
 constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
@@ -244,6 +254,137 @@ void parse_yaml(
       throw std::runtime_error("Duplicate non_ros_thread entry: name=" + c.thread_str);
     }
   }
+}
+
+bool KernelThreadConfig::is_managed() const noexcept
+{
+  return policy.has_value() || !affinity.empty();
+}
+
+bool IrqConfig::is_managed() const noexcept
+{
+  return !affinity.empty();
+}
+
+std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
+{
+  YAML::Node section = yaml["kernel_threads"];
+  std::vector<KernelThreadConfig> result;
+  if (!section || section.IsNull()) {
+    return result;
+  }
+  result.resize(section.size());
+
+  for (size_t i = 0; i < section.size(); ++i) {
+    const auto & kt = section[i];
+    auto & cfg = result[i];
+
+    if (is_unset(kt["comm"])) {
+      throw std::runtime_error("A kernel_threads entry is missing a non-empty 'comm'");
+    }
+    cfg.comm = kt["comm"].as<std::string>();
+    if (cfg.comm.empty()) {
+      throw std::runtime_error("A kernel_threads entry is missing a non-empty 'comm'");
+    }
+    if (cfg.comm.compare(0, 8, "kworker/") == 0) {
+      throw std::runtime_error(
+        "kernel_threads entry '" + cfg.comm +
+        "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
+        "be matched reliably");
+    }
+
+    if (!is_unset(kt["affinity"])) {
+      for (auto & cpu : kt["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+    }
+
+    const bool has_policy = !is_unset(kt["policy"]);
+    const bool has_priority = !is_unset(kt["priority"]);
+    if (!has_policy) {
+      if (has_priority) {
+        throw std::runtime_error(
+          "'priority' requires 'policy' for comm=" + cfg.comm + ": set both or leave both unset");
+      }
+      continue;
+    }
+
+    cfg.policy = kt["policy"].as<std::string>();
+    if (policy_to_sched_const.count(*cfg.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + *cfg.policy + "' for comm=" + cfg.comm +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
+
+    if (*cfg.policy == "SCHED_DEADLINE") {
+      // Explicit check for a clear message: these fields are always
+      // hand-written (prerun never emits DEADLINE) and easy to forget.
+      if (is_unset(kt["runtime"]) || is_unset(kt["period"]) || is_unset(kt["deadline"])) {
+        throw std::runtime_error(
+          "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + cfg.comm);
+      }
+      cfg.runtime = kt["runtime"].as<unsigned int>();
+      cfg.period = kt["period"].as<unsigned int>();
+      cfg.deadline = kt["deadline"].as<unsigned int>();
+    } else {
+      if (!has_priority) {
+        throw std::runtime_error(
+          "Policy '" + *cfg.policy + "' requires 'priority' for comm=" + cfg.comm);
+      }
+      cfg.priority = kt["priority"].as<int>();
+    }
+  }
+
+  std::unordered_set<std::string> seen;
+  for (const auto & c : result) {
+    // cppcheck-suppress useStlAlgorithm
+    if (!seen.insert(c.comm).second) {
+      throw std::runtime_error("Duplicate kernel_thread entry: comm=" + c.comm);
+    }
+  }
+  return result;
+}
+
+std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
+{
+  YAML::Node section = yaml["irqs"];
+  std::vector<IrqConfig> result;
+  if (!section || section.IsNull()) {
+    return result;
+  }
+  result.resize(section.size());
+
+  for (size_t i = 0; i < section.size(); ++i) {
+    const auto & iq = section[i];
+    auto & cfg = result[i];
+
+    if (is_unset(iq["irq"]) || !iq["irq"].IsScalar()) {
+      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+    }
+    try {
+      cfg.irq = iq["irq"].as<int>();
+    } catch (const YAML::Exception &) {
+      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+    }
+    if (cfg.irq < 0) {
+      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+    }
+
+    if (!is_unset(iq["name"])) {
+      cfg.name = iq["name"].as<std::string>();
+    }
+    if (!is_unset(iq["affinity"])) {
+      for (auto & cpu : iq["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+    }
+  }
+
+  std::unordered_set<int> seen;
+  for (const auto & c : result) {
+    // cppcheck-suppress useStlAlgorithm
+    if (!seen.insert(c.irq).second) {
+      throw std::runtime_error("Duplicate irq entry: irq=" + std::to_string(c.irq));
+    }
+  }
+  return result;
 }
 
 }  // namespace agnocast_cie_thread_configurator

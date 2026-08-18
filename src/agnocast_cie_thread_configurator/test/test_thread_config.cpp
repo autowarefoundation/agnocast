@@ -728,3 +728,358 @@ TEST(ExtractNodePart, SplitsAtFirstAtSign)
   EXPECT_EQ(acie::extract_node_part("@Timer(1)"), "");
   EXPECT_EQ(acie::extract_node_part(""), "");
 }
+
+// ---------- parse_kernel_threads ----------
+
+TEST(ParseKernelThreads, MissingOrNullSectionYieldsEmpty)
+{
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("callback_groups: []\n")).empty());
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: ~\n")).empty());
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: []\n")).empty());
+}
+
+TEST(ParseKernelThreads, ParsesPolicyPriorityAffinity)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_worker
+    policy: SCHED_FIFO
+    priority: 10
+    affinity: [2, 3]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].comm, "agnocast_exit_worker");
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_FIFO");
+  EXPECT_EQ(result[0].priority, 10);
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{2, 3}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, AllNullEntryIsUnmanaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, UnmanageableSentinelEqualsNull)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: ksoftirqd/0
+    policy: UNMANAGEABLE
+    priority: UNMANAGEABLE
+    affinity: UNMANAGEABLE
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, AffinityOnlyEntryIsManaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_worker
+    policy: ~
+    priority: ~
+    affinity: [2]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{2}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, PolicyWithUnmanageableAffinityIsManaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: ksoftirqd/0
+    policy: SCHED_FIFO
+    priority: 5
+    affinity: UNMANAGEABLE
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, ParsesSchedDeadline)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_DEADLINE");
+  EXPECT_EQ(result[0].runtime, 1000000u);
+  EXPECT_EQ(result[0].period, 5000000u);
+  EXPECT_EQ(result[0].deadline, 5000000u);
+}
+
+TEST(ParseKernelThreads, LowercaseSentinelIsNotRecognized)
+{
+  // Only the exact uppercase sentinel disengages an attribute; anything else
+  // must fall through to the normal validation (here: unknown policy).
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: unmanageable
+    priority: 0
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsMissingOrEmptyComm)
+{
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - policy: ~
+    priority: ~
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: ""
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsKworkerComm)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: kworker/0:0H-events_highpri
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsDuplicateComm)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: ~
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsUnknownPolicy)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_BOGUS
+    priority: 0
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsPriorityWithoutPolicy)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    priority: 5
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsPolicyWithoutPriority)
+{
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_FIFO
+    priority: ~
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+  // The sentinel counts as unset exactly like null does.
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_FIFO
+    priority: UNMANAGEABLE
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsSchedDeadlineMissingFields)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+// ---------- parse_irqs ----------
+
+TEST(ParseIrqs, MissingOrNullSectionYieldsEmpty)
+{
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("callback_groups: []\n")).empty());
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: ~\n")).empty());
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: []\n")).empty());
+}
+
+TEST(ParseIrqs, ParsesFilledAffinityAndName)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 103
+    name: nvidia
+    affinity: [2, 3]
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].irq, 103);
+  EXPECT_EQ(result[0].name, "nvidia");
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{2, 3}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseIrqs, NullOrUnmanageableAffinityIsUnmanaged)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 0
+    name: timer
+    affinity: UNMANAGEABLE
+  - irq: 1
+    name: i8042
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 2u);
+  EXPECT_FALSE(result[0].is_managed());
+  EXPECT_FALSE(result[1].is_managed());
+}
+
+TEST(ParseIrqs, MissingNameMeansNoVerification)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 42
+    affinity: [1]
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_TRUE(result[0].name.empty());
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseIrqs, RejectsMissingOrNegativeOrNonIntIrq)
+{
+  EXPECT_THROW(
+    acie::parse_irqs(yaml_from_str(R"YAML(
+irqs:
+  - name: orphan
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_irqs(yaml_from_str(R"YAML(
+irqs:
+  - irq: -1
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_irqs(yaml_from_str(R"YAML(
+irqs:
+  - irq: not_a_number
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+}
+
+TEST(ParseIrqs, RejectsDuplicateIrq)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 5
+    affinity: ~
+  - irq: 5
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_irqs(y), std::runtime_error);
+}
+
+// ---------- new sections vs parse_yaml ----------
+
+TEST(ParseYaml, IgnoresKernelThreadsAndIrqsSections)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice: 0
+    affinity: []
+non_ros_threads: []
+kernel_threads:
+  - comm: agnocast_exit_worker
+    policy: SCHED_FIFO
+    priority: 10
+    affinity: [2]
+irqs:
+  - irq: 103
+    name: nvidia
+    affinity: [2, 3]
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_EQ(cb[0].thread_str, "my_cbg");
+  EXPECT_TRUE(nrt.empty());
+}
