@@ -23,6 +23,11 @@
 ROOT_DIR=$(cd "$(dirname "$0")/../.." && pwd)
 ECHO_TIMEOUT_SEC=${ECHO_TIMEOUT_SEC:-5}
 DAEMON_WARMUP_SEC=${DAEMON_WARMUP_SEC:-2}
+AUTOFORK_TIMEOUT_SEC=${AUTOFORK_TIMEOUT_SEC:-15}
+
+# The leading / keeps this off register_domain_bridge, whose path also contains the package name.
+AGENT_PATTERN='/agnocast_discovery_agent( |$)'
+TALKER_PATTERN='/agnocast_sample_application/lib/.*/talker'
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -52,12 +57,74 @@ cleanup() {
     # pkill -P only reaches direct children; ros2 launch spawns its
     # talker / agent as grandchildren, so also match by binary path.
     pkill -P $$ 2>/dev/null || true
-    pkill -KILL -f '/agnocast_sample_application/lib/.*/talker' 2>/dev/null || true
-    pkill -KILL -f '/ros2agnocast_discovery_agent/lib/ros2agnocast_discovery_agent/agnocast_discovery_agent' 2>/dev/null || true
+    pkill -KILL -f "$TALKER_PATTERN" 2>/dev/null || true
+    pkill -KILL -f "$AGENT_PATTERN" 2>/dev/null || true
     sleep 1
     rm -rf "$LOG_DIR"
 }
 trap cleanup EXIT
+
+# ----- auto-fork: agnocastlib starts the agent by itself -----
+# agnocastlib only forks an agent when nothing holds the kmod's claim for this IPC namespace and
+# domain, and every other check below starts one explicitly, so this has to run first.
+autofork_fail() {
+    red "ERROR: $1"
+    [ -n "${2:-}" ] && { echo "----- output -----" >&2; printf '%s\n' "$2" >&2; }
+    echo "----- talker log -----" >&2
+    cat "$LOG_DIR/autofork_talker.log" >&2
+    exit 2
+}
+
+# The kmod frees the claim from its process-exit cleanup, so the pid has to be gone, not just
+# signalled, before the next agent can win it.
+wait_for_no_agent() {
+    for _ in $(seq 20); do
+        pgrep -f "$AGENT_PATTERN" > /dev/null 2>&1 || return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+if pgrep -f "$AGENT_PATTERN" > /dev/null 2>&1; then
+    yellow "A discovery agent is already running in this IPC namespace; killing it so the"
+    yellow "auto-fork can be observed (cleanup would kill it at exit anyway)."
+    pkill -KILL -f "$AGENT_PATTERN" 2>/dev/null || true
+    wait_for_no_agent || { red "ERROR: could not clear the existing discovery agent."; exit 1; }
+fi
+
+yellow "Starting a talker with no agent running (agnocastlib should fork one)..."
+ros2 launch agnocast_sample_application talker.launch.xml discovery_agent:=false \
+    > "$LOG_DIR/autofork_talker.log" 2>&1 &
+autofork_launch_pid=$!
+
+# ros2 launch hands the talker a pipe, which makes agnocastlib re-point the forked agent's stdout
+# at /dev/tty or /dev/null -- never at the log file above -- so the process table is the only
+# evidence the fork happened. --exit-when-idle is passed only by the auto-fork path, so it tells
+# an auto-forked agent apart from one someone else launched.
+autoforked=""
+for _ in $(seq "$AUTOFORK_TIMEOUT_SEC"); do
+    autoforked=$(pgrep -a -f '/agnocast_discovery_agent .*--exit-when-idle' 2>/dev/null)
+    [ -n "$autoforked" ] && break
+    sleep 1
+done
+[ -n "$autoforked" ] \
+    || autofork_fail "agnocastlib did not fork an agent within ${AUTOFORK_TIMEOUT_SEC}s"
+green "✓ agnocastlib forked the agent: $autoforked"
+
+# The agent still has to finish rclpy.init and run one 1 Hz poll tick.
+sleep 3
+msg_autofork=$(timeout "$ECHO_TIMEOUT_SEC" ros2 topic echo --once /_agnocast_discovery 2>&1) \
+    || autofork_fail "the auto-forked agent published no AgnocastDaemonState" "$msg_autofork"
+grep -q 'topic_name: /my_topic' <<<"$msg_autofork" \
+    || autofork_fail "auto-forked agent's snapshot is missing the talker's /my_topic" "$msg_autofork"
+green "✓ the auto-forked agent publishes /_agnocast_discovery with the talker's /my_topic"
+
+# The rest of the script needs the claim free so it can start an agent of its own.
+kill "$autofork_launch_pid" 2>/dev/null || true
+pkill -KILL -f "$TALKER_PATTERN" 2>/dev/null || true
+pkill -KILL -f "$AGENT_PATTERN" 2>/dev/null || true
+wait_for_no_agent || { red "ERROR: the auto-forked agent did not exit."; exit 2; }
+sleep 1
 
 yellow "Starting agnocast_discovery_agent..."
 ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent > "$LOG_DIR/agent.log" 2>&1 &

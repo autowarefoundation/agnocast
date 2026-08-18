@@ -16,7 +16,7 @@ void test_case_discovery_agent_register_first_wins(struct kunit * test)
   struct ioctl_add_discovery_agent_args reg;
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_discovery_agent(pid++, current->nsproxy->ipc_ns, 10, &reg), 0);
-  KUNIT_EXPECT_FALSE(test, reg.ret_already_exists);
+  KUNIT_EXPECT_TRUE(test, reg.ret_owned_by_caller);
   KUNIT_EXPECT_EQ(test, agnocast_get_discovery_agent_num(), 1);
 }
 
@@ -28,13 +28,36 @@ void test_case_discovery_agent_register_duplicate_loses(struct kunit * test)
   struct ioctl_add_discovery_agent_args first;
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_discovery_agent(pid++, current->nsproxy->ipc_ns, 11, &first), 0);
-  KUNIT_EXPECT_FALSE(test, first.ret_already_exists);
+  KUNIT_EXPECT_TRUE(test, first.ret_owned_by_caller);
 
   struct ioctl_add_discovery_agent_args second;
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_discovery_agent(pid++, current->nsproxy->ipc_ns, 11, &second), 0);
-  KUNIT_EXPECT_TRUE(test, second.ret_already_exists);
+  KUNIT_EXPECT_FALSE(test, second.ret_owned_by_caller);
   KUNIT_EXPECT_EQ(test, agnocast_get_discovery_agent_num(), 1);
+}
+
+// agnocastlib claims in a forked child and then execs the agent, which keeps the pid, so the
+// agent's own claim lands on a slot it already holds and has to win rather than be told to exit.
+void test_case_discovery_agent_same_pid_reclaim_wins(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(test, agnocast_get_discovery_agent_num(), 0);
+
+  const pid_t agent_pid = pid++;
+  struct ioctl_add_discovery_agent_args claimed;
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_discovery_agent(agent_pid, current->nsproxy->ipc_ns, 20, &claimed), 0);
+  KUNIT_ASSERT_TRUE(test, claimed.ret_owned_by_caller);
+
+  // Act
+  struct ioctl_add_discovery_agent_args reclaimed;
+  int ret = agnocast_ioctl_add_discovery_agent(agent_pid, current->nsproxy->ipc_ns, 20, &reclaimed);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_TRUE(test, reclaimed.ret_owned_by_caller);
+  KUNIT_EXPECT_EQ(test, agnocast_get_discovery_agent_num(), 1);  // re-claimed, not a second entry
 }
 
 // The fork gate reflects agent registration, not the process count: a live process alone does
@@ -149,7 +172,7 @@ void test_case_discovery_agent_orphan_race(struct kunit * test)
   struct ioctl_add_discovery_agent_args reg_b;
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_discovery_agent(agent_b, current->nsproxy->ipc_ns, 16, &reg_b), 0);
-  KUNIT_EXPECT_FALSE(test, reg_b.ret_already_exists);            // replacement wins
+  KUNIT_EXPECT_TRUE(test, reg_b.ret_owned_by_caller);            // replacement wins
   KUNIT_EXPECT_EQ(test, agnocast_get_discovery_agent_num(), 1);  // exactly one agent, no orphan
 }
 

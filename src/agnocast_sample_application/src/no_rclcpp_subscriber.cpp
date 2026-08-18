@@ -11,6 +11,7 @@ using std::placeholders::_1;
 
 class NoRclcppSubscriber : public agnocast::Node
 {
+  rclcpp::CallbackGroup::SharedPtr group_;
   agnocast::Subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_dynamic_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
@@ -84,9 +85,9 @@ public:
     RCLCPP_INFO(get_logger(), "Topic name (resolved): %s", resolved_topic.c_str());
     RCLCPP_INFO(get_logger(), "Queue size: %ld", queue_size_);
 
-    auto group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions agnocast_options;
-    agnocast_options.callback_group = group;
+    agnocast_options.callback_group = group_;
     agnocast_options.qos_overriding_options =
       rclcpp::QosOverridingOptions({rclcpp::QosPolicyKind::Durability});
 
