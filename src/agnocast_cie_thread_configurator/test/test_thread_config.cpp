@@ -54,13 +54,191 @@ non_ros_threads: []
   EXPECT_FALSE(cb[0].is_wildcard());
 }
 
+TEST(ParseYaml, ParsesNiceForCfsPolicies)
+{
+  for (const char * policy : {"SCHED_OTHER", "SCHED_BATCH", "SCHED_IDLE"}) {
+    auto y = yaml_from_str(("callback_groups:\n"
+                            "  - id: my_cbg\n"
+                            "    domain_id: 0\n"
+                            "    policy: " +
+                            std::string(policy) +
+                            "\n"
+                            "    nice: -10\n"
+                            "    affinity: []\n"
+                            "non_ros_threads: []\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt)) << policy;
+    ASSERT_EQ(cb.size(), 1u);
+    EXPECT_EQ(cb[0].nice, -10) << policy;
+    EXPECT_EQ(cb[0].priority, 0) << policy;
+  }
+}
+
+TEST(ParseYaml, IgnoresStrayKeyOfTheOtherPolicyClass)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: cfs_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice: -5
+    priority: 50
+    affinity: []
+  - id: rt_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: 50
+    nice: 10
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 2u);
+  EXPECT_EQ(cb[0].nice, -5);
+  EXPECT_EQ(cb[0].priority, 0);
+  EXPECT_EQ(cb[1].priority, 50);
+  EXPECT_EQ(cb[1].nice, 0);
+}
+
+TEST(ParseYaml, RejectsMissingNiceOnSchedOther)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, RejectsNiceOutOfRange)
+{
+  for (const char * bad_nice : {"-21", "20", "50"}) {
+    auto y = yaml_from_str(("callback_groups:\n"
+                            "  - id: my_cbg\n"
+                            "    domain_id: 0\n"
+                            "    policy: SCHED_OTHER\n"
+                            "    nice: " +
+                            std::string(bad_nice) +
+                            "\n"
+                            "    affinity: []\n"
+                            "non_ros_threads: []\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
+      << "nice=" << bad_nice;
+  }
+}
+
+TEST(ParseYaml, TreatsNullNiceAsMissing)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice:
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find("requires 'nice'"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ParseYaml, ReportsEntryOnNonIntegerNice)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice: low
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("'nice' must be an integer"), std::string::npos) << what;
+    EXPECT_NE(what.find("id=my_cbg"), std::string::npos) << what;
+  }
+}
+
+TEST(ParseYaml, ReportsEntryOnNonIntegerRtPriority)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
+    priority: high
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  try {
+    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("'priority' must be an integer"), std::string::npos) << what;
+    EXPECT_NE(what.find("id=my_cbg"), std::string::npos) << what;
+  }
+}
+
+TEST(ParseYaml, RejectsMissingPriorityOnRtPolicy)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_FIFO
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+}
+
+TEST(ParseYaml, RejectsRtPriorityOutOfRange)
+{
+  for (const char * bad_priority : {"0", "100", "-1"}) {
+    auto y = yaml_from_str(("callback_groups:\n"
+                            "  - id: my_cbg\n"
+                            "    domain_id: 0\n"
+                            "    policy: SCHED_FIFO\n"
+                            "    priority: " +
+                            std::string(bad_priority) +
+                            "\n"
+                            "    affinity: []\n"
+                            "non_ros_threads: []\n")
+                             .c_str());
+    std::vector<acie::ThreadConfig> cb, nrt;
+    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
+      << "priority=" << bad_priority;
+  }
+}
+
 TEST(ParseYaml, FallsBackToDefaultDomainId)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
   - id: my_cbg
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -165,7 +343,7 @@ callback_groups:
   - id: alpha
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -178,7 +356,7 @@ callback_groups:
   - id: beta
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -194,12 +372,12 @@ callback_groups:
   - id: cg
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - id: cg
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -214,12 +392,12 @@ callback_groups:
   - id: cg
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - id: cg
     domain_id: 1
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -235,11 +413,11 @@ callback_groups: []
 non_ros_threads:
   - name: t
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - name: t
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
@@ -275,7 +453,7 @@ callback_groups:
   - id: /*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -293,7 +471,7 @@ TEST(ParseYaml, RejectsStrayAsteriskInId)
                             "\"\n"
                             "    domain_id: 0\n"
                             "    policy: SCHED_OTHER\n"
-                            "    priority: 0\n"
+                            "    nice: 0\n"
                             "    affinity: []\n"
                             "non_ros_threads: []\n")
                              .c_str());
@@ -311,7 +489,7 @@ callback_groups:
   - id: /node@Timer(100)/*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -326,12 +504,12 @@ callback_groups:
   - id: /node/*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - id: /node/*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -346,12 +524,12 @@ callback_groups:
   - id: /node/*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - id: /node/*
     domain_id: 1
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 non_ros_threads: []
 )YAML");
@@ -367,7 +545,7 @@ callback_groups:
   - id: /node/*
     domain_id: 0
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
   - id: /node@Timer(100)
     domain_id: 0
@@ -392,7 +570,7 @@ callback_groups: []
 non_ros_threads:
   - name: worker/*
     policy: SCHED_OTHER
-    priority: 0
+    nice: 0
     affinity: []
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
