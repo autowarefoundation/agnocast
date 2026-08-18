@@ -103,6 +103,24 @@ void test_case_add_domain_bridge_normal(struct kunit * test)
   KUNIT_EXPECT_FALSE(test, b_to_a);
 }
 
+// Declaring from the higher domain first is the only way to reach the b_to_a orientation.
+void test_case_add_domain_bridge_reverse_first_declaration(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+
+  uint32_t domain_a = 0, domain_b = 0;
+  bool a_to_b = false, b_to_a = false;
+  KUNIT_ASSERT_TRUE(
+    test, agnocast_get_domain_rule(
+            TOPIC_NAME, current->nsproxy->ipc_ns, 1, &domain_a, &domain_b, &a_to_b, &b_to_a));
+  KUNIT_EXPECT_EQ(test, domain_a, 1);
+  KUNIT_EXPECT_EQ(test, domain_b, 2);
+  KUNIT_EXPECT_FALSE(test, a_to_b);
+  KUNIT_EXPECT_TRUE(test, b_to_a);
+}
+
 void test_case_add_domain_bridge_same_domain_rejected(struct kunit * test)
 {
   int ret =
