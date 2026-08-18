@@ -2285,8 +2285,8 @@ static struct domain_bridge_rule * find_domain_rule(
   return NULL;
 }
 
-// The caller holds global_htables_rwsem for write and has already established that neither cell
-// is taken.
+// The caller holds global_htables_rwsem for write and has verified, for both cells, that no
+// domain_bridge_rule covers it (find_domain_rule) and that no endpoint has joined it (find_topic).
 static int insert_domain_rule(
   const char * name_a, const char * name_b, const struct ipc_namespace * ipc_ns,
   const uint32_t domain_a, const uint32_t domain_b, const bool from_is_a)
