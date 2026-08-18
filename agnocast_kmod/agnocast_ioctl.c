@@ -2339,7 +2339,14 @@ static int add_domain_rule(
   struct domain_bridge_rule * r_from = find_domain_rule(topic_name_from, ipc_ns, from_domain);
   struct domain_bridge_rule * r_to = find_domain_rule(topic_name_to, ipc_ns, to_domain);
   if (r_from || r_to) {
-    if (r_from != r_to) return -EBUSY;
+    if (r_from != r_to) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: a cell is already paired with another "
+        "cell. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
 
     if (from_domain < to_domain) {
       r_from->a_to_b = true;
@@ -2361,8 +2368,13 @@ static int add_domain_rule(
   // before either side has allocated any; reject if an endpoint already joined.
   if (
     find_topic(topic_name_from, ipc_ns, from_domain) ||
-    find_topic(topic_name_to, ipc_ns, to_domain))
+    find_topic(topic_name_to, ipc_ns, to_domain)) {
+    dev_warn(
+      agnocast_device,
+      "Domain bridge rule (%s@%u -> %s@%u) rejected: an endpoint has already joined. (%s)\n",
+      topic_name_from, from_domain, topic_name_to, to_domain, __func__);
     return -EBUSY;
+  }
 
   return insert_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, ipc_ns);
 }
