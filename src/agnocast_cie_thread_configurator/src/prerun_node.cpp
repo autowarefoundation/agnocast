@@ -143,6 +143,13 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Key << "period_us" << YAML::Value << 1000000;
   out << YAML::EndMap;
 
+  // An empty list means "do not manage affinity", same as null, but it shows
+  // the shape the parser expects and stays a list through YAML round-trips
+  // that turn every scalar into a string.
+  const auto emit_unmanaged_affinity = [&out]() {
+    out << YAML::Key << "affinity" << YAML::Value << YAML::Flow << YAML::BeginSeq << YAML::EndSeq;
+  };
+
   // Add callback_groups section
   out << YAML::Key << "callback_groups";
   out << YAML::Value << YAML::BeginSeq;
@@ -151,7 +158,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     out << YAML::BeginMap;
     out << YAML::Key << "id" << YAML::Value << callback_group_id;
     out << YAML::Key << "domain_id" << YAML::Value << domain_id;
-    out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
+    emit_unmanaged_affinity();
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
     out << YAML::Key << "nice" << YAML::Value << 0;
     out << YAML::EndMap;
@@ -167,7 +174,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   for (const auto & thread_name : non_ros_thread_names_) {
     out << YAML::BeginMap;
     out << YAML::Key << "name" << YAML::Value << thread_name;
-    out << YAML::Key << "affinity" << YAML::Value << YAML::Null;
+    emit_unmanaged_affinity();
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
     out << YAML::Key << "nice" << YAML::Value << 0;
     out << YAML::EndMap;

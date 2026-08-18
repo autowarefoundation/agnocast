@@ -86,33 +86,30 @@ void SubscriptionBase::initialize(
 }
 
 template <typename NodeT>
-rclcpp::QoS SubscriptionBase::init_base(
+void SubscriptionBase::init_base(
   NodeT * node, const rclcpp::QoS & qos, const std::string & type_name, bool is_take_sub,
   const SubscriptionOptions & options, SubscriptionRole role)
 {
   const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
     override_qos ? node->get_node_parameters_interface() : nullptr;
-  const rclcpp::QoS actual_qos = override_qos
-                                   ? rclcpp::detail::declare_qos_parameters(
-                                       options.qos_overriding_options, node_parameters, topic_name_,
-                                       qos, rclcpp::detail::SubscriptionQosParametersTraits{})
-                                   : qos;
+  actual_qos_ = override_qos ? rclcpp::detail::declare_qos_parameters(
+                                 options.qos_overriding_options, node_parameters, topic_name_, qos,
+                                 rclcpp::detail::SubscriptionQosParametersTraits{})
+                             : qos;
 
-  validate_subscription_qos(actual_qos);
+  validate_subscription_qos(actual_qos_);
 
   const std::string node_name = node->get_fully_qualified_name();
   initialize(
-    actual_qos, is_take_sub, options.ignore_local_publications, role, node_name, type_name);
-
-  return actual_qos;
+    actual_qos_, is_take_sub, options.ignore_local_publications, role, node_name, type_name);
 }
 
-template rclcpp::QoS SubscriptionBase::init_base<rclcpp::Node>(
+template void SubscriptionBase::init_base<rclcpp::Node>(
   rclcpp::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
   SubscriptionRole);
 
-template rclcpp::QoS SubscriptionBase::init_base<agnocast::Node>(
+template void SubscriptionBase::init_base<agnocast::Node>(
   agnocast::Node *, const rclcpp::QoS &, const std::string &, bool, const SubscriptionOptions &,
   SubscriptionRole);
 
