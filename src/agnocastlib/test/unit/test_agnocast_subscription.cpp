@@ -138,10 +138,10 @@ TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_of_a_polling_subscriber)
   const rclcpp::QoS qos = rclcpp::QoS(rclcpp::KeepLast(5)).best_effort();
 
   // Act
-  auto sub = agnocast::create_subscription<StringMsg>(node.get(), "/test_actual_qos_polling", qos);
+  agnocast::PollingSubscriber<StringMsg> sub(node.get(), "/test_actual_qos_polling", qos);
 
   // Assert
-  EXPECT_EQ(sub->get_actual_qos(), qos);
+  EXPECT_EQ(sub.get_actual_qos(), qos);
 }
 
 TEST_F(GetActualQosTest, get_actual_qos_reflects_a_qos_parameter_override)
