@@ -247,7 +247,9 @@ public:
     auto request = publisher_->borrow_loaned_message();
 
     request->RequestMeta::seqno = next_sequence_number_.fetch_add(1);
-    std::memcpy(request->RequestMeta::client_gid, get_gid().data, RMW_GID_STORAGE_SIZE);
+    std::memcpy(
+      static_cast<void *>(request->RequestMeta::client_gid),
+      static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
     request->RequestMeta::node_name = node_name_;
 
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
