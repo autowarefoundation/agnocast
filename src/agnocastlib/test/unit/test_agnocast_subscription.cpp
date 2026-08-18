@@ -80,6 +80,11 @@ protected:
     // SubscriptionBase's constructor calls validate_ld_preload(), which exits the process when
     // the variable is unset. It cannot be stubbed here because test_agnocast_utils.cpp tests the
     // real one in this same binary, so satisfy it instead -- it only inspects the variable.
+    const char * old_ld_preload = getenv("LD_PRELOAD");
+    if (old_ld_preload != nullptr) {
+      had_ld_preload_ = true;
+      old_ld_preload_ = old_ld_preload;
+    }
     setenv("LD_PRELOAD", "libagnocast_heaphook.so", 1);
     rclcpp::init(0, nullptr);
   }
@@ -87,8 +92,16 @@ protected:
   void TearDown() override
   {
     rclcpp::shutdown();
-    unsetenv("LD_PRELOAD");
+    if (had_ld_preload_) {
+      setenv("LD_PRELOAD", old_ld_preload_.c_str(), 1);
+    } else {
+      unsetenv("LD_PRELOAD");
+    }
   }
+
+private:
+  bool had_ld_preload_ = false;
+  std::string old_ld_preload_;
 };
 
 TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_passed_at_construction)
