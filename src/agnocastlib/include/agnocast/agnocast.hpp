@@ -200,6 +200,10 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
 /// @return Shared pointer to the created polling subscription.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
+[[deprecated(
+  "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
+  "agnocast. Obtain a polling subscriber from the wrapper, or use agnocast::TakeSubscription "
+  "directly.")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const size_t qos_history_depth)
 {
@@ -219,6 +223,10 @@ typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
 /// @return Shared pointer to the created polling subscription.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
+[[deprecated(
+  "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
+  "agnocast. Obtain a polling subscriber from the wrapper, or use agnocast::TakeSubscription "
+  "directly.")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
