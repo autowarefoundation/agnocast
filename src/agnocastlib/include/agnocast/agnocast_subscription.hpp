@@ -468,6 +468,12 @@ public:
   /// @return Shared pointer to the latest message.
   AGNOCAST_PUBLIC
   const agnocast::ipc_shared_ptr<const MessageT> take_data() { return subscriber_->take(true); };
+
+  /// @brief Return the QoS of the wrapped take-subscription. See
+  /// SubscriptionBase::get_actual_qos() for the contract.
+  /// @return Effective QoS of this subscriber.
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return subscriber_->get_actual_qos(); }
 };
 
 /// @brief Mirrors `rclcpp::GenericSubscription` semantics: the topic type is supplied
