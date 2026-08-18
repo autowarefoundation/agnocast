@@ -1,6 +1,8 @@
 #include "agnocast_cie_thread_configurator/prerun_node.hpp"
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/system_scan.hpp"
+#include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
@@ -12,6 +14,27 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
+
+namespace
+{
+
+// One template entry per comm (it manages every thread sharing that comm).
+// The scan is sorted by (comm, tid), so the kept observed values are the
+// lowest tid's.
+std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> dedup_by_comm(
+  std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> scanned)
+{
+  std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> result;
+  for (auto & info : scanned) {
+    if (result.empty() || result.back().comm != info.comm) {
+      result.push_back(std::move(info));
+    }
+  }
+  return result;
+}
+
+}  // namespace
 
 PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node", options)
 {
@@ -177,6 +200,76 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     emit_unmanaged_affinity();
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
     out << YAML::Key << "nice" << YAML::Value << 0;
+    out << YAML::EndMap;
+    out << YAML::Newline;
+  }
+
+  out << YAML::EndSeq;
+
+  // Add kernel_threads and irqs sections: observed values become the initial
+  // desired values (compare-before-set keeps unedited entries no-ops), and
+  // UNMANAGEABLE marks values that cannot be provided or changed (YAML null
+  // stays the user's opt-out).
+  const std::string unmanageable(agnocast_cie_thread_configurator::k_unmanageable);
+  const auto kernel_threads =
+    dedup_by_comm(agnocast_cie_thread_configurator::scan_kernel_threads());
+  const auto irqs = agnocast_cie_thread_configurator::scan_irqs();
+  RCLCPP_INFO(
+    this->get_logger(), "Scanned %zu kernel thread comms and %zu device-backed IRQs",
+    kernel_threads.size(), irqs.size());
+
+  out << YAML::Key << "kernel_threads";
+  out << YAML::Value << YAML::BeginSeq;
+
+  for (const auto & info : kernel_threads) {
+    // A policy with no YAML representation: UNKNOWN(<n>), or SCHED_DEADLINE,
+    // whose runtime/period/deadline cannot be recovered from /proc.
+    const bool policy_representable =
+      agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
+      info.policy != "SCHED_DEADLINE";
+    const auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(info.affinity);
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "comm" << YAML::Value << info.comm;
+    if (policy_representable) {
+      const bool is_cfs =
+        info.policy == "SCHED_OTHER" || info.policy == "SCHED_BATCH" || info.policy == "SCHED_IDLE";
+      out << YAML::Key << "policy" << YAML::Value << info.policy;
+      if (is_cfs) {
+        out << YAML::Key << "nice" << YAML::Value << info.nice;
+      } else {
+        out << YAML::Key << "priority" << YAML::Value << info.rt_priority;
+      }
+    } else {
+      out << YAML::Key << "policy" << YAML::Value << unmanageable;
+      out << YAML::Key << "priority" << YAML::Value << unmanageable;
+    }
+    if (info.no_setaffinity || !cpus) {
+      out << YAML::Key << "affinity" << YAML::Value << unmanageable;
+    } else {
+      out << YAML::Key << "affinity" << YAML::Value << YAML::Flow << *cpus;
+    }
+    out << YAML::EndMap;
+    out << YAML::Newline;
+  }
+
+  out << YAML::EndSeq;
+
+  // Add irqs section
+  out << YAML::Key << "irqs";
+  out << YAML::Value << YAML::BeginSeq;
+
+  for (const auto & info : irqs) {
+    const auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(info.affinity);
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "irq" << YAML::Value << info.irq;
+    out << YAML::Key << "name" << YAML::Value << info.name;
+    if (cpus) {
+      out << YAML::Key << "affinity" << YAML::Value << YAML::Flow << *cpus;
+    } else {
+      out << YAML::Key << "affinity" << YAML::Value << unmanageable;
+    }
     out << YAML::EndMap;
     out << YAML::Newline;
   }
