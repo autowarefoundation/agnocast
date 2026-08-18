@@ -179,19 +179,19 @@ class GenericResponseWrapper
   static constexpr size_t get_wire_size(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members)
   {
-    return offsetof_meta(response_members->size_of_) + sizeof(RequestMeta);
+    return offsetof_meta(response_members->size_of_) + sizeof(ResponseMeta);
   }
 
-  static RequestMeta * get_meta_ptr(
+  static ResponseMeta * get_meta_ptr(
     const rosidl_typesupport_introspection_cpp::MessageMembers * response_members,
     void * response_ptr)
   {
-    return reinterpret_cast<RequestMeta *>(
+    return reinterpret_cast<ResponseMeta *>(
       static_cast<char *>(response_ptr) + offsetof_meta(response_members->size_of_));
   }
 
   ipc_shared_ptr<void> response_;
-  RequestMeta * const meta_ptr_;
+  ResponseMeta * const meta_ptr_;
 
 public:
   explicit GenericResponseWrapper(
