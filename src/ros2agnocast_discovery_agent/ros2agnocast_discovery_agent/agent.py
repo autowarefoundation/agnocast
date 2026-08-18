@@ -462,10 +462,18 @@ def main(argv=None) -> int:
     # The kmod decides the claim atomically, so a duplicate loses and exits cleanly (0); an
     # ioctl error exits 1.
     #
+    # agnocastlib's auto-fork path claims before exec'ing us, and exec keeps the pid, so the claim
+    # below is the kmod's idempotent re-claim of our own slot. Every start path therefore goes
+    # through the same check, with no flag to opt out of it.
+    #
     # A duplicate that exits early *could* make launch_test treat it as a crashed node and tear
     # down the launch tree. That's not a risk here: the launch emits one agent per tree, so a lost
     # claim always means a separate launch/run — never a same-tree sibling — which exiting can't
     # affect.
+    #
+    # Version skew fails here rather than as a traceback out of DiscoveryAgent.__init__. Under
+    # auto-fork the child's stderr is whatever agnocastlib pointed it at, which is the terminal
+    # or /dev/null when there is no controlling terminal, so a late traceback can go nowhere.
     domain_id = _read_ros_domain_id()
     try:
         lib = _load_ioctl_wrapper()

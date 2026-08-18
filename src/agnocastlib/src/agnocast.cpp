@@ -4,12 +4,15 @@
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
+#include <ament_index_cpp/get_package_prefix.hpp>
+
 #include <dlfcn.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -237,22 +240,65 @@ void poll_for_bridge_manager()
   exit(0);
 }
 
-// Forked into the pre-allocator child: must not allocate. execlp() with a literal
-// argv is malloc-free, unlike setenv() which may allocate before agnocast's TLSF
-// allocator is ready.
-void exec_discovery_agent()
+// For the forked child, which by convention here sticks to async-signal-safe calls: no
+// RCLCPP_ERROR, no strerror().
+void write_stderr_with_errno(const std::string_view msg, const int err)
 {
-  execlp(
-    "ros2", "ros2", "run", "ros2agnocast_discovery_agent", "agnocast_discovery_agent",
-    "--exit-when-idle", static_cast<char *>(nullptr));
-  // execlp only returns on failure. This still runs in the pre-allocator forked child, so the
-  // failure path must be async-signal-safe and allocation-free: RCLCPP_ERROR / strerror / exit()
-  // may allocate or run atexit handlers before the TLSF allocator is ready. Use write() + _exit().
-  constexpr std::string_view err_msg = "[ERROR] [Agnocast] Failed to exec the discovery agent\n";
-  // Best-effort diagnostic -- we _exit next regardless; the assignment + cast just
-  // consume write()'s warn_unused_result without allocating or logging.
-  const ssize_t written = write(STDERR_FILENO, err_msg.data(), err_msg.size());
-  static_cast<void>(written);
+  constexpr size_t buf_size = 256;
+  std::array<char, buf_size> buf = {};
+  const int len = snprintf(
+    buf.data(), buf.size(), "%.*s (errno=%d)\n", static_cast<int>(msg.size()), msg.data(), err);
+  if (len > 0) {
+    const ssize_t written =
+      write(STDERR_FILENO, buf.data(), std::min(static_cast<size_t>(len), buf.size() - 1));
+    static_cast<void>(written);
+  }
+}
+
+constexpr const char * DISCOVERY_AGENT_PACKAGE = "ros2agnocast_discovery_agent";
+constexpr const char * DISCOVERY_AGENT_EXECUTABLE = "agnocast_discovery_agent";
+
+std::string resolve_discovery_agent_path()
+{
+  std::string candidate;
+  try {
+    candidate = ament_index_cpp::get_package_prefix(DISCOVERY_AGENT_PACKAGE) + "/lib/" +
+                DISCOVERY_AGENT_PACKAGE + "/" + DISCOVERY_AGENT_EXECUTABLE;
+  } catch (const std::exception &) {
+    // AMENT_PREFIX_PATH unset or empty, or the package is not indexed.
+    return "";
+  }
+  // R_OK too: the agent is a shebang script, so the interpreter has to read it.
+  return access(candidate.c_str(), R_OK | X_OK) == 0 ? candidate : "";
+}
+
+enum class claim_result { won, lost, failed };
+
+claim_result claim_discovery_agent(const uint32_t domain_id)
+{
+  struct ioctl_add_discovery_agent_args args = {};
+  args.domain_id = domain_id;
+  if (ioctl(agnocast_fd, AGNOCAST_ADD_DISCOVERY_AGENT_CMD, &args) < 0) {
+    write_stderr_with_errno(
+      "[ERROR] [Agnocast] Failed to claim the discovery agent singleton", errno);
+    return claim_result::failed;
+  }
+  return args.ret_owned_by_caller ? claim_result::won : claim_result::lost;
+}
+
+// Not `ros2 run`, which would Popen the agent as a grandchild under a different PID than the one
+// that claimed the singleton. exec preserves the pid, so the agent's own claim hits the kmod's
+// idempotent path and wins.
+[[noreturn]] void exec_discovery_agent(const char * agent_path)
+{
+  // const_cast is safe: execv does not modify argv.
+  // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
+  std::array<char *, 3> argv = {
+    const_cast<char *>(agent_path), const_cast<char *>("--exit-when-idle"), nullptr};
+  // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
+  execv(agent_path, argv.data());
+  // The kmod releases the claim on process exit, so the slot is not leaked.
+  write_stderr_with_errno("[ERROR] [Agnocast] Failed to exec the discovery agent", errno);
   _exit(EXIT_FAILURE);
 }
 
@@ -490,8 +536,11 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
+  // add_process_args is a union, so ADD_PROCESS overwrites domain_id with its ret_* fields.
+  const uint32_t domain_id = get_ros_domain_id();
+
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.domain_id = get_ros_domain_id();
+  add_process_args.domain_id = domain_id;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
@@ -513,12 +562,32 @@ struct initialize_agnocast_result initialize_agnocast(
     spawn_daemon_process([]() { poll_for_bridge_manager(); });
   }
 
-  // The forked agent inherits this process's IPC namespace and ROS_DOMAIN_ID, and
-  // self-exits when the scope empties. A missing or unstartable agent is not fatal
-  // (the data plane does not depend on the observer); a fork() failure still is, as
-  // for the other daemons spawned here -- it means system-wide resource exhaustion.
+  // The forked agent inherits this process's IPC namespace and ROS_DOMAIN_ID, and self-exits when
+  // the scope empties. A missing agent is not fatal because the data plane does not depend on
+  // the observer; a fork() failure still is, as for the other daemons spawned here.
+  // ret_discovery_agent_exist is only an early-out hint.
   if (!add_process_args.ret_discovery_agent_exist && !discovery_agent_auto_fork_disabled()) {
-    spawn_daemon_process([]() { exec_discovery_agent(); });
+    const std::string agent_path = resolve_discovery_agent_path();
+    if (agent_path.empty()) {
+      RCLCPP_WARN(
+        logger,
+        "The discovery agent executable was not found in AMENT_PREFIX_PATH, so it is not "
+        "auto-started. Source the workspace that installs ros2agnocast_discovery_agent to enable "
+        "Agnocast observability.");
+    } else {
+      spawn_daemon_process([domain_id, agent_path]() {
+        // Claiming here rather than in the agent keeps the launch O(1): N processes starting at
+        // once cost one fork each, not N Python interpreters.
+        switch (claim_discovery_agent(domain_id)) {
+          case claim_result::won:
+            exec_discovery_agent(agent_path.c_str());
+          case claim_result::lost:
+            _exit(EXIT_SUCCESS);
+          case claim_result::failed:
+            _exit(EXIT_FAILURE);
+        }
+      });
+    }
   }
 
   void * mempool_ptr =

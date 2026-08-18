@@ -192,7 +192,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             process=thread_configurator,
         )
 
-    def test_reapply_after_priority_change(self, proc_output, thread_configurator):
+    def test_reapply_after_nice_change(self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received CallbackGroupInfo',
             timeout=20.0,
@@ -208,7 +208,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         # SCHED_OTHER + positive nice value: lowering priority needs no
         # CAP_SYS_NICE, which is not guaranteed in CI sandboxes.
         first['policy'] = 'SCHED_OTHER'
-        first['priority'] = 10
+        first['nice'] = 10
         first.setdefault('affinity', [])
         _write_config(cfg)
 
@@ -253,7 +253,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             'id': 'fictitious_unannounced_cbg',
             'domain_id': 0,
             'policy': 'SCHED_OTHER',
-            'priority': 0,
+            'nice': 0,
             'affinity': [],
         }
         cfg.setdefault('callback_groups', []).append(added_entry)
@@ -298,7 +298,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         ):
             self.assertNotIn(removed_key, list(arr))
 
-    def test_reapply_non_ros_thread_priority_change(self, proc_output, thread_configurator):
+    def test_reapply_non_ros_thread_nice_change(self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received NonRosThreadInfo',
             timeout=20.0,
@@ -315,7 +315,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
                 'prerun did not produce test_non_ros_worker non_ros_thread entry'
             )
         target['policy'] = 'SCHED_OTHER'
-        target['priority'] = 10
+        target['nice'] = 10
         target.setdefault('affinity', [])
         _write_config(cfg)
 
@@ -342,7 +342,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             'id': '/fictitious_node/*',
             'domain_id': 0,
             'policy': 'SCHED_OTHER',
-            'priority': 0,
+            'nice': 0,
             'affinity': [],
         }
         cfg.setdefault('callback_groups', []).append(added_entry)

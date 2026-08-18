@@ -99,7 +99,7 @@ struct ioctl_discovery_agent_should_exit_args
 struct ioctl_add_discovery_agent_args
 {
   uint32_t domain_id;
-  bool ret_already_exists;
+  bool ret_owned_by_caller;
 };
 
 struct ioctl_discovery_agent_exists_args

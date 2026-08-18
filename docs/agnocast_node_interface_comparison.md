@@ -244,6 +244,8 @@ This provides equivalent functionality to rclcpp's `rclcpp::detail::resolve_para
 2. `local_args` (from NodeOptions::arguments())
 3. `global_args` (from command line)
 
+`NodeOptions::automatically_declare_parameters_from_overrides()` is honored: when enabled, resolved overrides that are not already declared are declared in the constructor.
+
 ### 3.3 Topic Name Resolution
 
 | Feature | agnocast | Support Level | Planned |
