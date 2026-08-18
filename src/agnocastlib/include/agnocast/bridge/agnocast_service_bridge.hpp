@@ -34,8 +34,8 @@ struct ServiceBridgeDeps
 //                        └───┬───▲──────┘
 //                            │   │
 //              (1) Agnocast  │   │  (2) no Agnocast
-//                  endpoint  │   │      client left
-//                  registers │   │
+//                  endpoint  │   │      endpoint
+//                  registers │   │      left
 //                      ┌─────▼───┴───┐
 //           ┌──────────┤   Pending   ├──────────┐
 //           │          └──▲───────▲──┘          │
