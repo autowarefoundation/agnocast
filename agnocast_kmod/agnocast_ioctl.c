@@ -2354,10 +2354,10 @@ static int add_domain_rule(
       r_from->b_to_a = true;
     }
 
-    // Unlike the new-pair path (the fallthrough, which delegates to insert_domain_rule), this
-    // one runs after endpoints may have registered, and the direction just enabled was denied
-    // when their notify lists were built. Both cells share one topic_struct once grouped, so
-    // either wrapper reaches every publisher.
+    // Unlike the new-pair path that insert_domain_rule handles, this one runs after endpoints
+    // may have registered, and the direction just enabled was denied when their notify lists
+    // were built. Both cells share one topic_struct once grouped, so either wrapper reaches
+    // every publisher.
     struct topic_wrapper * wrapper = find_topic(topic_name_from, ipc_ns, from_domain);
     if (!wrapper) wrapper = find_topic(topic_name_to, ipc_ns, to_domain);
     if (wrapper) rebuild_all_notify_lists(wrapper);
