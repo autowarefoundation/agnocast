@@ -3,6 +3,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -46,12 +47,21 @@ NodeParams get_node_params(rclcpp::Node * node)
 class TestServer : public rclcpp::Node
 {
   int64_t target_count_;
-  int64_t received_count_ = 0;
+  // Deferred callbacks respond from their own threads, so the counter is shared across them.
+  std::atomic<int64_t> received_count_{0};
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Service<ServiceT>::SharedPtr srv_;
 
   std::mutex response_threads_mtx_;
   std::vector<std::thread> response_threads_;
+
+  void count_and_shutdown_if_done()
+  {
+    if (received_count_.fetch_add(1) + 1 >= target_count_) {
+      RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
+      rclcpp::shutdown();
+    }
+  }
 
   void basic_callback(
     const agnocast::ipc_shared_ptr<Request> & request,
@@ -61,11 +71,7 @@ class TestServer : public rclcpp::Node
 
     response->sum = request->data[0];
 
-    received_count_ += 1;
-    if (received_count_ >= target_count_) {
-      RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
-      rclcpp::shutdown();
-    }
+    count_and_shutdown_if_done();
   }
 
   void deferred_callback(
@@ -84,11 +90,7 @@ class TestServer : public rclcpp::Node
         auto request_movable = request;
         srv_handle->send_response(std::move(request_movable), std::move(response));
 
-        received_count_ += 1;
-        if (received_count_ >= target_count_) {
-          RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
-          rclcpp::shutdown();
-        }
+        count_and_shutdown_if_done();
       });
   }
 
