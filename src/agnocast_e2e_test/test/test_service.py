@@ -8,6 +8,7 @@ from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 from launch_testing.actions import ReadyToTest
 from launch_testing.asserts import EXIT_OK, assertExitCodes, assertInStderr
+from osrf_pycommon.terminal_color import remove_ansi_escape_sequences
 
 SERVICE_NAME = '/test_service'
 QOS_DEPTH = 10
@@ -18,7 +19,7 @@ def stderr_lines(proc_output, process):
     text = ''.join(
         io.text.decode(errors='replace') for io in proc_output[process] if io.from_stderr
     )
-    return text.splitlines()
+    return remove_ansi_escape_sequences(text).splitlines()
 
 
 PARAMETER_NAMES = (
