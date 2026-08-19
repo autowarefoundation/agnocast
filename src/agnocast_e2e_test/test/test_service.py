@@ -27,7 +27,7 @@ TARGET_COUNT = 3
         # ROS2 server to test A2R service bridge
         ('TestROS2Server', False, 'TestClient', False, True),
         # ROS2 client to test R2A service bridge
-        ('TestServer', False, 'TestROS2Client', False, True),
+        ('TestServer', False, 'TestROS2Client', True, True),
 
         # === asynchronous client (wait_response = false) ===
         # basic arrangement
