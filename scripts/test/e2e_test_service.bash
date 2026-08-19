@@ -19,4 +19,9 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select agnocast_e2e_test --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
-launch_test src/agnocast_e2e_test/test/test_service.py
+if launch_test src/agnocast_e2e_test/test/test_service.py; then
+    echo "All tests passed!!"
+else
+    echo "Test failed" >&2
+    exit 1
+fi

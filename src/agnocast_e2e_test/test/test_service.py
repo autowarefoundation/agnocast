@@ -3,7 +3,7 @@ import unittest
 
 import launch_testing
 from launch import LaunchDescription
-from launch.actions import SetEnvironmentVariable
+from launch.actions import OpaqueFunction, SetEnvironmentVariable
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 from launch_testing.actions import ReadyToTest
@@ -21,9 +21,10 @@ def stderr_lines(proc_output, process):
     return text.splitlines()
 
 
-@launch_testing.parametrize(
-    'server_plugin, use_deferred_callback, client_plugin, use_response_callback, wait_response',
-    [
+PARAMETER_NAMES = (
+    'server_plugin, use_deferred_callback, client_plugin, use_response_callback, wait_response'
+)
+PARAMETER_SETS = [
         # === synchronous client (wait_response = true) ===
         # basic arrangement
         ('TestServer', False, 'TestClient', False, True),
@@ -45,8 +46,24 @@ def stderr_lines(proc_output, process):
         ('TestROS2Server', False, 'TestClient', True, False),
         # ROS2 client to test R2A service bridge
         ('TestServer', False, 'TestROS2Client', True, False),
-    ],
-)
+]
+
+
+def print_progress(params):
+    names = [name.strip() for name in PARAMETER_NAMES.split(',')]
+    width = max(len(name) for name in names)
+    print(
+        f'\n====================== '
+        f'{PARAMETER_SETS.index(params) + 1} / {len(PARAMETER_SETS)}'
+        f' ======================'
+    )
+    print('----------------------------------------------')
+    for name, value in zip(names, params):
+        print(f'{name:{width}} : {value}')
+    print('----------------------------------------------', flush=True)
+
+
+@launch_testing.parametrize(PARAMETER_NAMES, PARAMETER_SETS)
 def generate_test_description(
     server_plugin,
     use_deferred_callback,
@@ -105,9 +122,18 @@ def generate_test_description(
         additional_env={'LD_PRELOAD': f"libagnocast_heaphook.so:{os.getenv('LD_PRELOAD', '')}"},
     )
 
+    params = (
+        server_plugin,
+        use_deferred_callback,
+        client_plugin,
+        use_response_callback,
+        wait_response,
+    )
+
     return (
         LaunchDescription(
             [
+                OpaqueFunction(function=lambda context: print_progress(params)),
                 SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '0'),
                 server_container,
                 client_container,
