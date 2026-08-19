@@ -67,6 +67,10 @@ struct ServiceBridgeDeps
 // parameter service nobody calls is never bridged. (5) is taken on the first tick after a client
 // appears, and (6) returns the item here once the last one leaves.
 //
+// The shadow node is created on entry to Pending, not with the bridge: it is what makes the
+// agnocast::Node visible in the graph, and a tool that resolves a node name before opening a client
+// could never create the client (5) waits for. It outlives (6), so a later (5) still finds it.
+//
 // That wait is stable rather than transient, because may_start_r2a_bridge_ && agno_service_exists()
 // on their own -- client or no client -- already stop (3) and (2) from being evaluated. This is
 // deliberate. The Agnocast service answers every Agnocast client directly, and an A2R bridge would
@@ -87,6 +91,8 @@ class ServiceBridgeItem
   // Stateful members.
   ServiceBridgeState state_ = ServiceBridgeState::NONE;
   ServiceBridgeEntity entity_ = {nullptr, nullptr, nullptr};
+  // Held, never read: an agnocast::Node creates no rcl_node_t of its own, so this stands in for one
+  // under its name, in this process. Lifetime is decided in check_and_update_pending().
   std::shared_ptr<rcl_node_t> shadow_node_ = nullptr;
 
   // Configuration members; set once and never modified.
@@ -102,6 +108,8 @@ class ServiceBridgeItem
   std::shared_ptr<rcl_node_t> find_or_create_shadow_node(
     const std::pair<std::string, std::string> & identity);
   static void erase_expired_shadow_node(const std::pair<std::string, std::string> & identity);
+  bool acquire_shadow_node();
+  void release_shadow_node();
 
   int get_agno_service_qos(rclcpp::QoS & qos);
 

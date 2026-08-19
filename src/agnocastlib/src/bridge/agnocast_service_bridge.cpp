@@ -99,6 +99,28 @@ void ServiceBridgeItem::erase_expired_shadow_node(
   }
 }
 
+// Returns false only if the shadow node was wanted but could not be created (the error string will
+// be set).
+bool ServiceBridgeItem::acquire_shadow_node()
+{
+  if (!shadow_node_identity_.has_value() || shadow_node_ != nullptr) {
+    return true;
+  }
+
+  shadow_node_ = find_or_create_shadow_node(*shadow_node_identity_);
+  return shadow_node_ != nullptr;
+}
+
+void ServiceBridgeItem::release_shadow_node()
+{
+  if (shadow_node_ == nullptr) {
+    return;
+  }
+
+  shadow_node_ = nullptr;
+  erase_expired_shadow_node(*shadow_node_identity_);
+}
+
 // Returns 0 on success, -1 on error (the error string will be set).
 int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
 {
@@ -257,14 +279,6 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
     return -1;
   }
 
-  std::shared_ptr<rcl_node_t> shadow_node;
-  if (shadow_node_identity_.has_value()) {
-    const auto & identity = *shadow_node_identity_;
-    if ((shadow_node = find_or_create_shadow_node(identity)) == nullptr) {
-      return -1;
-    }
-  }
-
   ServiceBridgeEntity entity;
   if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
@@ -289,7 +303,6 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::R2A;
   entity_ = std::move(entity);
-  shadow_node_ = std::move(shadow_node);
 
   // The groups are created with auto_add=false and their agnocast entities now exist, so add them
   // to the executor explicitly here for a deterministic (agnocast-capable) classification.
@@ -332,7 +345,6 @@ int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::A2R;
   entity_ = std::move(entity);
-  shadow_node_ = nullptr;
 
   // The groups are created with auto_add=false and their agnocast entities now exist, so add them
   // to the executor explicitly here for a deterministic (agnocast-capable) classification.
@@ -389,13 +401,10 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
     deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 
+  // The shadow node deliberately survives this hop: dropping it here would hide the node from the
+  // graph just as the next client goes looking for it. check_and_update_pending() releases it.
   state_ = ServiceBridgeState::PENDING;
   entity_ = {nullptr, nullptr, nullptr};
-  shadow_node_ = nullptr;
-
-  if (shadow_node_identity_.has_value()) {
-    erase_expired_shadow_node(shadow_node_identity_.value());
-  }
 }
 
 // Stays in A2R, or takes arrow (4) back to PENDING.
@@ -422,14 +431,23 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::PENDING;
   entity_ = {nullptr, nullptr, nullptr};
-  shadow_node_ = nullptr;
 }
 
 // Stays in PENDING, or takes arrow (5), (3) or (2), in that order of precedence.
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
-  // Arrow (5). The two conditions below also exclude (3) and (2), hence the unconditional return.
+  // (5)'s precondition, not (5) itself; it also excludes (3) and (2), hence the unconditional
+  // return.
   if (may_start_r2a_bridge_ && agno_service_exists()) {
+    // Before the client check on purpose: the node must be resolvable for that client to appear.
+    if (!acquire_shadow_node()) {
+      RCLCPP_WARN(
+        deps.logger, "Failed to create the shadow node for '%s': %s", service_name_.c_str(),
+        get_error_string());
+      return;
+    }
+
+    // Arrow (5).
     if (ros2_client_exists(deps) && start_r2a_bridge(deps) != 0) {
       RCLCPP_WARN(
         deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
@@ -437,6 +455,9 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
     }
     return;
   }
+
+  // Reached only when (5)'s precondition fails, so the shadow node has nothing left to stand for.
+  release_shadow_node();
 
   // Arrow (3).
   if (may_start_a2r_bridge_ && ros2_service_exists(deps)) {
