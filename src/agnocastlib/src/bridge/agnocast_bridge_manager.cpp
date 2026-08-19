@@ -235,7 +235,7 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
   switch (msg.type) {
     case BridgeMsgType::Service: {
       const auto & payload = msg.payload.service;
-      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_, clock_};
       std::string service_name = static_cast<const char *>(payload.service_name);
       ServiceBridgeItem sb_item;
 
@@ -506,7 +506,7 @@ void BridgeManager::check_and_remove_pubsub_bridges()
 
 void BridgeManager::check_and_update_service_bridges()
 {
-  ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+  ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_, clock_};
 
   auto it = active_service_bridges_.begin();
   while (it != active_service_bridges_.end()) {

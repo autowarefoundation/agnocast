@@ -173,14 +173,38 @@ bool ServiceBridgeItem::ros2_service_exists(const ServiceBridgeDeps & deps)
   }
 }
 
-// Returns false if the target Agnocast service does not exist or if an error occurs while checking
-// it (the reason will be set in the error string).
-bool ServiceBridgeItem::agno_service_exists()
+// Returns false if the target Agnocast service does not exist, if two or more share the name, or if
+// an error occurs while checking it (the reason will be set in the error string).
+//
+// A name shared by two or more Agnocast services is not supported, and the warning below is the
+// only place that says so. An R2A bridge has to adopt its target's QoS, and with several targets
+// there is no basis for picking one, so the bridge is refused. Counting the services rather than
+// probing for one keeps that refusal distinguishable from plain absence.
+bool ServiceBridgeItem::agno_service_exists(const ServiceBridgeDeps & deps)
 {
-  // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
-  // directly without using get_service_qos() as a probe.
-  rclcpp::QoS qos = rclcpp::ServicesQoS();
-  return get_agno_service_qos(qos) == 0;
+  const std::string request_topic_name = create_service_request_topic_name(service_name_);
+
+  SubscriberCountResult result = get_agnocast_subscriber_count(request_topic_name);
+
+  if (result.count == -1) {
+    set_error_string("Failed to fetch subscriber count from agnocast kernel module");
+    return false;
+  }
+  if (result.count == 0) {
+    set_error_string("No target Agnocast service found");
+    return false;
+  }
+  if (result.count > 1) {
+    constexpr int DUPLICATE_SERVICE_WARN_INTERVAL_MS = 10000;
+    RCLCPP_WARN_THROTTLE(
+      deps.logger, *deps.clock, DUPLICATE_SERVICE_WARN_INTERVAL_MS,
+      "Found %d Agnocast services named '%s'. Sharing a service name is not supported, so no "
+      "bridge is created for it.",
+      result.count, service_name_.c_str());
+    set_error_string("Multiple target Agnocast services found");
+    return false;
+  }
+  return true;
 }
 
 // Returns false if there is no target Agnocast client or if an error occurs while checking it (the
@@ -332,7 +356,7 @@ void ServiceBridgeItem::update_configuration(const BridgeMsgServicePayload & pay
 
 void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 {
-  if (agno_service_exists()) {
+  if (agno_service_exists(deps)) {
     return;
   }
 
@@ -388,7 +412,7 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
-  if (may_start_r2a_bridge_ && agno_service_exists()) {
+  if (may_start_r2a_bridge_ && agno_service_exists(deps)) {
     if (start_r2a_bridge(deps) != 0) {
       RCLCPP_WARN(
         deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),

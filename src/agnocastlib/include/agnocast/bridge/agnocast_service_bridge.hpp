@@ -20,6 +20,7 @@ struct ServiceBridgeDeps
   std::shared_ptr<CallbackIsolatedAgnocastExecutor> executor;
   rclcpp::Logger logger;
   std::shared_ptr<BridgeLoader> bridge_loader;
+  std::shared_ptr<rclcpp::Clock> clock;
 };
 
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
@@ -50,7 +51,7 @@ class ServiceBridgeItem
   int get_agno_service_qos(rclcpp::QoS & qos);
 
   bool ros2_service_exists(const ServiceBridgeDeps & deps);
-  bool agno_service_exists();
+  bool agno_service_exists(const ServiceBridgeDeps & deps);
   bool agno_client_exists();
 
   int start_r2a_bridge(const ServiceBridgeDeps & deps);

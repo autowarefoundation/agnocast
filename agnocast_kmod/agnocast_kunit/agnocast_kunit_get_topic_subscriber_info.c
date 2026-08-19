@@ -112,3 +112,31 @@ void test_case_get_topic_sub_info_selects_by_domain(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, args_d0.ret_topic_info_ret_num, (uint32_t)0);
 }
+
+// Two subscribers on one topic, queried with a one-entry buffer: the caller is told the buffer is
+// too small rather than being handed a truncated list. A caller that probes with a single entry
+// therefore cannot tell this apart from "no subscriber" by return value alone.
+void test_case_get_topic_sub_info_buffer_too_small(struct kunit * test)
+{
+  const pid_t pid2 = 1002;
+  union ioctl_add_subscriber_args add_sub_args;
+  union ioctl_topic_info_args topic_info_args = {0};
+  int ret;
+
+  setup_process(test, PID);
+  setup_process(test, pid2);
+
+  ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
+    IS_BRIDGE, -1, &add_sub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid2, QOS_DEPTH, false, false, false, false,
+    IS_BRIDGE, -1, &add_sub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  topic_info_args.topic_info_ret_buffer_size = 1;
+  ret = agnocast_ioctl_get_topic_subscriber_info(
+    TOPIC_NAME, current->nsproxy->ipc_ns, &topic_info_args);
+  KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
+}
