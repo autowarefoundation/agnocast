@@ -245,9 +245,7 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
       }
 
       sb_item.handle_request(payload);
-      if (sb_item.state() != ServiceBridgeState::NONE) {
-        active_service_bridges_.emplace(service_name, std::move(sb_item));
-      }
+      active_service_bridges_.emplace(service_name, std::move(sb_item));
       break;
     }
     case BridgeMsgType::PubSub: {
