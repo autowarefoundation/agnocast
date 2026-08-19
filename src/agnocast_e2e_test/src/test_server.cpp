@@ -3,6 +3,14 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+
 using namespace std::chrono_literals;
 using namespace std::placeholders;
 
@@ -36,8 +44,8 @@ NodeParams get_node_params(rclcpp::Node * node)
 
 class TestServer : public rclcpp::Node
 {
-  int target_count_;
-  int received_count_ = 0;
+  int64_t target_count_;
+  int64_t received_count_ = 0;
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Service<ServiceT>::SharedPtr srv_;
 
@@ -100,8 +108,8 @@ public:
 
 class TestROS2Server : public rclcpp::Node
 {
-  int target_count_;
-  int received_count_ = 0;
+  int64_t target_count_;
+  int64_t received_count_ = 0;
   rclcpp::CallbackGroup::SharedPtr cbg_;
   rclcpp::Service<ServiceT>::SharedPtr srv_;
 

@@ -3,7 +3,14 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <future>
+#include <memory>
+#include <string>
 #include <thread>
+#include <utility>
 
 using namespace std::chrono_literals;
 
@@ -50,7 +57,7 @@ class TestClient : public rclcpp::Node
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Client<ServiceT>::SharedPtr client_;
 
-  std::int64_t response_count_ = 0;
+  int64_t response_count_ = 0;
 
   bool step_once(int64_t iteration)
   {
@@ -139,7 +146,7 @@ class TestROS2Client : public rclcpp::Node
   rclcpp::CallbackGroup::SharedPtr cbg_;
   rclcpp::Client<ServiceT>::SharedPtr client_;
 
-  std::int64_t response_count_;
+  int64_t response_count_ = 0;
 
   bool step_once(int64_t iteration)
   {
