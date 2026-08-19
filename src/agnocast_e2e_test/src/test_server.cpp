@@ -81,14 +81,13 @@ class TestServer : public rclcpp::Node
 
     std::lock_guard<std::mutex> lock(response_threads_mtx_);
     response_threads_.emplace_back(
-      [this, srv_handle = std::move(srv_handle), request = std::move(request)]() {
+      [this, srv_handle = std::move(srv_handle), request = std::move(request)]() mutable {
         // Wait for a while to simulate an asynchronous operation.
         std::this_thread::sleep_for(100ms);
 
         auto response = srv_handle->borrow_loaned_response(request);
         response->sum = request->data[0];
-        auto request_movable = request;
-        srv_handle->send_response(std::move(request_movable), std::move(response));
+        srv_handle->send_response(std::move(request), std::move(response));
 
         count_and_shutdown_if_done();
       });
