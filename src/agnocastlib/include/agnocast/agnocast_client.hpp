@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <memory>
@@ -187,7 +188,7 @@ private:
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
       // Get the corresponding ResponseCallInfo and remove it from the map
-      auto it = seqno2_response_call_info_.find(response->seqno);
+      auto it = seqno2_response_call_info_.find(response->ResponseMeta::seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
         RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
@@ -217,6 +218,12 @@ private:
     }
   }
 
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
+
 public:
   Client(
     rclcpp::Node * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
@@ -238,8 +245,13 @@ public:
   ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
     auto request = publisher_->borrow_loaned_message();
-    request->node_name = node_name_;
-    request->seqno = next_sequence_number_.fetch_add(1);
+
+    request->RequestMeta::seqno = next_sequence_number_.fetch_add(1);
+    std::memcpy(
+      static_cast<void *>(request->RequestMeta::client_gid),
+      static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
+    request->RequestMeta::node_name = node_name_;
+
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
@@ -256,7 +268,7 @@ public:
   {
     SharedFuture shared_future;
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
+    int64_t seqno = internal_request->RequestMeta::seqno;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -277,7 +289,7 @@ public:
   {
     Future future;
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
+    int64_t seqno = internal_request->RequestMeta::seqno;
 
     {
       std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -385,6 +397,12 @@ private:
         service_type, service_name_, BridgeDirection::AGNOCAST_TO_ROS2, std::nullopt);
     }
   }
+
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
 
 public:
   GenericClient(

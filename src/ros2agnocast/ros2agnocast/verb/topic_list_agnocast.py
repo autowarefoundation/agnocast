@@ -1,16 +1,18 @@
+import copy
+import time
+
+from ros2cli.node.direct import DEFAULT_TIMEOUT as DEFAULT_SPIN_TIME
 from ros2cli.node.strategy import NodeStrategy
 from ros2topic.api import get_topic_names_and_types
 from ros2topic.verb import VerbExtension
 
 from ros2agnocast.discovery import (
-    add_gossip_timeout_arg,
     all_topic_names,
     bridge_label_from_roles,
     BRIDGE_LABEL_TEXT,
     CIE_THREAD_CONFIGURATOR_NAMESPACE,
     collect_announcements_with_fallback,
     collect_bridge_roles,
-    warn_if_gossip_timeout_overridden,
     warn_if_using_fallback,
 )
 
@@ -21,14 +23,27 @@ class ListAgnocastVerb(VerbExtension):
         parser.add_argument(
             '-d', '--debug', action='store_true',
             help='Include internal topics (CIE thread configurator) in the output')
-        add_gossip_timeout_arg(parser)
+        parser.add_argument(
+            '--spin-time', type=float, default=DEFAULT_SPIN_TIME,
+            help='Spin time in seconds to wait for discovery, covering both the '
+                 'ROS 2 graph and the Agnocast endpoints. Unlike the ros2 core '
+                 'flag it also applies when the ros2 daemon is running, because '
+                 'Agnocast discovery always runs in this process')
 
     def main(self, *, args):
-        warn_if_gossip_timeout_overridden(args)
-        with NodeStrategy(None) as node:
+        spin_time = max(0.0, args.spin_time)
+        # DirectNode would spin spin_time of its own before the gossip wait
+        # below. That wait runs on the same node, so it can be that spin: the
+        # ROS 2 graph fills in during it rather than after it.
+        node_args = copy.copy(args)
+        node_args.spin_time = 0.0
+        with NodeStrategy(node_args) as node:
+            # ros2cli measures its own --spin-time from here too: after the
+            # participant exists, not from process start.
+            deadline = time.monotonic() + spin_time
             snapshots, used_fallback = collect_announcements_with_fallback(
-                node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
+                node, timeout_sec=spin_time)
+            warn_if_using_fallback(node, used_fallback, spin_time, snapshots)
             bridge_roles = collect_bridge_roles(snapshots)
 
             def divide_ros2_topic_into_pubsub(topic_names):
@@ -55,6 +70,11 @@ class ListAgnocastVerb(VerbExtension):
             agnocast_topics = remove_service_topic(list(all_topic_names(snapshots)))
 
             # Get ros2 topics
+            if node.daemon_node is None:
+                # The queries below read our own node's graph, which has only had
+                # whatever gossip used. A daemon answers from its own, discovered
+                # long before this process started.
+                time.sleep(max(0.0, deadline - time.monotonic()))
             ros2_topics_data = get_topic_names_and_types(node=node)
             ros2_all_topics = set(name for name, _ in ros2_topics_data)
 
