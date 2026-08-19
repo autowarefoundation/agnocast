@@ -16,6 +16,9 @@
 using namespace std::chrono_literals;
 using namespace std::placeholders;
 
+// Report a stuck run from the node itself, instead of leaving the launch test to time out.
+constexpr auto request_timeout = 10s;
+
 using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
 using Request = agnocast_sample_interfaces::srv::SumIntArray::Request;
 using Response = agnocast_sample_interfaces::srv::SumIntArray::Response;
@@ -51,9 +54,24 @@ class TestServer : public rclcpp::Node
   std::atomic<int64_t> received_count_{0};
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Service<ServiceT>::SharedPtr srv_;
+  // Kept out of cbg_: a group holding both an Agnocast callback and a ROS 2 timer stalls the timer.
+  rclcpp::CallbackGroup::SharedPtr timer_cbg_;
+  rclcpp::TimerBase::SharedPtr timeout_timer_;
 
   std::mutex response_threads_mtx_;
   std::vector<std::thread> response_threads_;
+
+  void report_timeout_and_shutdown()
+  {
+    if (received_count_.load() >= target_count_) {
+      return;
+    }
+
+    RCLCPP_ERROR(
+      this->get_logger(), "Timeout waiting for requests. Received %ld of %ld.",
+      received_count_.load(), target_count_);
+    rclcpp::shutdown();
+  }
 
   void count_and_shutdown_if_done()
   {
@@ -110,6 +128,10 @@ public:
       srv_ = agnocast::create_service<ServiceT>(
         this, params.service_name, std::bind(&TestServer::basic_callback, this, _1, _2), qos, cbg_);
     }
+
+    timer_cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    timeout_timer_ = this->create_wall_timer(
+      request_timeout, [this]() { report_timeout_and_shutdown(); }, timer_cbg_);
   }
 
   ~TestServer() override
@@ -128,9 +150,23 @@ public:
 class TestROS2Server : public rclcpp::Node
 {
   int64_t target_count_;
-  int64_t received_count_ = 0;
+  std::atomic<int64_t> received_count_{0};
   rclcpp::CallbackGroup::SharedPtr cbg_;
   rclcpp::Service<ServiceT>::SharedPtr srv_;
+  rclcpp::CallbackGroup::SharedPtr timer_cbg_;
+  rclcpp::TimerBase::SharedPtr timeout_timer_;
+
+  void report_timeout_and_shutdown()
+  {
+    if (received_count_ >= target_count_) {
+      return;
+    }
+
+    RCLCPP_ERROR(
+      this->get_logger(), "Timeout waiting for requests. Received %ld of %ld.",
+      received_count_.load(), target_count_);
+    rclcpp::shutdown();
+  }
 
   void callback(
     const std::shared_ptr<Request> & request, const std::shared_ptr<Response> & response)
@@ -139,8 +175,7 @@ class TestROS2Server : public rclcpp::Node
 
     response->sum = request->data[0];
 
-    received_count_ += 1;
-    if (received_count_ >= target_count_) {
+    if (received_count_.fetch_add(1) + 1 >= target_count_) {
       RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
       rclcpp::shutdown();
     }
@@ -169,6 +204,10 @@ public:
 #else
       qos.get_rmw_qos_profile(), cbg_);
 #endif
+
+    timer_cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    timeout_timer_ = this->create_wall_timer(
+      request_timeout, [this]() { report_timeout_and_shutdown(); }, timer_cbg_);
   }
 };
 
