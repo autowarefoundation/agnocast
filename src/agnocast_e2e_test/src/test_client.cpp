@@ -58,6 +58,7 @@ class TestClient : public rclcpp::Node
   agnocast::Client<ServiceT>::SharedPtr client_;
 
   int64_t response_count_ = 0;
+  std::thread request_thread_;
 
   bool step_once(int64_t iteration)
   {
@@ -128,13 +129,20 @@ public:
       return;
     }
 
-    std::thread([this]() {
+    request_thread_ = std::thread([this]() {
       for (int64_t i = 0; i < target_count_; i++) {
         if (!step_once(i)) {
           break;
         }
       }
-    }).detach();
+    });
+  }
+
+  ~TestClient() override
+  {
+    if (request_thread_.joinable()) {
+      request_thread_.join();
+    }
   }
 };
 
@@ -147,6 +155,7 @@ class TestROS2Client : public rclcpp::Node
   rclcpp::Client<ServiceT>::SharedPtr client_;
 
   int64_t response_count_ = 0;
+  std::thread request_thread_;
 
   bool step_once(int64_t iteration)
   {
@@ -203,13 +212,20 @@ public:
       return;
     }
 
-    std::thread([this]() {
+    request_thread_ = std::thread([this]() {
       for (int64_t i = 0; i < target_count_; i++) {
         if (!step_once(i)) {
           break;
         }
       }
-    }).detach();
+    });
+  }
+
+  ~TestROS2Client() override
+  {
+    if (request_thread_.joinable()) {
+      request_thread_.join();
+    }
   }
 };
 

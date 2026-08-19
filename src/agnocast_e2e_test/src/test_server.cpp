@@ -7,9 +7,11 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace std::chrono_literals;
 using namespace std::placeholders;
@@ -49,6 +51,9 @@ class TestServer : public rclcpp::Node
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Service<ServiceT>::SharedPtr srv_;
 
+  std::mutex response_threads_mtx_;
+  std::vector<std::thread> response_threads_;
+
   void basic_callback(
     const agnocast::ipc_shared_ptr<Request> & request,
     const agnocast::ipc_shared_ptr<Response> & response)
@@ -69,21 +74,23 @@ class TestServer : public rclcpp::Node
   {
     RCLCPP_INFO(this->get_logger(), "Receiving %ld.", request->data[0]);
 
-    std::thread([this, srv_handle = std::move(srv_handle), request = std::move(request)]() {
-      // Wait for a while to simulate an asynchronous operation.
-      std::this_thread::sleep_for(100ms);
+    std::lock_guard<std::mutex> lock(response_threads_mtx_);
+    response_threads_.emplace_back(
+      [this, srv_handle = std::move(srv_handle), request = std::move(request)]() {
+        // Wait for a while to simulate an asynchronous operation.
+        std::this_thread::sleep_for(100ms);
 
-      auto response = srv_handle->borrow_loaned_response(request);
-      response->sum = request->data[0];
-      auto request_movable = request;
-      srv_handle->send_response(std::move(request_movable), std::move(response));
+        auto response = srv_handle->borrow_loaned_response(request);
+        response->sum = request->data[0];
+        auto request_movable = request;
+        srv_handle->send_response(std::move(request_movable), std::move(response));
 
-      received_count_ += 1;
-      if (received_count_ >= target_count_) {
-        RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
-        rclcpp::shutdown();
-      }
-    }).detach();
+        received_count_ += 1;
+        if (received_count_ >= target_count_) {
+          RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
+          rclcpp::shutdown();
+        }
+      });
   }
 
 public:
@@ -102,6 +109,18 @@ public:
     } else {
       srv_ = agnocast::create_service<ServiceT>(
         this, params.service_name, std::bind(&TestServer::basic_callback, this, _1, _2), qos, cbg_);
+    }
+  }
+
+  ~TestServer() override
+  {
+    std::vector<std::thread> threads;
+    {
+      std::lock_guard<std::mutex> lock(response_threads_mtx_);
+      threads.swap(response_threads_);
+    }
+    for (auto & thread : threads) {
+      thread.join();
     }
   }
 };
