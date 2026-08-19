@@ -14,6 +14,13 @@ QOS_DEPTH = 10
 TARGET_COUNT = 3
 
 
+def stderr_lines(proc_output, process):
+    text = ''.join(
+        io.text.decode(errors='replace') for io in proc_output[process] if io.from_stderr
+    )
+    return text.splitlines()
+
+
 @launch_testing.parametrize(
     'server_plugin, use_deferred_callback, client_plugin, use_response_callback, wait_response',
     [
@@ -125,9 +132,16 @@ class TestService(unittest.TestCase):
     def test_exit_codes(self, proc_info):
         assertExitCodes(proc_info, allowable_exit_codes=[EXIT_OK])
 
+    def test_no_error_logs(self, proc_output, server_container, client_container):
+        for container in (server_container, client_container):
+            errors = [line for line in stderr_lines(proc_output, container) if '[ERROR]' in line]
+            self.assertEqual(errors, [])
+
     def test_server_received_all_requests(self, proc_output, server_container):
+        lines = stderr_lines(proc_output, server_container)
         for i in range(TARGET_COUNT):
-            assertInStderr(proc_output, f'Receiving {i}.', server_container)
+            matched = [line for line in lines if f'Receiving {i}.' in line]
+            self.assertEqual(len(matched), 1, f'Receiving {i}. was logged {len(matched)} times')
         assertInStderr(
             proc_output,
             'All requests have been handled. Shutting down.',
@@ -135,8 +149,10 @@ class TestService(unittest.TestCase):
         )
 
     def test_client_received_all_responses(self, proc_output, client_container):
+        lines = stderr_lines(proc_output, client_container)
         for i in range(TARGET_COUNT):
-            assertInStderr(proc_output, f'Receiving {i}.', client_container)
+            matched = [line for line in lines if f'Receiving {i}.' in line]
+            self.assertEqual(len(matched), 1, f'Receiving {i}. was logged {len(matched)} times')
         assertInStderr(
             proc_output,
             'All responses have been received. Shutting down.',
