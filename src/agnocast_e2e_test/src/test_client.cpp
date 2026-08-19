@@ -114,8 +114,6 @@ public:
     auto params = get_node_params(this);
     use_response_callback_ = params.use_response_callback;
     wait_response_ = params.wait_response;
-    // If the peer is a ROS 2 server, use a longer interval to account for the overhead introduced
-    // by the service bridge.
     target_count_ = params.target_count;
 
     cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
