@@ -1381,6 +1381,7 @@ int agnocast_ioctl_get_subscriber_num(
   ioctl_ret->ret_other_process_subscriber_num = 0;
   ioctl_ret->ret_same_process_subscriber_num = 0;
   ioctl_ret->ret_ros2_subscriber_num = 0;
+  ioctl_ret->ret_other_domain_subscriber_num = 0;
   ioctl_ret->ret_a2r_bridge_exist = false;
   ioctl_ret->ret_r2a_bridge_exist = false;
 
@@ -1397,16 +1398,20 @@ int agnocast_ioctl_get_subscriber_num(
 
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
+  uint32_t other_domain_count = 0;
 
-  // Match ROS 2's get_subscription_count: report only same-domain subscribers.
-  // A bridge rule still delivers cross-domain (see the publish/receive paths),
-  // but a publisher does not count subscribers in another domain. Ungrouped
-  // topics hold only one domain, so this is a no-op for them.
+  // Match ROS 2's get_subscription_count: the same/other-process counts report only same-domain
+  // subscribers. A bridge rule still delivers cross-domain (see the publish/receive paths), but a
+  // publisher does not count subscribers in another domain. Ungrouped topics hold only one domain,
+  // so this is a no-op for them.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
     if (sub_info->domain_id != wrapper->domain_id) {
+      if (domain_delivery_allowed(wrapper->topic, wrapper->domain_id, sub_info->domain_id)) {
+        other_domain_count++;
+      }
       continue;
     }
     if (sub_info->is_bridge) {
@@ -1431,6 +1436,7 @@ int agnocast_ioctl_get_subscriber_num(
 
   ioctl_ret->ret_other_process_subscriber_num = inter_count;
   ioctl_ret->ret_same_process_subscriber_num = intra_count;
+  ioctl_ret->ret_other_domain_subscriber_num = other_domain_count;
   ioctl_ret->ret_ros2_subscriber_num = wrapper->topic->ros2_subscriber_num;
 
   up_read(&wrapper->topic->rwsem);

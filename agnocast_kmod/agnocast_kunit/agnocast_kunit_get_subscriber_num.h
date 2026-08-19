@@ -9,7 +9,10 @@
     KUNIT_CASE(test_case_get_subscriber_num_no_subscriber),                                       \
     KUNIT_CASE(test_case_get_subscriber_num_include_ros2),                                        \
     KUNIT_CASE(test_case_get_subscriber_num_bridge_exist),                                        \
-    KUNIT_CASE(test_case_get_subscriber_num_intra_process)
+    KUNIT_CASE(test_case_get_subscriber_num_intra_process),                                       \
+    KUNIT_CASE(test_case_get_subscriber_num_other_domain),                                        \
+    KUNIT_CASE(test_case_get_subscriber_num_other_domain_reversed_pair),                          \
+    KUNIT_CASE(test_case_get_subscriber_num_other_domain_undelivered)
 
 void test_case_get_subscriber_num_normal(struct kunit * test);
 void test_case_get_subscriber_num_many(struct kunit * test);
@@ -19,3 +22,6 @@ void test_case_get_subscriber_num_no_subscriber(struct kunit * test);
 void test_case_get_subscriber_num_include_ros2(struct kunit * test);
 void test_case_get_subscriber_num_bridge_exist(struct kunit * test);
 void test_case_get_subscriber_num_intra_process(struct kunit * test);
+void test_case_get_subscriber_num_other_domain(struct kunit * test);
+void test_case_get_subscriber_num_other_domain_reversed_pair(struct kunit * test);
+void test_case_get_subscriber_num_other_domain_undelivered(struct kunit * test);
