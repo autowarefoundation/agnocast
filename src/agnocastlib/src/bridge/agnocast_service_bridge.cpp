@@ -410,7 +410,9 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 // Stays in A2R, or takes arrow (4) back to PENDING.
 void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 {
-  if (ros2_service_exists(deps)) {
+  if (may_start_r2a_bridge_ && agno_service_exists()) {
+    set_error_string("An Agnocast service now owns this name");
+  } else if (ros2_service_exists(deps)) {
     return;
   }
 
