@@ -6,6 +6,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <memory>
 
 using namespace std::chrono;
@@ -126,8 +127,11 @@ ipc_shared_ptr<void> GenericClient::borrow_loaned_request()
   auto generic_request_wrapper = GenericRequestWrapper::allocate(
     request_members_, [this](size_t size) { return publisher_->borrow_loaned_message(size); });
 
-  generic_request_wrapper.node_name() = node_name_;
   generic_request_wrapper.seqno() = next_sequence_number_.fetch_add(1);
+  std::memcpy(
+    static_cast<void *>(generic_request_wrapper.client_gid()),
+    static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
+  generic_request_wrapper.node_name() = node_name_;
 
   return std::move(generic_request_wrapper).take_request();
 }
