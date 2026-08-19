@@ -3,7 +3,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
-#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -150,8 +149,14 @@ public:
   explicit TestROS2Server(const rclcpp::NodeOptions & options) : Node("test_ros2_server", options)
   {
     auto params = get_node_params(this);
-    assert(!params.use_deferred_callback && "deferred callback not implemented for TestROS2Server");
     target_count_ = params.target_count;
+
+    if (params.use_deferred_callback) {
+      RCLCPP_ERROR(
+        this->get_logger(), "TestROS2Server does not support the deferred service callback.");
+      rclcpp::shutdown();
+      return;
+    }
 
     cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};

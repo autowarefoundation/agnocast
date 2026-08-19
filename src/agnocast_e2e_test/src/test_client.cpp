@@ -3,7 +3,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
-#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -194,9 +193,14 @@ public:
   explicit TestROS2Client(const rclcpp::NodeOptions & options) : Node("test_ros2_client", options)
   {
     auto params = get_node_params(this);
-    assert(params.use_response_callback && "TestROS2Client must use response callback");
     wait_response_ = params.wait_response;
     target_count_ = params.target_count;
+
+    if (!params.use_response_callback) {
+      RCLCPP_ERROR(this->get_logger(), "TestROS2Client requires use_response_callback to be true.");
+      rclcpp::shutdown();
+      return;
+    }
 
     cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
