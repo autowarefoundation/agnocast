@@ -3,6 +3,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -10,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -56,8 +58,23 @@ class TestClient : public rclcpp::Node
   rclcpp::CallbackGroup::SharedPtr cbg_;
   agnocast::Client<ServiceT>::SharedPtr client_;
 
-  int64_t response_count_ = 0;
+  std::atomic<int64_t> response_count_{0};
   std::thread request_thread_;
+  std::vector<agnocast::Client<ServiceT>::SharedFuture> pending_futures_;
+
+  // The asynchronous pattern has no deadline in step_once(), so it is enforced here.
+  void wait_for_pending_responses()
+  {
+    for (auto & sfut : pending_futures_) {
+      if (sfut.wait_for(2s) == std::future_status::timeout) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Timeout waiting for responses. Received %ld of %ld.",
+          response_count_.load(), target_count_);
+        rclcpp::shutdown();
+        return;
+      }
+    }
+  }
 
   bool step_once(int64_t iteration)
   {
@@ -85,6 +102,7 @@ class TestClient : public rclcpp::Node
     }
 
     if (!wait_response_) {
+      pending_futures_.push_back(sfut);
       return true;
     }
 
@@ -129,9 +147,10 @@ public:
     request_thread_ = std::thread([this]() {
       for (int64_t i = 0; i < target_count_; i++) {
         if (!step_once(i)) {
-          break;
+          return;
         }
       }
+      wait_for_pending_responses();
     });
   }
 
@@ -151,8 +170,23 @@ class TestROS2Client : public rclcpp::Node
   rclcpp::CallbackGroup::SharedPtr cbg_;
   rclcpp::Client<ServiceT>::SharedPtr client_;
 
-  int64_t response_count_ = 0;
+  std::atomic<int64_t> response_count_{0};
   std::thread request_thread_;
+  std::vector<rclcpp::Client<ServiceT>::SharedFuture> pending_futures_;
+
+  // The asynchronous pattern has no deadline in step_once(), so it is enforced here.
+  void wait_for_pending_responses()
+  {
+    for (auto & sfut : pending_futures_) {
+      if (sfut.wait_for(2s) == std::future_status::timeout) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Timeout waiting for responses. Received %ld of %ld.",
+          response_count_.load(), target_count_);
+        rclcpp::shutdown();
+        return;
+      }
+    }
+  }
 
   bool step_once(int64_t iteration)
   {
@@ -175,6 +209,7 @@ class TestROS2Client : public rclcpp::Node
         .future;
 
     if (!wait_response_) {
+      pending_futures_.push_back(sfut);
       return true;
     }
 
@@ -217,9 +252,10 @@ public:
     request_thread_ = std::thread([this]() {
       for (int64_t i = 0; i < target_count_; i++) {
         if (!step_once(i)) {
-          break;
+          return;
         }
       }
+      wait_for_pending_responses();
     });
   }
 
