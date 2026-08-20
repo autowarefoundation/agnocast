@@ -108,7 +108,6 @@ struct ServiceTsBundle
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib;
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection;
   const rosidl_service_type_support_t * service_ts{nullptr};
-  const rosidl_service_type_support_t * service_ts_introspection{nullptr};
   const rosidl_typesupport_introspection_cpp::MessageMembers * request_members{nullptr};
   const rosidl_typesupport_introspection_cpp::MessageMembers * response_members{nullptr};
 };

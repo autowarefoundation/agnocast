@@ -268,6 +268,8 @@ ServiceTsBundle load_service_typesupport(const std::string & service_type)
 
   ServiceTsBundle bundle;
 
+  const rosidl_service_type_support_t * service_ts_introspection = nullptr;
+
   bundle.ts_lib = rclcpp::get_typesupport_library(service_type, ts_identifier);
   bundle.ts_lib_introspection =
     rclcpp::get_typesupport_library(service_type, ts_identifier_introspection);
@@ -276,18 +278,18 @@ ServiceTsBundle load_service_typesupport(const std::string & service_type)
   bundle.service_ts =
     rclcpp::get_service_typesupport_handle(service_type, ts_identifier, *bundle.ts_lib);
 
-  bundle.service_ts_introspection = rclcpp::get_service_typesupport_handle(
+  service_ts_introspection = rclcpp::get_service_typesupport_handle(
     service_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
 #else
   bundle.service_ts = get_service_typesupport_handle(service_type, ts_identifier, *bundle.ts_lib);
 
-  bundle.service_ts_introspection = get_service_typesupport_handle(
+  service_ts_introspection = get_service_typesupport_handle(
     service_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
 #endif
 
   const auto * service_members =
     static_cast<const rosidl_typesupport_introspection_cpp::ServiceMembers *>(
-      bundle.service_ts_introspection->data);
+      service_ts_introspection->data);
 
   bundle.request_members = service_members->request_members_;
   bundle.response_members = service_members->response_members_;
