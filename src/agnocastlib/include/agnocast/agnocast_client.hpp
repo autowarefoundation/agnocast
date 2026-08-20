@@ -7,6 +7,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+#include "agnocast/internal/service_typesupport.hpp"
 #include "agnocast/internal/service_wire_type.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
@@ -338,11 +339,7 @@ private:
   typename TypeErasedPublisher::SharedPtr publisher_;
   typename Subscription<void>::SharedPtr subscriber_;
 
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_{nullptr};
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_{nullptr};
-
-  void load_typesupport_impl(const std::string & service_type);
+  ServiceTsBundle service_ts_bundle_;
 
   template <typename NodeT>
   void constructor_impl(
@@ -351,7 +348,7 @@ private:
   {
     init_base(node, service_name);
 
-    load_typesupport_impl(service_type);
+    service_ts_bundle_ = load_service_typesupport(service_type);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -363,7 +360,7 @@ private:
 
     auto subscriber_callback = [this, node](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =
-        GenericResponseWrapper(response_members_, std::move(response));
+        GenericResponseWrapper(service_ts_bundle_.response_members, std::move(response));
       int64_t response_seqno = generic_response_wrapper.seqno();
 
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);

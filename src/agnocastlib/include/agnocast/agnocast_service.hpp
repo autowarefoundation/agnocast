@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/internal/service_typesupport.hpp"
 #include "agnocast/internal/service_wire_type.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -256,9 +257,7 @@ class GenericService : public std::enable_shared_from_this<GenericService>
   std::unordered_map<std::string, typename TypeErasedPublisher::SharedPtr> publishers_;
   typename Subscription<void>::SharedPtr subscriber_;
 
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_{nullptr};
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_{nullptr};
+  ServiceTsBundle service_ts_bundle_;
 
   typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
     const std::string & node_name);
@@ -267,11 +266,12 @@ class GenericService : public std::enable_shared_from_this<GenericService>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
-      auto req_wrapper = GenericRequestWrapper(request_members_, std::move(request));
+      auto req_wrapper =
+        GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
       auto publisher = this->get_or_create_publisher_for(req_wrapper.node_name());
 
       auto res_wrapper = GenericResponseWrapper::allocate(
-        response_members_,
+        service_ts_bundle_.response_members,
         [&publisher](size_t size) { return publisher->borrow_loaned_message(size); });
       res_wrapper.seqno() = req_wrapper.seqno();
 
@@ -288,13 +288,13 @@ class GenericService : public std::enable_shared_from_this<GenericService>
         callback(std::move(req_wrapper).take_request(), std::move(response_double));
       } catch (...) {
         publisher->cancel_message(std::move(response), [this](void * p) {
-          GenericResponseWrapper::free(p, this->response_members_);
+          GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
         });
         throw;
       }
 
       publisher->publish(std::move(response), [this](void * p) {
-        GenericResponseWrapper::free(p, this->response_members_);
+        GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
       });
 
       // Safety regarding response_double
@@ -313,8 +313,6 @@ class GenericService : public std::enable_shared_from_this<GenericService>
     };
   }
 
-  void load_typesupport_impl(const std::string & service_type);
-
   template <typename Func, typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const std::string & service_type,
@@ -327,7 +325,7 @@ class GenericService : public std::enable_shared_from_this<GenericService>
       "2. deferred: (std::shared_ptr<GenericService>, ipc_shared_ptr<void>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
 
-    load_typesupport_impl(service_type);
+    service_ts_bundle_ = load_service_typesupport(service_type);
 
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
