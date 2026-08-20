@@ -26,8 +26,9 @@ std::shared_ptr<void> GenericService::create_request()
   const auto * request_members = service_ts_bundle_.request_members;
   void * request = new uint8_t[request_members->size_of_];
   request_members->init_function(request, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return {request, [request_members](void * p) {
-            request_members->fini_function(p);
+  // The deleter can outlive this service, so it owns the bundle that keeps fini_function mapped.
+  return {request, [bundle = service_ts_bundle_](void * p) {
+            bundle.request_members->fini_function(p);
             delete[] static_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
           }};
 }
@@ -53,8 +54,8 @@ std::shared_ptr<void> GenericService::create_response()
   const auto * response_members = service_ts_bundle_.response_members;
   void * response = new uint8_t[response_members->size_of_];
   response_members->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return {response, [response_members](void * p) {
-            response_members->fini_function(p);
+  return {response, [bundle = service_ts_bundle_](void * p) {
+            bundle.response_members->fini_function(p);
             delete[] static_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
           }};
 }

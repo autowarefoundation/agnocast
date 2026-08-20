@@ -71,8 +71,9 @@ std::shared_ptr<void> GenericClient::create_response()
   const auto * response_members = service_ts_bundle_.response_members;
   void * response = new uint8_t[response_members->size_of_];
   response_members->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return {response, [response_members](void * p) {
-            response_members->fini_function(p);
+  // The deleter can outlive this client, so it owns the bundle that keeps fini_function mapped.
+  return {response, [bundle = service_ts_bundle_](void * p) {
+            bundle.response_members->fini_function(p);
             delete[] reinterpret_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
           }};
 }
