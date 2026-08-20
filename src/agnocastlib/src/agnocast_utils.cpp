@@ -2,8 +2,6 @@
 
 #include "agnocast/node/agnocast_node.hpp"
 
-#include <rosidl_typesupport_introspection_cpp/service_introspection.hpp>
-
 #include <rclcpp/version.h>
 #include <sys/stat.h>
 
@@ -268,31 +266,33 @@ ServiceTsBundle load_service_typesupport(const std::string & service_type)
 
   ServiceTsBundle bundle;
 
-  const rosidl_service_type_support_t * service_ts_introspection = nullptr;
-
   bundle.ts_lib = rclcpp::get_typesupport_library(service_type, ts_identifier);
   bundle.ts_lib_introspection =
     rclcpp::get_typesupport_library(service_type, ts_identifier_introspection);
 
+  // Not the service introspection handle: its ServiceMembers is filled in lazily on first access
+  // without synchronization.
 #if RCLCPP_VERSION_MAJOR >= 28
   bundle.service_ts =
     rclcpp::get_service_typesupport_handle(service_type, ts_identifier, *bundle.ts_lib);
 
-  service_ts_introspection = rclcpp::get_service_typesupport_handle(
-    service_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
+  const rosidl_message_type_support_t * request_ts = rclcpp::get_message_typesupport_handle(
+    request_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
+  const rosidl_message_type_support_t * response_ts = rclcpp::get_message_typesupport_handle(
+    response_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
 #else
   bundle.service_ts = get_service_typesupport_handle(service_type, ts_identifier, *bundle.ts_lib);
 
-  service_ts_introspection = get_service_typesupport_handle(
-    service_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
+  const rosidl_message_type_support_t * request_ts = rclcpp::get_typesupport_handle(
+    request_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
+  const rosidl_message_type_support_t * response_ts = rclcpp::get_typesupport_handle(
+    response_type, ts_identifier_introspection, *bundle.ts_lib_introspection);
 #endif
 
-  const auto * service_members =
-    static_cast<const rosidl_typesupport_introspection_cpp::ServiceMembers *>(
-      service_ts_introspection->data);
-
-  bundle.request_members = service_members->request_members_;
-  bundle.response_members = service_members->response_members_;
+  bundle.request_members =
+    static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(request_ts->data);
+  bundle.response_members =
+    static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(response_ts->data);
 
   return bundle;
 }
