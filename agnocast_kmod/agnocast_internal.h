@@ -229,8 +229,8 @@ extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
 // A domain bridge rule relays one topic between two ROS domains within one IPC
 // namespace. The pair is stored canonically (domain_a < domain_b) with the enabled
-// direction(s) in a_to_b / b_to_a. See agnocast_ioctl_add_domain_bridge for the rules
-// on adding one.
+// direction(s) in a_to_b / b_to_a. See add_domain_rule in agnocast_ioctl.c for the
+// rules on adding one.
 struct domain_bridge_rule
 {
   // Per-domain topic names. Equal when the rule does not rename; a rename pairs

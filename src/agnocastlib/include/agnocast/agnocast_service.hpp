@@ -86,10 +86,10 @@ private:
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-      auto publisher = this->get_or_create_publisher_for(request->node_name);
+      auto publisher = this->get_or_create_publisher_for(request->RequestMeta::node_name);
 
       ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
-      response->seqno = request->seqno;
+      response->ResponseMeta::seqno = request->RequestMeta::seqno;
 
       ipc_shared_ptr<typename ServiceT::Response> response_double(response);
 
@@ -195,7 +195,7 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
-    auto publisher = get_or_create_publisher_for(internal_request->node_name);
+    auto publisher = get_or_create_publisher_for(internal_request->RequestMeta::node_name);
     publisher->publish(std::move(internal_response));
   }
 
@@ -214,9 +214,9 @@ public:
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
-    auto publisher = get_or_create_publisher_for(internal_request->node_name);
+    auto publisher = get_or_create_publisher_for(internal_request->RequestMeta::node_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
-    response->seqno = internal_request->seqno;
+    response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
   }
 
