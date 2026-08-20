@@ -40,10 +40,23 @@ extern int agnocast_fd;
 enum class ClientRole : uint8_t {
   /// User-created client; issues an A2R bridge request.
   Default,
-  /// Used by the bridge plugin's own client; no bridge request is issued.
+  /// Used by the bridge implementation itself; marks the endpoints it creates as bridges in kmod
+  /// and issues no bridge request.
   /// Not intended for direct use by application code.
-  AgnocastOnly,
+  BridgeInternal,
 };
+
+constexpr SubscriptionRole to_subscription_role(const ClientRole role)
+{
+  return role == ClientRole::BridgeInternal ? SubscriptionRole::BridgeInternal
+                                            : SubscriptionRole::AgnocastOnly;
+}
+
+constexpr PublisherRole to_publisher_role(const ClientRole role)
+{
+  return role == ClientRole::BridgeInternal ? PublisherRole::BridgeInternal
+                                            : PublisherRole::AgnocastOnly;
+}
 
 namespace detail
 {
@@ -183,7 +196,7 @@ private:
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options,
-      PublisherRole::AgnocastOnly);
+      to_publisher_role(role));
 
     auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -208,9 +221,9 @@ private:
 
     SubscriptionOptions options{group};
     std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
+    const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-      node, topic_name, qos, std::move(subscriber_callback), options,
-      SubscriptionRole::AgnocastOnly);
+      node, topic_name, qos, std::move(subscriber_callback), options, subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(
@@ -356,7 +369,7 @@ private:
     agnocast::PublisherOptions pub_options;
     std::string req_topic_name = create_service_request_topic_name(service_name_);
     publisher_ = std::make_shared<TypeErasedPublisher>(
-      node, req_topic_name, "", qos, pub_options, PublisherRole::AgnocastOnly);
+      node, req_topic_name, "", qos, pub_options, to_publisher_role(role));
 
     auto subscriber_callback = [this, node](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =
@@ -385,9 +398,9 @@ private:
 
     SubscriptionOptions sub_options{group};
     std::string res_topic_name = create_service_response_topic_name(service_name_, node_name_);
+    const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<Subscription<void>>(
-      node, res_topic_name, "", qos, std::move(subscriber_callback), sub_options,
-      SubscriptionRole::AgnocastOnly);
+      node, res_topic_name, "", qos, std::move(subscriber_callback), sub_options, subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(

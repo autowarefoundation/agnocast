@@ -79,9 +79,9 @@ struct ServiceBridgeDeps
 // service goes away.
 //
 // Two things escape that guard, and both let (2) destroy the item while an Agnocast service is
-// still running. may_start_r2a_bridge_ is set only by a ServiceRole::Default service, so an
-// AgnocastOnly one never guards anything; and agno_service_exists() reads at most one entry, so it
-// reports false when two or more Agnocast services share the name.
+// still running. may_start_r2a_bridge_ is set only by a ServiceRole::Default service, so a
+// BridgeInternal one never guards anything; and agno_service_exists() reads at most one entry, so
+// it reports false when two or more Agnocast services share the name.
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem

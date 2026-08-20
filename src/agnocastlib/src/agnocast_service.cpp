@@ -19,7 +19,7 @@ typename TypeErasedPublisher::SharedPtr GenericService::get_or_create_publisher_
           std::string topic_name = create_service_response_topic_name(service_name_, node_name);
           agnocast::PublisherOptions pub_options;
           pub = std::make_shared<TypeErasedPublisher>(
-            node, topic_name, "", qos_, pub_options, PublisherRole::AgnocastOnly);
+            node, topic_name, "", qos_, pub_options, to_publisher_role(role_));
           publishers_[node_name] = pub;
         },
         node_);
