@@ -723,8 +723,10 @@ void test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified(struct
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
   setup_publisher_in_domain(test, current->tgid, 1, is_bridge, &publisher_id, &ret_addr);
-  const int eventfd = 0;
-  setup_one_subscriber_in_domain_with_eventfd(test, 2, true, eventfd, false);
+  const int bridge_eventfd = 0;
+  const int plain_eventfd = 1;
+  setup_one_subscriber_in_domain_with_eventfd(test, 2, true, bridge_eventfd, false);
+  setup_one_subscriber_in_domain_with_eventfd(test, 2, is_bridge, plain_eventfd, false);
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 
   // Act
@@ -733,7 +735,9 @@ void test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified(struct
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(bridge_eventfd), 0);
+  // The non-bridge subscriber is the control: it reads zero too if the two cells never grouped.
+  KUNIT_EXPECT_EQ(test, signal_count_of(plain_eventfd), 1);
 }
 
 void test_case_publish_msg_bridge_publisher_does_not_notify_other_domain(struct kunit * test)
