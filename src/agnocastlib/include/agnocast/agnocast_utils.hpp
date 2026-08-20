@@ -3,12 +3,6 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#include <rcpputils/shared_library.hpp>
-#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
-
-#include <rosidl_runtime_c/service_type_support_struct.h>
-
-#include <memory>
 #include <string>
 
 namespace agnocast
@@ -102,16 +96,5 @@ uint64_t agnocast_get_timestamp();
 // Returns a pointer to the inner node handle that can be used for the TRACEPOINT macro.
 const void * get_node_base_address(agnocast::Node * node);
 const void * get_node_base_address(rclcpp::Node * node);
-
-struct ServiceTsBundle
-{
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib;
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection;
-  const rosidl_service_type_support_t * service_ts{nullptr};
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members{nullptr};
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members{nullptr};
-};
-
-ServiceTsBundle load_service_typesupport(const std::string & service_type);
 
 }  // namespace agnocast

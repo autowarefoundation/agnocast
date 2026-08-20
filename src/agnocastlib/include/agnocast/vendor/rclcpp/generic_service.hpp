@@ -19,7 +19,7 @@
 
 #pragma once
 
-#include "agnocast/agnocast_utils.hpp"
+#include "agnocast/internal/service_typesupport.hpp"
 
 #include <rclcpp/expand_topic_or_service_name.hpp>
 #include <rclcpp/function_traits.hpp>

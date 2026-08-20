@@ -19,7 +19,7 @@
 
 #pragma once
 
-#include "agnocast/agnocast_utils.hpp"
+#include "agnocast/internal/service_typesupport.hpp"
 
 #include <rclcpp/client.hpp>
 #include <rclcpp/node.hpp>
