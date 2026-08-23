@@ -106,12 +106,13 @@ TEST(ScanKernelThreads, FindsKthreadAndReadsFields)
   EXPECT_EQ(result[0].tid, 15);
   EXPECT_EQ(result[0].comm, "my_kthread");
   EXPECT_EQ(result[0].policy, "SCHED_FIFO");
-  EXPECT_EQ(result[0].priority, 50);
+  EXPECT_EQ(result[0].nice, 0);
+  EXPECT_EQ(result[0].rt_priority, 50);
   EXPECT_EQ(result[0].affinity, "0-3");
   EXPECT_FALSE(result[0].no_setaffinity);
 }
 
-TEST(ScanKernelThreads, DualPriorityMeaning)
+TEST(ScanKernelThreads, CapturesNiceAndRtPriority)
 {
   TempTree tree;
   add_proc_entry(tree.root, 10, "nice_thread", kPfKthread, 5, 0, kPolicyOther, "0");
@@ -121,11 +122,14 @@ TEST(ScanKernelThreads, DualPriorityMeaning)
   const auto result = acie::scan_kernel_threads(tree.root.string());
   ASSERT_EQ(result.size(), 3u);
   EXPECT_EQ(result[0].comm, "batch_thread");
-  EXPECT_EQ(result[0].priority, -7);
+  EXPECT_EQ(result[0].nice, -7);
+  EXPECT_EQ(result[0].rt_priority, 0);
   EXPECT_EQ(result[1].comm, "nice_thread");
-  EXPECT_EQ(result[1].priority, 5);
+  EXPECT_EQ(result[1].nice, 5);
+  EXPECT_EQ(result[1].rt_priority, 0);
   EXPECT_EQ(result[2].comm, "rt_thread");
-  EXPECT_EQ(result[2].priority, 42);
+  EXPECT_EQ(result[2].nice, 0);
+  EXPECT_EQ(result[2].rt_priority, 42);
 }
 
 TEST(ScanKernelThreads, ExcludesKworkers)
@@ -150,10 +154,10 @@ TEST(ScanKernelThreads, ParsesCommWithParensAndSpaces)
   const auto result = acie::scan_kernel_threads(tree.root.string());
   ASSERT_EQ(result.size(), 2u);
   EXPECT_EQ(result[0].comm, "a) b (c");
-  EXPECT_EQ(result[0].priority, 3);
+  EXPECT_EQ(result[0].nice, 3);
   EXPECT_EQ(result[1].comm, "irq/24-PCIe PME");
   EXPECT_EQ(result[1].policy, "SCHED_FIFO");
-  EXPECT_EQ(result[1].priority, 50);
+  EXPECT_EQ(result[1].rt_priority, 50);
 }
 
 TEST(ScanKernelThreads, SetsNoSetaffinityFlag)
@@ -204,12 +208,13 @@ TEST(ScanKernelThreads, SkipsMalformedEntries)
 TEST(ScanKernelThreads, RendersUnknownPolicy)
 {
   TempTree tree;
-  add_proc_entry(tree.root, 15, "odd_thread", kPfKthread, 0, 0, 4, "0");
+  add_proc_entry(tree.root, 15, "odd_thread", kPfKthread, -3, 7, 4, "0");
 
   const auto result = acie::scan_kernel_threads(tree.root.string());
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].policy, "UNKNOWN(4)");
-  EXPECT_EQ(result[0].priority, 0);
+  EXPECT_EQ(result[0].nice, -3);
+  EXPECT_EQ(result[0].rt_priority, 7);
 }
 
 // ---------- scan_irqs / read_irq_actions ----------

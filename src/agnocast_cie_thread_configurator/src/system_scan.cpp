@@ -2,9 +2,6 @@
 
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
-#include <linux/sched.h>
-#include <sched.h>
-
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -194,11 +191,8 @@ std::optional<KernelThreadInfo> read_kernel_thread(
   info.tid = tid;
   info.comm = comm;
   info.policy = policy_const_to_string(*policy);
-  if (*policy == SCHED_FIFO || *policy == SCHED_RR) {
-    info.priority = *rt_priority;
-  } else if (*policy == SCHED_OTHER || *policy == SCHED_BATCH || *policy == SCHED_IDLE) {
-    info.priority = *nice;
-  }
+  info.nice = *nice;
+  info.rt_priority = *rt_priority;
   info.affinity = *affinity;
   info.no_setaffinity = (*flags & k_pf_no_setaffinity) != 0;
   return info;
