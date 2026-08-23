@@ -19,10 +19,10 @@
 
 #pragma once
 
+#include "agnocast/internal/service_typesupport.hpp"
+
 #include <rclcpp/client.hpp>
 #include <rclcpp/node.hpp>
-#include <rcpputils/shared_library.hpp>
-#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 
 #include <future>
 #include <map>
@@ -86,9 +86,7 @@ protected:
   std::mutex pending_requests_mutex_;
 
 private:
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_;
+  agnocast::ServiceTsBundle service_ts_bundle_;
 };
 
 }  // namespace agnocast::vendor_rclcpp

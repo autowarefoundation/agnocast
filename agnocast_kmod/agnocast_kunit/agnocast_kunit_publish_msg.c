@@ -19,65 +19,28 @@ static pid_t common_pid = 3000;
 static bool is_take_sub = false;
 static bool is_bridge = false;
 
-static void setup_one_subscriber(
-  struct kunit * test, topic_local_id_t * subscriber_id, bool ignore_local_publications)
-{
-  subscriber_pid++;
-
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, -1,
-    &add_subscriber_args);
-  *subscriber_id = add_subscriber_args.ret_id;
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-}
-
-static void setup_one_publisher(
-  struct kunit * test, topic_local_id_t * publisher_id, uint64_t * ret_addr)
-{
-  publisher_pid++;
-
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    publisher_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
-  *ret_addr = add_process_args.ret_addr;
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-    qos_is_transient_local, is_bridge, &add_publisher_args);
-  *publisher_id = add_publisher_args.ret_id;
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-}
-
-// The setup helpers above pass -1, which the fake maps to its unobserved slot: the subscriber
-// still enters the publishers' notify lists and is signaled on publish, but no assertion can see
-// it. Cases that assert on delivery need a real fd instead.
+// The helpers below pass -1 for the eventfd unless a case needs to observe delivery: the fake maps
+// -1 to its unobserved slot, so the subscriber still enters the notify lists and is signaled, but
+// no assertion can see it.
 static topic_local_id_t add_subscriber_with_eventfd(
-  struct kunit * test, const pid_t pid, const int eventfd, const bool ignore_local_publications)
+  struct kunit * test, const pid_t pid, const int eventfd, const bool ignore_local_publications,
+  const bool sub_is_bridge)
 {
   union ioctl_add_subscriber_args add_subscriber_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, pid, qos_depth, qos_is_transient_local,
-    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, eventfd,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_subscriber(
+      topic_name, current->nsproxy->ipc_ns, node_name, pid, qos_depth, qos_is_transient_local,
+      qos_is_reliable, is_take_sub, ignore_local_publications, sub_is_bridge, eventfd,
+      &add_subscriber_args),
+    0);
   return add_subscriber_args.ret_id;
 }
 
-// Same, but in a process of its own.
-static topic_local_id_t setup_one_subscriber_with_eventfd(
-  struct kunit * test, const int eventfd, const bool ignore_local_publications)
+// Same, but in a process of its own, registered in the given domain.
+static topic_local_id_t setup_one_subscriber_in_domain_with_eventfd(
+  struct kunit * test, const uint32_t domain_id, const bool sub_is_bridge, const int eventfd,
+  const bool ignore_local_publications)
 {
   subscriber_pid++;
 
@@ -85,9 +48,52 @@ static topic_local_id_t setup_one_subscriber_with_eventfd(
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
+      subscriber_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
     0);
-  return add_subscriber_with_eventfd(test, subscriber_pid, eventfd, ignore_local_publications);
+  return add_subscriber_with_eventfd(
+    test, subscriber_pid, eventfd, ignore_local_publications, sub_is_bridge);
+}
+
+static void setup_one_subscriber(
+  struct kunit * test, topic_local_id_t * subscriber_id, bool ignore_local_publications)
+{
+  *subscriber_id =
+    setup_one_subscriber_in_domain_with_eventfd(test, 0, is_bridge, -1, ignore_local_publications);
+}
+
+static topic_local_id_t setup_one_subscriber_with_eventfd(
+  struct kunit * test, const int eventfd, const bool ignore_local_publications)
+{
+  return setup_one_subscriber_in_domain_with_eventfd(
+    test, 0, is_bridge, eventfd, ignore_local_publications);
+}
+
+static void setup_publisher_in_domain(
+  struct kunit * test, const pid_t pid, const uint32_t domain_id, const bool pub_is_bridge,
+  topic_local_id_t * publisher_id, uint64_t * ret_addr)
+{
+  union ioctl_add_process_args add_process_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
+    0);
+  *ret_addr = add_process_args.ret_addr;
+
+  union ioctl_add_publisher_args add_publisher_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_publisher(
+      topic_name, current->nsproxy->ipc_ns, node_name, pid, qos_depth, qos_is_transient_local,
+      pub_is_bridge, &add_publisher_args),
+    0);
+  *publisher_id = add_publisher_args.ret_id;
+}
+
+static void setup_one_publisher(
+  struct kunit * test, topic_local_id_t * publisher_id, uint64_t * ret_addr)
+{
+  publisher_pid++;
+  setup_publisher_in_domain(test, publisher_pid, 0, is_bridge, publisher_id, ret_addr);
 }
 
 // One process holding both, which is what makes ignore_local_publications observable.
@@ -97,23 +103,8 @@ static void setup_pub_sub_same_process_with_eventfd(
 {
   common_pid++;
 
-  union ioctl_add_process_args add_process_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(common_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
-    0);
-  *ret_addr = add_process_args.ret_addr;
-
-  union ioctl_add_publisher_args add_publisher_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, node_name, common_pid, qos_depth,
-      qos_is_transient_local, is_bridge, &add_publisher_args),
-    0);
-  *publisher_id = add_publisher_args.ret_id;
-
-  add_subscriber_with_eventfd(test, common_pid, eventfd, ignore_local_publications);
+  setup_publisher_in_domain(test, common_pid, 0, is_bridge, publisher_id, ret_addr);
+  add_subscriber_with_eventfd(test, common_pid, eventfd, ignore_local_publications, is_bridge);
 }
 
 static uint32_t signal_count_of(const int eventfd)
@@ -464,7 +455,7 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
       qos_is_transient_local, qos_is_reliable, true /* is_take_sub */, false, is_bridge,
       take_eventfd, &take_sub_args),
     0);
-  add_subscriber_with_eventfd(test, subscriber_pid, notify_eventfd, false);
+  add_subscriber_with_eventfd(test, subscriber_pid, notify_eventfd, false, is_bridge);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
 
@@ -495,7 +486,7 @@ void test_case_publish_msg_signals_large_fanout(struct kunit * test)
       subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
     0);
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
-    add_subscriber_with_eventfd(test, subscriber_pid, eventfd, false);
+    add_subscriber_with_eventfd(test, subscriber_pid, eventfd, false, is_bridge);
   }
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
@@ -718,4 +709,80 @@ void test_case_publish_msg_no_process(struct kunit * test)
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+}
+
+// PUBLISH resolves the wrapper by the caller's domain, so the publisher of a cross-domain case
+// has to be current->tgid.
+void test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  agnocast_kunit_eventfd_reset();
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, current->tgid, 1, is_bridge, &publisher_id, &ret_addr);
+  const int bridge_eventfd = 0;
+  const int plain_eventfd = 1;
+  setup_one_subscriber_in_domain_with_eventfd(test, 2, true, bridge_eventfd, false);
+  setup_one_subscriber_in_domain_with_eventfd(test, 2, is_bridge, plain_eventfd, false);
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(bridge_eventfd), 0);
+  // The non-bridge subscriber is the control: it reads zero too if the two cells never grouped.
+  KUNIT_EXPECT_EQ(test, signal_count_of(plain_eventfd), 1);
+}
+
+void test_case_publish_msg_bridge_publisher_does_not_notify_other_domain(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  agnocast_kunit_eventfd_reset();
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, current->tgid, 1, true, &publisher_id, &ret_addr);
+  const int eventfd = 0;
+  setup_one_subscriber_in_domain_with_eventfd(test, 2, is_bridge, eventfd, false);
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 0);
+}
+
+// The exclusion is about crossing, not about being a bridge.
+void test_case_publish_msg_bridge_subscriber_in_own_domain_notified(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  agnocast_kunit_eventfd_reset();
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, current->tgid, 1, is_bridge, &publisher_id, &ret_addr);
+  const int eventfd = 0;
+  setup_one_subscriber_in_domain_with_eventfd(test, 1, true, eventfd, false);
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
 }

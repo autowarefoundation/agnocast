@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(agnocastlib REQUIRED)
+find_package(agnocast_sample_interfaces REQUIRED)
 find_package(agnocast_components REQUIRED)
 find_package(agnocast_cie_thread_configurator REQUIRED)
 
@@ -61,6 +62,38 @@ rclcpp_components_register_node(
   agnocast_test_ros2_talker_component
   PLUGIN "TestROS2Publisher"
   EXECUTABLE test_ros2_talker
+)
+
+add_library(agnocast_test_client_component SHARED src/test_client.cpp)
+ament_target_dependencies(agnocast_test_client_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_test_client_component PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+rclcpp_components_register_node(
+  agnocast_test_client_component
+  PLUGIN "TestClient"
+  EXECUTABLE test_client
+)
+rclcpp_components_register_node(
+  agnocast_test_client_component
+  PLUGIN "TestROS2Client"
+  EXECUTABLE test_ros2_client
+)
+
+add_library(agnocast_test_server_component SHARED src/test_server.cpp)
+ament_target_dependencies(agnocast_test_server_component rclcpp rclcpp_components agnocastlib agnocast_sample_interfaces)
+target_include_directories(agnocast_test_server_component PRIVATE
+  ${agnocastlib_INCLUDE_DIRS}
+)
+rclcpp_components_register_node(
+  agnocast_test_server_component
+  PLUGIN "TestServer"
+  EXECUTABLE test_server
+)
+rclcpp_components_register_node(
+  agnocast_test_server_component
+  PLUGIN "TestROS2Server"
+  EXECUTABLE test_ros2_server
 )
 
 add_library(agnocast_test_cie_publisher_component SHARED src/test_publisher_component.cpp)
@@ -119,7 +152,10 @@ install(TARGETS agnocast_test_ros2_talker_component
         RUNTIME DESTINATION bin
 )
 
-install(TARGETS agnocast_test_cie_publisher_component agnocast_test_cie_subscription_component
+install(TARGETS agnocast_test_client_component
+                agnocast_test_server_component
+                agnocast_test_cie_publisher_component
+                agnocast_test_cie_subscription_component
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin

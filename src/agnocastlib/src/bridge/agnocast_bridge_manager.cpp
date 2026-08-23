@@ -235,7 +235,6 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
   switch (msg.type) {
     case BridgeMsgType::Service: {
       const auto & payload = msg.payload.service;
-      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
       std::string service_name = static_cast<const char *>(payload.service_name);
       ServiceBridgeItem sb_item;
 
@@ -245,10 +244,8 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
         active_service_bridges_.erase(it);
       }
 
-      sb_item.handle_request(payload, deps);
-      if (sb_item.state() != ServiceBridgeState::NONE) {
-        active_service_bridges_.emplace(service_name, std::move(sb_item));
-      }
+      sb_item.handle_request(payload);
+      active_service_bridges_.emplace(service_name, std::move(sb_item));
       break;
     }
     case BridgeMsgType::PubSub: {

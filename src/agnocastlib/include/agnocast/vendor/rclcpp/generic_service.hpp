@@ -19,17 +19,16 @@
 
 #pragma once
 
+#include "agnocast/internal/service_typesupport.hpp"
+
 #include <rclcpp/expand_topic_or_service_name.hpp>
 #include <rclcpp/function_traits.hpp>
 #include <rclcpp/macros.hpp>
 #include <rclcpp/node.hpp>
 #include <rclcpp/service.hpp>
-#include <rcpputils/shared_library.hpp>
-#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 
 #include <rcl/node.h>
 #include <rcl/service.h>
-#include <rclcpp/version.h>
 #include <rmw/types.h>
 
 #include <memory>
@@ -38,14 +37,6 @@
 
 namespace agnocast::vendor_rclcpp
 {
-
-#if RCLCPP_VERSION_MAJOR < 28
-
-const rosidl_service_type_support_t * get_service_typesupport_handle(
-  const std::string & type, const std::string & typesupport_identifier,
-  rcpputils::SharedLibrary & library);
-
-#endif
 
 class GenericService;
 
@@ -109,38 +100,8 @@ public:
     any_callback_(std::forward<Func>(callback)),
     service_name_(node->get_node_services_interface()->resolve_service_name(service_name))
   {
-    static const std::string ts_identifier = "rosidl_typesupport_cpp";
-    static const std::string ts_introspection_identifier = "rosidl_typesupport_introspection_cpp";
-
-    const std::string request_type = service_type + "_Request";
-    const std::string response_type = service_type + "_Response";
-
-    const rosidl_service_type_support_t * service_ts = nullptr;
     try {
-      ts_lib_ = ::rclcpp::get_typesupport_library(service_type, ts_identifier);
-      ts_lib_introspection_ =
-        ::rclcpp::get_typesupport_library(service_type, ts_introspection_identifier);
-
-#if RCLCPP_VERSION_MAJOR >= 28
-      service_ts = ::rclcpp::get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
-
-      const rosidl_message_type_support_t * request_ts = ::rclcpp::get_message_typesupport_handle(
-        request_type, ts_introspection_identifier, *ts_lib_introspection_);
-      const rosidl_message_type_support_t * response_ts = ::rclcpp::get_message_typesupport_handle(
-        response_type, ts_introspection_identifier, *ts_lib_introspection_);
-#else
-      service_ts = get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
-
-      const rosidl_message_type_support_t * request_ts = ::rclcpp::get_typesupport_handle(
-        request_type, ts_introspection_identifier, *ts_lib_introspection_);
-      const rosidl_message_type_support_t * response_ts = ::rclcpp::get_typesupport_handle(
-        response_type, ts_introspection_identifier, *ts_lib_introspection_);
-#endif
-
-      request_members_ =
-        static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(request_ts->data);
-      response_members_ = static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(
-        response_ts->data);
+      service_ts_bundle_ = agnocast::load_service_typesupport(service_type);
     } catch (std::runtime_error & err) {
       RCLCPP_ERROR(
         node_logger_.get_child("agnocast.rclcpp"), "Invalid service type: %s", err.what());
@@ -164,8 +125,8 @@ public:
     service_options.qos = qos.get_rmw_qos_profile();
 
     rcl_ret_t ret = rcl_service_init(
-      service_handle_.get(), node_handle_.get(), service_ts, service_name.c_str(),
-      &service_options);
+      service_handle_.get(), node_handle_.get(), service_ts_bundle_.service_ts,
+      service_name.c_str(), &service_options);
     if (ret != RCL_RET_OK) {
       if (ret == RCL_RET_SERVICE_NAME_INVALID) {
         auto rcl_node_handle = get_rcl_node_handle();
@@ -215,10 +176,7 @@ private:
 
   std::string service_name_;
 
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_;
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_;
+  agnocast::ServiceTsBundle service_ts_bundle_;
 };
 
 }  // namespace agnocast::vendor_rclcpp
