@@ -740,20 +740,39 @@ TEST(ParseKernelThreads, MissingOrNullSectionYieldsEmpty)
 
 TEST(ParseKernelThreads, ParsesPolicyPriorityAffinity)
 {
+  // CPUs 0/1 only, to keep this test valid on small CI machines; the comm is
+  // the truncated form of the kmod's "agnocast_exit_worker" thread.
   auto y = yaml_from_str(R"YAML(
 kernel_threads:
-  - comm: agnocast_exit_worker
+  - comm: agnocast_exit_w
     policy: SCHED_FIFO
     priority: 10
-    affinity: [2, 3]
+    affinity: [0, 1]
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_EQ(result[0].comm, "agnocast_exit_worker");
+  EXPECT_EQ(result[0].comm, "agnocast_exit_w");
   ASSERT_TRUE(result[0].policy.has_value());
   EXPECT_EQ(*result[0].policy, "SCHED_FIFO");
   EXPECT_EQ(result[0].priority, 10);
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{2, 3}));
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, ParsesCfsPolicyWithNice)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_OTHER
+    nice: -10
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_OTHER");
+  EXPECT_EQ(result[0].nice, -10);
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -763,6 +782,7 @@ TEST(ParseKernelThreads, AllNullEntryIsUnmanaged)
 kernel_threads:
   - comm: rcu_preempt
     policy: ~
+    nice: ~
     priority: ~
     affinity: ~
 )YAML");
@@ -779,6 +799,7 @@ TEST(ParseKernelThreads, UnmanageableSentinelEqualsNull)
 kernel_threads:
   - comm: ksoftirqd/0
     policy: UNMANAGEABLE
+    nice: UNMANAGEABLE
     priority: UNMANAGEABLE
     affinity: UNMANAGEABLE
 )YAML");
@@ -793,16 +814,54 @@ TEST(ParseKernelThreads, AffinityOnlyEntryIsManaged)
 {
   auto y = yaml_from_str(R"YAML(
 kernel_threads:
-  - comm: agnocast_exit_worker
+  - comm: agnocast_exit_w
     policy: ~
     priority: ~
-    affinity: [2]
+    affinity: [1]
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_FALSE(result[0].policy.has_value());
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{2}));
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{1}));
   EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, NormalizesAffinityToSortedUnique)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: [1, 0, 1]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+}
+
+TEST(ParseKernelThreads, RejectsScalarAndOutOfRangeAffinity)
+{
+  // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
+  // silently mean "leave alone".
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: 0-3
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: [-1]
+)YAML")),
+    std::runtime_error);
 }
 
 TEST(ParseKernelThreads, PolicyWithUnmanageableAffinityIsManaged)
@@ -888,6 +947,20 @@ kernel_threads:
   EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
 }
 
+TEST(ParseKernelThreads, RejectsCommLongerThanKernelLimit)
+{
+  // "agnocast_exit_worker" scans as "agnocast_exit_w", so this entry could
+  // never match and would be silently dead configuration.
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_worker
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
 TEST(ParseKernelThreads, RejectsDuplicateComm)
 {
   auto y = yaml_from_str(R"YAML(
@@ -928,6 +1001,54 @@ kernel_threads:
   EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
 }
 
+TEST(ParseKernelThreads, RejectsNiceWithoutPolicy)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    nice: 5
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsCfsPolicyWithoutNice)
+{
+  // As in callback_groups, a CFS policy takes 'nice'; 'priority' does not
+  // satisfy the requirement.
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_OTHER
+    priority: 5
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+}
+
+TEST(ParseKernelThreads, RejectsOutOfRangeNiceAndRtPriority)
+{
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_OTHER
+    nice: 50
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_FIFO
+    priority: 150
+    affinity: ~
+)YAML")),
+    std::runtime_error);
+}
+
 TEST(ParseKernelThreads, RejectsPolicyWithoutPriority)
 {
   EXPECT_THROW(
@@ -963,6 +1084,16 @@ kernel_threads:
   EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
 }
 
+TEST(ParseKernelThreads, RejectsNonListSection)
+{
+  // A scalar or map section would otherwise silently parse as empty.
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str("kernel_threads: oops\n")), std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_kernel_threads(yaml_from_str("kernel_threads:\n  comm: nfsd\n")),
+    std::runtime_error);
+}
+
 // ---------- parse_irqs ----------
 
 TEST(ParseIrqs, MissingOrNullSectionYieldsEmpty)
@@ -978,13 +1109,13 @@ TEST(ParseIrqs, ParsesFilledAffinityAndName)
 irqs:
   - irq: 103
     name: nvidia
-    affinity: [2, 3]
+    affinity: [1, 0]
 )YAML");
   const auto result = acie::parse_irqs(y);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].irq, 103);
   EXPECT_EQ(result[0].name, "nvidia");
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{2, 3}));
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -1055,6 +1186,32 @@ irqs:
   EXPECT_THROW(acie::parse_irqs(y), std::runtime_error);
 }
 
+TEST(ParseIrqs, RejectsScalarAndOutOfRangeAffinity)
+{
+  // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
+  // silently mean "leave alone".
+  EXPECT_THROW(
+    acie::parse_irqs(yaml_from_str(R"YAML(
+irqs:
+  - irq: 10
+    affinity: 0-3
+)YAML")),
+    std::runtime_error);
+  EXPECT_THROW(
+    acie::parse_irqs(yaml_from_str(R"YAML(
+irqs:
+  - irq: 10
+    affinity: [-1]
+)YAML")),
+    std::runtime_error);
+}
+
+TEST(ParseIrqs, RejectsNonListSection)
+{
+  EXPECT_THROW(acie::parse_irqs(yaml_from_str("irqs: oops\n")), std::runtime_error);
+  EXPECT_THROW(acie::parse_irqs(yaml_from_str("irqs:\n  irq: 5\n")), std::runtime_error);
+}
+
 // ---------- new sections vs parse_yaml ----------
 
 TEST(ParseYaml, IgnoresKernelThreadsAndIrqsSections)
@@ -1068,14 +1225,14 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 kernel_threads:
-  - comm: agnocast_exit_worker
+  - comm: agnocast_exit_w
     policy: SCHED_FIFO
     priority: 10
-    affinity: [2]
+    affinity: [0]
 irqs:
   - irq: 103
     name: nvidia
-    affinity: [2, 3]
+    affinity: [0, 1]
 )YAML");
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));

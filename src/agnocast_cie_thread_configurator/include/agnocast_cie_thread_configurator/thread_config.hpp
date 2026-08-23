@@ -60,7 +60,8 @@ struct KernelThreadConfig
 {
   std::string comm;
   std::optional<std::string> policy;
-  int priority = 0;           // meaningful only when policy is set: nice or rt_priority
+  int nice = 0;               // SCHED_OTHER/BATCH/IDLE only (-20..19)
+  int priority = 0;           // rt_priority; SCHED_FIFO/RR only (1..99)
   std::vector<int> affinity;  // empty = leave alone
 
   // SCHED_DEADLINE only

@@ -31,6 +31,9 @@ constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
 constexpr int k_rt_priority_max = 99;
+// task->comm is truncated to TASK_COMM_LEN - 1 characters and the apply step
+// matches scanned comms exactly, so a longer configured comm can never match.
+constexpr size_t k_max_comm_len = 15;
 
 bool is_cfs_policy(const std::string & policy)
 {
@@ -273,33 +276,50 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
   if (!section || section.IsNull()) {
     return result;
   }
+  if (!section.IsSequence()) {
+    throw std::runtime_error("'kernel_threads' must be a list");
+  }
   result.resize(section.size());
 
   for (size_t i = 0; i < section.size(); ++i) {
     const auto & kt = section[i];
     auto & cfg = result[i];
+    const std::string entry_pos = "kernel_threads entry #" + std::to_string(i);
 
-    if (is_unset(kt["comm"])) {
-      throw std::runtime_error("A kernel_threads entry is missing a non-empty 'comm'");
+    if (!kt["comm"] || kt["comm"].IsNull()) {
+      throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
     }
     cfg.comm = kt["comm"].as<std::string>();
     if (cfg.comm.empty()) {
-      throw std::runtime_error("A kernel_threads entry is missing a non-empty 'comm'");
+      throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
     }
-    if (cfg.comm.compare(0, 8, "kworker/") == 0) {
+    constexpr std::string_view kworker_prefix = "kworker/";
+    if (cfg.comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0) {
       throw std::runtime_error(
         "kernel_threads entry '" + cfg.comm +
         "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
         "be matched reliably");
     }
+    if (cfg.comm.size() > k_max_comm_len) {
+      throw std::runtime_error(
+        "kernel_threads entry '" + cfg.comm +
+        "' can never match: the kernel truncates thread "
+        "comms to " +
+        std::to_string(k_max_comm_len) + " characters");
+    }
 
     if (!is_unset(kt["affinity"])) {
-      for (auto & cpu : kt["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+      cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm);
     }
 
     const bool has_policy = !is_unset(kt["policy"]);
+    const bool has_nice = !is_unset(kt["nice"]);
     const bool has_priority = !is_unset(kt["priority"]);
     if (!has_policy) {
+      if (has_nice) {
+        throw std::runtime_error(
+          "'nice' requires 'policy' for comm=" + cfg.comm + ": set both or leave both unset");
+      }
       if (has_priority) {
         throw std::runtime_error(
           "'priority' requires 'policy' for comm=" + cfg.comm + ": set both or leave both unset");
@@ -325,12 +345,18 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       cfg.runtime = kt["runtime"].as<unsigned int>();
       cfg.period = kt["period"].as<unsigned int>();
       cfg.deadline = kt["deadline"].as<unsigned int>();
+    } else if (is_cfs_policy(*cfg.policy)) {
+      if (!has_nice) {
+        throw std::runtime_error(
+          "Policy '" + *cfg.policy + "' requires 'nice' for comm=" + cfg.comm);
+      }
+      cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm);
     } else {
       if (!has_priority) {
         throw std::runtime_error(
           "Policy '" + *cfg.policy + "' requires 'priority' for comm=" + cfg.comm);
       }
-      cfg.priority = kt["priority"].as<int>();
+      cfg.priority = parse_rt_priority(kt, *cfg.policy, "comm=" + cfg.comm);
     }
   }
 
@@ -351,29 +377,33 @@ std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
   if (!section || section.IsNull()) {
     return result;
   }
+  if (!section.IsSequence()) {
+    throw std::runtime_error("'irqs' must be a list");
+  }
   result.resize(section.size());
 
   for (size_t i = 0; i < section.size(); ++i) {
     const auto & iq = section[i];
     auto & cfg = result[i];
+    const std::string entry_pos = "irqs entry #" + std::to_string(i);
 
-    if (is_unset(iq["irq"]) || !iq["irq"].IsScalar()) {
-      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+    if (!iq["irq"] || iq["irq"].IsNull()) {
+      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
     }
     try {
       cfg.irq = iq["irq"].as<int>();
     } catch (const YAML::Exception &) {
-      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
     }
     if (cfg.irq < 0) {
-      throw std::runtime_error("An irqs entry is missing a non-negative integer 'irq'");
+      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
     }
 
-    if (!is_unset(iq["name"])) {
+    if (iq["name"] && !iq["name"].IsNull()) {
       cfg.name = iq["name"].as<std::string>();
     }
     if (!is_unset(iq["affinity"])) {
-      for (auto & cpu : iq["affinity"]) cfg.affinity.push_back(cpu.as<int>());
+      cfg.affinity = parse_affinity(iq, "irq=" + std::to_string(cfg.irq));
     }
   }
 
