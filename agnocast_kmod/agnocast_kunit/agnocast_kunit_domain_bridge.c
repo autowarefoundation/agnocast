@@ -257,6 +257,38 @@ void test_case_domain_bridge_late_reverse_direction_rejected(struct kunit * test
   KUNIT_EXPECT_EQ(test, ret, -EBUSY);
 }
 
+// Declaring 2 -> 1 as well makes the higher-to-lower direction deliver, which no other case
+// asserts: cross_domain_enumeration publishes the 1 -> 2 way round.
+void test_case_domain_bridge_bidirectional_delivers(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+
+  // publish resolves the wrapper by the caller's domain, so the caller and the publisher are
+  // both in domain 2.
+  agnocast_kunit_eventfd_reset();
+  const uint64_t msg_addr = setup_process_in_domain(test, current->tgid, 2);
+  const topic_local_id_t pub_id = add_publisher_for(test, current->tgid);
+
+  setup_process_in_domain(test, 1001, 1);
+  const int eventfd = 0;
+  add_subscriber_named_with_eventfd(test, 1001, TOPIC_NAME, eventfd);
+
+  // Act
+  union ioctl_publish_msg_args publish_args;
+  const int ret = agnocast_ioctl_publish_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, pub_id, msg_addr, &publish_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Assert: same arrangement direction_respected leaves unsignaled; here 2 -> 1 is declared.
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
 // Re-running the registration tool with an unchanged config must keep working once nodes are up.
 void test_case_domain_bridge_redeclaration_is_idempotent(struct kunit * test)
 {
@@ -270,6 +302,28 @@ void test_case_domain_bridge_redeclaration_is_idempotent(struct kunit * test)
   // Act: the same direction again, so nothing new is enabled.
   const int ret =
     agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+}
+
+// Same promise for a bidirectional config, where the re-declared direction is the one stored as
+// b_to_a rather than a_to_b.
+void test_case_domain_bridge_reverse_redeclaration_is_idempotent(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+  setup_process_in_domain(test, current->tgid, 1);
+  add_publisher_for(test, current->tgid);
+
+  // Act
+  const int ret =
+    agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
