@@ -183,6 +183,24 @@ private:
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
+  template <typename Func>
+  int64_t send_request_impl(
+    ipc_shared_ptr<typename ServiceT::Request> && request, ResponseCallInfo && call_info,
+    Func && take_future)
+  {
+    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    const int64_t seqno = internal_request->RequestMeta::seqno;
+
+    {
+      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
+      take_future(
+        seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
+    }
+
+    publisher_->publish(std::move(internal_request));
+    return seqno;
+  }
+
   template <typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
@@ -281,16 +299,9 @@ public:
     std::function<void(SharedFuture)> callback)
   {
     SharedFuture shared_future;
-    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->RequestMeta::seqno;
-
-    {
-      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-      auto it = seqno2_response_call_info_.try_emplace(seqno, std::move(callback)).first;
-      shared_future = it->second.shared_future.value();
-    }
-
-    publisher_->publish(std::move(internal_request));
+    const int64_t seqno = send_request_impl(
+      std::move(request), ResponseCallInfo(std::move(callback)),
+      [&](ResponseCallInfo & info) { shared_future = info.shared_future.value(); });
     return SharedFutureAndRequestId(std::move(shared_future), seqno);
   }
 
@@ -302,16 +313,9 @@ public:
   FutureAndRequestId async_send_request(ipc_shared_ptr<typename ServiceT::Request> && request)
   {
     Future future;
-    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->RequestMeta::seqno;
-
-    {
-      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-      auto it = seqno2_response_call_info_.try_emplace(seqno).first;
-      future = it->second.promise.get_future();
-    }
-
-    publisher_->publish(std::move(internal_request));
+    const int64_t seqno = send_request_impl(
+      std::move(request), ResponseCallInfo(),
+      [&](ResponseCallInfo & info) { future = info.promise.get_future(); });
     return FutureAndRequestId(std::move(future), seqno);
   }
 };
