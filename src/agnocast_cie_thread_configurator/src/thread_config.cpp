@@ -46,9 +46,7 @@ bool is_cfs_policy(const std::string & policy)
 int parse_nice(const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
 {
   const YAML::Node nice = entry["nice"];
-  // A key with an empty value ("nice:") is a defined null node, so `!nice`
-  // alone would pass it on to as<int>()'s context-free BadConversion.
-  if (!nice || nice.IsNull()) {
+  if (is_unset(nice)) {
     throw std::runtime_error("Policy '" + policy + "' requires 'nice' for " + entry_desc);
   }
   int value = 0;
@@ -71,7 +69,7 @@ int parse_rt_priority(
   const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
 {
   const YAML::Node priority = entry["priority"];
-  if (!priority || priority.IsNull()) {
+  if (is_unset(priority)) {
     throw std::runtime_error("Policy '" + policy + "' requires 'priority' for " + entry_desc);
   }
   int value = 0;
@@ -87,6 +85,19 @@ int parse_rt_priority(
   return value;
 }
 
+// A negative value also lands in the catch: yaml-cpp rejects negative
+// scalars for unsigned targets instead of wrapping them.
+unsigned int parse_deadline_field(
+  const YAML::Node & entry, const char * key, const std::string & entry_desc)
+{
+  try {
+    return entry[key].as<unsigned int>();
+  } catch (const YAML::Exception &) {
+    throw std::runtime_error(
+      "'" + std::string(key) + "' must be a non-negative integer for " + entry_desc);
+  }
+}
+
 // CPU_SET(3) and sched_setaffinity(2) silently drop out-of-range or
 // nonexistent CPUs instead of failing, so reject them at parse time. The
 // machine CPU count is a valid bound because the config is always parsed on
@@ -96,8 +107,8 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & en
 {
   const YAML::Node affinity = entry["affinity"];
   std::vector<int> cpus;
-  // Absent or null means "do not manage affinity".
-  if (!affinity || affinity.IsNull()) {
+  // Unset (absent, null, or UNMANAGEABLE) means "do not manage affinity".
+  if (is_unset(affinity)) {
     return cpus;
   }
   if (!affinity.IsSequence()) {
@@ -149,6 +160,12 @@ std::string ThreadConfig::wildcard_prefix() const
 std::string extract_node_part(const std::string & callback_group_id)
 {
   return callback_group_id.substr(0, callback_group_id.find('@'));
+}
+
+bool is_kworker_comm(const std::string & comm)
+{
+  constexpr std::string_view kworker_prefix = "kworker/";
+  return comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0;
 }
 
 void parse_yaml(
@@ -286,15 +303,21 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
     auto & cfg = result[i];
     const std::string entry_pos = "kernel_threads entry #" + std::to_string(i);
 
+    if (!kt.IsMap()) {
+      throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- comm: ...')");
+    }
     if (!kt["comm"] || kt["comm"].IsNull()) {
       throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
     }
-    cfg.comm = kt["comm"].as<std::string>();
+    try {
+      cfg.comm = kt["comm"].as<std::string>();
+    } catch (const YAML::Exception &) {
+      throw std::runtime_error(entry_pos + ": 'comm' must be a string");
+    }
     if (cfg.comm.empty()) {
       throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
     }
-    constexpr std::string_view kworker_prefix = "kworker/";
-    if (cfg.comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0) {
+    if (is_kworker_comm(cfg.comm)) {
       throw std::runtime_error(
         "kernel_threads entry '" + cfg.comm +
         "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
@@ -308,9 +331,7 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
         std::to_string(k_max_comm_len) + " characters");
     }
 
-    if (!is_unset(kt["affinity"])) {
-      cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm);
-    }
+    cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm);
 
     const bool has_policy = !is_unset(kt["policy"]);
     const bool has_nice = !is_unset(kt["nice"]);
@@ -327,7 +348,11 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       continue;
     }
 
-    cfg.policy = kt["policy"].as<std::string>();
+    try {
+      cfg.policy = kt["policy"].as<std::string>();
+    } catch (const YAML::Exception &) {
+      throw std::runtime_error("'policy' must be a string for comm=" + cfg.comm);
+    }
     if (policy_to_sched_const.count(*cfg.policy) == 0) {
       throw std::runtime_error(
         "Unknown scheduling policy '" + *cfg.policy + "' for comm=" + cfg.comm +
@@ -342,20 +367,12 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
         throw std::runtime_error(
           "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + cfg.comm);
       }
-      cfg.runtime = kt["runtime"].as<unsigned int>();
-      cfg.period = kt["period"].as<unsigned int>();
-      cfg.deadline = kt["deadline"].as<unsigned int>();
+      cfg.runtime = parse_deadline_field(kt, "runtime", "comm=" + cfg.comm);
+      cfg.period = parse_deadline_field(kt, "period", "comm=" + cfg.comm);
+      cfg.deadline = parse_deadline_field(kt, "deadline", "comm=" + cfg.comm);
     } else if (is_cfs_policy(*cfg.policy)) {
-      if (!has_nice) {
-        throw std::runtime_error(
-          "Policy '" + *cfg.policy + "' requires 'nice' for comm=" + cfg.comm);
-      }
       cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm);
     } else {
-      if (!has_priority) {
-        throw std::runtime_error(
-          "Policy '" + *cfg.policy + "' requires 'priority' for comm=" + cfg.comm);
-      }
       cfg.priority = parse_rt_priority(kt, *cfg.policy, "comm=" + cfg.comm);
     }
   }
@@ -387,24 +404,32 @@ std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
     auto & cfg = result[i];
     const std::string entry_pos = "irqs entry #" + std::to_string(i);
 
+    if (!iq.IsMap()) {
+      throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- irq: ...')");
+    }
     if (!iq["irq"] || iq["irq"].IsNull()) {
       throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
     }
     try {
       cfg.irq = iq["irq"].as<int>();
     } catch (const YAML::Exception &) {
-      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
+      throw std::runtime_error(
+        entry_pos + ": 'irq' must be an integer, got '" +
+        (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
     }
     if (cfg.irq < 0) {
-      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
+      throw std::runtime_error(
+        entry_pos + ": 'irq' must be non-negative, got " + std::to_string(cfg.irq));
     }
 
     if (iq["name"] && !iq["name"].IsNull()) {
-      cfg.name = iq["name"].as<std::string>();
+      try {
+        cfg.name = iq["name"].as<std::string>();
+      } catch (const YAML::Exception &) {
+        throw std::runtime_error("'name' must be a string for irq=" + std::to_string(cfg.irq));
+      }
     }
-    if (!is_unset(iq["affinity"])) {
-      cfg.affinity = parse_affinity(iq, "irq=" + std::to_string(cfg.irq));
-    }
+    cfg.affinity = parse_affinity(iq, "irq=" + std::to_string(cfg.irq));
   }
 
   std::unordered_set<int> seen;

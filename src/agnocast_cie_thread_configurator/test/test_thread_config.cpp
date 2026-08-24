@@ -20,6 +20,29 @@ YAML::Node yaml_from_str(const char * s)
 {
   return YAML::Load(s);
 }
+
+// EXPECT_THROW alone cannot tell WHICH validation fired (every failure path
+// derives from std::runtime_error), so the negative tests also match a
+// distinguishing fragment of the message.
+void expect_kernel_threads_error(const char * yaml, const std::string & fragment)
+{
+  try {
+    acie::parse_kernel_threads(yaml_from_str(yaml));
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
+  }
+}
+
+void expect_irqs_error(const char * yaml, const std::string & fragment)
+{
+  try {
+    acie::parse_irqs(yaml_from_str(yaml));
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
+  }
+}
 }  // namespace
 
 // ---------- parse_yaml ----------
@@ -844,24 +867,24 @@ TEST(ParseKernelThreads, RejectsScalarAndOutOfRangeAffinity)
 {
   // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
   // silently mean "leave alone".
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: nfsd
     policy: ~
     priority: ~
     affinity: 0-3
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+)YAML",
+    "'affinity' must be a list");
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: nfsd
     policy: ~
     priority: ~
     affinity: [-1]
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "'affinity' CPU -1 must be in");
 }
 
 TEST(ParseKernelThreads, PolicyWithUnmanageableAffinityIsManaged)
@@ -903,67 +926,85 @@ kernel_threads:
 TEST(ParseKernelThreads, LowercaseSentinelIsNotRecognized)
 {
   // Only the exact uppercase sentinel disengages an attribute; anything else
-  // must fall through to the normal validation (here: unknown policy).
-  auto y = yaml_from_str(R"YAML(
+  // must fall through to the normal validation (here: unknown policy). No
+  // other attribute key is set, so a case-insensitive sentinel match would
+  // parse cleanly and fail the test.
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: unmanageable
-    priority: 0
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "Unknown scheduling policy 'unmanageable'");
 }
 
 TEST(ParseKernelThreads, RejectsMissingOrEmptyComm)
 {
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - policy: ~
     priority: ~
     affinity: ~
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+)YAML",
+    "is missing a non-empty 'comm'");
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: ""
     policy: ~
     priority: ~
     affinity: ~
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "is missing a non-empty 'comm'");
+}
+
+TEST(ParseKernelThreads, RejectsNonStringComm)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: [a, b]
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "'comm' must be a string");
 }
 
 TEST(ParseKernelThreads, RejectsKworkerComm)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: kworker/0:0H-events_highpri
     policy: ~
     priority: ~
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "kworker comms are ephemeral");
 }
 
 TEST(ParseKernelThreads, RejectsCommLongerThanKernelLimit)
 {
   // "agnocast_exit_worker" scans as "agnocast_exit_w", so this entry could
   // never match and would be silently dead configuration.
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: agnocast_exit_worker
     policy: ~
     priority: ~
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "can never match");
 }
 
 TEST(ParseKernelThreads, RejectsDuplicateComm)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: nfsd
     policy: ~
@@ -973,125 +1014,160 @@ kernel_threads:
     policy: ~
     priority: ~
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "Duplicate kernel_thread entry: comm=nfsd");
 }
 
 TEST(ParseKernelThreads, RejectsUnknownPolicy)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: SCHED_BOGUS
     priority: 0
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "Unknown scheduling policy 'SCHED_BOGUS'");
 }
 
 TEST(ParseKernelThreads, RejectsPriorityWithoutPolicy)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: ~
     priority: 5
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "'priority' requires 'policy'");
 }
 
 TEST(ParseKernelThreads, RejectsNiceWithoutPolicy)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: ~
     nice: 5
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "'nice' requires 'policy'");
 }
 
 TEST(ParseKernelThreads, RejectsCfsPolicyWithoutNice)
 {
   // As in callback_groups, a CFS policy takes 'nice'; 'priority' does not
   // satisfy the requirement.
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: SCHED_OTHER
     priority: 5
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "requires 'nice'");
 }
 
 TEST(ParseKernelThreads, RejectsOutOfRangeNiceAndRtPriority)
 {
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: nfsd
     policy: SCHED_OTHER
     nice: 50
     affinity: ~
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+)YAML",
+    "'nice' must be in [-20, 19]");
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: nfsd
     policy: SCHED_FIFO
     priority: 150
     affinity: ~
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "'priority' must be in [1, 99]");
 }
 
 TEST(ParseKernelThreads, RejectsPolicyWithoutPriority)
 {
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: SCHED_FIFO
     priority: ~
     affinity: ~
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "requires 'priority'");
   // The sentinel counts as unset exactly like null does.
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: rcu_preempt
     policy: SCHED_FIFO
     priority: UNMANAGEABLE
     affinity: ~
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "requires 'priority'");
 }
 
 TEST(ParseKernelThreads, RejectsSchedDeadlineMissingFields)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_kernel_threads_error(
+    R"YAML(
 kernel_threads:
   - comm: dl_thread
     policy: SCHED_DEADLINE
     runtime: 1000000
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_kernel_threads(y), std::runtime_error);
+)YAML",
+    "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline'");
+}
+
+TEST(ParseKernelThreads, RejectsMalformedSchedDeadlineFields)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: -5
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML",
+    "'runtime' must be a non-negative integer for comm=dl_thread");
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: not_a_number
+    deadline: 5000000
+    affinity: ~
+)YAML",
+    "'period' must be a non-negative integer for comm=dl_thread");
 }
 
 TEST(ParseKernelThreads, RejectsNonListSection)
 {
   // A scalar or map section would otherwise silently parse as empty.
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str("kernel_threads: oops\n")), std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_kernel_threads(yaml_from_str("kernel_threads:\n  comm: nfsd\n")),
-    std::runtime_error);
+  expect_kernel_threads_error("kernel_threads: oops\n", "'kernel_threads' must be a list");
+  expect_kernel_threads_error("kernel_threads:\n  comm: nfsd\n", "'kernel_threads' must be a list");
+}
+
+TEST(ParseKernelThreads, RejectsScalarListEntry)
+{
+  // A plausible shorthand (a list of bare comms) must fail with the entry
+  // diagnostic, not a raw yaml-cpp BadSubscript.
+  expect_kernel_threads_error("kernel_threads: [nfsd]\n", "entry #0 must be a mapping");
 }
 
 // ---------- parse_irqs ----------
@@ -1151,65 +1227,73 @@ irqs:
 
 TEST(ParseIrqs, RejectsMissingOrNegativeOrNonIntIrq)
 {
-  EXPECT_THROW(
-    acie::parse_irqs(yaml_from_str(R"YAML(
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - name: orphan
     affinity: ~
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_irqs(yaml_from_str(R"YAML(
+)YAML",
+    "is missing a non-negative integer 'irq'");
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - irq: -1
     affinity: ~
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_irqs(yaml_from_str(R"YAML(
+)YAML",
+    "'irq' must be non-negative, got -1");
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - irq: not_a_number
     affinity: ~
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "'irq' must be an integer, got 'not_a_number'");
 }
 
 TEST(ParseIrqs, RejectsDuplicateIrq)
 {
-  auto y = yaml_from_str(R"YAML(
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - irq: 5
     affinity: ~
   - irq: 5
     affinity: ~
-)YAML");
-  EXPECT_THROW(acie::parse_irqs(y), std::runtime_error);
+)YAML",
+    "Duplicate irq entry: irq=5");
 }
 
 TEST(ParseIrqs, RejectsScalarAndOutOfRangeAffinity)
 {
   // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
   // silently mean "leave alone".
-  EXPECT_THROW(
-    acie::parse_irqs(yaml_from_str(R"YAML(
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - irq: 10
     affinity: 0-3
-)YAML")),
-    std::runtime_error);
-  EXPECT_THROW(
-    acie::parse_irqs(yaml_from_str(R"YAML(
+)YAML",
+    "'affinity' must be a list");
+  expect_irqs_error(
+    R"YAML(
 irqs:
   - irq: 10
     affinity: [-1]
-)YAML")),
-    std::runtime_error);
+)YAML",
+    "'affinity' CPU -1 must be in");
 }
 
 TEST(ParseIrqs, RejectsNonListSection)
 {
-  EXPECT_THROW(acie::parse_irqs(yaml_from_str("irqs: oops\n")), std::runtime_error);
-  EXPECT_THROW(acie::parse_irqs(yaml_from_str("irqs:\n  irq: 5\n")), std::runtime_error);
+  expect_irqs_error("irqs: oops\n", "'irqs' must be a list");
+  expect_irqs_error("irqs:\n  irq: 5\n", "'irqs' must be a list");
+}
+
+TEST(ParseIrqs, RejectsScalarListEntry)
+{
+  // A plausible shorthand (a list of bare IRQ numbers) must fail with the
+  // entry diagnostic, not a raw yaml-cpp BadSubscript.
+  expect_irqs_error("irqs: [42]\n", "entry #0 must be a mapping");
 }
 
 // ---------- new sections vs parse_yaml ----------

@@ -47,6 +47,11 @@ struct ThreadConfig
 // first '@' (the whole string when no '@' is present).
 std::string extract_node_part(const std::string & callback_group_id);
 
+// kworker comms embed worker-pool/CPU state that mutates at runtime, so they
+// can never be matched reliably; both the system scanner and the
+// kernel_threads parser exclude them.
+bool is_kworker_comm(const std::string & comm);
+
 // Sentinel for kernel_threads/irqs attribute values: the kernel or this tool
 // cannot manage the attribute (fixed per-CPU affinity, a policy with no YAML
 // representation), whereas YAML null means the USER chose not to. Both parse
