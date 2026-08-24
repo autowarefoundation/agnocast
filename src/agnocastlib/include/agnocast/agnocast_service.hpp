@@ -75,20 +75,19 @@ private:
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
   typename ServiceResponsePublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & node_name)
+    const std::string & response_topic_name)
   {
     typename ServiceResponsePublisher::SharedPtr pub;
     {
       std::lock_guard<std::mutex> lock(publishers_mtx_);
-      auto it = publishers_.find(node_name);
+      auto it = publishers_.find(response_topic_name);
       if (it == publishers_.end()) {
         std::visit(
-          [this, &pub, &node_name](auto * node) {
-            std::string topic_name = create_service_response_topic_name(service_name_, node_name);
+          [this, &pub, &response_topic_name](auto * node) {
             agnocast::PublisherOptions pub_options;
             pub = std::make_shared<ServiceResponsePublisher>(
-              node, topic_name, qos_, pub_options, to_publisher_role(role_));
-            publishers_[node_name] = pub;
+              node, response_topic_name, qos_, pub_options, to_publisher_role(role_));
+            publishers_[response_topic_name] = pub;
           },
           node_);
       } else {
@@ -102,7 +101,7 @@ private:
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-      auto publisher = this->get_or_create_publisher_for(request->RequestMeta::node_name);
+      auto publisher = this->get_or_create_publisher_for(request->RequestMeta::response_topic_name);
 
       ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
       response->ResponseMeta::seqno = request->RequestMeta::seqno;
@@ -212,7 +211,8 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
-    auto publisher = get_or_create_publisher_for(internal_request->RequestMeta::node_name);
+    auto publisher =
+      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
     publisher->publish(std::move(internal_response));
   }
 
@@ -231,7 +231,8 @@ public:
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
-    auto publisher = get_or_create_publisher_for(internal_request->RequestMeta::node_name);
+    auto publisher =
+      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
     response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
@@ -277,7 +278,7 @@ class GenericService : public std::enable_shared_from_this<GenericService>
   ServiceTsBundle service_ts_bundle_;
 
   typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & node_name);
+    const std::string & response_topic_name);
 
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
@@ -285,7 +286,7 @@ class GenericService : public std::enable_shared_from_this<GenericService>
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
-      auto publisher = this->get_or_create_publisher_for(req_wrapper.node_name());
+      auto publisher = this->get_or_create_publisher_for(req_wrapper.response_topic_name());
 
       auto res_wrapper = GenericResponseWrapper::allocate(
         service_ts_bundle_.response_members,

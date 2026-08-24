@@ -88,6 +88,7 @@ protected:
   std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string node_name_;
   std::string service_name_;
+  std::string response_topic_name_;
   std::function<bool()> check_context_ok_;
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
@@ -221,6 +222,9 @@ private:
       node, create_service_request_topic_name(service_name_), qos, pub_options,
       to_publisher_role(role));
 
+    response_topic_name_ =
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+
     auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
@@ -243,10 +247,9 @@ private:
     };
 
     SubscriptionOptions options{group};
-    std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
     const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-      node, topic_name, qos, std::move(subscriber_callback), options, subscriber_role);
+      node, response_topic_name_, qos, std::move(subscriber_callback), options, subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(
@@ -287,7 +290,7 @@ public:
     std::memcpy(
       static_cast<void *>(request->RequestMeta::client_gid),
       static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
-    request->RequestMeta::node_name = node_name_;
+    request->RequestMeta::response_topic_name = response_topic_name_;
 
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
@@ -380,6 +383,9 @@ private:
     publisher_ = std::make_shared<TypeErasedPublisher>(
       node, req_topic_name, "", qos, pub_options, to_publisher_role(role));
 
+    response_topic_name_ =
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+
     auto subscriber_callback = [this](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =
         GenericResponseWrapper(service_ts_bundle_.response_members, std::move(response));
@@ -406,10 +412,10 @@ private:
     };
 
     SubscriptionOptions sub_options{group};
-    std::string res_topic_name = create_service_response_topic_name(service_name_, node_name_);
     const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<Subscription<void>>(
-      node, res_topic_name, "", qos, std::move(subscriber_callback), sub_options, subscriber_role);
+      node, response_topic_name_, "", qos, std::move(subscriber_callback), sub_options,
+      subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(

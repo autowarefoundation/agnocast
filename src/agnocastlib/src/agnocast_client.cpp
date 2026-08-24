@@ -110,7 +110,7 @@ ipc_shared_ptr<void> GenericClient::borrow_loaned_request()
   std::memcpy(
     static_cast<void *>(generic_request_wrapper.client_gid()),
     static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
-  generic_request_wrapper.node_name() = node_name_;
+  generic_request_wrapper.response_topic_name() = response_topic_name_;
 
   return std::move(generic_request_wrapper).take_request();
 }
