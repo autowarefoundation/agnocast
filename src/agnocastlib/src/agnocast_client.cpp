@@ -15,6 +15,11 @@ using namespace std::chrono_literals;
 namespace agnocast
 {
 
+rclcpp::Logger ClientBase::get_logger() const
+{
+  return std::visit([](auto * n) { return n->get_logger(); }, node_);
+}
+
 uint32_t get_agnocast_sub_count(const std::string & topic_name)
 {
   auto topic_info_buffer = std::make_unique<std::array<topic_info_ret, MAX_TOPIC_INFO_RET_NUM>>();

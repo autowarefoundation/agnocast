@@ -85,13 +85,18 @@ class ClientBase
 {
 protected:
   std::atomic<int64_t> next_sequence_number_{0};
+  std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string node_name_;
   std::string service_name_;
   std::function<bool()> check_context_ok_;
 
+  // Defined in the .cpp: agnocast::Node is only forward-declared here.
+  rclcpp::Logger get_logger() const;
+
   template <typename NodeT>
   void init_base(NodeT * node, const std::string & service_name)
   {
+    node_ = node;
     node_name_ = node->get_fully_qualified_name();
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
@@ -216,14 +221,14 @@ private:
       node, create_service_request_topic_name(service_name_), qos, pub_options,
       to_publisher_role(role));
 
-    auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
+    auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
       // Get the corresponding ResponseCallInfo and remove it from the map
       auto it = seqno2_response_call_info_.find(response->ResponseMeta::seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(get_logger(), "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
@@ -375,7 +380,7 @@ private:
     publisher_ = std::make_shared<TypeErasedPublisher>(
       node, req_topic_name, "", qos, pub_options, to_publisher_role(role));
 
-    auto subscriber_callback = [this, node](ipc_shared_ptr<void> && response) {
+    auto subscriber_callback = [this](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =
         GenericResponseWrapper(service_ts_bundle_.response_members, std::move(response));
       int64_t response_seqno = generic_response_wrapper.seqno();
@@ -386,7 +391,7 @@ private:
       auto it = seqno2_response_call_info_.find(response_seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(get_logger(), "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
