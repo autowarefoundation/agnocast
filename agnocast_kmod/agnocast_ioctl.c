@@ -2358,9 +2358,9 @@ static int add_domain_rule(
 {
   // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
   // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
-  // these two cells -- a re-declaration or the reverse direction, so just OR in the
-  // direction. Any other overlap (a cell already paired with a different cell) is a
-  // fan-out and is rejected. This is the one place that enforces one pair per cell.
+  // these two cells -- a re-declaration or the reverse direction. Any other overlap (a cell
+  // already paired with a different cell) is a fan-out and is rejected. This is the one place
+  // that enforces one pair per cell.
   // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
   struct domain_bridge_rule * r_from = find_domain_rule(topic_name_from, ipc_ns, from_domain);
   struct domain_bridge_rule * r_to = find_domain_rule(topic_name_to, ipc_ns, to_domain);
@@ -2374,19 +2374,29 @@ static int add_domain_rule(
       return -EBUSY;
     }
 
-    if (from_domain < to_domain) {
+    // Re-running the registration tool with an unchanged config must succeed even after nodes
+    // started, so a declaration that enables nothing new is simply accepted.
+    const bool from_is_a = from_domain < to_domain;
+    if ((from_is_a && r_from->a_to_b) || (!from_is_a && r_from->b_to_a)) return 0;
+
+    // Endpoints that joined while this direction was denied were left out of their publishers'
+    // notify lists and skipped by set_publisher_shm_info; neither is repaired here.
+    if (
+      find_topic(topic_name_from, ipc_ns, from_domain) ||
+      find_topic(topic_name_to, ipc_ns, to_domain)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: it adds a direction after an endpoint "
+        "joined. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    if (from_is_a) {
       r_from->a_to_b = true;
     } else {
       r_from->b_to_a = true;
     }
-
-    // Unlike the new-pair path that insert_domain_rule handles, this one runs after endpoints
-    // may have registered, and the direction just enabled was denied when their notify lists
-    // were built. Both cells share one topic_struct once grouped, so either wrapper reaches
-    // every publisher.
-    struct topic_wrapper * wrapper = find_topic(topic_name_from, ipc_ns, from_domain);
-    if (!wrapper) wrapper = find_topic(topic_name_to, ipc_ns, to_domain);
-    if (wrapper) rebuild_all_notify_lists(wrapper);
     return 0;
   }
 

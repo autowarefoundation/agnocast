@@ -15,6 +15,7 @@ add_library(agnocast_thread_configurator SHARED
   src/util.cpp
   src/non_ros_thread_ipc.cpp
   src/thread_config.cpp
+  src/system_scan.cpp
 )
 ament_target_dependencies(agnocast_thread_configurator rclcpp agnocast_cie_config_msgs)
 target_link_libraries(agnocast_thread_configurator yaml-cpp)
@@ -85,6 +86,14 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_thread_config agnocast_thread_configurator yaml-cpp)
   target_include_directories(test_thread_config PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  ament_add_gtest(test_system_scan
+    test/test_system_scan.cpp
+  )
+  target_link_libraries(test_system_scan agnocast_thread_configurator)
+  target_include_directories(test_system_scan PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
 endif()
