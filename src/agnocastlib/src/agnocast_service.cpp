@@ -2,9 +2,15 @@
 
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/internal/service_wire_type.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 
 namespace agnocast
 {
+
+rclcpp::Logger GenericService::get_logger() const
+{
+  return std::visit([](auto * n) { return n->get_logger(); }, node_);
+}
 
 typename TypeErasedPublisher::SharedPtr GenericService::get_or_create_publisher_for(
   const std::string & response_topic_name)

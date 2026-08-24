@@ -74,6 +74,11 @@ private:
   std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
+  rclcpp::Logger get_logger() const
+  {
+    return std::visit([](auto * n) { return n->get_logger(); }, node_);
+  }
+
   typename ServiceResponsePublisher::SharedPtr get_or_create_publisher_for(
     const std::string & response_topic_name)
   {
@@ -101,7 +106,16 @@ private:
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-      auto publisher = this->get_or_create_publisher_for(request->RequestMeta::response_topic_name);
+      // The name comes from the request, so a bad one is the caller's fault.
+      typename ServiceResponsePublisher::SharedPtr publisher;
+      try {
+        publisher = this->get_or_create_publisher_for(request->RequestMeta::response_topic_name);
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
+          service_name_.c_str(), request->RequestMeta::response_topic_name.c_str(), e.what());
+        return;
+      }
 
       ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
       response->ResponseMeta::seqno = request->RequestMeta::seqno;
@@ -277,6 +291,9 @@ class GenericService : public std::enable_shared_from_this<GenericService>
 
   ServiceTsBundle service_ts_bundle_;
 
+  // Defined in the .cpp: agnocast::Node is only forward-declared here.
+  rclcpp::Logger get_logger() const;
+
   typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
     const std::string & response_topic_name);
 
@@ -286,7 +303,16 @@ class GenericService : public std::enable_shared_from_this<GenericService>
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
-      auto publisher = this->get_or_create_publisher_for(req_wrapper.response_topic_name());
+      // The name comes from the request, so a bad one is the caller's fault.
+      typename TypeErasedPublisher::SharedPtr publisher;
+      try {
+        publisher = this->get_or_create_publisher_for(req_wrapper.response_topic_name());
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
+          service_name_.c_str(), req_wrapper.response_topic_name().c_str(), e.what());
+        return;
+      }
 
       auto res_wrapper = GenericResponseWrapper::allocate(
         service_ts_bundle_.response_members,
