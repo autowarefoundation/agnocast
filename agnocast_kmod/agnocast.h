@@ -297,6 +297,16 @@ struct ioctl_add_domain_bridge_args
   uint32_t to_domain;
 };
 
+// Bridges every topic whose name starts with topic_name_prefix, pairing it with the identical
+// name in the other domain. For topic families whose full names appear only at runtime and so
+// cannot be listed in a config -- an Agnocast service's per-client response topics.
+struct ioctl_add_domain_bridge_prefix_args
+{
+  struct name_info topic_name_prefix;
+  uint32_t from_domain;
+  uint32_t to_domain;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -326,6 +336,8 @@ struct ioctl_add_domain_bridge_args
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD \
   _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
+#define AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD \
+  _IOW(0xA6, 32, struct ioctl_add_domain_bridge_prefix_args)
 
 // ================================================
 // ros2cli ioctls
@@ -469,6 +481,10 @@ int agnocast_ioctl_remove_bridge(
 int agnocast_ioctl_add_domain_bridge(
   const char * topic_name_from, const char * topic_name_to, uint32_t from_domain,
   uint32_t to_domain, const struct ipc_namespace * ipc_ns);
+
+int agnocast_ioctl_add_domain_bridge_prefix(
+  const char * topic_name_prefix, uint32_t from_domain, uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast.h"
 #include "agnocast_kunit/agnocast_kunit_add_bridge.h"
+#include "agnocast_kunit/agnocast_kunit_add_domain_bridge_prefix.h"
 #include "agnocast_kunit/agnocast_kunit_add_process.h"
 #include "agnocast_kunit/agnocast_kunit_add_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_add_subscriber.h"
@@ -56,6 +57,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_ADD_BRIDGE,
   TEST_CASES_REMOVE_BRIDGE,
   TEST_CASES_DOMAIN_BRIDGE,
+  TEST_CASES_ADD_DOMAIN_BRIDGE_PREFIX,
   TEST_CASES_SET_ROS2_SUBSCRIBER_NUM,
   TEST_CASES_SET_ROS2_PUBLISHER_NUM,
   TEST_CASES_DO_EXIT,
