@@ -13,6 +13,7 @@ All scripts are intended to be invoked from the repository root unless noted oth
 | Script | Purpose |
 |---|---|
 | `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast over CycloneDDS. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
+| `run_daemon.bash` | Run the user-space daemon (`agnocast_daemon`) in the foreground. Required in **user daemon mode** (workspace built with `-DAGNOCAST_USE_DAEMON=ON`): must be running before any Agnocast process starts, in place of the kernel module. Build first with `agnocast_daemon`'s `make` or `dev/build_all_daemon.bash`. |
 | `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
 | `switch_kmod.bash` | Swap the host's `agnocast-kmod-v<ver>` to another version. For container-based setups where only the host-side kmod needs replacing; the kmod and in-container heaphook must share the same ioctl ABI version. |
 
@@ -51,9 +52,17 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 |---|---|
 | `dev/setup.bash` | Install build dependencies: `rosdep install --from-paths src`, and Rust toolchain `1.75.0` with `clippy`/`rustfmt`. Aborts if conflicting apt-installed `agnocast-*` packages are present. |
 | `dev/build_all.bash` | Build the whole workspace: `colcon build`, `make` for `agnocast_kmod/`, `cargo build --release` for `agnocast_heaphook/`, then copy `libagnocast_heaphook.so` into `install/agnocastlib/lib/`. |
+| `dev/build_all_daemon.bash` | Same as `build_all.bash` but for **user daemon mode**: builds the `agnocast_daemon` executable (instead of the kernel module) and passes `-DAGNOCAST_USE_DAEMON=ON` so `agnocastlib` and downstream packages use the Unix-socket client. Heaphook is still built. Start the daemon afterwards with `run_daemon.bash`. |
 | `dev/run_checkpatch.bash` | Run the Linux kernel `checkpatch.pl` against C/H files under `agnocast_kmod/`. Auto-discovers `checkpatch.pl` from `PATH` or kernel headers; override with the `CHECKPATCH` env var. |
 
 ### test/ — tests and coverage
+
+**Backend selection.** The end-to-end scripts below (`e2e_test_1to1`, `e2e_test_2to2`, `e2e_test_many_exit`, `e2e_test_stress`) work against either backend, selected via the `AGNOCAST_USE_DAEMON` environment variable:
+
+- **Kernel module (default):** the script verifies `agnocast.ko` is loaded, as before.
+- **User daemon** (`AGNOCAST_USE_DAEMON=1`): the script reuses a daemon already listening on `/tmp/agnocast_daemon.sock`, or starts one from `agnocast_daemon/build/agnocast_daemon` and stops it on exit. Build the workspace with `dev/build_all_daemon.bash` first, so `agnocastlib` actually uses the socket client.
+
+The shared logic lives in `scripts/lib/agnocast_backend.bash` (`agnocast_require_backend`, `agnocast_start_daemon`, `agnocast_stop_daemon`).
 
 | Script | Purpose |
 |---|---|

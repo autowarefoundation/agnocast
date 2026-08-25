@@ -1,9 +1,17 @@
 #include "agnocast/agnocast.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_version.hpp"
 #include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
+
+#ifdef AGNOCAST_USE_DAEMON
+#include "protocol.h"
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#endif
 
 #include <dlfcn.h>
 #include <strings.h>
@@ -160,7 +168,7 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
   union ioctl_add_process_args add_process_args = {};
   add_process_args.is_performance_bridge_manager = true;
   add_process_args.domain_id = get_ros_domain_id();
-  if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
+  if (agnocast_ipc_add_process(&add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
   }
 
@@ -196,7 +204,7 @@ void poll_for_unlink()
         reinterpret_cast<uint64_t>(mq_info_buf.data());
       get_exit_process_args.subscription_mq_info_buffer_size =
         static_cast<uint32_t>(mq_info_buf.size());
-      if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
+      if (agnocast_ipc_get_exit_process(&get_exit_process_args) < 0) {
         RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
         close(agnocast_fd);
         exit(EXIT_FAILURE);
@@ -382,6 +390,10 @@ bool is_version_consistent(
   return true;
 }
 
+#ifdef AGNOCAST_USE_DAEMON
+static void connect_to_daemon_socket();
+#endif
+
 // Opt-out for deployments that manage the discovery agent themselves. getenv()
 // does not allocate, so this is safe before agnocast's allocator is ready.
 bool discovery_agent_auto_fork_disabled()
@@ -445,12 +457,59 @@ pid_t spawn_daemon_process(Func && func)
       fail("setsid failed: %s");
     }
 
+#ifdef AGNOCAST_USE_DAEMON
+    // The daemon identifies each client per connection, using the PID reported
+    // by SO_PEERCRED at connect time. A forked child inherits the parent's single
+    // socket connection, so without a fresh connection the daemon would attribute
+    // the child's requests to the parent PID (breaking add_process, memory
+    // assignment, and exit cleanup) and the two processes would interleave
+    // requests/responses on one stream. Drop the inherited connection and open a
+    // dedicated one for this child.
+    close(agnocast_fd);
+    connect_to_daemon_socket();
+#endif
+
     func();
     exit(0);
   }
 
   return pid;
 }
+
+#ifdef AGNOCAST_USE_DAEMON
+static void connect_to_daemon_socket()
+{
+  agnocast_fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+  if (agnocast_fd < 0) {
+    RCLCPP_ERROR(logger, "socket() failed: %s", strerror(errno));
+    exit(EXIT_FAILURE);
+  }
+
+  const int buf = AGNOCAST_DAEMON_SOCKET_BUF_SIZE;
+  if (setsockopt(agnocast_fd, SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf)) < 0) {
+    RCLCPP_ERROR(logger, "setsockopt(SO_SNDBUF) failed: %s", strerror(errno));
+    close(agnocast_fd);
+    agnocast_fd = -1;
+    exit(EXIT_FAILURE);
+  }
+  if (setsockopt(agnocast_fd, SOL_SOCKET, SO_RCVBUF, &buf, sizeof(buf)) < 0) {
+    RCLCPP_ERROR(logger, "setsockopt(SO_RCVBUF) failed: %s", strerror(errno));
+    close(agnocast_fd);
+    agnocast_fd = -1;
+    exit(EXIT_FAILURE);
+  }
+
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, AGNOCAST_DAEMON_SOCKET_PATH, sizeof(addr.sun_path) - 1);
+  if (connect(agnocast_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+    RCLCPP_ERROR(logger, "connect to agnocast daemon failed: %s", strerror(errno));
+    close(agnocast_fd);
+    agnocast_fd = -1;
+    exit(EXIT_FAILURE);
+  }
+}
+#endif
 
 // NOTE: Avoid heap allocation inside initialize_agnocast. TLSF is not initialized yet.
 struct initialize_agnocast_result initialize_agnocast(
@@ -461,6 +520,9 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
+#ifdef AGNOCAST_USE_DAEMON
+  connect_to_daemon_socket();
+#else
   agnocast_fd = open("/dev/agnocast", O_RDWR);
   if (agnocast_fd < 0) {
     if (errno == ENOENT) {
@@ -470,9 +532,10 @@ struct initialize_agnocast_result initialize_agnocast(
     }
     exit(EXIT_FAILURE);
   }
+#endif
 
   struct ioctl_get_version_args get_version_args = {};
-  if (ioctl(agnocast_fd, AGNOCAST_GET_VERSION_CMD, &get_version_args) < 0) {
+  if (agnocast_ipc_get_version(&get_version_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_VERSION_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -485,7 +548,7 @@ struct initialize_agnocast_result initialize_agnocast(
 
   union ioctl_add_process_args add_process_args = {};
   add_process_args.domain_id = get_ros_domain_id();
-  if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
+  if (agnocast_ipc_add_process(&add_process_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -494,10 +557,12 @@ struct initialize_agnocast_result initialize_agnocast(
   bool should_spawn_bridge = false;
   auto bridge_mode = get_bridge_mode();
 
+#ifndef AGNOCAST_USE_DAEMON
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }
+#endif
   if (bridge_mode == BridgeMode::On && !add_process_args.ret_performance_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }

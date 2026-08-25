@@ -1,5 +1,6 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
@@ -70,7 +71,7 @@ topic_local_id_t initialize_publisher(
   pub_args.qos_depth = qos.depth();
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;
-  if (ioctl(agnocast_fd, AGNOCAST_ADD_PUBLISHER_CMD, &pub_args) < 0) {
+  if (agnocast_ipc_add_publisher(&pub_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PUBLISHER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -99,7 +100,7 @@ union ioctl_publish_msg_args publish_core(
     reinterpret_cast<uint64_t>(subscriber_ids_buffer.data());
   publish_msg_args.subscriber_ids_buffer_size = MAX_SUBSCRIBER_NUM;
 
-  if (ioctl(agnocast_fd, AGNOCAST_PUBLISH_MSG_CMD, &publish_msg_args) < 0) {
+  if (agnocast_ipc_publish_msg(&publish_msg_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -171,7 +172,7 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};
-  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+  if (agnocast_ipc_get_subscriber_num(&args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -196,7 +197,7 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
   get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &get_subscriber_count_args) < 0) {
+  if (agnocast_ipc_get_subscriber_num(&get_subscriber_count_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
@@ -309,7 +310,7 @@ PublisherBase::~PublisherBase()
     };
     remove_publisher_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
     remove_publisher_args.publisher_id = id_;
-    if (ioctl(agnocast_fd, AGNOCAST_REMOVE_PUBLISHER_CMD, &remove_publisher_args) < 0) {
+    if (agnocast_ipc_remove_publisher(&remove_publisher_args) < 0) {
       RCLCPP_WARN(logger, "Failed to remove publisher (id=%d) from kernel.", id_);
     }
   }

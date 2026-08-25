@@ -1,5 +1,6 @@
 #include "agnocast/bridge/agnocast_service_bridge.hpp"
 
+#include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
@@ -110,7 +111,7 @@ int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
     reinterpret_cast<uint64_t>(topic_info_buffer->data());
   topic_info_args.topic_info_ret_buffer_size = 1;
 
-  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
+  if (agnocast_ipc_get_topic_subscriber_info(&topic_info_args) < 0) {
     if (errno == ENOBUFS) {
       set_error_string("Multiple target agnocast services found");
     } else {

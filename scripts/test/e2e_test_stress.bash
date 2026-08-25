@@ -1,10 +1,9 @@
 #!/bin/bash
 
-if ! grep -q "^agnocast " /proc/modules; then
-    echo "ERROR: agnocast kernel module is not loaded." >&2
-    echo "Load it first: sudo insmod agnocast_kmod/agnocast.ko" >&2
-    exit 1
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/agnocast_backend.bash
+source "${SCRIPT_DIR}/../lib/agnocast_backend.bash"
+agnocast_require_backend
 
 set -e
 

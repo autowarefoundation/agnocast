@@ -1,6 +1,8 @@
 build/
 install/
 log/
+agnocast_daemon/build/
+agnocast_daemon/build_test/
 *.log
 coverage_report_agnocastlib
 .vscode

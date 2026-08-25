@@ -1,6 +1,7 @@
 #include "agnocast/agnocast_client.hpp"
 
 #include "agnocast/agnocast_ioctl.hpp"
+#include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 
 #include <array>
@@ -22,7 +23,7 @@ uint32_t get_agnocast_sub_count(const std::string & topic_name)
   topic_info_args.topic_info_ret_buffer_addr =
     reinterpret_cast<uint64_t>(topic_info_buffer->data());
   topic_info_args.topic_info_ret_buffer_size = MAX_TOPIC_INFO_RET_NUM;
-  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
+  if (agnocast_ipc_get_topic_subscriber_info(&topic_info_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);

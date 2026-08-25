@@ -7,6 +7,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 option(COVERAGE "Enable coverage reporting for gcov" OFF)
+option(AGNOCAST_USE_DAEMON "Use user-space daemon instead of kernel module" OFF)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -56,6 +57,13 @@ add_library(agnocast SHARED
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp
   src/vendor/rclcpp/generic_service.cpp)
+
+if(AGNOCAST_USE_DAEMON)
+  target_compile_definitions(agnocast PUBLIC AGNOCAST_USE_DAEMON)
+  target_sources(agnocast PRIVATE src/agnocast_socket_client.cpp)
+  target_include_directories(agnocast PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../agnocast_daemon)
+endif()
 
 ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
 
