@@ -5,6 +5,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
+#include <charconv>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,22 +21,26 @@ namespace
 {
 
 // Unset = the attribute must not be applied: YAML null / absent key (the
-// user's opt-out) or the UNMANAGEABLE sentinel (a kernel/tool constraint).
-bool is_unset(const YAML::Node & node)
+// user's opt-out) or, when `allow_unmanageable` is set, the UNMANAGEABLE
+// sentinel (a kernel/tool constraint). The sentinel is scoped to the
+// kernel_threads/irqs sections; elsewhere it is an ordinary invalid value.
+bool is_unset(const YAML::Node & node, bool allow_unmanageable)
 {
   if (!node || node.IsNull()) {
     return true;
   }
-  return node.IsScalar() && node.Scalar() == k_unmanageable;
+  return allow_unmanageable && node.IsScalar() && node.Scalar() == k_unmanageable;
+}
+
+bool is_unmanageable_sentinel(const YAML::Node & node)
+{
+  return node && node.IsScalar() && node.Scalar() == k_unmanageable;
 }
 
 constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
 constexpr int k_rt_priority_max = 99;
-// task->comm is truncated to TASK_COMM_LEN - 1 characters and the apply step
-// matches scanned comms exactly, so a longer configured comm can never match.
-constexpr size_t k_max_comm_len = 15;
 
 bool is_cfs_policy(const std::string & policy)
 {
@@ -43,11 +50,15 @@ bool is_cfs_policy(const std::string & policy)
 // 'nice' is required for the CFS policies (SCHED_OTHER/BATCH/IDLE);
 // parse_rt_priority is the mirror image for SCHED_FIFO/SCHED_RR. `entry_desc`
 // is the "id=..."/"name=..." fragment used in messages.
-int parse_nice(const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
+int parse_nice(
+  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc,
+  bool allow_unmanageable)
 {
   const YAML::Node nice = entry["nice"];
-  if (is_unset(nice)) {
-    throw std::runtime_error("Policy '" + policy + "' requires 'nice' for " + entry_desc);
+  if (is_unset(nice, allow_unmanageable)) {
+    throw std::runtime_error(
+      "Policy '" + policy + "' requires 'nice' for " + entry_desc +
+      (is_unmanageable_sentinel(nice) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
   int value = 0;
   try {
@@ -66,11 +77,14 @@ int parse_nice(const YAML::Node & entry, const std::string & policy, const std::
 }
 
 int parse_rt_priority(
-  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc)
+  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc,
+  bool allow_unmanageable)
 {
   const YAML::Node priority = entry["priority"];
-  if (is_unset(priority)) {
-    throw std::runtime_error("Policy '" + policy + "' requires 'priority' for " + entry_desc);
+  if (is_unset(priority, allow_unmanageable)) {
+    throw std::runtime_error(
+      "Policy '" + policy + "' requires 'priority' for " + entry_desc +
+      (is_unmanageable_sentinel(priority) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
   int value = 0;
   try {
@@ -85,17 +99,40 @@ int parse_rt_priority(
   return value;
 }
 
-// A negative value also lands in the catch: yaml-cpp rejects negative
-// scalars for unsigned targets instead of wrapping them.
+// yaml-cpp's as<T>() auto-detects the numeric base (YAML 1.1), so a
+// zero-padded "010" would parse as octal 8 and "0x10" as hex 16. IRQ numbers
+// and SCHED_DEADLINE parameters are hand-aligned columns where zero-padding
+// is plausible, so accept digits only and parse base-10, matching the
+// is_all_digits() + from_chars() path the system scanners use.
+template <typename T>
+std::optional<T> as_base10(const YAML::Node & node)
+{
+  if (!node || !node.IsScalar()) {
+    return std::nullopt;
+  }
+  const std::string & s = node.Scalar();
+  if (s.empty() || !std::all_of(s.begin(), s.end(), [](unsigned char c) {
+        return std::isdigit(c) != 0;
+      })) {
+    return std::nullopt;
+  }
+  T value{};
+  const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
+  if (ec != std::errc() || ptr != s.data() + s.size()) {
+    return std::nullopt;
+  }
+  return value;
+}
+
 unsigned int parse_deadline_field(
   const YAML::Node & entry, const char * key, const std::string & entry_desc)
 {
-  try {
-    return entry[key].as<unsigned int>();
-  } catch (const YAML::Exception &) {
+  const auto value = as_base10<unsigned int>(entry[key]);
+  if (!value) {
     throw std::runtime_error(
-      "'" + std::string(key) + "' must be a non-negative integer for " + entry_desc);
+      "'" + std::string(key) + "' must be a non-negative decimal integer for " + entry_desc);
   }
+  return *value;
 }
 
 // CPU_SET(3) and sched_setaffinity(2) silently drop out-of-range or
@@ -103,12 +140,14 @@ unsigned int parse_deadline_field(
 // machine CPU count is a valid bound because the config is always parsed on
 // the machine that applies it. The result is sorted and deduplicated so
 // downstream consumers see a canonical form.
-std::vector<int> parse_affinity(const YAML::Node & entry, const std::string & entry_desc)
+std::vector<int> parse_affinity(
+  const YAML::Node & entry, const std::string & entry_desc, bool allow_unmanageable)
 {
   const YAML::Node affinity = entry["affinity"];
   std::vector<int> cpus;
-  // Unset (absent, null, or UNMANAGEABLE) means "do not manage affinity".
-  if (is_unset(affinity)) {
+  // Unset (absent, null, or the allowed UNMANAGEABLE sentinel) means
+  // "do not manage affinity".
+  if (is_unset(affinity, allow_unmanageable)) {
     return cpus;
   }
   if (!affinity.IsSequence()) {
@@ -207,7 +246,7 @@ void parse_yaml(
       }
     }
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
-    cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str);
+    cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = cg["policy"].as<std::string>();
 
     if (policy_to_sched_const.count(cfg.policy) == 0) {
@@ -222,9 +261,10 @@ void parse_yaml(
       cfg.period = cg["period"].as<unsigned int>();
       cfg.deadline = cg["deadline"].as<unsigned int>();
     } else if (is_cfs_policy(cfg.policy)) {
-      cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str);
+      cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
-      cfg.priority = parse_rt_priority(cg, cfg.policy, "id=" + cfg.thread_str);
+      cfg.priority =
+        parse_rt_priority(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     }
   }
 
@@ -233,7 +273,7 @@ void parse_yaml(
     auto & cfg = non_ros_threads_out[i];
 
     cfg.thread_str = nrt["name"].as<std::string>();
-    cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str);
+    cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = nrt["policy"].as<std::string>();
 
     if (policy_to_sched_const.count(cfg.policy) == 0) {
@@ -248,9 +288,11 @@ void parse_yaml(
       cfg.period = nrt["period"].as<unsigned int>();
       cfg.deadline = nrt["deadline"].as<unsigned int>();
     } else if (is_cfs_policy(cfg.policy)) {
-      cfg.nice = parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str);
+      cfg.nice =
+        parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
-      cfg.priority = parse_rt_priority(nrt, cfg.policy, "name=" + cfg.thread_str);
+      cfg.priority =
+        parse_rt_priority(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     }
   }
 
@@ -323,27 +365,17 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
         "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
         "be matched reliably");
     }
-    if (cfg.comm.size() > k_max_comm_len) {
-      throw std::runtime_error(
-        "kernel_threads entry '" + cfg.comm +
-        "' can never match: the kernel truncates thread "
-        "comms to " +
-        std::to_string(k_max_comm_len) + " characters");
-    }
+    cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
 
-    cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm);
-
-    const bool has_policy = !is_unset(kt["policy"]);
-    const bool has_nice = !is_unset(kt["nice"]);
-    const bool has_priority = !is_unset(kt["priority"]);
-    if (!has_policy) {
-      if (has_nice) {
-        throw std::runtime_error(
-          "'nice' requires 'policy' for comm=" + cfg.comm + ": set both or leave both unset");
-      }
-      if (has_priority) {
-        throw std::runtime_error(
-          "'priority' requires 'policy' for comm=" + cfg.comm + ": set both or leave both unset");
+    if (is_unset(kt["policy"], /*allow_unmanageable=*/true)) {
+      // Any policy-dependent field without 'policy' would otherwise be
+      // silently dead configuration (is_managed() == false).
+      for (const char * key : {"nice", "priority", "runtime", "period", "deadline"}) {
+        if (!is_unset(kt[key], /*allow_unmanageable=*/true)) {
+          throw std::runtime_error(
+            "'" + std::string(key) + "' requires 'policy' for comm=" + cfg.comm +
+            ": set both or leave both unset");
+        }
       }
       continue;
     }
@@ -363,7 +395,10 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
     if (*cfg.policy == "SCHED_DEADLINE") {
       // Explicit check for a clear message: these fields are always
       // hand-written (prerun never emits DEADLINE) and easy to forget.
-      if (is_unset(kt["runtime"]) || is_unset(kt["period"]) || is_unset(kt["deadline"])) {
+      if (
+        is_unset(kt["runtime"], /*allow_unmanageable=*/true) ||
+        is_unset(kt["period"], /*allow_unmanageable=*/true) ||
+        is_unset(kt["deadline"], /*allow_unmanageable=*/true)) {
         throw std::runtime_error(
           "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + cfg.comm);
       }
@@ -371,9 +406,10 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       cfg.period = parse_deadline_field(kt, "period", "comm=" + cfg.comm);
       cfg.deadline = parse_deadline_field(kt, "deadline", "comm=" + cfg.comm);
     } else if (is_cfs_policy(*cfg.policy)) {
-      cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm);
+      cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     } else {
-      cfg.priority = parse_rt_priority(kt, *cfg.policy, "comm=" + cfg.comm);
+      cfg.priority =
+        parse_rt_priority(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     }
   }
 
@@ -410,17 +446,13 @@ std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
     if (!iq["irq"] || iq["irq"].IsNull()) {
       throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
     }
-    try {
-      cfg.irq = iq["irq"].as<int>();
-    } catch (const YAML::Exception &) {
+    const auto irq = as_base10<int>(iq["irq"]);
+    if (!irq) {
       throw std::runtime_error(
-        entry_pos + ": 'irq' must be an integer, got '" +
+        entry_pos + ": 'irq' must be a non-negative decimal integer, got '" +
         (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
     }
-    if (cfg.irq < 0) {
-      throw std::runtime_error(
-        entry_pos + ": 'irq' must be non-negative, got " + std::to_string(cfg.irq));
-    }
+    cfg.irq = *irq;
 
     if (iq["name"] && !iq["name"].IsNull()) {
       try {
@@ -429,7 +461,8 @@ std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
         throw std::runtime_error("'name' must be a string for irq=" + std::to_string(cfg.irq));
       }
     }
-    cfg.affinity = parse_affinity(iq, "irq=" + std::to_string(cfg.irq));
+    cfg.affinity =
+      parse_affinity(iq, "irq=" + std::to_string(cfg.irq), /*allow_unmanageable=*/true);
   }
 
   std::unordered_set<int> seen;
