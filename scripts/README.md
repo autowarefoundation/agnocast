@@ -55,6 +55,18 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `dev/build_all_daemon.bash` | Same as `build_all.bash` but for **user daemon mode**: builds the `agnocast_daemon` executable (instead of the kernel module) and passes `-DAGNOCAST_USE_DAEMON=ON` so `agnocastlib` and downstream packages use the Unix-socket client. Heaphook is still built. Start the daemon afterwards with `run_daemon.bash`. |
 | `dev/run_checkpatch.bash` | Run the Linux kernel `checkpatch.pl` against C/H files under `agnocast_kmod/`. Auto-discovers `checkpatch.pl` from `PATH` or kernel headers; override with the `CHECKPATCH` env var. |
 
+### bench/ — M0 latency benchmark (kmod vs user daemon)
+
+See [`bench/README.md`](bench/README.md). Builds `agnocast_bench_publisher` / `agnocast_bench_subscriber` into separate `ws/kmod/` and `ws/daemon/` install trees and measures publish/receive IPC and end-to-end latency.
+
+| Script | Purpose |
+|---|---|
+| `bench/build.bash` | Build bench nodes against one or both backends (`-DAGNOCAST_BENCH_TIMING=ON`). |
+| `bench/run_bench.bash` | Run one (T, S, R) configuration and write raw/summary CSVs. |
+| `bench/run_sweeps.bash` | Sweep A/B parameter grids for one backend. |
+| `bench/compare.bash` | Run both backends and render comparison figures. |
+| `bench/prep_repro_env.sh` | Host tuning for reproducible RT measurements (requires root). |
+
 ### test/ — tests and coverage
 
 **Backend selection.** The end-to-end scripts below (`e2e_test_1to1`, `e2e_test_2to2`, `e2e_test_many_exit`, `e2e_test_stress`) work against either backend, selected via the `AGNOCAST_USE_DAEMON` environment variable:

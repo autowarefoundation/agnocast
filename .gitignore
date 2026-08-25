@@ -1,6 +1,8 @@
 build/
 install/
 log/
+ws/
+results/
 agnocast_daemon/build/
 agnocast_daemon/build_test/
 *.log

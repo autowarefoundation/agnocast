@@ -128,6 +128,32 @@ struct ResponseHeader
 };
 
 /* --------------------------------------------------------------------------
+ * Benchmark timing trailer (optional)
+ *
+ * A daemon built with AGNOCAST_BENCH_TIMING appends this block after the
+ * response payload so that a client can split the round trip it observes into
+ * "waiting for the daemon to be scheduled" and "work the daemon actually did".
+ * All stamps are CLOCK_MONOTONIC nanoseconds, which is system-wide and
+ * therefore directly comparable against the client's own stamps.
+ *
+ * The trailer is detected by the magic value rather than by size, so a daemon
+ * and a client may be built with different settings without corrupting the
+ * framing: a client that does not expect it simply lets the extra bytes be
+ * truncated, and a client that does expect it sees a zeroed buffer (magic
+ * mismatch) when the daemon does not send one.
+ * -------------------------------------------------------------------------- */
+#define AGNOCAST_BENCH_TRAILER_MAGIC 0x41474254u /* "AGBT" */
+
+struct BenchTimingTrailer
+{
+  uint32_t magic;
+  uint32_t _pad;
+  int64_t recv_ns; /* recv() for this request returned */
+  int64_t work_ns; /* handler passed dispatch and acquired its locks; 0 if unstamped */
+  int64_t send_ns; /* immediately before the reply is written to the socket */
+};
+
+/* --------------------------------------------------------------------------
  * Shared payload types (no pointer fields)
  * -------------------------------------------------------------------------- */
 
@@ -657,6 +683,7 @@ struct SetRos2PublisherNumRequest
 #ifdef __cplusplus
 static_assert(sizeof(struct RequestHeader) == 8, "RequestHeader must be 8 bytes");
 static_assert(sizeof(struct ResponseHeader) == 8, "ResponseHeader must be 8 bytes");
+static_assert(sizeof(struct BenchTimingTrailer) == 32, "BenchTimingTrailer must be 32 bytes");
 static_assert(
   sizeof(struct AgnocastPublisherShmInfo) == 24, "AgnocastPublisherShmInfo must be 24 bytes");
 static_assert(
@@ -686,6 +713,7 @@ static_assert(
 #else
 _Static_assert(sizeof(struct RequestHeader) == 8, "RequestHeader must be 8 bytes");
 _Static_assert(sizeof(struct ResponseHeader) == 8, "ResponseHeader must be 8 bytes");
+_Static_assert(sizeof(struct BenchTimingTrailer) == 32, "BenchTimingTrailer must be 32 bytes");
 _Static_assert(
   sizeof(struct AgnocastPublisherShmInfo) == 24, "AgnocastPublisherShmInfo must be 24 bytes");
 _Static_assert(

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "command_handlers.hpp"
 
+#include "bench_timing.hpp"
+
 #include <fcntl.h>
 #include <mqueue.h>
 #include <sys/mman.h>
@@ -358,20 +360,27 @@ CommandHandlers::CommandHandlers(MetadataStore & store, MemoryAllocator & alloca
 
 void CommandHandlers::send_response(int fd, int32_t error_code)
 {
-  ResponseHeader hdr{error_code, 0};
-  send(fd, &hdr, sizeof(hdr), MSG_NOSIGNAL);
+  send_response(fd, error_code, nullptr, 0);
 }
 
 void CommandHandlers::send_response(
   int fd, int32_t error_code, const void * payload, uint32_t payload_size)
 {
   ResponseHeader hdr{error_code, payload_size};
-  iovec iov[2];
-  iov[0] = {const_cast<ResponseHeader *>(&hdr), sizeof(hdr)};
-  iov[1] = {const_cast<void *>(payload), payload_size};
+  iovec iov[3];
+  int n_iov = 0;
+  iov[n_iov++] = {const_cast<ResponseHeader *>(&hdr), sizeof(hdr)};
+  if (payload != nullptr && payload_size > 0) {
+    iov[n_iov++] = {const_cast<void *>(payload), payload_size};
+  }
+#ifdef AGNOCAST_BENCH_TIMING
+  BenchTimingTrailer trailer{};
+  ::agnocast_daemon_bench::fill_trailer(trailer);
+  iov[n_iov++] = {&trailer, sizeof(trailer)};
+#endif
   msghdr msg{};
   msg.msg_iov = iov;
-  msg.msg_iovlen = 2;
+  msg.msg_iovlen = static_cast<size_t>(n_iov);
   sendmsg(fd, &msg, MSG_NOSIGNAL);
 }
 
@@ -627,6 +636,7 @@ void CommandHandlers::handle_publish_msg(int fd, pid_t pid, const void * payload
   }
 
   std::unique_lock tlock(wrapper->topic_rwsem);
+  AGNOCAST_DAEMON_BENCH_STAMP_WORK();
 
   PublisherInfo * pub_info = find_publisher_info(wrapper, req->publisher_id);
   if (!pub_info) {
@@ -690,6 +700,7 @@ void CommandHandlers::handle_receive_msg(int fd, pid_t pid, const void * payload
   }
 
   std::unique_lock tlock(wrapper->topic_rwsem);
+  AGNOCAST_DAEMON_BENCH_STAMP_WORK();
 
   SubscriberInfo * sub_info = find_subscriber_info(wrapper, req->subscriber_id);
   if (!sub_info) {

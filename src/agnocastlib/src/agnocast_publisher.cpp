@@ -1,5 +1,6 @@
 #include "agnocast/agnocast_publisher.hpp"
 
+#include "agnocast/agnocast_bench_timing.hpp"
 #include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
@@ -100,10 +101,13 @@ union ioctl_publish_msg_args publish_core(
     reinterpret_cast<uint64_t>(subscriber_ids_buffer.data());
   publish_msg_args.subscriber_ids_buffer_size = MAX_SUBSCRIBER_NUM;
 
-  if (agnocast_ipc_publish_msg(&publish_msg_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
+  {
+    AGNOCAST_BENCH_TIME_PUBLISH_IPC();
+    if (agnocast_ipc_publish_msg(&publish_msg_args) < 0) {
+      RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
   }
 
   TRACEPOINT(agnocast_publish, publisher_handle, publish_msg_args.ret_entry_id);

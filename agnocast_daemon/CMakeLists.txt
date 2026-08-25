@@ -26,6 +26,14 @@ add_executable(agnocast_daemon
 target_compile_options(agnocast_daemon PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(agnocast_daemon PRIVATE agnocast_daemon_core pthread)
 
+# Appends a BenchTimingTrailer to every response so clients can split the round
+# trip they observe into scheduling delay and daemon-side work. Off by default;
+# the benchmark build turns it on for both the daemon and agnocastlib.
+option(AGNOCAST_BENCH_TIMING "Append daemon-side timing stamps to responses" OFF)
+if(AGNOCAST_BENCH_TIMING)
+  target_compile_definitions(agnocast_daemon_core PUBLIC AGNOCAST_BENCH_TIMING)
+endif()
+
 option(AGNOCAST_BUILD_TESTS "Build agnocast_daemon unit tests" OFF)
 if(AGNOCAST_BUILD_TESTS)
   enable_testing()

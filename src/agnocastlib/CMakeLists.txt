@@ -8,6 +8,7 @@ endif()
 
 option(COVERAGE "Enable coverage reporting for gcov" OFF)
 option(AGNOCAST_USE_DAEMON "Use user-space daemon instead of kernel module" OFF)
+option(AGNOCAST_BENCH_TIMING "Record per-call publish/receive IPC latency for benchmarking" OFF)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -45,7 +46,7 @@ add_library(agnocast SHARED
   src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
-  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp
+  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_bench_timing.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp
@@ -57,6 +58,10 @@ add_library(agnocast SHARED
   src/node/tf2/buffer.cpp src/node/tf2/transform_broadcaster.cpp src/node/tf2/transform_listener.cpp src/node/tf2/static_transform_broadcaster.cpp
   src/node/diagnostic_updater/diagnostic_updater.cpp
   src/vendor/rclcpp/generic_service.cpp)
+
+if(AGNOCAST_BENCH_TIMING)
+  target_compile_definitions(agnocast PUBLIC AGNOCAST_BENCH_TIMING)
+endif()
 
 if(AGNOCAST_USE_DAEMON)
   target_compile_definitions(agnocast PUBLIC AGNOCAST_USE_DAEMON)

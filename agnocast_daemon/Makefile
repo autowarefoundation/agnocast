@@ -1,10 +1,12 @@
 BUILD_DIR ?= build
 TEST_BUILD_DIR ?= build_test
+# e.g. make CMAKE_ARGS=-DAGNOCAST_BENCH_TIMING=ON
+CMAKE_ARGS ?=
 
 .PHONY: all test clean
 
 all:
-	cmake -S . -B $(BUILD_DIR)
+	cmake -S . -B $(BUILD_DIR) $(CMAKE_ARGS)
 	cmake --build $(BUILD_DIR) -j
 
 test:

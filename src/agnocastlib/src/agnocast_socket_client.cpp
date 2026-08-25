@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef AGNOCAST_USE_DAEMON
 
+#include "agnocast/agnocast_bench_timing.hpp"
 #include "agnocast/agnocast_ipc.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "protocol.h"
@@ -18,6 +19,66 @@ namespace agnocast
 
 static std::mutex socket_mtx;
 
+#ifdef AGNOCAST_BENCH_TIMING
+namespace
+{
+
+// Stamps of the round trip daemon_call() performed most recently on this thread.
+// Read straight afterwards by finalize_breakdown(), before another call can
+// overwrite them.
+struct CallStamps
+{
+  int64_t send_begin;   // client, immediately before sendmsg
+  int64_t send_end;     // client, immediately after sendmsg
+  int64_t recv_end;     // client, immediately after recvmsg
+  int64_t daemon_recv;  // daemon stamps, 0 when the response carried no trailer
+  int64_t daemon_work;
+  int64_t daemon_send;
+};
+
+thread_local CallStamps g_stamps = {};
+
+// Splits [enter_ns, exit_ns] using the stamps of the call that just completed.
+void finalize_breakdown(IpcBreakdown & out, int64_t enter_ns, int64_t exit_ns)
+{
+  const CallStamps s = g_stamps;
+
+  out = IpcBreakdown{};
+  out.total_ns = exit_ns - enter_ns;
+  out.req_ns = s.send_begin - enter_ns;
+  out.send_syscall_ns = s.send_end - s.send_begin;
+  out.post_ns = exit_ns - s.recv_end;
+
+  if (s.daemon_recv == 0 || s.daemon_send == 0) {
+    // No trailer: keep the segments summing to the total by attributing the
+    // whole socket round trip to up_ns.
+    out.up_ns = s.recv_end - s.send_begin;
+    return;
+  }
+
+  out.daemon_stamped = 1;
+  out.up_ns = s.daemon_recv - s.send_begin;
+  out.down_ns = s.recv_end - s.daemon_send;
+  if (s.daemon_work != 0) {
+    out.lock_ns = s.daemon_work - s.daemon_recv;
+    out.work_ns = s.daemon_send - s.daemon_work;
+  } else {
+    out.work_ns = s.daemon_send - s.daemon_recv;
+  }
+}
+
+}  // namespace
+
+// Both macros expand inside namespace agnocast, so unqualified lookup reaches
+// finalize_breakdown() in the unnamed namespace above.
+#define AGNOCAST_BENCH_CALL_ENTER() const int64_t agnocast_bench_enter_ns = bench_timing_now_ns()
+#define AGNOCAST_BENCH_CALL_LEAVE(slot) \
+  finalize_breakdown(last_##slot##_ipc_breakdown, agnocast_bench_enter_ns, bench_timing_now_ns())
+#else
+#define AGNOCAST_BENCH_CALL_ENTER() static_cast<void>(0)
+#define AGNOCAST_BENCH_CALL_LEAVE(slot) static_cast<void>(0)
+#endif  // AGNOCAST_BENCH_TIMING
+
 // Returns 0 on success, sets errno on failure.
 static int daemon_call(
   uint32_t cmd, const void * req_payload, uint32_t req_size, void * resp_payload,
@@ -33,21 +94,45 @@ static int daemon_call(
   msghdr send_msg{};
   send_msg.msg_iov = iov;
   send_msg.msg_iovlen = (req_size > 0) ? 2 : 1;
+#ifdef AGNOCAST_BENCH_TIMING
+  g_stamps = CallStamps{};
+  g_stamps.send_begin = bench_timing_now_ns();
+#endif
   if (sendmsg(agnocast_fd, &send_msg, MSG_NOSIGNAL) < 0) {
     return -1;
   }
+#ifdef AGNOCAST_BENCH_TIMING
+  g_stamps.send_end = bench_timing_now_ns();
+#endif
 
   // --- receive response ---
   ResponseHeader resp_hdr{};
-  iovec riov[2];
-  riov[0] = {&resp_hdr, sizeof(resp_hdr)};
-  riov[1] = {resp_payload, resp_size};
+  iovec riov[3];
+  int n_riov = 0;
+  riov[n_riov++] = {&resp_hdr, sizeof(resp_hdr)};
+  if (resp_size > 0 && resp_payload != nullptr) {
+    riov[n_riov++] = {resp_payload, resp_size};
+  }
+#ifdef AGNOCAST_BENCH_TIMING
+  // Filled only if the daemon appends a trailer; stays zeroed otherwise, which
+  // finalize_breakdown() detects through the magic value.
+  BenchTimingTrailer trailer{};
+  riov[n_riov++] = {&trailer, sizeof(trailer)};
+#endif
   msghdr recv_msg{};
   recv_msg.msg_iov = riov;
-  recv_msg.msg_iovlen = (resp_size > 0 && resp_payload != nullptr) ? 2 : 1;
+  recv_msg.msg_iovlen = static_cast<size_t>(n_riov);
   if (recvmsg(agnocast_fd, &recv_msg, 0) < 0) {
     return -1;
   }
+#ifdef AGNOCAST_BENCH_TIMING
+  g_stamps.recv_end = bench_timing_now_ns();
+  if (trailer.magic == AGNOCAST_BENCH_TRAILER_MAGIC) {
+    g_stamps.daemon_recv = trailer.recv_ns;
+    g_stamps.daemon_work = trailer.work_ns;
+    g_stamps.daemon_send = trailer.send_ns;
+  }
+#endif
 
   if (resp_hdr.error_code != 0) {
     errno = resp_hdr.error_code;
@@ -138,6 +223,8 @@ int agnocast_ipc_add_subscriber(union ioctl_add_subscriber_args * args)
 
 int agnocast_ipc_publish_msg(union ioctl_publish_msg_args * args)
 {
+  AGNOCAST_BENCH_CALL_ENTER();
+
   // ioctl_publish_msg_args is a union: the output ret_released_addrs[] overlaps the input
   // subscriber_ids_buffer_addr/size. Snapshot the caller-provided buffer pointer/size before
   // writing any ret_* field, otherwise writing ret_released_addrs[] clobbers them.
@@ -166,11 +253,15 @@ int agnocast_ipc_publish_msg(union ioctl_publish_msg_args * args)
       sub_ids[i] = resp.subscriber_ids[i];
     }
   }
+
+  AGNOCAST_BENCH_CALL_LEAVE(publish);
   return r;
 }
 
 int agnocast_ipc_receive_msg(union ioctl_receive_msg_args * args)
 {
+  AGNOCAST_BENCH_CALL_ENTER();
+
   // ioctl_receive_msg_args is a union: the output ret_* fields overlap the input
   // pub_shm_info_addr/size. The kernel reads inputs before writing outputs, but here
   // we must snapshot the caller-provided buffer pointer/size before writing any ret_*
@@ -201,6 +292,8 @@ int agnocast_ipc_receive_msg(union ioctl_receive_msg_args * args)
       shm_buf[i].shm_size = resp.pub_shm_infos[i].shm_size;
     }
   }
+
+  AGNOCAST_BENCH_CALL_LEAVE(receive);
   return r;
 }
 

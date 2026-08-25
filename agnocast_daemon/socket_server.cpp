@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "socket_server.hpp"
 
+#include "bench_timing.hpp"
+
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -157,6 +159,8 @@ void SocketServer::handle_client(int client_fd, pid_t client_pid)
     // For SOCK_SEQPACKET, one recv() delivers exactly one message (the full
     // packet sent by the client).  MSG_TRUNC would indicate buffer overflow.
     const ssize_t n = recv(client_fd, buf.data(), buf.size(), MSG_TRUNC);
+    AGNOCAST_DAEMON_BENCH_STAMP_RECV();
+    AGNOCAST_DAEMON_BENCH_CLEAR_WORK();
     if (n == 0) break;  // client closed the connection
     if (n < 0) {
       if (errno == EINTR) continue;
