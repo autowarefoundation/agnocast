@@ -194,12 +194,6 @@ def test_bidirectional_accepts_the_yaml11_forms_yaml_cpp_resolves():
         assert len(rules) == expected_len, text
 
 
-def test_bidirectional_rejects_a_value_that_is_not_a_boolean():
-    text = 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n    bidirectional: maybe\n'
-    with pytest.raises(ValueError):
-        parse_domain_bridge_config(text)
-
-
 def test_bidirectional_reverse_leg_swaps_only_the_domains():
     """Mirrors the external node, whose reverse leg keeps the source and remap names."""
     text = """

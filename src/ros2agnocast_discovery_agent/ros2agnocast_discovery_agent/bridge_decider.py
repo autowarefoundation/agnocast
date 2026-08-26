@@ -173,9 +173,10 @@ def _note_unforced(logger, reported, cell, reason, seen) -> None:
     ``UNFORCED_WARN_AFTER_TICKS`` warns once, and nothing in between is logged.
 
     The count is per cell per tick: ``seen`` holds the cells already noted in this pass, since two
-    rules can name one cell. It counts how long the cell has gone unforced, not how long one reason
-    has held -- a fault that alternates between reasons is still a fault, and resetting on each
-    change would leave it at info forever. A changed reason is worth an info line, not a restart.
+    rules can name one cell. It counts consecutive unforced ticks, not how long one reason has
+    held, so a gap that alternates between reasons still escalates; a changed reason is worth an
+    info line, not a restart. A cell that alternates between forced and unforced does restart,
+    since forcing clears the entry, and so stays at info.
     """
     if logger is None:
         return
@@ -243,8 +244,8 @@ def decide_domain_rule_bridges(
             _note_unforced(logger, reported, cell, 'no local topic in this domain', seen)
             continue
         if not local_topic.type_name:
-            # The type comes from the tmpfs registry, so an empty one usually means that join
-            # failed rather than that the topic is new.
+            # The type comes from the tmpfs registry: empty means the topic has not registered
+            # yet, which is ordinary at startup, or that the join failed.
             _note_unforced(logger, reported, cell, 'the topic type is not known yet', seen)
             continue
 

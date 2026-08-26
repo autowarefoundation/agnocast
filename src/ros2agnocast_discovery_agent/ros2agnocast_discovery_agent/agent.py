@@ -323,9 +323,10 @@ def _load_domain_rules(logger=None) -> list:
                     f'is off (set {domain_bridge_config.CONFIG_ENV} to use another path)')
         return []
     except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
-        # domain_bridge refuses the same file outright, so one bad entry disables the whole
-        # config on both sides. Say so at error level: forcing is off for every topic, and a
-        # topic split across a namespace and a domain then stops without another trace.
+        # One bad entry disables the whole config, not just its topic, and domain_bridge refuses
+        # the same file for anything yaml-cpp cannot convert. Say so at error level: forcing is
+        # off for every topic, and a topic split across a namespace and a domain then stops
+        # without another trace.
         if logger is not None:
             logger.error(
                 f'cannot load {path} ({exc}); cross-domain bridge forcing is off for ALL '
