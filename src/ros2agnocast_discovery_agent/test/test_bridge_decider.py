@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 from ros2agnocast_discovery_agent.bridge_decider import (
     BridgeRequest,
+    UNFORCED_WARN_AFTER_TICKS,
     decide_bridges,
     decide_domain_rule_bridges,
     DIRECTION_AGNOCAST_TO_ROS2,
@@ -219,11 +220,13 @@ def test_domain_rule_reports_each_reason_it_forced_nothing():
         _state(topics=[_topic('/x', pubs=[_endpoint('/b', is_bridge=True)], domain=1)]),
         [('/x', '/x', 1, 2)], logger=logger)
 
-    reasons = ' '.join(str(c) for c in logger.warn.call_args_list)
-    assert logger.warn.call_count == 3
+    reasons = ' '.join(str(c) for c in logger.info.call_args_list)
+    assert logger.info.call_count == 3
     assert 'no local topic' in reasons
     assert 'type is not known' in reasons
     assert 'no local publisher' in reasons
+    # The startup gap is ordinary; nothing has persisted yet.
+    logger.warn.assert_not_called()
 
 
 def test_domain_rule_reports_one_reason_once_across_ticks():
@@ -233,11 +236,41 @@ def test_domain_rule_reports_one_reason_once_across_ticks():
     local = _state(topics=[])
     for _ in range(3):
         decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)], logger=logger, reported=reported)
+    assert logger.info.call_count == 1
+    logger.warn.assert_not_called()
+
+
+def test_domain_rule_warns_once_after_the_reason_persists():
+    """The agent ticks before the first publisher exists, so only a lasting gap is a warning."""
+    logger = MagicMock()
+    reported = {}
+    local = _state(topics=[])
+    rules = [('/x', '/x', 1, 2)]
+    for _ in range(UNFORCED_WARN_AFTER_TICKS + 5):
+        decide_domain_rule_bridges(local, rules, logger=logger, reported=reported)
+
+    assert logger.info.call_count == 1
     assert logger.warn.call_count == 1
+    assert 'unchanged for' in str(logger.warn.call_args)
 
 
-def test_domain_rule_reports_again_after_forcing_recovers_and_breaks():
-    """A rule that starts forcing clears its note, so a later failure is reported again."""
+def test_domain_rule_restarts_the_count_when_the_reason_changes():
+    logger = MagicMock()
+    reported = {}
+    rules = [('/x', '/x', 1, 2)]
+    absent = _state(topics=[])
+    untyped = _state(topics=[_topic('/x', type_name='', pubs=[_endpoint('/lp')], domain=1)])
+
+    for _ in range(UNFORCED_WARN_AFTER_TICKS - 1):
+        decide_domain_rule_bridges(absent, rules, logger=logger, reported=reported)
+    decide_domain_rule_bridges(untyped, rules, logger=logger, reported=reported)
+
+    assert logger.info.call_count == 2
+    logger.warn.assert_not_called()
+
+
+def test_domain_rule_says_when_forcing_starts_and_can_report_again():
+    """A reported gap that closes is said so, and a later one is reported afresh."""
     logger = MagicMock()
     reported = {}
     absent = _state(topics=[])
@@ -248,7 +281,9 @@ def test_domain_rule_reports_again_after_forcing_recovers_and_breaks():
     assert decide_domain_rule_bridges(present, rules, logger=logger, reported=reported)
     decide_domain_rule_bridges(absent, rules, logger=logger, reported=reported)
 
-    assert logger.warn.call_count == 2
+    messages = ' '.join(str(c) for c in logger.info.call_args_list)
+    assert logger.info.call_count == 3
+    assert 'now forced' in messages
 
 
 def test_domain_rule_request_carries_the_topic_type_and_publisher_qos():

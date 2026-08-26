@@ -160,22 +160,46 @@ def decide_bridges(local_state, remote_states) -> list:
     return list(requests.values())
 
 
-def _note_unforced(logger, reported, cell, reason) -> None:
-    """Report why a rule forced nothing, once per ``(cell, reason)``.
+# At ~1 Hz, long enough that the ordinary startup gap -- the agent is forked by the first
+# Agnocast process, so it ticks before that process has created its publishers -- passes at info.
+UNFORCED_WARN_AFTER_TICKS = 30
 
-    The decider runs every tick, so an unchanged reason must not be repeated. A rule that stops
-    being forced for a *different* reason is worth a new line, hence keying on the reason too.
+
+def _note_unforced(logger, reported, cell, reason) -> None:
+    """Report why a rule forced nothing, escalating only once the reason persists.
+
+    Both "no local topic" and "type not known" are the normal state at startup, so warning on the
+    first tick would cry wolf. The first sighting is info; the same reason still standing after
+    ``UNFORCED_WARN_AFTER_TICKS`` warns once. The decider runs every tick, so nothing in between is
+    logged, and a different reason restarts the count.
     """
     if logger is None:
         return
     topic, domain = cell
+    text = f'no cross-domain bridge forced for {topic}@{domain}: {reason}'
     if reported is None:
-        logger.warn(f'no cross-domain bridge forced for {topic}@{domain}: {reason}')
+        logger.info(text)
         return
-    if reported.get(cell) == reason:
+
+    seen_reason, ticks = reported.get(cell, (None, 0))
+    if seen_reason != reason:
+        reported[cell] = (reason, 1)
+        logger.info(text)
         return
-    reported[cell] = reason
-    logger.warn(f'no cross-domain bridge forced for {topic}@{domain}: {reason}')
+
+    ticks += 1
+    reported[cell] = (reason, ticks)
+    if ticks == UNFORCED_WARN_AFTER_TICKS:
+        logger.warn(f'{text} (unchanged for {ticks} ticks)')
+
+
+def _note_forced(logger, reported, cell) -> None:
+    """Close the loop when a rule starts forcing, so a reported gap does not just stop being said."""
+    if reported is None:
+        return
+    if reported.pop(cell, None) is not None and logger is not None:
+        topic, domain = cell
+        logger.info(f'cross-domain bridge now forced for {topic}@{domain}')
 
 
 def decide_domain_rule_bridges(
@@ -223,8 +247,7 @@ def decide_domain_rule_bridges(
             _note_unforced(logger, reported, cell, 'no local publisher other than a bridge')
             continue
 
-        if reported is not None:
-            reported.pop(cell, None)
+        _note_forced(logger, reported, cell)
 
         pub = local_pubs[0]
         key = (from_topic, from_domain, DIRECTION_AGNOCAST_TO_ROS2)
