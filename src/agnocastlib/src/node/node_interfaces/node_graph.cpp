@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 
 namespace agnocast::node_interfaces
