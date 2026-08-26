@@ -8,9 +8,14 @@
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
+#include <sched.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -25,13 +30,32 @@ namespace
 std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> dedup_by_comm(
   std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> scanned)
 {
-  std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> result;
-  for (auto & info : scanned) {
-    if (result.empty() || result.back().comm != info.comm) {
-      result.push_back(std::move(info));
-    }
+  scanned.erase(
+    std::unique(
+      scanned.begin(), scanned.end(),
+      [](const auto & a, const auto & b) { return a.comm == b.comm; }),
+    scanned.end());
+  return scanned;
+}
+
+// The kernel prints affinity over the possible-CPU mask, which can include
+// CPUs the apply-side parser rejects (it bounds them by the present CPUs);
+// keep only acceptable CPUs so the untouched template stays loadable.
+std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & raw)
+{
+  auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(raw);
+  if (!cpus) {
+    return std::nullopt;
   }
-  return result;
+  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
+  cpus->erase(
+    std::remove_if(cpus->begin(), cpus->end(), [max_cpu](int cpu) { return cpu > max_cpu; }),
+    cpus->end());
+  if (cpus->empty()) {
+    return std::nullopt;
+  }
+  return cpus;
 }
 
 }  // namespace
@@ -217,6 +241,16 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   RCLCPP_INFO(
     this->get_logger(), "Scanned %zu kernel thread comms and %zu device-backed IRQs",
     kernel_threads.size(), irqs.size());
+  if (kernel_threads.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No kernel threads found; the /proc scan likely failed (restricted /proc?)");
+  }
+  if (irqs.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No device-backed IRQs found; is /sys/kernel/irq available (kernel >= 4.12)?");
+  }
 
   out << YAML::Key << "kernel_threads";
   out << YAML::Value << YAML::BeginSeq;
@@ -227,13 +261,12 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     const bool policy_representable =
       agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
       info.policy != "SCHED_DEADLINE";
-    const auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(info.affinity);
+    const auto cpus = parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "comm" << YAML::Value << info.comm;
     if (policy_representable) {
-      const bool is_cfs =
-        info.policy == "SCHED_OTHER" || info.policy == "SCHED_BATCH" || info.policy == "SCHED_IDLE";
+      const bool is_cfs = agnocast_cie_thread_configurator::is_cfs_policy(info.policy);
       out << YAML::Key << "policy" << YAML::Value << info.policy;
       if (is_cfs) {
         out << YAML::Key << "nice" << YAML::Value << info.nice;
@@ -260,7 +293,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & info : irqs) {
-    const auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(info.affinity);
+    const auto cpus = parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "irq" << YAML::Value << info.irq;
