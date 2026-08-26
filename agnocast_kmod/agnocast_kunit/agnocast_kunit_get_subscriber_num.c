@@ -13,40 +13,33 @@ bool is_take_sub = false;
 bool ignore_local_publications = false;
 bool is_bridge = false;
 
-static void setup_one_subscriber(struct kunit * test, char * topic_name)
+static void setup_one_subscriber_impl(
+  struct kunit * test, char * topic_name, const uint32_t domain_id, const bool sub_is_bridge)
 {
   subscriber_pid++;
 
   union ioctl_add_process_args add_process_args;
   int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+    subscriber_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
 
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret2 = agnocast_ioctl_add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, -1,
-    &add_subscriber_args);
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, sub_is_bridge,
+    -1, &add_subscriber_args);
 
   KUNIT_ASSERT_EQ(test, ret1, 0);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 }
 
+static void setup_one_subscriber(struct kunit * test, char * topic_name)
+{
+  setup_one_subscriber_impl(test, topic_name, 0, false);
+}
+
 static void setup_one_subscriber_with_bridge(struct kunit * test, char * topic_name)
 {
-  subscriber_pid++;
-
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, true, -1,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  setup_one_subscriber_impl(test, topic_name, 0, true);
 }
 
 static void setup_one_publisher(struct kunit * test, char * topic_name)
@@ -86,20 +79,13 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
 static void setup_one_subscriber_in_domain(
   struct kunit * test, char * topic_name, const uint32_t domain_id)
 {
-  subscriber_pid++;
+  setup_one_subscriber_impl(test, topic_name, domain_id, false);
+}
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, -1,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+static void setup_one_subscriber_in_domain_with_bridge(
+  struct kunit * test, char * topic_name, const uint32_t domain_id)
+{
+  setup_one_subscriber_impl(test, topic_name, domain_id, true);
 }
 
 // The count is reported for the domain the calling process is registered in, so the publisher has
@@ -316,4 +302,50 @@ void test_case_get_subscriber_num_other_domain_undelivered(struct kunit * test)
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_domain_subscriber_num, 0);
+}
+
+// The bridge drops out of the reachable count, the real subscriber beside it does not.
+void test_case_get_subscriber_num_other_domain_bridge_not_counted(struct kunit * test)
+{
+  // Arrange
+  char * topic_name = "/kunit_test_topic";
+  int ret_setup =
+    agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns);
+  KUNIT_ASSERT_EQ(test, ret_setup, 0);
+  setup_current_publisher_in_domain(test, topic_name, 1);
+  setup_one_subscriber_in_domain_with_bridge(test, topic_name, 2);
+  setup_one_subscriber_in_domain(test, topic_name, 2);
+  union ioctl_get_subscriber_num_args subscriber_num_args;
+
+  // Act
+  int ret = agnocast_ioctl_get_subscriber_num(
+    topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_domain_subscriber_num, 1);
+}
+
+// The exclusion is about crossing, not about being a bridge.
+void test_case_get_subscriber_num_same_domain_bridge_still_counted(struct kunit * test)
+{
+  // Arrange
+  char * topic_name = "/kunit_test_topic";
+  int ret_setup =
+    agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns);
+  KUNIT_ASSERT_EQ(test, ret_setup, 0);
+  setup_current_publisher_in_domain(test, topic_name, 1);
+  setup_one_subscriber_in_domain_with_bridge(test, topic_name, 1);
+  setup_one_subscriber_in_domain(test, topic_name, 2);
+  union ioctl_get_subscriber_num_args subscriber_num_args;
+
+  // Act
+  int ret = agnocast_ioctl_get_subscriber_num(
+    topic_name, current->nsproxy->ipc_ns, current->tgid, &subscriber_num_args);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_process_subscriber_num, 1);
+  KUNIT_EXPECT_EQ(test, subscriber_num_args.ret_other_domain_subscriber_num, 1);
+  KUNIT_EXPECT_TRUE(test, subscriber_num_args.ret_a2r_bridge_exist);
 }

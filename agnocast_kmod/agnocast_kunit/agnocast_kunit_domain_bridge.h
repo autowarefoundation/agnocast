@@ -12,7 +12,10 @@
     KUNIT_CASE(test_case_domain_bridge_groups_wrappers),                      \
     KUNIT_CASE(test_case_domain_bridge_cross_domain_enumeration),             \
     KUNIT_CASE(test_case_domain_bridge_direction_respected),                  \
-    KUNIT_CASE(test_case_domain_bridge_late_reverse_direction_delivers),      \
+    KUNIT_CASE(test_case_domain_bridge_bidirectional_delivers),               \
+    KUNIT_CASE(test_case_domain_bridge_late_reverse_direction_rejected),      \
+    KUNIT_CASE(test_case_domain_bridge_redeclaration_is_idempotent),          \
+    KUNIT_CASE(test_case_domain_bridge_reverse_redeclaration_is_idempotent),  \
     KUNIT_CASE(test_case_domain_bridge_partial_remove_keeps_struct),          \
     KUNIT_CASE(test_case_domain_bridge_partial_remove_sub_keeps_struct),      \
     KUNIT_CASE(test_case_domain_bridge_exit_frees_shared_struct),             \
@@ -22,7 +25,13 @@
     KUNIT_CASE(test_case_domain_bridge_rename_groups_wrappers),               \
     KUNIT_CASE(test_case_domain_bridge_rename_cross_domain_delivery),         \
     KUNIT_CASE(test_case_domain_bridge_rename_fanout_rejected),               \
-    KUNIT_CASE(test_case_domain_bridge_rename_multi_publisher)
+    KUNIT_CASE(test_case_domain_bridge_rename_multi_publisher),               \
+    KUNIT_CASE(test_case_domain_bridge_prefix_groups_wrappers),               \
+    KUNIT_CASE(test_case_domain_bridge_prefix_leaves_other_topics_alone),     \
+    KUNIT_CASE(test_case_domain_bridge_prefix_pairs_each_name_separately),    \
+    KUNIT_CASE(test_case_domain_bridge_prefix_cross_domain_delivery),         \
+    KUNIT_CASE(test_case_domain_bridge_prefix_direction_respected),           \
+    KUNIT_CASE(test_case_domain_bridge_exact_under_prefix_rejected)
 
 void test_case_add_domain_bridge_normal(struct kunit * test);
 void test_case_add_domain_bridge_reverse_first_declaration(struct kunit * test);
@@ -33,7 +42,10 @@ void test_case_add_domain_bridge_rejected_when_endpoint_exists(struct kunit * te
 void test_case_domain_bridge_groups_wrappers(struct kunit * test);
 void test_case_domain_bridge_cross_domain_enumeration(struct kunit * test);
 void test_case_domain_bridge_direction_respected(struct kunit * test);
-void test_case_domain_bridge_late_reverse_direction_delivers(struct kunit * test);
+void test_case_domain_bridge_bidirectional_delivers(struct kunit * test);
+void test_case_domain_bridge_late_reverse_direction_rejected(struct kunit * test);
+void test_case_domain_bridge_redeclaration_is_idempotent(struct kunit * test);
+void test_case_domain_bridge_reverse_redeclaration_is_idempotent(struct kunit * test);
 void test_case_domain_bridge_partial_remove_keeps_struct(struct kunit * test);
 void test_case_domain_bridge_partial_remove_sub_keeps_struct(struct kunit * test);
 void test_case_domain_bridge_exit_frees_shared_struct(struct kunit * test);
@@ -44,3 +56,9 @@ void test_case_domain_bridge_rename_groups_wrappers(struct kunit * test);
 void test_case_domain_bridge_rename_cross_domain_delivery(struct kunit * test);
 void test_case_domain_bridge_rename_fanout_rejected(struct kunit * test);
 void test_case_domain_bridge_rename_multi_publisher(struct kunit * test);
+void test_case_domain_bridge_prefix_groups_wrappers(struct kunit * test);
+void test_case_domain_bridge_prefix_leaves_other_topics_alone(struct kunit * test);
+void test_case_domain_bridge_prefix_pairs_each_name_separately(struct kunit * test);
+void test_case_domain_bridge_prefix_cross_domain_delivery(struct kunit * test);
+void test_case_domain_bridge_prefix_direction_respected(struct kunit * test);
+void test_case_domain_bridge_exact_under_prefix_rejected(struct kunit * test);

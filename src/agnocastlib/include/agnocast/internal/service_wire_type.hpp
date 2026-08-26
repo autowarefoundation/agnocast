@@ -1,10 +1,10 @@
 // On-the-wire layout of Agnocast service request/response messages.
 //
-// ┌───────────┬────────────────────────────────────┐
-// │           │        correlation metadata        │
-// │  payload  ├─────────┬──────────────┬───────────┤
-// │           │  seqno  │  client_gid  │ node_name │
-// └───────────┼─────────┴──────────────┴───────────┘
+// ┌───────────┬───────────────────────────────────────────────┐
+// │           │             correlation metadata              │
+// │  payload  ├─────────┬──────────────┬──────────────────────┤
+// │           │  seqno  │  client_gid  │ response_topic_name  │
+// └───────────┼─────────┴──────────────┴──────────────────────┘
 //             └ 16-byte aligned
 //
 // payload: request/response payload (ServiceT::Request or ServiceT::Response).
@@ -15,7 +15,9 @@
 // client_gid: The client GID (uint8_t array of length RMW_GID_STORAGE_SIZE). This field only exists
 // in the request.
 //
-// node_name: The node name of the caller (std::string). This field only exists in the request.
+// response_topic_name: The topic the caller listens for its response on (std::string). This field
+// only exists in the request. A renaming domain bridge gives the two sides different service names,
+// so the server publishes to this name rather than deriving one.
 
 #pragma once
 
@@ -64,7 +66,7 @@ struct RequestMeta
 {
   alignas(16) int64_t seqno;
   uint8_t client_gid[RMW_GID_STORAGE_SIZE];
-  std::string node_name;
+  std::string response_topic_name;
 };
 
 struct ResponseMeta
@@ -120,7 +122,7 @@ public:
 
   int64_t & seqno() { return meta_ptr_->seqno; }
   auto client_gid() -> uint8_t (&)[RMW_GID_STORAGE_SIZE] { return meta_ptr_->client_gid; }
-  std::string & node_name() { return meta_ptr_->node_name; }
+  std::string & response_topic_name() { return meta_ptr_->response_topic_name; }
 
   ipc_shared_ptr<void> && take_request() && { return std::move(request_); }
 
@@ -128,7 +130,7 @@ public:
   ///
   /// The payload buffer is initialized via the introspection init function with
   /// MessageInitialization::SKIP. The seqno number and client_gid are uninitialized (garbage),
-  /// and the node_name string is default-constructed via placement new.
+  /// and the response_topic_name string is default-constructed via placement new.
   ///
   /// @param request_members The introspection message members for the request type.
   /// @param borrow_loaned_message A callable that allocates a buffer of the given size in shared
@@ -144,9 +146,9 @@ public:
     request_members->init_function(
       wrapper.request_.get(), rosidl_runtime_cpp::MessageInitialization::SKIP);
 
-    // Use placement new to construct node_name.
-    auto * node_name_ptr = &wrapper.node_name();
-    new (node_name_ptr) std::string{};
+    // Use placement new to construct response_topic_name.
+    auto * response_topic_name_ptr = &wrapper.response_topic_name();
+    new (response_topic_name_ptr) std::string{};
 
     return wrapper;
   }
@@ -159,10 +161,10 @@ public:
   {
     request_members->fini_function(ptr);
 
-    // Destroy node_name by calling std::destroy_at().
+    // Destroy response_topic_name by calling std::destroy_at().
     RequestMeta * meta_ptr = get_meta_ptr(request_members, ptr);
-    auto * node_name_ptr = &meta_ptr->node_name;
-    std::destroy_at(node_name_ptr);
+    auto * response_topic_name_ptr = &meta_ptr->response_topic_name;
+    std::destroy_at(response_topic_name_ptr);
 
     ::operator delete(ptr);
   }

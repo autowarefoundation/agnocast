@@ -4,10 +4,8 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
-#include <array>
 #include <chrono>
 #include <cstring>
-#include <memory>
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -15,28 +13,29 @@ using namespace std::chrono_literals;
 namespace agnocast
 {
 
-uint32_t get_agnocast_sub_count(const std::string & topic_name)
+rclcpp::Logger ClientBase::get_logger() const
 {
-  auto topic_info_buffer = std::make_unique<std::array<topic_info_ret, MAX_TOPIC_INFO_RET_NUM>>();
+  return std::visit([](auto * n) { return n->get_logger(); }, node_);
+}
 
-  ioctl_topic_info_args topic_info_args = {};
-  topic_info_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  topic_info_args.topic_info_ret_buffer_addr =
-    reinterpret_cast<uint64_t>(topic_info_buffer->data());
-  topic_info_args.topic_info_ret_buffer_size = MAX_TOPIC_INFO_RET_NUM;
-  topic_info_args.domain_id = get_ros_domain_id();
-  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD, &topic_info_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD failed: %s", strerror(errno));
+uint32_t get_reachable_agnocast_sub_count(const std::string & topic_name)
+{
+  union ioctl_get_subscriber_num_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
 
-  return topic_info_args.ret_topic_info_ret_num;
+  return args.ret_same_process_subscriber_num + args.ret_other_process_subscriber_num +
+         args.ret_other_domain_subscriber_num;
 }
 
 bool service_is_ready_core(const std::string & service_name)
 {
-  uint32_t sub_count = get_agnocast_sub_count(create_service_request_topic_name(service_name));
+  const uint32_t sub_count =
+    get_reachable_agnocast_sub_count(create_service_request_topic_name(service_name));
 
   if (sub_count == 0) {
     return false;
@@ -105,7 +104,7 @@ ipc_shared_ptr<void> GenericClient::borrow_loaned_request()
   std::memcpy(
     static_cast<void *>(generic_request_wrapper.client_gid()),
     static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
-  generic_request_wrapper.node_name() = node_name_;
+  generic_request_wrapper.response_topic_name() = response_topic_name_;
 
   return std::move(generic_request_wrapper).take_request();
 }

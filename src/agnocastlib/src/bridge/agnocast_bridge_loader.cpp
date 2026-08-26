@@ -338,7 +338,7 @@ ServiceBridgeEntity BridgeLoader::create_r2a_service_bridge_generic(
   auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto agno_client = std::make_shared<agnocast::GenericClient>(
-    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::AgnocastOnly);
+    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::BridgeInternal);
 
   auto ros_srv = agnocast::vendor_rclcpp::GenericService::create_generic_service(
     node.get(), service_name, service_type,
@@ -427,7 +427,7 @@ ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
           service_handle->get_service_name(), e.what());
       }
     },
-    qos, srv_cbg, agnocast::ServiceRole::AgnocastOnly);
+    qos, srv_cbg, agnocast::ServiceRole::BridgeInternal);
 
   return {agno_srv, srv_cbg, client_cbg};
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)

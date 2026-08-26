@@ -23,9 +23,8 @@ extern "C" ServiceBridgeEntity create_r2a_service_bridge_@(snake_type_name)(
   auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
   auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
-  // AgnocastOnly: this client is the bridge's own endpoint and must not itself request a bridge.
   auto agno_client = std::make_shared<AgnoClient>(
-    node.get(), service_name, qos, client_cb_group, agnocast::ClientRole::AgnocastOnly);
+    node.get(), service_name, qos, client_cb_group, agnocast::ClientRole::BridgeInternal);
 
   auto ros_srv = node->create_service<ServiceT>(
     service_name,
@@ -98,8 +97,7 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
           service_handle->get_service_name(), e.what());
       }
     },
-    // AgnocastOnly: this service is the bridge's own endpoint and must not itself request a bridge.
-    qos, srv_cb_group, agnocast::ServiceRole::AgnocastOnly);
+    qos, srv_cb_group, agnocast::ServiceRole::BridgeInternal);
 
   return {agno_srv, srv_cb_group, client_cb_group};
 }

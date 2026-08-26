@@ -243,6 +243,10 @@ struct domain_bridge_rule
   uint32_t domain_b;
   bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
   bool b_to_a;
+  // When set, topic_name_a is a prefix rather than a whole name and topic_name_b equals it: the
+  // rule pairs every topic whose name starts with the prefix against the *same* name in the other
+  // domain, so a prefix rule never renames.
+  bool is_prefix;
   struct hlist_node node;
 };
 
