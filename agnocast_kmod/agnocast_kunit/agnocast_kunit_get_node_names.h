@@ -11,7 +11,8 @@
     KUNIT_CASE(test_case_get_node_names_excludes_bridge_subscriber),  \
     KUNIT_CASE(test_case_get_node_names_other_domain),                \
     KUNIT_CASE(test_case_get_node_names_excludes_the_bridged_domain), \
-    KUNIT_CASE(test_case_get_node_names_buffer_too_small)
+    KUNIT_CASE(test_case_get_node_names_buffer_too_small),            \
+    KUNIT_CASE(test_case_get_node_names_excludes_an_exited_process)
 
 void test_case_get_node_names_no_node(struct kunit * test);
 void test_case_get_node_names_multiple_nodes(struct kunit * test);
@@ -22,3 +23,4 @@ void test_case_get_node_names_excludes_bridge_subscriber(struct kunit * test);
 void test_case_get_node_names_other_domain(struct kunit * test);
 void test_case_get_node_names_excludes_the_bridged_domain(struct kunit * test);
 void test_case_get_node_names_buffer_too_small(struct kunit * test);
+void test_case_get_node_names_excludes_an_exited_process(struct kunit * test);

@@ -1731,6 +1731,14 @@ static int add_unique_node(struct node_name_collector * col, const char * name, 
   return 0;
 }
 
+// A publisher_info outlives its process while a subscriber still references its entries.
+// Caller holds global_htables_rwsem.
+static bool owner_is_alive(const pid_t pid)
+{
+  const struct process_info * proc_info = agnocast_find_process_info(pid);
+  return proc_info && !proc_info->exited;
+}
+
 // Collects the nodes owning an endpoint of one topic. Caller holds global_htables_rwsem.
 static int collect_node_names_of_topic(
   struct topic_wrapper * wrapper, const uint32_t domain_id, struct node_name_collector * col)
@@ -1744,6 +1752,7 @@ static int collect_node_names_of_topic(
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     if (pub_info->domain_id != domain_id || pub_info->is_bridge) continue;
+    if (!owner_is_alive(pub_info->pid)) continue;
 
     ret = add_unique_node(col, pub_info->node_name, pub_info->pid);
     if (ret) goto unlock;
@@ -1754,6 +1763,7 @@ static int collect_node_names_of_topic(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->domain_id != domain_id || sub_info->is_bridge) continue;
+    if (!owner_is_alive(sub_info->pid)) continue;
 
     ret = add_unique_node(col, sub_info->node_name, sub_info->pid);
     if (ret) goto unlock;

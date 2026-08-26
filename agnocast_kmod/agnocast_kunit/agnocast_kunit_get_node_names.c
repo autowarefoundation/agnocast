@@ -4,6 +4,7 @@
 #include "../agnocast.h"
 
 #include <kunit/test.h>
+#include <linux/delay.h>
 
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * TOPIC_NAME2 = "/kunit_test_topic2";
@@ -15,15 +16,17 @@ static const uint32_t QOS_DEPTH = 1;
 static const uint32_t DOMAIN_ID = 1;
 static const uint32_t OTHER_DOMAIN_ID = 2;
 
-static void setup_process(struct kunit * test, const pid_t pid, const uint32_t domain_id)
+// Returns the process's mempool base address, used as a valid publish address.
+static uint64_t setup_process(struct kunit * test, const pid_t pid, const uint32_t domain_id)
 {
   union ioctl_add_process_args add_process_args;
   int ret =
     agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
+  return add_process_args.ret_addr;
 }
 
-static void add_publisher(
+static topic_local_id_t add_publisher(
   struct kunit * test, const char * topic_name, const char * node_name, const pid_t pid,
   const bool is_bridge)
 {
@@ -32,9 +35,10 @@ static void add_publisher(
     topic_name, current->nsproxy->ipc_ns, node_name, pid, QOS_DEPTH, false, is_bridge,
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
+  return add_pub_args.ret_id;
 }
 
-static void add_subscriber(
+static topic_local_id_t add_subscriber(
   struct kunit * test, const char * topic_name, const char * node_name, const pid_t pid,
   const bool is_bridge)
 {
@@ -43,6 +47,7 @@ static void add_subscriber(
     topic_name, current->nsproxy->ipc_ns, node_name, pid, QOS_DEPTH, false, true, false, false,
     is_bridge, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
+  return add_sub_args.ret_id;
 }
 
 // Returns how many of the `num` names in `buf` equal `name`.
@@ -244,4 +249,43 @@ void test_case_get_node_names_buffer_too_small(struct kunit * test)
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
+}
+
+// A publisher whose process exited outlives it while a subscriber still references its entries, so
+// without a liveness check a node that crashed and restarted would be reported twice.
+void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
+{
+  char buf[2][NODE_NAME_BUFFER_SIZE];
+  uint32_t node_num = 0;
+
+  // Arrange
+  const uint64_t msg_addr = setup_process(test, PID, DOMAIN_ID);
+  const topic_local_id_t publisher_id = add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
+  union ioctl_publish_msg_args publish_msg_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_publish_msg(
+      TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_addr, &publish_msg_args),
+    0);
+  setup_process(test, PID2, DOMAIN_ID);
+  const topic_local_id_t subscriber_id = add_subscriber(test, TOPIC_NAME, NODE_NAME2, PID2, false);
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_increment_message_entry_rc(
+      TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, publish_msg_args.ret_entry_id),
+    0);
+  agnocast_enqueue_exit_pid(PID);
+  msleep(20);
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(PID));
+  KUNIT_ASSERT_TRUE(
+    test, agnocast_is_in_publisher_htable(TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id));
+
+  // Act
+  int ret = agnocast_ioctl_get_node_names(
+    current->nsproxy->ipc_ns, PID2, (char *)buf, ARRAY_SIZE(buf), &node_num);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, node_num, 1);
+  KUNIT_EXPECT_STREQ(test, buf[0], NODE_NAME2);
 }
