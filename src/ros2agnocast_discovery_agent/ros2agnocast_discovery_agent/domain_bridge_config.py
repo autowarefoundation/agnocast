@@ -30,6 +30,8 @@ def parse_domain_bridge_config(text):
     ``rules`` is a list of ``(from_topic, to_topic, from_domain, to_domain)``
     tuples. ``to_topic`` is the per-topic ``remap`` target (same ``domain_bridge``
     field the external node honors), or the source name when ``remap`` is absent.
+    A ``bidirectional`` topic yields two tuples; the kmod folds them into one rule
+    with both directions enabled.
     ``skipped`` lists the topic names dropped for lack of a resolvable domain
     pair, so the caller can surface them instead of dropping them silently.
     ``from_domain`` / ``to_domain`` are taken from the top level and may be
@@ -70,8 +72,16 @@ def parse_domain_bridge_config(text):
         to_topic = spec.get('remap', str(topic_name))
         if not isinstance(to_topic, str):
             raise ValueError(f"'remap' for topic {topic_name!r} must be a string")
-        rules.append(
-            (str(topic_name), to_topic, _as_domain_id(from_domain), _as_domain_id(to_domain)))
+        bidirectional = spec.get('bidirectional', False)
+        if not isinstance(bidirectional, bool):
+            raise ValueError(f"'bidirectional' for topic {topic_name!r} must be a boolean")
+        from_id = _as_domain_id(from_domain)
+        to_id = _as_domain_id(to_domain)
+        rules.append((str(topic_name), to_topic, from_id, to_id))
+        if bidirectional:
+            # The external node's reverse leg swaps the domain ids and nothing else, keeping the
+            # source name on the subscribe side and the remap on the publish side.
+            rules.append((str(topic_name), to_topic, to_id, from_id))
     return rules, skipped
 
 

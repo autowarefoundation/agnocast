@@ -167,3 +167,54 @@ topics:
   chatter:
 """
     assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+
+
+def test_bidirectional_topic_yields_both_directions():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: true
+"""
+    rules, skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/chatter', 1, 2), ('/chatter', '/chatter', 2, 1)]
+    assert skipped == []
+
+
+def test_bidirectional_reverse_leg_swaps_only_the_domains():
+    """Mirrors the external node, whose reverse leg keeps the source and remap names."""
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    remap: /renamed
+    bidirectional: true
+"""
+    rules, _skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/renamed', 1, 2), ('/chatter', '/renamed', 2, 1)]
+
+
+def test_bidirectional_false_yields_one_direction():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: false
+"""
+    rules, _skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/chatter', 1, 2)]
+
+
+def test_non_boolean_bidirectional_is_rejected():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: yes please
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
