@@ -1680,9 +1680,10 @@ unlock:
 // stalls every publish behind a waiting endpoint add/remove. Hence the scratch preallocated
 // below, and the copy_to_user left to get_node_names_cmd.
 
-// Kept well above MAX_NODE_NUM so that probing always terminates on a free slot.
 #define NODE_NAME_SLOT_BITS 11
 #define NODE_NAME_SLOT_NUM (1u << NODE_NAME_SLOT_BITS)
+// add_unique_node's probe loop has no bound: it terminates only because a free slot always exists.
+static_assert(NODE_NAME_SLOT_NUM >= 2 * MAX_NODE_NUM, "node name slots must outnumber the names");
 
 struct collected_node
 {
@@ -1774,14 +1775,16 @@ unlock:
   return ret;
 }
 
-// `buf_node_num` must not exceed MAX_NODE_NUM, or the dedup table can fill and probing never
-// finds a free slot. get_node_names_cmd clamps it.
 int agnocast_ioctl_get_node_names(
   const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
   uint32_t * ret_node_num)
 {
   int ret = 0;
   struct node_name_collector col = {.buf = buf, .capacity = buf_node_num};
+
+  // Beyond MAX_NODE_NUM the dedup table could fill and add_unique_node's probe loop would not
+  // terminate.
+  if (buf_node_num > MAX_NODE_NUM) return -EINVAL;
 
   col.slots = kvcalloc(NODE_NAME_SLOT_NUM, sizeof(*col.slots), GFP_KERNEL);
   if (!col.slots) return -ENOMEM;
