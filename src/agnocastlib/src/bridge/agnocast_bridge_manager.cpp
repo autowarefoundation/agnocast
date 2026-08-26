@@ -317,19 +317,15 @@ void BridgeManager::create_daemon_forced_bridges()
       // local Agnocast endpoint is still required for the bridge to carry traffic.
       const auto count = is_r2a ? get_agnocast_subscriber_count(topic_name).count
                                 : get_agnocast_publisher_count(topic_name).count;
-      if (
-        !already_active && count > 0 &&
-        !activate_daemon_forced_bridge(
-          topic_name, it->second.message_type, it->second.qos, is_r2a)) {
-        it = forced.erase(it);
-        continue;
+      if (!already_active && count > 0) {
+        activate_daemon_forced_bridge(topic_name, it->second.message_type, it->second.qos, is_r2a);
       }
       ++it;
     }
   }
 }
 
-bool BridgeManager::activate_daemon_forced_bridge(
+void BridgeManager::activate_daemon_forced_bridge(
   const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
   bool is_r2a)
 {
@@ -338,10 +334,7 @@ bool BridgeManager::activate_daemon_forced_bridge(
       is_r2a ? loader_->create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos)
              : loader_->create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
     if (!result.entity_handle) {
-      RCLCPP_WARN(
-        logger_, "Daemon-forced bridge for '%s' produced no entity; dropping the request.",
-        topic_name.c_str());
-      return false;
+      return;
     }
 
     if (is_r2a) {
@@ -365,19 +358,13 @@ bool BridgeManager::activate_daemon_forced_bridge(
       }
       active_pubsub_a2r_bridges_[topic_name] = result;
     }
-    return true;
   } catch (const std::exception & e) {
-    // Mirror the on-demand path: a request that cannot be built is dropped rather than retried,
-    // or the daemon's per-tick renewal would repeat the same failure forever.
     RCLCPP_WARN(
-      logger_, "Failed to create daemon-forced bridge for '%s': %s. Dropping the request.",
-      topic_name.c_str(), e.what());
+      logger_, "Failed to create daemon-forced bridge for '%s': %s", topic_name.c_str(), e.what());
   } catch (...) {
     RCLCPP_WARN(
-      logger_, "Unknown error creating daemon-forced bridge for '%s'. Dropping the request.",
-      topic_name.c_str());
+      logger_, "Unknown error creating daemon-forced bridge for '%s'", topic_name.c_str());
   }
-  return false;
 }
 
 void BridgeManager::request_shutdown()

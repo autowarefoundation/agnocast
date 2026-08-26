@@ -93,8 +93,7 @@ private:
   void register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPayload & req);
   bool is_daemon_forced(const std::string & topic_name, BridgeDirection direction) const;
   void create_daemon_forced_bridges();
-  // Returns false when the bridge could not be built, so the caller drops the forced request.
-  bool activate_daemon_forced_bridge(
+  void activate_daemon_forced_bridge(
     const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
     bool is_r2a);
 
