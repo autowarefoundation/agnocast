@@ -1704,8 +1704,9 @@ static char * node_name_at(const struct node_name_collector * col, const uint32_
   return col->buf + (size_t)index * NODE_NAME_BUFFER_SIZE;
 }
 
-// The dedup key is (pid, name), not the name alone: rclcpp reports same-named nodes in different
-// processes as two. Two in one process still collapse -- ROS 2 cannot tell those apart either.
+// The dedup key is (pid, name), not the name alone, so that same-named nodes in different
+// processes stay distinct as rclcpp reports them. Two in one process still collapse, which rclcpp
+// does not: the kmod has no node identity finer than the process.
 static int add_unique_node(struct node_name_collector * col, const char * name, const pid_t pid)
 {
   const size_t len = strlen(name) + 1;

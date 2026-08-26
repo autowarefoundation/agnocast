@@ -120,8 +120,7 @@ void test_case_get_node_names_deduplicates(struct kunit * test)
   KUNIT_EXPECT_STREQ(test, buf[0], NODE_NAME);
 }
 
-// Two processes running a node of the same name are two nodes, matching what rclcpp reports for
-// the DDS graph. Only the dedup within one process may collapse them.
+// Two processes running a node of the same name are two nodes, as rclcpp reports them.
 void test_case_get_node_names_same_name_in_two_processes(struct kunit * test)
 {
   char buf[2][NODE_NAME_BUFFER_SIZE];
