@@ -1767,8 +1767,8 @@ unlock:
 // `buf_node_num` must not exceed MAX_NODE_NUM, or the dedup table can fill and probing never
 // finds a free slot. get_node_names_cmd clamps it.
 int agnocast_ioctl_get_node_names(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, char * buf,
-  const uint32_t buf_node_num, uint32_t * ret_node_num)
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num)
 {
   int ret = 0;
   struct node_name_collector col = {.buf = buf, .capacity = buf_node_num};
@@ -1777,6 +1777,8 @@ int agnocast_ioctl_get_node_names(
   if (!col.slots) return -ENOMEM;
 
   down_read(&global_htables_rwsem);
+
+  const uint32_t domain_id = get_process_domain_id(pid);
 
   struct topic_wrapper * wrapper;
   int bkt_topic;
@@ -3228,8 +3230,7 @@ static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
   if (!buf) return -ENOMEM;
 
   uint32_t node_num = 0;
-  long ret =
-    agnocast_ioctl_get_node_names(ipc_ns, get_current_domain_id(), buf, buf_node_num, &node_num);
+  long ret = agnocast_ioctl_get_node_names(ipc_ns, current->tgid, buf, buf_node_num, &node_num);
   if (ret == 0) {
     if (copy_to_user(user_buf, buf, (size_t)node_num * NODE_NAME_BUFFER_SIZE)) {
       ret = -EFAULT;

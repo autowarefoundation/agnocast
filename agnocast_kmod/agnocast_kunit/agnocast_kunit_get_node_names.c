@@ -65,7 +65,7 @@ void test_case_get_node_names_no_node(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -84,7 +84,7 @@ void test_case_get_node_names_multiple_nodes(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -107,7 +107,7 @@ void test_case_get_node_names_deduplicates(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -130,7 +130,7 @@ void test_case_get_node_names_same_name_in_two_processes(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -151,7 +151,7 @@ void test_case_get_node_names_excludes_bridge_publisher(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -171,7 +171,7 @@ void test_case_get_node_names_excludes_bridge_subscriber(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -187,11 +187,12 @@ void test_case_get_node_names_other_domain(struct kunit * test)
 
   // Arrange
   setup_process(test, PID, DOMAIN_ID);
+  setup_process(test, PID2, OTHER_DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, OTHER_DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID2, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -218,7 +219,7 @@ void test_case_get_node_names_excludes_the_bridged_domain(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -239,7 +240,7 @@ void test_case_get_node_names_buffer_too_small(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_get_node_names(
-    current->nsproxy->ipc_ns, DOMAIN_ID, (char *)buf, ARRAY_SIZE(buf), &node_num);
+    current->nsproxy->ipc_ns, PID, (char *)buf, ARRAY_SIZE(buf), &node_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);

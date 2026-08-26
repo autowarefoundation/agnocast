@@ -469,8 +469,8 @@ int agnocast_ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
 
 int agnocast_ioctl_get_node_names(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, char * buf,
-  const uint32_t buf_node_num, uint32_t * ret_node_num);
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num);
 
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
