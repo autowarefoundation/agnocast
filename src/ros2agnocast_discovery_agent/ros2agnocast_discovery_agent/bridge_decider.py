@@ -181,9 +181,6 @@ def _note_unforced(logger, reported, cell, reason, seen) -> None:
         return
     topic, domain = cell
     text = f'no cross-domain bridge forced for {topic}@{domain}: {reason}'
-    if reported is None:
-        logger.info(text)
-        return
     if cell in seen:
         return
     seen.add(cell)
@@ -200,8 +197,6 @@ def _note_unforced(logger, reported, cell, reason, seen) -> None:
 
 def _note_forced(logger, reported, cell) -> None:
     """Close the loop when a rule starts forcing, so a reported gap does not just stop being said."""
-    if reported is None:
-        return
     if reported.pop(cell, None) is not None and logger is not None:
         topic, domain = cell
         logger.info(f'cross-domain bridge now forced for {topic}@{domain}')
@@ -229,6 +224,10 @@ def decide_domain_rule_bridges(
     requests = {}
     # Cells already noted this pass, so two rules naming one cell count as one tick.
     seen = set()
+    # Normalised once so the helpers never branch on it; a caller that omits it simply gets no
+    # counting across ticks.
+    if reported is None:
+        reported = {}
     local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
 
     for from_topic, _to_topic, from_domain, to_domain in rules:

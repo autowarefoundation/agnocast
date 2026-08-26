@@ -186,8 +186,8 @@ def test_domain_rule_forces_a2r_on_the_from_side():
 
 
 def test_domain_rule_leaves_the_to_side_to_the_on_demand_path():
-    # The publisher matters: without it this would also return [] for want of one, and the test
-    # would pass even if the domain filter were dropped.
+    # The publisher matters: without it this would return [] for want of one rather than for the
+    # cell lookup. The domain filter is a separate guard, covered by the test above.
     local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=2)])
     assert decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)]) == []
 
