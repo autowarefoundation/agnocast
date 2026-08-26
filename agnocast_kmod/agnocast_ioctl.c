@@ -1719,11 +1719,7 @@ static int add_unique_node(struct node_name_collector * col, const char * name, 
     idx = (idx + 1) & (NODE_NAME_SLOT_NUM - 1);
   }
 
-  if (col->num >= col->capacity) {
-    dev_warn(
-      agnocast_device, "Node count exceeds limit: node_name_buffer_size=%u\n", col->capacity);
-    return -ENOBUFS;
-  }
+  if (col->num >= col->capacity) return -ENOBUFS;
 
   memcpy(node_name_at(col, col->num), name, len);
   col->slots[idx].name_index = col->num;
@@ -3251,6 +3247,10 @@ static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
       get_node_names_args.ret_node_num = node_num;
       if (copy_to_user(arg, &get_node_names_args, sizeof(get_node_names_args))) ret = -EFAULT;
     }
+  } else if (ret == -ENOBUFS) {
+    dev_warn(
+      agnocast_device, "Node count exceeds limit: MAX_NODE_NUM=%d, node_name_buffer_size=%u\n",
+      MAX_NODE_NUM, get_node_names_args.node_name_buffer_size);
   }
 
   kvfree(buf);
