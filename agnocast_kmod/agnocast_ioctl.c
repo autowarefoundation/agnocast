@@ -3224,7 +3224,7 @@ static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
   char __user * user_buf =
     (char __user *)u64_to_user_ptr(get_node_names_args.node_name_buffer_addr);
 
-  char * buf = kvmalloc((size_t)buf_node_num * NODE_NAME_BUFFER_SIZE, GFP_KERNEL);
+  char * buf = kvzalloc((size_t)buf_node_num * NODE_NAME_BUFFER_SIZE, GFP_KERNEL);
   if (!buf) return -ENOMEM;
 
   uint32_t node_num = 0;
