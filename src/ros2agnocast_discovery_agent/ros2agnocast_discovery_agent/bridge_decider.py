@@ -289,4 +289,4 @@ def dispatch_requests(
         err = send_request(
             _bridge_uds_addr(ipc_ns_inode, req.domain_id), serialize_request(req))
         if err is not None and logger is not None:
-            logger.warn('daemon bridge dispatch failed: %s', err)
+            logger.warn(f'daemon bridge dispatch failed: {err}')
