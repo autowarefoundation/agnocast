@@ -423,7 +423,7 @@ def test_dispatch_issues_domain_rule_bridges_without_any_remote_agent(monkeypatc
 
     fake_self = SimpleNamespace(
         _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
-        _unforced_reasons={}, get_logger=lambda: MagicMock())
+        _unforced_reasons={}, _domain_id=1, get_logger=lambda: MagicMock())
     DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
 
     assert sent == [forced]
@@ -441,10 +441,27 @@ def test_dispatch_passes_the_loaded_rules_through_to_the_decider(monkeypatch):
     rules = [('/x', '/x', 1, 2)]
     fake_self = SimpleNamespace(
         _remote_states={}, _domain_rules=rules, _ipc_ns_inode=7, _unforced_reasons={},
-        get_logger=lambda: MagicMock())
+        _domain_id=1, get_logger=lambda: MagicMock())
     DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
 
     assert seen == [rules]
+
+
+def test_dispatch_tells_the_decider_which_domain_is_ours(monkeypatch):
+    """Without it the decider cannot tell a foreign rule from one with nothing to force yet."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    seen = {}
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges',
+        lambda state, rules, **kw: seen.update(kw) or [])
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
+
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
+        _unforced_reasons={}, _domain_id=4, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert seen.get('domain_id') == 4
 
 
 def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):
@@ -456,7 +473,7 @@ def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):
 
     fake_self = SimpleNamespace(
         _remote_states={}, _domain_rules=[], _ipc_ns_inode=7, _unforced_reasons={},
-        get_logger=lambda: MagicMock())
+        _domain_id=1, get_logger=lambda: MagicMock())
     DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
 
     assert sent == []

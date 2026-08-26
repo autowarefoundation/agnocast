@@ -191,6 +191,20 @@ def test_domain_rule_leaves_the_to_side_to_the_on_demand_path():
     assert decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)]) == []
 
 
+def test_domain_rule_ignores_a_rule_belonging_to_another_domain():
+    """bidirectional splits an entry per direction, so one of each pair is always someone else's."""
+    logger = MagicMock()
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=1)])
+    rules = [('/x', '/x', 1, 2), ('/x', '/x', 2, 1)]
+
+    reqs = decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger)
+
+    assert len(reqs) == 1
+    assert reqs[0].domain_id == 1
+    # The 2->1 tuple is the domain-2 agent's to force; saying so here would be noise.
+    logger.warn.assert_not_called()
+
+
 def test_domain_rule_reports_each_reason_it_forced_nothing():
     """Skipping in silence is the symptom this forcing exists to remove."""
     logger = MagicMock()

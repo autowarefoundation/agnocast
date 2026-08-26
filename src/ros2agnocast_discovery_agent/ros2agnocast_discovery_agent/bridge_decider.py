@@ -178,7 +178,8 @@ def _note_unforced(logger, reported, cell, reason) -> None:
     logger.warn(f'no cross-domain bridge forced for {topic}@{domain}: {reason}')
 
 
-def decide_domain_rule_bridges(local_state, rules, logger=None, reported=None) -> list:
+def decide_domain_rule_bridges(
+        local_state, rules, domain_id=None, logger=None, reported=None) -> list:
     """Return the A2R requests implied by the registered domain bridge rules.
 
     Only the ``from`` side is forced: there domain_bridge waits for a DDS
@@ -191,12 +192,19 @@ def decide_domain_rule_bridges(local_state, rules, logger=None, reported=None) -
     A rule that forces nothing is reported through ``logger``, with ``reported`` (a caller-owned
     dict) suppressing the repeat every tick. Skipping in silence would reproduce the symptom this
     forcing exists to remove: a topic that does not flow, with no trace of why.
+
+    ``domain_id`` is the caller's own domain. A rule whose ``from`` side belongs to another one is
+    not this agent's to force and is skipped without a word -- ``bidirectional`` splits an entry
+    into a tuple per direction, so exactly one of each pair is always someone else's.
     """
     requests = {}
     local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
 
     for from_topic, _to_topic, from_domain, to_domain in rules:
         if from_domain == to_domain:
+            continue
+
+        if domain_id is not None and from_domain != domain_id:
             continue
 
         cell = (from_topic, from_domain)

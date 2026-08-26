@@ -478,8 +478,8 @@ class DiscoveryAgent(Node):
         remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
         requests = bridge_decider.decide_bridges(local_state, remote_states)
         requests += bridge_decider.decide_domain_rule_bridges(
-            local_state, self._domain_rules, logger=self.get_logger(),
-            reported=self._unforced_reasons)
+            local_state, self._domain_rules, domain_id=self._domain_id,
+            logger=self.get_logger(), reported=self._unforced_reasons)
         if requests:
             bridge_decider.dispatch_requests(
                 requests, self._ipc_ns_inode, logger=self.get_logger())
