@@ -8,6 +8,8 @@ so the two reach each other through ROS 2 (DDS):
   * local publisher  + remote subscriber -> A2R bridge (publish to DDS)
   * local subscriber + remote publisher  -> R2A bridge (reinject from DDS)
 
+The domain bridge rule config is a second, gossip-independent source of requests.
+
 The request is sent as a ``BridgeMsg`` (type=DaemonPubSub) to the per-namespace
 bridge_manager over an abstract-namespace UNIX domain socket
 (``\\0agnocast_bridge_manager_<ipc_ns_inode>[_d<domain>]``).
@@ -158,6 +160,117 @@ def decide_bridges(local_state, remote_states) -> list:
     return list(requests.values())
 
 
+# At ~1 Hz, long enough that the ordinary startup gap -- the agent is forked by the first
+# Agnocast process, so it ticks before that process has created its publishers -- passes at info.
+UNFORCED_WARN_AFTER_TICKS = 30
+
+
+def _note_unforced(logger, reported, cell, reason, seen) -> None:
+    """Report why a rule forced nothing, escalating only once the gap persists.
+
+    Both "no local topic" and "type not known" are the normal state at startup, so warning on the
+    first tick would cry wolf. The first sighting is info; the gap still standing after
+    ``UNFORCED_WARN_AFTER_TICKS`` warns once, and nothing in between is logged.
+
+    The count is per cell per tick: ``seen`` holds the cells already noted in this pass, since two
+    rules can name one cell. It counts consecutive unforced ticks, not how long one reason has
+    held, so a gap that alternates between reasons still escalates; a changed reason is worth an
+    info line, not a restart. A cell that alternates between forced and unforced does restart,
+    since forcing clears the entry, and so stays at info.
+    """
+    if logger is None:
+        return
+    topic, domain = cell
+    text = f'no cross-domain bridge forced for {topic}@{domain}: {reason}'
+    if cell in seen:
+        return
+    seen.add(cell)
+
+    seen_reason, ticks = reported.get(cell, (None, 0))
+    ticks += 1
+    reported[cell] = (reason, ticks)
+    if ticks == UNFORCED_WARN_AFTER_TICKS:
+        # The warn carries the current reason, so a change on this tick loses nothing.
+        logger.warn(f'{text} (unforced for {ticks} ticks)')
+    elif seen_reason != reason:
+        logger.info(text)
+
+
+def _note_forced(logger, reported, cell) -> None:
+    """Close the loop when a rule starts forcing, so a reported gap does not just stop being said."""
+    if reported.pop(cell, None) is not None and logger is not None:
+        topic, domain = cell
+        logger.info(f'cross-domain bridge now forced for {topic}@{domain}')
+
+
+def decide_domain_rule_bridges(
+        local_state, rules, domain_id=None, logger=None, reported=None) -> list:
+    """Return the A2R requests implied by the registered domain bridge rules.
+
+    Only the ``from`` side is forced: there domain_bridge waits for a DDS
+    publisher while the A2R bridge waits for a DDS subscriber, so neither starts.
+    The ``to`` side is left to the ordinary on-demand check.
+
+    Forcing is unconditional: gossip never crosses domains, so there is no
+    evidence here of a subscriber in ``to_domain``.
+
+    A rule that forces nothing is reported through ``logger``, with ``reported`` (a caller-owned
+    dict) suppressing the repeat every tick. Skipping in silence would reproduce the symptom this
+    forcing exists to remove: a topic that does not flow, with no trace of why.
+
+    ``domain_id`` is the caller's own domain. A rule whose ``from`` side belongs to another one is
+    not this agent's to force and is skipped without a word -- ``bidirectional`` splits an entry
+    into a tuple per direction, so exactly one of each pair is always someone else's.
+    """
+    requests = {}
+    # Cells already noted this pass, so two rules naming one cell count as one tick.
+    seen = set()
+    # Normalised once so the helpers never branch on it; a caller that omits it simply gets no
+    # counting across ticks.
+    if reported is None:
+        reported = {}
+    local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
+
+    for from_topic, _to_topic, from_domain, to_domain in rules:
+        if from_domain == to_domain:
+            continue
+
+        if domain_id is not None and from_domain != domain_id:
+            continue
+
+        cell = (from_topic, from_domain)
+        local_topic = local_by_topic.get(cell)
+        if local_topic is None:
+            _note_unforced(logger, reported, cell, 'no local topic in this domain', seen)
+            continue
+        if not local_topic.type_name:
+            # The type comes from the tmpfs registry: empty means the topic has not registered
+            # yet, which is ordinary at startup, or that the join failed.
+            _note_unforced(logger, reported, cell, 'the topic type is not known yet', seen)
+            continue
+
+        local_pubs = [p for p in local_topic.publishers if not p.is_bridge]
+        if not local_pubs:
+            _note_unforced(logger, reported, cell, 'no local publisher other than a bridge', seen)
+            continue
+
+        _note_forced(logger, reported, cell)
+
+        pub = local_pubs[0]
+        key = (from_topic, from_domain, DIRECTION_AGNOCAST_TO_ROS2)
+        requests.setdefault(key, BridgeRequest(
+            topic_name=from_topic,
+            type_name=local_topic.type_name,
+            direction=DIRECTION_AGNOCAST_TO_ROS2,
+            qos_depth=pub.qos_depth,
+            qos_is_transient_local=pub.qos_is_transient_local,
+            qos_is_reliable=pub.qos_is_reliable,
+            domain_id=from_domain,
+        ))
+
+    return list(requests.values())
+
+
 def _bridge_uds_addr(ipc_ns_inode: int, domain_id: int) -> str:
     name = '\x00' + _BRIDGE_UDS_BASE + '_' + str(ipc_ns_inode)
     if domain_id:
@@ -201,8 +314,9 @@ def dispatch_requests(
     ``send_request`` swallows ECONNREFUSED/ENOENT so a missing peer never
     stalls the daemon, and the request is re-issued idempotently next tick.
     """
-    for req in requests:
+    # decide_bridges and decide_domain_rule_bridges can both ask for the same bridge.
+    for req in dict.fromkeys(requests):
         err = send_request(
             _bridge_uds_addr(ipc_ns_inode, req.domain_id), serialize_request(req))
         if err is not None and logger is not None:
-            logger.warn('daemon bridge dispatch failed: %s', err)
+            logger.warn(f'daemon bridge dispatch failed: {err}')

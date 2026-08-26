@@ -20,6 +20,29 @@ YAML::Node yaml_from_str(const char * s)
 {
   return YAML::Load(s);
 }
+
+// EXPECT_THROW alone cannot tell WHICH validation fired (every failure path
+// derives from std::runtime_error), so the negative tests also match a
+// distinguishing fragment of the message.
+void expect_kernel_threads_error(const char * yaml, const std::string & fragment)
+{
+  try {
+    acie::parse_kernel_threads(yaml_from_str(yaml));
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
+  }
+}
+
+void expect_irqs_error(const char * yaml, const std::string & fragment)
+{
+  try {
+    acie::parse_irqs(yaml_from_str(yaml));
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error & e) {
+    EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
+  }
+}
 }  // namespace
 
 // ---------- parse_yaml ----------
@@ -727,4 +750,681 @@ TEST(ExtractNodePart, SplitsAtFirstAtSign)
   EXPECT_EQ(acie::extract_node_part("/node@"), "/node");
   EXPECT_EQ(acie::extract_node_part("@Timer(1)"), "");
   EXPECT_EQ(acie::extract_node_part(""), "");
+}
+
+// ---------- parse_kernel_threads ----------
+
+TEST(ParseKernelThreads, MissingOrNullSectionYieldsEmpty)
+{
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("callback_groups: []\n")).empty());
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: ~\n")).empty());
+  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: []\n")).empty());
+}
+
+TEST(ParseKernelThreads, ParsesPolicyPriorityAffinity)
+{
+  // CPUs 0/1 only, to keep this test valid on small CI machines.
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_w
+    policy: SCHED_FIFO
+    priority: 10
+    affinity: [0, 1]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].comm, "agnocast_exit_w");
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_FIFO");
+  EXPECT_EQ(result[0].priority, 10);
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, ParsesCfsPolicyWithNice)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_OTHER
+    nice: -10
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_OTHER");
+  EXPECT_EQ(result[0].nice, -10);
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, AllNullEntryIsUnmanaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    nice: ~
+    priority: ~
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, UnmanageableSentinelEqualsNull)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: ksoftirqd/0
+    policy: UNMANAGEABLE
+    nice: UNMANAGEABLE
+    priority: UNMANAGEABLE
+    affinity: UNMANAGEABLE
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, AffinityOnlyEntryIsManaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_w
+    policy: ~
+    priority: ~
+    affinity: [1]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_FALSE(result[0].policy.has_value());
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{1}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, NormalizesAffinityToSortedUnique)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: [1, 0, 1]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+}
+
+TEST(ParseKernelThreads, RejectsScalarAndOutOfRangeAffinity)
+{
+  // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
+  // silently mean "leave alone".
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: 0-3
+)YAML",
+    "'affinity' must be a list");
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: [-1]
+)YAML",
+    "'affinity' CPU -1 must be in");
+}
+
+TEST(ParseKernelThreads, PolicyWithUnmanageableAffinityIsManaged)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: ksoftirqd/0
+    policy: SCHED_FIFO
+    priority: 5
+    affinity: UNMANAGEABLE
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, ParsesSchedDeadline)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  ASSERT_TRUE(result[0].policy.has_value());
+  EXPECT_EQ(*result[0].policy, "SCHED_DEADLINE");
+  EXPECT_EQ(result[0].runtime, 1000000u);
+  EXPECT_EQ(result[0].period, 5000000u);
+  EXPECT_EQ(result[0].deadline, 5000000u);
+}
+
+TEST(ParseKernelThreads, LowercaseSentinelIsNotRecognized)
+{
+  // Only the exact uppercase sentinel disengages an attribute; anything else
+  // must fall through to the normal validation (here: unknown policy). No
+  // other attribute key is set, so a case-insensitive sentinel match would
+  // parse cleanly and fail the test.
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: unmanageable
+    affinity: ~
+)YAML",
+    "Unknown scheduling policy 'unmanageable'");
+}
+
+TEST(ParseKernelThreads, RejectsMissingOrEmptyComm)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "is missing a non-empty 'comm'");
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: ""
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "is missing a non-empty 'comm'");
+}
+
+TEST(ParseKernelThreads, RejectsNonStringComm)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: [a, b]
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "'comm' must be a string");
+}
+
+TEST(ParseKernelThreads, RejectsKworkerComm)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: kworker/0:0H-events_highpri
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "kworker comms are ephemeral");
+}
+
+TEST(ParseKernelThreads, AcceptsCommLongerThan15Chars)
+{
+  // Since Linux 5.17 /proc reports a kthread's full name untruncated (e.g.
+  // the kmod's "agnocast_exit_worker"), so the scanner returns comms longer
+  // than TASK_COMM_LEN - 1 and they must round-trip through the parser.
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: agnocast_exit_worker
+    policy: ~
+    priority: ~
+    affinity: [0]
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].comm, "agnocast_exit_worker");
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseKernelThreads, RejectsDuplicateComm)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: ~
+  - comm: nfsd
+    policy: ~
+    priority: ~
+    affinity: ~
+)YAML",
+    "Duplicate kernel_thread entry: comm=nfsd");
+}
+
+TEST(ParseKernelThreads, RejectsUnknownPolicy)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_BOGUS
+    priority: 0
+    affinity: ~
+)YAML",
+    "Unknown scheduling policy 'SCHED_BOGUS'");
+}
+
+TEST(ParseKernelThreads, RejectsPriorityWithoutPolicy)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    priority: 5
+    affinity: ~
+)YAML",
+    "'priority' requires 'policy'");
+}
+
+TEST(ParseKernelThreads, RejectsNiceWithoutPolicy)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: ~
+    nice: 5
+    affinity: ~
+)YAML",
+    "'nice' requires 'policy'");
+}
+
+TEST(ParseKernelThreads, RejectsCfsPolicyWithoutNice)
+{
+  // As in callback_groups, a CFS policy takes 'nice'; 'priority' does not
+  // satisfy the requirement.
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_OTHER
+    priority: 5
+    affinity: ~
+)YAML",
+    "requires 'nice'");
+}
+
+TEST(ParseKernelThreads, RejectsOutOfRangeNiceAndRtPriority)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_OTHER
+    nice: 50
+    affinity: ~
+)YAML",
+    "'nice' must be in [-20, 19]");
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: nfsd
+    policy: SCHED_FIFO
+    priority: 150
+    affinity: ~
+)YAML",
+    "'priority' must be in [1, 99]");
+}
+
+TEST(ParseKernelThreads, RejectsPolicyWithoutPriority)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_FIFO
+    priority: ~
+    affinity: ~
+)YAML",
+    "requires 'priority'");
+  // The sentinel counts as unset exactly like null does, and the message
+  // says so because the key is visibly present.
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: rcu_preempt
+    policy: SCHED_FIFO
+    priority: UNMANAGEABLE
+    affinity: ~
+)YAML",
+    "requires 'priority' for comm=rcu_preempt (UNMANAGEABLE counts as unset)");
+}
+
+TEST(ParseKernelThreads, RejectsDeadlineFieldsWithoutPolicy)
+{
+  // The full SCHED_DEADLINE triple with 'policy' forgotten would otherwise
+  // parse cleanly as unmanaged, the same silently dead configuration the
+  // nice/priority guard rejects.
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: ~
+    runtime: 1000000
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML",
+    "'runtime' requires 'policy'");
+}
+
+TEST(ParseKernelThreads, RejectsSchedDeadlineMissingFields)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    affinity: ~
+)YAML",
+    "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline'");
+}
+
+TEST(ParseKernelThreads, RejectsMalformedSchedDeadlineFields)
+{
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: -5
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML",
+    "'runtime' must be a non-negative decimal integer for comm=dl_thread");
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: not_a_number
+    deadline: 5000000
+    affinity: ~
+)YAML",
+    "'period' must be a non-negative decimal integer for comm=dl_thread");
+  // yaml-cpp would read "0x10" as 16; only plain decimal digits are valid.
+  expect_kernel_threads_error(
+    R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: 5000000
+    deadline: 0x10
+    affinity: ~
+)YAML",
+    "'deadline' must be a non-negative decimal integer for comm=dl_thread");
+}
+
+TEST(ParseKernelThreads, ParsesZeroPaddedDeadlineFieldAsBase10)
+{
+  // yaml-cpp's base auto-detection would read "0500000" as octal; a
+  // zero-padded column must mean decimal.
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 0500000
+    period: 5000000
+    deadline: 5000000
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].runtime, 500000u);
+}
+
+TEST(ParseKernelThreads, RejectsNonListSection)
+{
+  // A scalar or map section would otherwise silently parse as empty.
+  expect_kernel_threads_error("kernel_threads: oops\n", "'kernel_threads' must be a list");
+  expect_kernel_threads_error("kernel_threads:\n  comm: nfsd\n", "'kernel_threads' must be a list");
+}
+
+TEST(ParseKernelThreads, RejectsScalarListEntry)
+{
+  // A plausible shorthand (a list of bare comms) must fail with the entry
+  // diagnostic, not a raw yaml-cpp BadSubscript.
+  expect_kernel_threads_error("kernel_threads: [nfsd]\n", "entry #0 must be a mapping");
+}
+
+// ---------- parse_irqs ----------
+
+TEST(ParseIrqs, MissingOrNullSectionYieldsEmpty)
+{
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("callback_groups: []\n")).empty());
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: ~\n")).empty());
+  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: []\n")).empty());
+}
+
+TEST(ParseIrqs, ParsesFilledAffinityAndName)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 103
+    name: nvidia
+    affinity: [1, 0]
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].irq, 103);
+  EXPECT_EQ(result[0].name, "nvidia");
+  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseIrqs, NullOrUnmanageableAffinityIsUnmanaged)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 0
+    name: timer
+    affinity: UNMANAGEABLE
+  - irq: 1
+    name: i8042
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 2u);
+  EXPECT_FALSE(result[0].is_managed());
+  EXPECT_FALSE(result[1].is_managed());
+}
+
+TEST(ParseIrqs, MissingNameMeansNoVerification)
+{
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 42
+    affinity: [1]
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_TRUE(result[0].name.empty());
+  EXPECT_TRUE(result[0].is_managed());
+}
+
+TEST(ParseIrqs, RejectsMissingOrNegativeOrNonIntIrq)
+{
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - name: orphan
+    affinity: ~
+)YAML",
+    "is missing a non-negative integer 'irq'");
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: -1
+    affinity: ~
+)YAML",
+    "'irq' must be a non-negative decimal integer, got '-1'");
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: not_a_number
+    affinity: ~
+)YAML",
+    "'irq' must be a non-negative decimal integer, got 'not_a_number'");
+}
+
+TEST(ParseIrqs, ParsesZeroPaddedIrqAsBase10)
+{
+  // yaml-cpp's as<int>() would read "010" as octal 8 and silently target a
+  // different interrupt; a zero-padded column must mean decimal 10.
+  auto y = yaml_from_str(R"YAML(
+irqs:
+  - irq: 010
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_irqs(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].irq, 10);
+}
+
+TEST(ParseIrqs, RejectsHexIrq)
+{
+  // yaml-cpp would read "0x10" as 16; only plain decimal digits are valid.
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: 0x10
+    affinity: ~
+)YAML",
+    "'irq' must be a non-negative decimal integer, got '0x10'");
+}
+
+TEST(ParseIrqs, RejectsDuplicateIrq)
+{
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: 5
+    affinity: ~
+  - irq: 5
+    affinity: ~
+)YAML",
+    "Duplicate irq entry: irq=5");
+}
+
+TEST(ParseIrqs, RejectsScalarAndOutOfRangeAffinity)
+{
+  // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
+  // silently mean "leave alone".
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: 10
+    affinity: 0-3
+)YAML",
+    "'affinity' must be a list");
+  expect_irqs_error(
+    R"YAML(
+irqs:
+  - irq: 10
+    affinity: [-1]
+)YAML",
+    "'affinity' CPU -1 must be in");
+}
+
+TEST(ParseIrqs, RejectsNonListSection)
+{
+  expect_irqs_error("irqs: oops\n", "'irqs' must be a list");
+  expect_irqs_error("irqs:\n  irq: 5\n", "'irqs' must be a list");
+}
+
+TEST(ParseIrqs, RejectsScalarListEntry)
+{
+  // A plausible shorthand (a list of bare IRQ numbers) must fail with the
+  // entry diagnostic, not a raw yaml-cpp BadSubscript.
+  expect_irqs_error("irqs: [42]\n", "entry #0 must be a mapping");
+}
+
+// ---------- new sections vs parse_yaml ----------
+
+TEST(ParseYaml, IgnoresKernelThreadsAndIrqsSections)
+{
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    domain_id: 0
+    policy: SCHED_OTHER
+    nice: 0
+    affinity: []
+non_ros_threads: []
+kernel_threads:
+  - comm: agnocast_exit_w
+    policy: SCHED_FIFO
+    priority: 10
+    affinity: [0]
+irqs:
+  - irq: 103
+    name: nvidia
+    affinity: [0, 1]
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_EQ(cb[0].thread_str, "my_cbg");
+  EXPECT_TRUE(nrt.empty());
+}
+
+TEST(ParseYaml, UnmanageableSentinelIsNotRecognized)
+{
+  // The sentinel is scoped to kernel_threads/irqs (the tool writes it there);
+  // in the hand-written sections it must fail like any other invalid value,
+  // not silently mean "leave the attribute alone".
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: my_cbg
+    policy: SCHED_FIFO
+    priority: 50
+    affinity: UNMANAGEABLE
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+
+  auto y2 = yaml_from_str(R"YAML(
+callback_groups: []
+non_ros_threads:
+  - name: my_thread
+    policy: SCHED_OTHER
+    nice: UNMANAGEABLE
+    affinity: ~
+)YAML");
+  EXPECT_THROW(acie::parse_yaml(y2, kTestDefaultDomain, cb, nrt), std::runtime_error);
 }

@@ -178,7 +178,7 @@ std::optional<KernelThreadInfo> read_kernel_thread(
     return std::nullopt;
   }
   const std::string comm = stat->substr(open + 1, close - open - 1);
-  if (comm.compare(0, 8, "kworker/") == 0) {
+  if (is_kworker_comm(comm)) {
     return std::nullopt;
   }
 

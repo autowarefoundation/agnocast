@@ -10,9 +10,22 @@ never registers rules).
 `domain_bridge` YAML and registers each rule:
 
 ```bash
-ros2 run ros2agnocast_discovery_agent register_domain_bridge --config /etc/agnocast/domain_bridge.yaml
-# or set AGNOCAST_DOMAIN_BRIDGE_CONFIG and run it with no arguments
+ros2 run ros2agnocast_discovery_agent register_domain_bridge
+# reads /etc/agnocast/domain_bridge.yaml; override with --config or
+# AGNOCAST_DOMAIN_BRIDGE_CONFIG
 ```
+
+The discovery agent reads the same file, to force the A2R bridge that a topic
+split across both an IPC namespace and a ROS domain needs (without it,
+`domain_bridge` waits for a DDS publisher while the A2R bridge waits for a DDS
+subscriber, and the topic never flows). The agent is `execv`'d from an
+application process, so it only ever sees the default path or an environment
+variable exported to that process — **not** a `--config` argument passed here.
+
+Keep the file at `/etc/agnocast/domain_bridge.yaml`, or export
+`AGNOCAST_DOMAIN_BRIDGE_CONFIG` to the applications as well. Registering with
+`--config` alone leaves the rules in the kmod but the forcing off, which the
+agent reports only in its own log.
 
 Run it once, ordered so that it:
 

@@ -40,7 +40,10 @@ from ros2agnocast_discovery_msgs.msg import (
     AgnocastTopic,
 )
 
+import yaml
+
 from . import bridge_decider
+from . import domain_bridge_config
 from .type_registry import TypeRegistryReader
 
 
@@ -296,6 +299,48 @@ def _read_ros_domain_id() -> int:
     return value
 
 
+def _load_domain_rules(logger=None) -> list:
+    """Return the domain bridge rules from the config, or [].
+
+    Every outcome is logged: a silently empty rule list looks exactly like the
+    cross-domain deadlock this forcing exists to break. A config that cannot be
+    read is reported and skipped rather than fatal, so it never takes the gossip
+    publication down.
+    """
+    path, from_env = domain_bridge_config.resolve_config_path()
+
+    try:
+        rules, skipped = domain_bridge_config.load_domain_bridge_rules(path)
+    except FileNotFoundError:
+        if logger is not None:
+            if from_env:
+                logger.warn(
+                    f'{domain_bridge_config.CONFIG_ENV} points at {path}, which does not '
+                    'exist; no cross-domain bridge will be forced')
+            else:
+                logger.info(
+                    f'no domain bridge config at {path}; cross-domain bridge forcing '
+                    f'is off (set {domain_bridge_config.CONFIG_ENV} to use another path)')
+        return []
+    except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
+        # One bad entry disables the whole config, not just its topic, and domain_bridge refuses
+        # the same file for anything yaml-cpp cannot convert. Say so at error level: forcing is
+        # off for every topic, and a topic split across a namespace and a domain then stops
+        # without another trace.
+        if logger is not None:
+            logger.error(
+                f'cannot load {path} ({exc}); cross-domain bridge forcing is off for ALL '
+                'topics, so any topic split across an IPC namespace and a ROS domain will '
+                'not flow')
+        return []
+
+    if logger is not None:
+        logger.info(f'{path}: {len(rules)} domain bridge rule(s) loaded')
+        if skipped:
+            logger.warn(f'{path}: no from_domain/to_domain for {", ".join(skipped)}')
+    return rules
+
+
 def _gossip_qos() -> QoSProfile:
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
@@ -323,7 +368,8 @@ class DiscoveryAgent(Node):
 
     Also subscribes to its own gossip topic and caches the latest snapshot per
     ``(host_uuid, ipc_ns_inode)``; each tick the bridge decider diffs that
-    against the local state and issues cross-NS bridge requests.
+    against the local state and issues cross-NS bridge requests, plus the
+    cross-domain ones implied by the domain bridge rule config.
     """
 
     def __init__(
@@ -352,6 +398,10 @@ class DiscoveryAgent(Node):
         self._clock = Clock(clock_type=ClockType.SYSTEM_TIME)
         self._registry = registry if registry is not None else TypeRegistryReader(
             self._ipc_ns_inode, logger=self.get_logger())
+        self._domain_rules = _load_domain_rules(self.get_logger())
+        # (topic, domain) -> (reason, ticks unforced); the decider escalates from info to warn
+        # off this, so it has to outlive the tick.
+        self._unforced_reasons = {}
 
         qos = _gossip_qos()
         self._pub = self.create_publisher(AgnocastDaemonState, GOSSIP_TOPIC, qos)
@@ -427,10 +477,11 @@ class DiscoveryAgent(Node):
         return msg
 
     def _dispatch_bridge_requests(self, local_state: AgnocastDaemonState) -> None:
-        if not self._remote_states:
-            return
         remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
         requests = bridge_decider.decide_bridges(local_state, remote_states)
+        requests += bridge_decider.decide_domain_rule_bridges(
+            local_state, self._domain_rules, domain_id=self._domain_id,
+            logger=self.get_logger(), reported=self._unforced_reasons)
         if requests:
             bridge_decider.dispatch_requests(
                 requests, self._ipc_ns_inode, logger=self.get_logger())

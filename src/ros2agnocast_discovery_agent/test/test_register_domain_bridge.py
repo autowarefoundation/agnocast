@@ -1,6 +1,7 @@
 """Tests for the standalone domain bridge rule injector."""
 import pytest
 
+from ros2agnocast_discovery_agent import domain_bridge_config
 from ros2agnocast_discovery_agent import register_domain_bridge
 from ros2agnocast_discovery_agent.domain_bridge_config import CONFIG_ENV
 
@@ -25,10 +26,26 @@ def _write_config(tmp_path, text):
     return str(path)
 
 
-def test_no_config_is_usage_error(monkeypatch):
+def test_missing_config_is_reported_and_registers_nothing(tmp_path, monkeypatch):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
     monkeypatch.delenv(CONFIG_ENV, raising=False)
-    with pytest.raises(SystemExit):
-        register_domain_bridge.main([])
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'absent.yaml'))
+
+    assert register_domain_bridge.main([]) == 1
+    assert fake.calls == []
+
+
+def test_default_config_path_is_used_when_env_unset(tmp_path, monkeypatch):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    cfg = _write_config(tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
+    monkeypatch.setattr(domain_bridge_config, 'DEFAULT_CONFIG_PATH', cfg)
+
+    assert register_domain_bridge.main([]) == 0
+    assert fake.calls == [('chatter', 'chatter', 1, 2)]
 
 
 def test_registers_every_rule(tmp_path, monkeypatch):
