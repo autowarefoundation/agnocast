@@ -114,9 +114,9 @@ std::vector<std::string> NodeGraph::get_node_names() const
 
   // The kmod only knows nodes that own an endpoint, but rclcpp lists the calling node even
   // when it owns none. Skipping a name already listed hides a same-named node in another process.
-  const std::string self_name = node_base_->get_fully_qualified_name();
+  std::string self_name = node_base_->get_fully_qualified_name();
   if (std::find(node_names.begin(), node_names.end(), self_name) == node_names.end()) {
-    node_names.push_back(self_name);
+    node_names.push_back(std::move(self_name));
   }
 
   return node_names;
