@@ -447,8 +447,9 @@ def test_dispatch_passes_the_loaded_rules_through_to_the_decider(monkeypatch):
     assert seen == [rules]
 
 
-def test_dispatch_tells_the_decider_which_domain_is_ours(monkeypatch):
-    """Without it the decider cannot tell a foreign rule from one with nothing to force yet."""
+def test_dispatch_hands_the_decider_everything_it_needs(monkeypatch):
+    """Without the domain it cannot tell a foreign rule from an unresolved one; without the logger
+    and the shared dict, the reporting is dead or repeats every tick."""
     from ros2agnocast_discovery_agent import bridge_decider as bd
     seen = {}
     monkeypatch.setattr(
@@ -456,12 +457,17 @@ def test_dispatch_tells_the_decider_which_domain_is_ours(monkeypatch):
         lambda state, rules, **kw: seen.update(kw) or [])
     monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
 
+    logger = MagicMock()
+    reasons = {}
     fake_self = SimpleNamespace(
         _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
-        _unforced_reasons={}, _domain_id=4, get_logger=lambda: MagicMock())
+        _unforced_reasons=reasons, _domain_id=4, get_logger=lambda: logger)
     DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
 
     assert seen.get('domain_id') == 4
+    assert seen.get('logger') is logger
+    # The same dict across ticks, not a copy: the tick count lives in it.
+    assert seen.get('reported') is reasons
 
 
 def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):

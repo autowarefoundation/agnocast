@@ -165,13 +165,17 @@ def decide_bridges(local_state, remote_states) -> list:
 UNFORCED_WARN_AFTER_TICKS = 30
 
 
-def _note_unforced(logger, reported, cell, reason) -> None:
-    """Report why a rule forced nothing, escalating only once the reason persists.
+def _note_unforced(logger, reported, cell, reason, seen) -> None:
+    """Report why a rule forced nothing, escalating only once the gap persists.
 
     Both "no local topic" and "type not known" are the normal state at startup, so warning on the
-    first tick would cry wolf. The first sighting is info; the same reason still standing after
-    ``UNFORCED_WARN_AFTER_TICKS`` warns once. The decider runs every tick, so nothing in between is
-    logged, and a different reason restarts the count.
+    first tick would cry wolf. The first sighting is info; the gap still standing after
+    ``UNFORCED_WARN_AFTER_TICKS`` warns once, and nothing in between is logged.
+
+    The count is per cell per tick: ``seen`` holds the cells already noted in this pass, since two
+    rules can name one cell. It counts how long the cell has gone unforced, not how long one reason
+    has held -- a fault that alternates between reasons is still a fault, and resetting on each
+    change would leave it at info forever. A changed reason is worth an info line, not a restart.
     """
     if logger is None:
         return
@@ -180,17 +184,18 @@ def _note_unforced(logger, reported, cell, reason) -> None:
     if reported is None:
         logger.info(text)
         return
+    if cell in seen:
+        return
+    seen.add(cell)
 
     seen_reason, ticks = reported.get(cell, (None, 0))
-    if seen_reason != reason:
-        reported[cell] = (reason, 1)
-        logger.info(text)
-        return
-
     ticks += 1
     reported[cell] = (reason, ticks)
     if ticks == UNFORCED_WARN_AFTER_TICKS:
-        logger.warn(f'{text} (unchanged for {ticks} ticks)')
+        # The warn carries the current reason, so a change on this tick loses nothing.
+        logger.warn(f'{text} (unforced for {ticks} ticks)')
+    elif seen_reason != reason:
+        logger.info(text)
 
 
 def _note_forced(logger, reported, cell) -> None:
@@ -222,6 +227,8 @@ def decide_domain_rule_bridges(
     into a tuple per direction, so exactly one of each pair is always someone else's.
     """
     requests = {}
+    # Cells already noted this pass, so two rules naming one cell count as one tick.
+    seen = set()
     local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
 
     for from_topic, _to_topic, from_domain, to_domain in rules:
@@ -234,17 +241,17 @@ def decide_domain_rule_bridges(
         cell = (from_topic, from_domain)
         local_topic = local_by_topic.get(cell)
         if local_topic is None:
-            _note_unforced(logger, reported, cell, 'no local topic in this domain')
+            _note_unforced(logger, reported, cell, 'no local topic in this domain', seen)
             continue
         if not local_topic.type_name:
             # The type comes from the tmpfs registry, so an empty one usually means that join
             # failed rather than that the topic is new.
-            _note_unforced(logger, reported, cell, 'the topic type is not known yet')
+            _note_unforced(logger, reported, cell, 'the topic type is not known yet', seen)
             continue
 
         local_pubs = [p for p in local_topic.publishers if not p.is_bridge]
         if not local_pubs:
-            _note_unforced(logger, reported, cell, 'no local publisher other than a bridge')
+            _note_unforced(logger, reported, cell, 'no local publisher other than a bridge', seen)
             continue
 
         _note_forced(logger, reported, cell)

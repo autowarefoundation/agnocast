@@ -195,37 +195,40 @@ def test_domain_rule_leaves_the_to_side_to_the_on_demand_path():
 def test_domain_rule_ignores_a_rule_belonging_to_another_domain():
     """bidirectional splits an entry per direction, so one of each pair is always someone else's."""
     logger = MagicMock()
-    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=1)])
+    reported = {}
+    # Both domains present, so without the guard the 2->1 tuple would force a second request.
+    local = _state(topics=[
+        _topic('/x', pubs=[_endpoint('/lp')], domain=1),
+        _topic('/x', pubs=[_endpoint('/rp')], domain=2)])
     rules = [('/x', '/x', 1, 2), ('/x', '/x', 2, 1)]
 
-    reqs = decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger)
+    reqs = decide_domain_rule_bridges(
+        local, rules, domain_id=1, logger=logger, reported=reported)
 
     assert len(reqs) == 1
     assert reqs[0].domain_id == 1
-    # The 2->1 tuple is the domain-2 agent's to force; saying so here would be noise.
+    # The 2->1 tuple is the domain-2 agent's to force: no line, and no entry left behind.
+    logger.info.assert_not_called()
     logger.warn.assert_not_called()
+    assert reported == {}
 
 
 def test_domain_rule_reports_each_reason_it_forced_nothing():
     """Skipping in silence is the symptom this forcing exists to remove."""
     logger = MagicMock()
-    # No local topic at all.
-    decide_domain_rule_bridges(_state(topics=[]), [('/x', '/x', 1, 2)], logger=logger)
-    # Present but with no type resolved from the registry.
-    decide_domain_rule_bridges(
-        _state(topics=[_topic('/x', type_name='', pubs=[_endpoint('/lp')], domain=1)]),
-        [('/x', '/x', 1, 2)], logger=logger)
-    # Present and typed, but the only publisher is a bridge.
-    decide_domain_rule_bridges(
-        _state(topics=[_topic('/x', pubs=[_endpoint('/b', is_bridge=True)], domain=1)]),
-        [('/x', '/x', 1, 2)], logger=logger)
+    for topics in (
+            [],
+            [_topic('/x', type_name='', pubs=[_endpoint('/lp')], domain=1)],
+            [_topic('/x', pubs=[_endpoint('/b', is_bridge=True)], domain=1)]):
+        decide_domain_rule_bridges(
+            _state(topics=topics), [('/x', '/x', 1, 2)], domain_id=1, logger=logger, reported={})
 
     reasons = ' '.join(str(c) for c in logger.info.call_args_list)
     assert logger.info.call_count == 3
     assert 'no local topic' in reasons
     assert 'type is not known' in reasons
     assert 'no local publisher' in reasons
-    # The startup gap is ordinary; nothing has persisted yet.
+    # A fresh dict each time, so nothing has persisted: the startup gap stays at info.
     logger.warn.assert_not_called()
 
 
@@ -235,7 +238,8 @@ def test_domain_rule_reports_one_reason_once_across_ticks():
     reported = {}
     local = _state(topics=[])
     for _ in range(3):
-        decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)], logger=logger, reported=reported)
+        decide_domain_rule_bridges(
+            local, [('/x', '/x', 1, 2)], domain_id=1, logger=logger, reported=reported)
     assert logger.info.call_count == 1
     logger.warn.assert_not_called()
 
@@ -246,26 +250,61 @@ def test_domain_rule_warns_once_after_the_reason_persists():
     reported = {}
     local = _state(topics=[])
     rules = [('/x', '/x', 1, 2)]
-    for _ in range(UNFORCED_WARN_AFTER_TICKS + 5):
-        decide_domain_rule_bridges(local, rules, logger=logger, reported=reported)
+    for _ in range(UNFORCED_WARN_AFTER_TICKS - 1):
+        decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger, reported=reported)
+    logger.warn.assert_not_called()
 
-    assert logger.info.call_count == 1
+    decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger, reported=reported)
     assert logger.warn.call_count == 1
-    assert 'unchanged for' in str(logger.warn.call_args)
+    assert f'unforced for {UNFORCED_WARN_AFTER_TICKS} ticks' in str(logger.warn.call_args)
+
+    for _ in range(5):
+        decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger, reported=reported)
+    assert logger.warn.call_count == 1
+    assert logger.info.call_count == 1
 
 
-def test_domain_rule_restarts_the_count_when_the_reason_changes():
+def test_domain_rule_counts_one_tick_when_two_rules_name_one_cell():
+    """Two rules can name one cell, and the warn text states the count, so it must not double."""
+    logger = MagicMock()
+    reported = {}
+    local = _state(topics=[])
+    rules = [('/x', '/x', 1, 2), ('/x', '/y', 1, 3)]
+    for _ in range(UNFORCED_WARN_AFTER_TICKS - 1):
+        decide_domain_rule_bridges(local, rules, domain_id=1, logger=logger, reported=reported)
+
+    logger.warn.assert_not_called()
+    assert reported[('/x', 1)][1] == UNFORCED_WARN_AFTER_TICKS - 1
+    assert logger.info.call_count == 1
+
+
+def test_domain_rule_keeps_counting_when_the_reason_changes():
+    """A fault that alternates is still a fault; resetting would leave it at info forever."""
     logger = MagicMock()
     reported = {}
     rules = [('/x', '/x', 1, 2)]
     absent = _state(topics=[])
     untyped = _state(topics=[_topic('/x', type_name='', pubs=[_endpoint('/lp')], domain=1)])
 
-    for _ in range(UNFORCED_WARN_AFTER_TICKS - 1):
-        decide_domain_rule_bridges(absent, rules, logger=logger, reported=reported)
-    decide_domain_rule_bridges(untyped, rules, logger=logger, reported=reported)
+    for i in range(UNFORCED_WARN_AFTER_TICKS):
+        state = absent if i % 2 == 0 else untyped
+        decide_domain_rule_bridges(state, rules, domain_id=1, logger=logger, reported=reported)
 
-    assert logger.info.call_count == 2
+    assert reported[('/x', 1)][1] == UNFORCED_WARN_AFTER_TICKS
+    assert logger.warn.call_count == 1
+
+
+def test_domain_rule_stays_quiet_when_a_rule_forces_from_the_start():
+    """`now forced` is the other half of a reported gap, not a line for every forcing rule."""
+    logger = MagicMock()
+    reported = {}
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=1)])
+
+    for _ in range(3):
+        assert decide_domain_rule_bridges(
+            local, [('/x', '/x', 1, 2)], domain_id=1, logger=logger, reported=reported)
+
+    logger.info.assert_not_called()
     logger.warn.assert_not_called()
 
 

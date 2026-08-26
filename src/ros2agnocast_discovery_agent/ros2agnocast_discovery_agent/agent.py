@@ -398,7 +398,8 @@ class DiscoveryAgent(Node):
         self._registry = registry if registry is not None else TypeRegistryReader(
             self._ipc_ns_inode, logger=self.get_logger())
         self._domain_rules = _load_domain_rules(self.get_logger())
-        # Keyed by (topic, domain); keeps the per-tick decider from repeating one reason.
+        # (topic, domain) -> (reason, ticks unforced); the decider escalates from info to warn
+        # off this, so it has to outlive the tick.
         self._unforced_reasons = {}
 
         qos = _gossip_qos()
