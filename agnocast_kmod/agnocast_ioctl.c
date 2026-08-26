@@ -1676,6 +1676,128 @@ unlock:
   return ret;
 }
 
+// Nothing may sleep under global_htables_rwsem: it is writer-preferring, so a sleeping reader
+// stalls every publish behind a waiting endpoint add/remove. Hence the scratch preallocated
+// below, and the copy_to_user left to get_node_names_cmd.
+
+// Kept well above MAX_NODE_NUM so that probing always terminates on a free slot.
+#define NODE_NAME_SLOT_BITS 11
+#define NODE_NAME_SLOT_NUM (1u << NODE_NAME_SLOT_BITS)
+
+struct collected_node
+{
+  uint32_t name_index;
+  pid_t pid;
+};
+
+struct node_name_collector
+{
+  struct collected_node * slots;
+  char * buf;
+  uint32_t capacity;
+  uint32_t num;
+};
+
+static char * node_name_at(const struct node_name_collector * col, const uint32_t index)
+{
+  return col->buf + (size_t)index * NODE_NAME_BUFFER_SIZE;
+}
+
+// The dedup key is (pid, name), not the name alone: rclcpp reports same-named nodes in different
+// processes as two. Two in one process still collapse -- ROS 2 cannot tell those apart either.
+static int add_unique_node(struct node_name_collector * col, const char * name, const pid_t pid)
+{
+  const size_t len = strlen(name) + 1;
+  uint32_t idx = full_name_hash(NULL, name, len - 1) & (NODE_NAME_SLOT_NUM - 1);
+
+  while (col->slots[idx].pid != 0) {
+    const struct collected_node * slot = &col->slots[idx];
+    if (slot->pid == pid && strcmp(node_name_at(col, slot->name_index), name) == 0) {
+      return 0;  // already collected
+    }
+    idx = (idx + 1) & (NODE_NAME_SLOT_NUM - 1);
+  }
+
+  if (col->num >= col->capacity) {
+    dev_warn(
+      agnocast_device, "Node count exceeds limit: node_name_buffer_size=%u\n", col->capacity);
+    return -ENOBUFS;
+  }
+
+  memcpy(node_name_at(col, col->num), name, len);
+  col->slots[idx].name_index = col->num;
+  col->slots[idx].pid = pid;
+  col->num++;
+  return 0;
+}
+
+// Collects the nodes owning an endpoint of one topic. Caller holds global_htables_rwsem.
+static int collect_node_names_of_topic(
+  struct topic_wrapper * wrapper, const uint32_t domain_id, struct node_name_collector * col)
+{
+  int ret = 0;
+
+  down_read(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != domain_id || pub_info->is_bridge) continue;
+
+    ret = add_unique_node(col, pub_info->node_name, pub_info->pid);
+    if (ret) goto unlock;
+  }
+
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != domain_id || sub_info->is_bridge) continue;
+
+    ret = add_unique_node(col, sub_info->node_name, sub_info->pid);
+    if (ret) goto unlock;
+  }
+
+unlock:
+  up_read(&wrapper->topic->rwsem);
+  return ret;
+}
+
+// `buf_node_num` must not exceed MAX_NODE_NUM, or the dedup table can fill and probing never
+// finds a free slot. get_node_names_cmd clamps it.
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, char * buf,
+  const uint32_t buf_node_num, uint32_t * ret_node_num)
+{
+  int ret = 0;
+  struct node_name_collector col = {.buf = buf, .capacity = buf_node_num};
+
+  col.slots = kvcalloc(NODE_NAME_SLOT_NUM, sizeof(*col.slots), GFP_KERNEL);
+  if (!col.slots) return -ENOMEM;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper;
+  int bkt_topic;
+  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
+  {
+    if (!ipc_eq(ipc_ns, wrapper->ipc_ns) || wrapper->domain_id != domain_id) {
+      continue;
+    }
+
+    ret = collect_node_names_of_topic(wrapper, domain_id, &col);
+    if (ret) goto unlock;
+  }
+
+  *ret_node_num = col.num;
+
+unlock:
+  up_read(&global_htables_rwsem);
+  kvfree(col.slots);
+  return ret;
+}
+
 int agnocast_ioctl_get_node_subscriber_topics(
   const struct ipc_namespace * ipc_ns, const char * node_name,
   union ioctl_node_info_args * node_info_args)
@@ -3090,6 +3212,37 @@ static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
   return ret;
 }
 
+static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_get_node_names_args get_node_names_args;
+  if (copy_from_user(&get_node_names_args, arg, sizeof(get_node_names_args))) return -EFAULT;
+
+  const uint32_t buf_node_num =
+    min_t(uint32_t, get_node_names_args.node_name_buffer_size, MAX_NODE_NUM);
+  char __user * user_buf =
+    (char __user *)u64_to_user_ptr(get_node_names_args.node_name_buffer_addr);
+
+  char * buf = kvmalloc((size_t)buf_node_num * NODE_NAME_BUFFER_SIZE, GFP_KERNEL);
+  if (!buf) return -ENOMEM;
+
+  uint32_t node_num = 0;
+  long ret =
+    agnocast_ioctl_get_node_names(ipc_ns, get_current_domain_id(), buf, buf_node_num, &node_num);
+  if (ret == 0) {
+    if (copy_to_user(user_buf, buf, (size_t)node_num * NODE_NAME_BUFFER_SIZE)) {
+      ret = -EFAULT;
+    } else {
+      get_node_names_args.ret_node_num = node_num;
+      if (copy_to_user(arg, &get_node_names_args, sizeof(get_node_names_args))) ret = -EFAULT;
+    }
+  }
+
+  kvfree(buf);
+  return ret;
+}
+
 static long get_node_subscriber_topics_cmd(union ioctl_node_info_args __user * arg)
 {
   int ret = 0;
@@ -3447,6 +3600,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_exit_process_cmd((struct ioctl_get_exit_process_args __user *)arg);
     case AGNOCAST_GET_TOPIC_LIST_CMD:
       return get_topic_list_cmd((union ioctl_topic_list_args __user *)arg);
+    case AGNOCAST_GET_NODE_NAMES_CMD:
+      return get_node_names_cmd((union ioctl_get_node_names_args __user *)arg);
     case AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD:
       return get_node_subscriber_topics_cmd((union ioctl_node_info_args __user *)arg);
     case AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD:

@@ -12,6 +12,7 @@
 #include "agnocast_kunit/agnocast_kunit_domain_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_exit_free_data.h"
 #include "agnocast_kunit/agnocast_kunit_get_exit_process.h"
+#include "agnocast_kunit/agnocast_kunit_get_node_names.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_publisher_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_num.h"
@@ -62,6 +63,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_SET_ROS2_PUBLISHER_NUM,
   TEST_CASES_DO_EXIT,
   TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS,
+  TEST_CASES_GET_NODE_NAMES,
   TEST_CASES_GET_NODE_PUBLISHER_TOPICS,
   TEST_CASES_GET_TOPIC_SUBSCRIBER_INFO,
   TEST_CASES_GET_TOPIC_PUBLISHER_INFO,

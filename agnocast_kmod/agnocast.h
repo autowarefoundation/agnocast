@@ -14,6 +14,7 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
+#define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
@@ -33,6 +34,15 @@ struct name_info
 struct ioctl_get_version_args
 {
   char ret_version[VERSION_BUFFER_LEN];
+};
+
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
 };
 
 union ioctl_add_process_args {
@@ -338,6 +348,7 @@ struct ioctl_add_domain_bridge_prefix_args
   _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
 #define AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD \
   _IOW(0xA6, 32, struct ioctl_add_domain_bridge_prefix_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 
 // ================================================
 // ros2cli ioctls
@@ -456,6 +467,10 @@ int agnocast_ioctl_get_publisher_num(
 
 int agnocast_ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
+
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, char * buf,
+  const uint32_t buf_node_num, uint32_t * ret_node_num);
 
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
