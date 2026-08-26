@@ -303,8 +303,9 @@ def _load_domain_rules(logger=None) -> list:
     """Return the domain bridge rules from the config, or [].
 
     Every outcome is logged: a silently empty rule list looks exactly like the
-    cross-domain deadlock this forcing exists to break. An unreadable config is a
-    warning rather than fatal, so it never takes the gossip publication down.
+    cross-domain deadlock this forcing exists to break. A config that cannot be
+    read is reported and skipped rather than fatal, so it never takes the gossip
+    publication down.
     """
     path, from_env = domain_bridge_config.resolve_config_path()
 
@@ -322,9 +323,14 @@ def _load_domain_rules(logger=None) -> list:
                     f'is off (set {domain_bridge_config.CONFIG_ENV} to use another path)')
         return []
     except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
+        # domain_bridge refuses the same file outright, so one bad entry disables the whole
+        # config on both sides. Say so at error level: forcing is off for every topic, and a
+        # topic split across a namespace and a domain then stops without another trace.
         if logger is not None:
-            logger.warn(
-                f'cannot load {path} ({exc}); no cross-domain bridge will be forced')
+            logger.error(
+                f'cannot load {path} ({exc}); cross-domain bridge forcing is off for ALL '
+                'topics, so any topic split across an IPC namespace and a ROS domain will '
+                'not flow')
         return []
 
     if logger is not None:
@@ -392,6 +398,8 @@ class DiscoveryAgent(Node):
         self._registry = registry if registry is not None else TypeRegistryReader(
             self._ipc_ns_inode, logger=self.get_logger())
         self._domain_rules = _load_domain_rules(self.get_logger())
+        # Keyed by (topic, domain); keeps the per-tick decider from repeating one reason.
+        self._unforced_reasons = {}
 
         qos = _gossip_qos()
         self._pub = self.create_publisher(AgnocastDaemonState, GOSSIP_TOPIC, qos)
@@ -469,7 +477,9 @@ class DiscoveryAgent(Node):
     def _dispatch_bridge_requests(self, local_state: AgnocastDaemonState) -> None:
         remote_states = {key: msg for key, (msg, _received_at) in self._remote_states.items()}
         requests = bridge_decider.decide_bridges(local_state, remote_states)
-        requests += bridge_decider.decide_domain_rule_bridges(local_state, self._domain_rules)
+        requests += bridge_decider.decide_domain_rule_bridges(
+            local_state, self._domain_rules, logger=self.get_logger(),
+            reported=self._unforced_reasons)
         if requests:
             bridge_decider.dispatch_requests(
                 requests, self._ipc_ns_inode, logger=self.get_logger())

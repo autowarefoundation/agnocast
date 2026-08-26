@@ -184,6 +184,22 @@ topics:
     assert skipped == []
 
 
+def test_bidirectional_accepts_the_yaml11_forms_yaml_cpp_resolves():
+    # PyYAML leaves a bare 'y'/'n' as a string while yaml-cpp reads it as a bool. Rejecting them
+    # would refuse a config the external domain_bridge node runs.
+    # PyYAML already resolves 'yes'/'no'/'on'/'off'; only these reach the string branch.
+    for text, expected_len in (('y', 2), ('n', 1), ('Y', 2), ('N', 1), ("'y'", 2), ("' y '", 2)):
+        doc = f'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n    bidirectional: {text}\n'
+        rules, _ = parse_domain_bridge_config(doc)
+        assert len(rules) == expected_len, text
+
+
+def test_bidirectional_rejects_a_value_that_is_not_a_boolean():
+    text = 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n    bidirectional: maybe\n'
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
+
+
 def test_bidirectional_reverse_leg_swaps_only_the_domains():
     """Mirrors the external node, whose reverse leg keeps the source and remap names."""
     text = """

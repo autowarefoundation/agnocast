@@ -15,6 +15,18 @@ ros2 run ros2agnocast_discovery_agent register_domain_bridge
 # AGNOCAST_DOMAIN_BRIDGE_CONFIG
 ```
 
+The discovery agent reads the same file, to force the A2R bridge that a topic
+split across both an IPC namespace and a ROS domain needs (without it,
+`domain_bridge` waits for a DDS publisher while the A2R bridge waits for a DDS
+subscriber, and the topic never flows). The agent is `execv`'d from an
+application process, so it only ever sees the default path or an environment
+variable exported to that process — **not** a `--config` argument passed here.
+
+Keep the file at `/etc/agnocast/domain_bridge.yaml`, or export
+`AGNOCAST_DOMAIN_BRIDGE_CONFIG` to the applications as well. Registering with
+`--config` alone leaves the rules in the kmod but the forcing off, which the
+agent reports only in its own log.
+
 Run it once, ordered so that it:
 
 1. runs **after** the Agnocast kernel module is loaded (so `/dev/agnocast` exists),

@@ -160,7 +160,25 @@ def decide_bridges(local_state, remote_states) -> list:
     return list(requests.values())
 
 
-def decide_domain_rule_bridges(local_state, rules) -> list:
+def _note_unforced(logger, reported, cell, reason) -> None:
+    """Report why a rule forced nothing, once per ``(cell, reason)``.
+
+    The decider runs every tick, so an unchanged reason must not be repeated. A rule that stops
+    being forced for a *different* reason is worth a new line, hence keying on the reason too.
+    """
+    if logger is None:
+        return
+    topic, domain = cell
+    if reported is None:
+        logger.warn(f'no cross-domain bridge forced for {topic}@{domain}: {reason}')
+        return
+    if reported.get(cell) == reason:
+        return
+    reported[cell] = reason
+    logger.warn(f'no cross-domain bridge forced for {topic}@{domain}: {reason}')
+
+
+def decide_domain_rule_bridges(local_state, rules, logger=None, reported=None) -> list:
     """Return the A2R requests implied by the registered domain bridge rules.
 
     Only the ``from`` side is forced: there domain_bridge waits for a DDS
@@ -169,6 +187,10 @@ def decide_domain_rule_bridges(local_state, rules) -> list:
 
     Forcing is unconditional: gossip never crosses domains, so there is no
     evidence here of a subscriber in ``to_domain``.
+
+    A rule that forces nothing is reported through ``logger``, with ``reported`` (a caller-owned
+    dict) suppressing the repeat every tick. Skipping in silence would reproduce the symptom this
+    forcing exists to remove: a topic that does not flow, with no trace of why.
     """
     requests = {}
     local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
@@ -177,13 +199,24 @@ def decide_domain_rule_bridges(local_state, rules) -> list:
         if from_domain == to_domain:
             continue
 
-        local_topic = local_by_topic.get((from_topic, from_domain))
-        if local_topic is None or not local_topic.type_name:
+        cell = (from_topic, from_domain)
+        local_topic = local_by_topic.get(cell)
+        if local_topic is None:
+            _note_unforced(logger, reported, cell, 'no local topic in this domain')
+            continue
+        if not local_topic.type_name:
+            # The type comes from the tmpfs registry, so an empty one usually means that join
+            # failed rather than that the topic is new.
+            _note_unforced(logger, reported, cell, 'the topic type is not known yet')
             continue
 
         local_pubs = [p for p in local_topic.publishers if not p.is_bridge]
         if not local_pubs:
+            _note_unforced(logger, reported, cell, 'no local publisher other than a bridge')
             continue
+
+        if reported is not None:
+            reported.pop(cell, None)
 
         pub = local_pubs[0]
         key = (from_topic, from_domain, DIRECTION_AGNOCAST_TO_ROS2)

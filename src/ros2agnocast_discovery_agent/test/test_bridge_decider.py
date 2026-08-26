@@ -7,6 +7,7 @@ bytes) in ``agnocast_bridge_msg.hpp``.
 """
 
 import struct
+from unittest.mock import MagicMock
 
 from ros2agnocast_discovery_agent.bridge_decider import (
     BridgeRequest,
@@ -184,8 +185,84 @@ def test_domain_rule_forces_a2r_on_the_from_side():
 
 
 def test_domain_rule_leaves_the_to_side_to_the_on_demand_path():
-    local = _state(topics=[_topic('/x', subs=[_endpoint('/ls')], domain=2)])
+    # The publisher matters: without it this would also return [] for want of one, and the test
+    # would pass even if the domain filter were dropped.
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=2)])
     assert decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)]) == []
+
+
+def test_domain_rule_reports_each_reason_it_forced_nothing():
+    """Skipping in silence is the symptom this forcing exists to remove."""
+    logger = MagicMock()
+    # No local topic at all.
+    decide_domain_rule_bridges(_state(topics=[]), [('/x', '/x', 1, 2)], logger=logger)
+    # Present but with no type resolved from the registry.
+    decide_domain_rule_bridges(
+        _state(topics=[_topic('/x', type_name='', pubs=[_endpoint('/lp')], domain=1)]),
+        [('/x', '/x', 1, 2)], logger=logger)
+    # Present and typed, but the only publisher is a bridge.
+    decide_domain_rule_bridges(
+        _state(topics=[_topic('/x', pubs=[_endpoint('/b', is_bridge=True)], domain=1)]),
+        [('/x', '/x', 1, 2)], logger=logger)
+
+    reasons = ' '.join(str(c) for c in logger.warn.call_args_list)
+    assert logger.warn.call_count == 3
+    assert 'no local topic' in reasons
+    assert 'type is not known' in reasons
+    assert 'no local publisher' in reasons
+
+
+def test_domain_rule_reports_one_reason_once_across_ticks():
+    """The decider runs every tick; an unchanged reason must not be repeated."""
+    logger = MagicMock()
+    reported = {}
+    local = _state(topics=[])
+    for _ in range(3):
+        decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)], logger=logger, reported=reported)
+    assert logger.warn.call_count == 1
+
+
+def test_domain_rule_reports_again_after_forcing_recovers_and_breaks():
+    """A rule that starts forcing clears its note, so a later failure is reported again."""
+    logger = MagicMock()
+    reported = {}
+    absent = _state(topics=[])
+    present = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=1)])
+    rules = [('/x', '/x', 1, 2)]
+
+    decide_domain_rule_bridges(absent, rules, logger=logger, reported=reported)
+    assert decide_domain_rule_bridges(present, rules, logger=logger, reported=reported)
+    decide_domain_rule_bridges(absent, rules, logger=logger, reported=reported)
+
+    assert logger.warn.call_count == 2
+
+
+def test_domain_rule_request_carries_the_topic_type_and_publisher_qos():
+    """The forced request is what bridge_manager builds from, so its payload matters."""
+    pub = _endpoint('/lp', depth=7, transient=True)
+    local = _state(topics=[_topic('/x', pubs=[pub], domain=1, type_name='pkg/msg/Thing')])
+    reqs = decide_domain_rule_bridges(local, [('/x', '/x', 1, 2)])
+    assert len(reqs) == 1
+    assert reqs[0].type_name == 'pkg/msg/Thing'
+    assert reqs[0].qos_depth == 7
+    assert reqs[0].qos_is_transient_local is True
+
+
+def test_domain_rule_collapses_two_rules_naming_the_same_cell():
+    """A bidirectional pair and a duplicate entry both land on the same (topic, from_domain)."""
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=1)])
+    reqs = decide_domain_rule_bridges(local, [('/x', '/x', 1, 2), ('/x', '/y', 1, 3)])
+    assert len(reqs) == 1
+
+
+def test_domain_rule_forces_the_reverse_leg_of_a_bidirectional_rule():
+    # parse_domain_bridge_config emits the reverse tuple for 'bidirectional: true'. This is the
+    # half that turns it into a request: a publisher in the to_domain is forced by that tuple.
+    local = _state(topics=[_topic('/x', pubs=[_endpoint('/lp')], domain=2)])
+    reqs = decide_domain_rule_bridges(local, [('/x', '/x', 1, 2), ('/x', '/x', 2, 1)])
+    assert len(reqs) == 1
+    assert reqs[0].domain_id == 2
+    assert reqs[0].direction == DIRECTION_AGNOCAST_TO_ROS2
 
 
 def test_domain_rule_uses_the_from_side_name_when_renamed():
