@@ -162,10 +162,11 @@ if(BUILD_TESTING)
     test/unit/test_daemon_bridge_uds.cpp
     test/unit/test_agnocast_bridge_uds.cpp
     test/unit/test_discovery_agent_auto_fork.cpp
-    test/unit/test_bridge_node_name.cpp)
+    test/unit/test_bridge_node_name.cpp
+    test/unit/test_service_wire_type.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
-  ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
+  ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs std_srvs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
   set_tests_properties(test_unit_${PROJECT_NAME} PROPERTIES
     ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe"
   )
