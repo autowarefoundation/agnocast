@@ -405,6 +405,15 @@ public:
   AGNOCAST_PUBLIC
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  /// Return the fully qualified names of the nodes in this IPC namespace and ROS_DOMAIN_ID.
+  ///
+  /// Reports the agnocast nodes that own an endpoint, plus this node itself. DDS is not consulted,
+  /// so a ROS 2 node without an agnocast endpoint is not reported. See
+  /// docs/agnocast_node_interface_comparison.md.
+  /// @return Node names, with a name shared by several nodes repeated once per node.
+  AGNOCAST_PUBLIC
+  std::vector<std::string> get_node_names() const { return node_graph_->get_node_names(); }
+
   /// Return the number of publishers on a topic.
   ///
   /// Counts the agnocast publishers in the same domain, plus the ROS 2 publishers reported by a
@@ -509,6 +518,10 @@ public:
   /// @return Shared pointer to the created polling subscription.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
   {
@@ -523,6 +536,10 @@ public:
   /// @return Shared pointer to the created polling subscription.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::TakeSubscription directly.")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
   {

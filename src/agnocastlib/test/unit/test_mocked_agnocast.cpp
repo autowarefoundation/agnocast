@@ -14,6 +14,7 @@ using namespace agnocast;
 int release_subscriber_reference_mock_called_count = 0;
 int publish_core_mock_called_count = 0;
 uint32_t mock_borrowed_publisher_num = 0;
+size_t initialize_publisher_mock_last_qos_depth = 0;
 
 extern "C" uint32_t agnocast_get_borrowed_publisher_num()
 {
@@ -40,8 +41,10 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string &, const std::string &, const rclcpp::QoS &, const bool, const std::string &)
+  const std::string &, const std::string &, const rclcpp::QoS & qos, const bool,
+  const std::string &)
 {
+  initialize_publisher_mock_last_qos_depth = qos.depth();
   return 0;  // Dummy value
 }
 union ioctl_publish_msg_args publish_core(

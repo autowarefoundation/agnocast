@@ -183,7 +183,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_client_names_and_types_by_node()` | ✗ | **Throws Exception** | No | Agnocast does not officially support Service |
 | `get_publisher_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
 | `get_subscriber_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
-| `get_node_names()` | ✗ | **Throws Exception** | Yes | To support this, the kmod must report the nodes owning an agnocast endpoint; it currently does not |
+| `get_node_names()` | ✓ | **Partial Support** | - | Returns the nodes of the caller's IPC namespace and `ROS_DOMAIN_ID` that own at least one non-bridge agnocast publisher/subscriber, plus the caller itself. DDS is not consulted, so an `rclcpp::Node` without an agnocast endpoint is not reported. Nodes are keyed on `(pid, fully qualified name)`, so duplicate names survive across processes but collapse within one, which rclcpp does not do. Beyond `MAX_NODE_NUM` (1024) nodes only the caller is reported, and an error is logged |
 | `get_node_names_with_enclaves()` | ✗ | **Throws Exception** | No | |
 | `get_node_names_and_namespaces()` | ✗ | **Throws Exception** | No | To support this, namespace must be managed within the kmod; however, they are currently not managed |
 | `count_publishers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 publishers, excluding those created by bridges. `agnocast::Node::count_publishers()` delegates here |
@@ -343,7 +343,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | API | rclcpp::Node | agnocast::Node |
 |-----|:------------:|:--------------:|
-| `get_node_names()` | ✓ | ✗ |
+| `get_node_names()` | ✓ | ✓ |
 | `get_topic_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types_by_node()` | ✓ | ✗ |

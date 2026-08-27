@@ -1,0 +1,216 @@
+#include "agnocast/agnocast.hpp"
+#include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp/version.h"
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+using namespace std::chrono_literals;
+using namespace std::placeholders;
+
+// Report a stuck run from the node itself, instead of leaving the launch test to time out.
+constexpr auto request_timeout = 10s;
+
+using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
+using Request = agnocast_sample_interfaces::srv::SumIntArray::Request;
+using Response = agnocast_sample_interfaces::srv::SumIntArray::Response;
+
+struct NodeParams
+{
+  std::string service_name;
+  int64_t qos_depth;
+  bool use_deferred_callback;
+  // The number of requests to handle before exiting
+  int64_t target_count;
+};
+
+NodeParams get_node_params(rclcpp::Node * node)
+{
+  node->declare_parameter<std::string>("service_name", "/test_service");
+  node->declare_parameter<int64_t>("qos_depth", 10);
+  node->declare_parameter<bool>("use_deferred_callback", false);
+  node->declare_parameter<int64_t>("target_count", 1);
+
+  NodeParams params;
+  params.service_name = node->get_parameter("service_name").as_string();
+  params.qos_depth = node->get_parameter("qos_depth").as_int();
+  params.use_deferred_callback = node->get_parameter("use_deferred_callback").as_bool();
+  params.target_count = node->get_parameter("target_count").as_int();
+  return params;
+}
+
+class TestServer : public rclcpp::Node
+{
+  int64_t target_count_;
+  // Deferred callbacks respond from their own threads, so the counter is shared across them.
+  std::atomic<int64_t> received_count_{0};
+  rclcpp::CallbackGroup::SharedPtr cbg_;
+  agnocast::Service<ServiceT>::SharedPtr srv_;
+  // Kept out of cbg_: a group holding both an Agnocast callback and a ROS 2 timer stalls the timer.
+  rclcpp::CallbackGroup::SharedPtr timer_cbg_;
+  rclcpp::TimerBase::SharedPtr timeout_timer_;
+
+  std::mutex response_threads_mtx_;
+  std::vector<std::thread> response_threads_;
+
+  void report_timeout_and_shutdown()
+  {
+    if (received_count_.load() >= target_count_) {
+      return;
+    }
+
+    RCLCPP_ERROR(
+      this->get_logger(), "Timeout waiting for requests. Received %ld of %ld.",
+      received_count_.load(), target_count_);
+    rclcpp::shutdown();
+  }
+
+  void count_and_shutdown_if_done()
+  {
+    if (received_count_.fetch_add(1) + 1 >= target_count_) {
+      RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
+      rclcpp::shutdown();
+    }
+  }
+
+  void basic_callback(
+    const agnocast::ipc_shared_ptr<Request> & request,
+    const agnocast::ipc_shared_ptr<Response> & response)
+  {
+    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", request->data[0]);
+
+    response->sum = request->data[0];
+
+    count_and_shutdown_if_done();
+  }
+
+  void deferred_callback(
+    agnocast::Service<ServiceT>::SharedPtr srv_handle, agnocast::ipc_shared_ptr<Request> && request)
+  {
+    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", request->data[0]);
+
+    std::lock_guard<std::mutex> lock(response_threads_mtx_);
+    response_threads_.emplace_back(
+      [this, srv_handle = std::move(srv_handle), request = std::move(request)]() mutable {
+        // Wait for a while to simulate an asynchronous operation.
+        std::this_thread::sleep_for(100ms);
+
+        auto response = srv_handle->borrow_loaned_response(request);
+        response->sum = request->data[0];
+        srv_handle->send_response(std::move(request), std::move(response));
+
+        count_and_shutdown_if_done();
+      });
+  }
+
+public:
+  explicit TestServer(const rclcpp::NodeOptions & options) : Node("test_server", options)
+  {
+    auto params = get_node_params(this);
+    target_count_ = params.target_count;
+
+    cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
+
+    if (params.use_deferred_callback) {
+      srv_ = agnocast::create_service<ServiceT>(
+        this, params.service_name, std::bind(&TestServer::deferred_callback, this, _1, _2), qos,
+        cbg_);
+    } else {
+      srv_ = agnocast::create_service<ServiceT>(
+        this, params.service_name, std::bind(&TestServer::basic_callback, this, _1, _2), qos, cbg_);
+    }
+
+    timer_cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    timeout_timer_ = this->create_wall_timer(
+      request_timeout, [this]() { report_timeout_and_shutdown(); }, timer_cbg_);
+  }
+
+  ~TestServer() override
+  {
+    std::vector<std::thread> threads;
+    {
+      std::lock_guard<std::mutex> lock(response_threads_mtx_);
+      threads.swap(response_threads_);
+    }
+    for (auto & thread : threads) {
+      thread.join();
+    }
+  }
+};
+
+class TestROS2Server : public rclcpp::Node
+{
+  int64_t target_count_;
+  std::atomic<int64_t> received_count_{0};
+  rclcpp::CallbackGroup::SharedPtr cbg_;
+  rclcpp::Service<ServiceT>::SharedPtr srv_;
+  rclcpp::CallbackGroup::SharedPtr timer_cbg_;
+  rclcpp::TimerBase::SharedPtr timeout_timer_;
+
+  void report_timeout_and_shutdown()
+  {
+    if (received_count_ >= target_count_) {
+      return;
+    }
+
+    RCLCPP_ERROR(
+      this->get_logger(), "Timeout waiting for requests. Received %ld of %ld.",
+      received_count_.load(), target_count_);
+    rclcpp::shutdown();
+  }
+
+  void callback(
+    const std::shared_ptr<Request> & request, const std::shared_ptr<Response> & response)
+  {
+    RCLCPP_INFO(this->get_logger(), "Receiving %ld.", request->data[0]);
+
+    response->sum = request->data[0];
+
+    if (received_count_.fetch_add(1) + 1 >= target_count_) {
+      RCLCPP_INFO(this->get_logger(), "All requests have been handled. Shutting down.");
+      rclcpp::shutdown();
+    }
+  }
+
+public:
+  explicit TestROS2Server(const rclcpp::NodeOptions & options) : Node("test_ros2_server", options)
+  {
+    auto params = get_node_params(this);
+    target_count_ = params.target_count;
+
+    if (params.use_deferred_callback) {
+      RCLCPP_ERROR(
+        this->get_logger(), "TestROS2Server does not support the deferred service callback.");
+      rclcpp::shutdown();
+      return;
+    }
+
+    cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::QoS qos{rclcpp::KeepLast(params.qos_depth)};
+
+    srv_ = this->create_service<ServiceT>(
+      params.service_name, std::bind(&TestROS2Server::callback, this, _1, _2),
+#if RCLCPP_VERSION_MAJOR >= 28
+      qos, cbg_);
+#else
+      qos.get_rmw_qos_profile(), cbg_);
+#endif
+
+    timer_cbg_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    timeout_timer_ = this->create_wall_timer(
+      request_timeout, [this]() { report_timeout_and_shutdown(); }, timer_cbg_);
+  }
+};
+
+#include <rclcpp_components/register_node_macro.hpp>
+RCLCPP_COMPONENTS_REGISTER_NODE(TestServer)
+RCLCPP_COMPONENTS_REGISTER_NODE(TestROS2Server)

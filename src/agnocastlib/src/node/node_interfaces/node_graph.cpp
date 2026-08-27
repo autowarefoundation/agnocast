@@ -1,8 +1,17 @@
 #include "agnocast/node/node_interfaces/node_graph.hpp"
 
+#include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_subscription.hpp"
+#include "agnocast/agnocast_utils.hpp"
 
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 
 namespace agnocast::node_interfaces
@@ -62,11 +71,57 @@ std::map<std::string, std::vector<std::string>> NodeGraph::get_subscriber_names_
     "NodeGraph::get_subscriber_names_and_types_by_node is not supported in agnocast.");
 }
 
-// Supporting this requires the kmod to report the nodes owning an agnocast endpoint, which it
-// does not do yet.
+namespace
+{
+std::vector<std::string> query_agnocast_node_names()
+{
+  std::vector<char> buffer(static_cast<size_t>(MAX_NODE_NUM) * NODE_NAME_BUFFER_SIZE);
+
+  union ioctl_get_node_names_args get_node_names_args = {};
+  get_node_names_args.node_name_buffer_addr = reinterpret_cast<uint64_t>(buffer.data());
+  get_node_names_args.node_name_buffer_size = MAX_NODE_NUM;
+  if (ioctl(agnocast_fd, AGNOCAST_GET_NODE_NAMES_CMD, &get_node_names_args) < 0) {
+    // The kmod clamps the buffer to MAX_NODE_NUM either way, so -ENOBUFS means the graph is too
+    // large to report, not a broken kmod state -- and so, unlike the other ioctl wrappers, this
+    // one must not take the caller down.
+    if (errno == ENOBUFS) {
+      RCLCPP_ERROR(
+        logger,
+        "AGNOCAST_GET_NODE_NAMES_CMD failed: more than MAX_NODE_NUM (%d) agnocast nodes in this "
+        "IPC namespace and ROS_DOMAIN_ID. get_node_names() reports the calling node only.",
+        MAX_NODE_NUM);
+      return {};
+    }
+    RCLCPP_ERROR(logger, "AGNOCAST_GET_NODE_NAMES_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  std::vector<std::string> node_names;
+  node_names.reserve(get_node_names_args.ret_node_num);
+
+  for (uint32_t i = 0; i < get_node_names_args.ret_node_num; ++i) {
+    node_names.emplace_back(&buffer[static_cast<size_t>(i) * NODE_NAME_BUFFER_SIZE]);
+  }
+
+  return node_names;
+}
+}  // namespace
+
+// Duplicate names survive: `rclcpp` reports a name once per node that carries it, and the kmod
+// likewise counts two same-named nodes in different processes as two.
 std::vector<std::string> NodeGraph::get_node_names() const
 {
-  throw std::runtime_error("NodeGraph::get_node_names is not supported in agnocast.");
+  std::vector<std::string> node_names = query_agnocast_node_names();
+
+  // The kmod only knows nodes that own an endpoint, but rclcpp lists the calling node even
+  // when it owns none. Skipping a name already listed hides a same-named node in another process.
+  std::string self_name = node_base_->get_fully_qualified_name();
+  if (std::find(node_names.begin(), node_names.end(), self_name) == node_names.end()) {
+    node_names.push_back(std::move(self_name));
+  }
+
+  return node_names;
 }
 
 std::vector<std::tuple<std::string, std::string, std::string>>

@@ -14,6 +14,7 @@ import pytest
 
 from rclpy.executors import ExternalShutdownException
 
+from ros2agnocast_discovery_agent import domain_bridge_config
 from ros2agnocast_discovery_agent.agent import (
     DiscoveryAgent,
     EXIT_WHEN_IDLE_ENV,
@@ -23,9 +24,16 @@ from ros2agnocast_discovery_agent.agent import (
     TopicInfoRet,
     _exit_when_idle_enabled,
     _ioctl_to_endpoint,
+    _load_domain_rules,
     _read_host_uuid,
     read_local_topics,
 )
+from ros2agnocast_discovery_agent.bridge_decider import (
+    BridgeRequest,
+    DIRECTION_AGNOCAST_TO_ROS2,
+)
+from ros2agnocast_discovery_agent.domain_bridge_config import CONFIG_ENV
+from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
 
 
 def _make_info(node_name: str, qos_depth: int = 10,
@@ -402,6 +410,159 @@ def test_idle_exit_tracker_resets_on_activity():
 def test_idle_exit_tracker_threshold_floor():
     # A non-positive threshold is clamped to 1, so a single idle tick fires.
     assert IdleExitTracker(threshold=0).update(True) is True
+
+
+def test_dispatch_issues_domain_rule_bridges_without_any_remote_agent(monkeypatch):
+    """The cross-domain path has no gossip peer, so it must not be gated on one."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    forced = BridgeRequest('/x', 'T', DIRECTION_AGNOCAST_TO_ROS2, 10, False, True, domain_id=1)
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges', lambda state, rules, **kw: [forced])
+    sent = []
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: sent.extend(reqs))
+
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
+        _unforced_reasons={}, _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert sent == [forced]
+
+
+def test_dispatch_passes_the_loaded_rules_through_to_the_decider(monkeypatch):
+    """The rules read from the config must reach the decider, not an empty list."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    seen = []
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges',
+        lambda state, rules, **kw: seen.append(rules) or [])
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
+
+    rules = [('/x', '/x', 1, 2)]
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=rules, _ipc_ns_inode=7, _unforced_reasons={},
+        _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert seen == [rules]
+
+
+def test_dispatch_hands_the_decider_everything_it_needs(monkeypatch):
+    """Without the domain it cannot tell a foreign rule from an unresolved one; without the logger
+    and the shared dict, the reporting is dead or repeats every tick."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    seen = {}
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges',
+        lambda state, rules, **kw: seen.update(kw) or [])
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
+
+    logger = MagicMock()
+    reasons = {}
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
+        _unforced_reasons=reasons, _domain_id=4, get_logger=lambda: logger)
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert seen.get('domain_id') == 4
+    assert seen.get('logger') is logger
+    # The same dict across ticks, not a copy: the tick count lives in it.
+    assert seen.get('reported') is reasons
+
+
+def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):
+    """Removing the remote-state early return must not turn every idle tick into a datagram."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    monkeypatch.setattr(bd, 'decide_domain_rule_bridges', lambda state, rules, **kw: [])
+    sent = []
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: sent.append(reqs))
+
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[], _ipc_ns_inode=7, _unforced_reasons={},
+        _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert sent == []
+
+
+def test_load_domain_rules_returns_empty_when_no_config_exists(monkeypatch, tmp_path):
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'absent.yaml'))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.info.assert_called_once()
+    logger.warn.assert_not_called()
+
+
+def test_load_domain_rules_falls_back_to_the_default_path(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(config))
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2)]
+
+
+def test_load_domain_rules_warns_when_the_configured_path_is_absent(monkeypatch, tmp_path):
+    """An env var pointing at nothing is a misconfiguration; a missing default is not."""
+    monkeypatch.setenv(CONFIG_ENV, str(tmp_path / 'absent.yaml'))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.warn.assert_called_once()
+
+
+def test_load_domain_rules_logs_what_it_loaded(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    _load_domain_rules(logger)
+
+    logger.info.assert_called_once()
+    assert str(config) in logger.info.call_args[0][0]
+
+
+def test_load_domain_rules_parses_the_configured_yaml(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text(
+        'from_domain: 1\n'
+        'to_domain: 2\n'
+        'topics:\n'
+        '  /x:\n'
+        '    type: std_msgs/msg/Int32\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2)]
+
+
+def test_load_domain_rules_warns_about_topics_without_a_domain_pair(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text(
+        'topics:\n'
+        '  /x:\n'
+        '    from_domain: 1\n'
+        '    to_domain: 2\n'
+        '  /y:\n'
+        '    type: std_msgs/msg/Int32\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    assert '/y' in logger.warn.call_args[0][0]
+
+
+def test_load_domain_rules_errors_and_returns_empty_on_a_broken_config(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('topics: [not, a, mapping]\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.error.assert_called_once()
 
 
 def test_exit_when_idle_enabled_via_env(monkeypatch):

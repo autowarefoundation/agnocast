@@ -1,10 +1,12 @@
-"""Unit tests for parsing the domain_bridge YAML into kmod rule tuples.
+"""Unit tests for locating and parsing the domain_bridge YAML.
 
-These exercise the pure parser only; no kmod, DDS, or file I/O is involved.
+These exercise path resolution and the pure parser; no kmod, DDS, or file I/O
+is involved.
 """
 
 import pytest
 
+from ros2agnocast_discovery_agent import domain_bridge_config
 from ros2agnocast_discovery_agent.domain_bridge_config import parse_domain_bridge_config
 
 
@@ -167,3 +169,75 @@ topics:
   chatter:
 """
     assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+
+
+def test_bidirectional_topic_yields_both_directions():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: true
+"""
+    rules, skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/chatter', 1, 2), ('/chatter', '/chatter', 2, 1)]
+    assert skipped == []
+
+
+def test_bidirectional_accepts_the_yaml11_forms_yaml_cpp_resolves():
+    # PyYAML leaves a bare 'y'/'n' as a string while yaml-cpp reads it as a bool. Rejecting them
+    # would refuse a config the external domain_bridge node runs.
+    # PyYAML already resolves 'yes'/'no'/'on'/'off'; only these reach the string branch.
+    for text, expected_len in (('y', 2), ('n', 1), ('Y', 2), ('N', 1), ("'y'", 2), ("' y '", 2)):
+        doc = f'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n    bidirectional: {text}\n'
+        rules, _ = parse_domain_bridge_config(doc)
+        assert len(rules) == expected_len, text
+
+
+def test_bidirectional_reverse_leg_swaps_only_the_domains():
+    """Mirrors the external node, whose reverse leg keeps the source and remap names."""
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    remap: /renamed
+    bidirectional: true
+"""
+    rules, _skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/renamed', 1, 2), ('/chatter', '/renamed', 2, 1)]
+
+
+def test_bidirectional_false_yields_one_direction():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: false
+"""
+    rules, _skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/chatter', 1, 2)]
+
+
+def test_non_boolean_bidirectional_is_rejected():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    bidirectional: yes please
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
+
+
+def test_resolve_config_path_prefers_the_env_var(monkeypatch):
+    monkeypatch.setenv(domain_bridge_config.CONFIG_ENV, '/somewhere/else.yaml')
+    assert domain_bridge_config.resolve_config_path() == ('/somewhere/else.yaml', True)
+
+
+def test_resolve_config_path_falls_back_to_the_default(monkeypatch):
+    monkeypatch.delenv(domain_bridge_config.CONFIG_ENV, raising=False)
+    assert domain_bridge_config.resolve_config_path() == (
+        domain_bridge_config.DEFAULT_CONFIG_PATH, False)

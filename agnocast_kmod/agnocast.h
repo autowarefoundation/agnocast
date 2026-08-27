@@ -14,6 +14,7 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
+#define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
@@ -33,6 +34,15 @@ struct name_info
 struct ioctl_get_version_args
 {
   char ret_version[VERSION_BUFFER_LEN];
+};
+
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
 };
 
 union ioctl_add_process_args {
@@ -155,6 +165,9 @@ union ioctl_get_subscriber_num_args {
     uint32_t ret_other_process_subscriber_num;
     uint32_t ret_same_process_subscriber_num;
     uint32_t ret_ros2_subscriber_num;
+    // Subscribers in the domain a bridge rule pairs this one with, counted only where the rule
+    // delivers this way round. Disjoint from the own-domain counts above.
+    uint32_t ret_other_domain_subscriber_num;
     bool ret_a2r_bridge_exist;
     bool ret_r2a_bridge_exist;
   };
@@ -294,6 +307,16 @@ struct ioctl_add_domain_bridge_args
   uint32_t to_domain;
 };
 
+// Bridges every topic whose name starts with topic_name_prefix, pairing it with the identical
+// name in the other domain. For topic families whose full names appear only at runtime and so
+// cannot be listed in a config -- an Agnocast service's per-client response topics.
+struct ioctl_add_domain_bridge_prefix_args
+{
+  struct name_info topic_name_prefix;
+  uint32_t from_domain;
+  uint32_t to_domain;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -323,6 +346,9 @@ struct ioctl_add_domain_bridge_args
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD \
   _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
+#define AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD \
+  _IOW(0xA6, 32, struct ioctl_add_domain_bridge_prefix_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 
 // ================================================
 // ros2cli ioctls
@@ -442,6 +468,10 @@ int agnocast_ioctl_get_publisher_num(
 int agnocast_ioctl_get_topic_list(
   const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
 
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num);
+
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct ioctl_get_subscriber_qos_args * args);
@@ -466,6 +496,10 @@ int agnocast_ioctl_remove_bridge(
 int agnocast_ioctl_add_domain_bridge(
   const char * topic_name_from, const char * topic_name_to, uint32_t from_domain,
   uint32_t to_domain, const struct ipc_namespace * ipc_ns);
+
+int agnocast_ioctl_add_domain_bridge_prefix(
+  const char * topic_name_prefix, uint32_t from_domain, uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns);
 
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 

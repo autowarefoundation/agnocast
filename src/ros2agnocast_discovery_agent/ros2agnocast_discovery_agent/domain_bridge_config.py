@@ -6,14 +6,26 @@ rule injection that opens same-IPC-namespace zero-copy cross-domain delivery. Th
 topic name, its ``remap`` target, and the domain pair matter here; ``type`` and
 other fields are ignored.
 """
+import os
+
 import yaml
 
 # Operators point the daemon at the config by setting this to the YAML path.
 CONFIG_ENV = 'AGNOCAST_DOMAIN_BRIDGE_CONFIG'
 
+# The agent is exec'd by an application process and inherits *its* environment, so
+# an env var set only where the registration tool runs never reaches the agent.
+DEFAULT_CONFIG_PATH = '/etc/agnocast/domain_bridge.yaml'
+
 # Domain ids cross the ioctl boundary as ctypes.c_uint32, so an out-of-range
 # value would wrap silently; reject it here instead.
 _UINT32_MAX = 0xFFFFFFFF
+
+
+def resolve_config_path():
+    """Return ``(path, from_env)`` for the config every consumer should read."""
+    path = os.environ.get(CONFIG_ENV)
+    return (path, True) if path else (DEFAULT_CONFIG_PATH, False)
 
 
 def _as_domain_id(value):
@@ -24,12 +36,38 @@ def _as_domain_id(value):
     return domain
 
 
+# yaml-cpp resolves the YAML 1.1 bool set, PyYAML only part of it: 'yes'/'no'/'on'/'off' come
+# through as bools, but a bare 'y'/'n' stays a string. Accepting them here keeps a config the
+# external domain_bridge node runs from being rejected wholesale on this side.
+_YAML11_TRUE = frozenset(('y', 'yes', 'true', 'on'))
+_YAML11_FALSE = frozenset(('n', 'no', 'false', 'off'))
+
+
+def _as_bool(value, field, topic_name):
+    """Coerce a YAML scalar to a bool, raising ``ValueError`` otherwise.
+
+    Accepts every spelling yaml-cpp resolves, and is deliberately looser about case and
+    surrounding space: a value this takes and yaml-cpp rejects fails loudly in the external node,
+    while the reverse would silently disable the rules on this side alone.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _YAML11_TRUE:
+            return True
+        if text in _YAML11_FALSE:
+            return False
+    raise ValueError(f"'{field}' for topic {topic_name!r} must be a boolean")
+
+
 def parse_domain_bridge_config(text):
     """Return ``(rules, skipped)``.
 
     ``rules`` is a list of ``(from_topic, to_topic, from_domain, to_domain)``
     tuples. ``to_topic`` is the per-topic ``remap`` target (same ``domain_bridge``
     field the external node honors), or the source name when ``remap`` is absent.
+    A ``bidirectional`` topic yields two tuples, one per direction.
     ``skipped`` lists the topic names dropped for lack of a resolvable domain
     pair, so the caller can surface them instead of dropping them silently.
     ``from_domain`` / ``to_domain`` are taken from the top level and may be
@@ -70,8 +108,14 @@ def parse_domain_bridge_config(text):
         to_topic = spec.get('remap', str(topic_name))
         if not isinstance(to_topic, str):
             raise ValueError(f"'remap' for topic {topic_name!r} must be a string")
-        rules.append(
-            (str(topic_name), to_topic, _as_domain_id(from_domain), _as_domain_id(to_domain)))
+        bidirectional = _as_bool(spec.get('bidirectional', False), 'bidirectional', topic_name)
+        from_id = _as_domain_id(from_domain)
+        to_id = _as_domain_id(to_domain)
+        rules.append((str(topic_name), to_topic, from_id, to_id))
+        if bidirectional:
+            # The external node's reverse leg swaps the domain ids and nothing else, keeping the
+            # source name on the subscribe side and the remap on the publish side.
+            rules.append((str(topic_name), to_topic, to_id, from_id))
     return rules, skipped
 
 

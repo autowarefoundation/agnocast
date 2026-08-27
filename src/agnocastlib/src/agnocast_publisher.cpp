@@ -138,7 +138,7 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
 }
 
 template <typename NodeT>
-rclcpp::QoS PublisherBase::init_base(
+void PublisherBase::init_base(
   NodeT * node, const std::string & topic_name, const std::string & type_name,
   const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role)
 {
@@ -152,17 +152,17 @@ rclcpp::QoS PublisherBase::init_base(
   topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
 
   auto node_parameters = node->get_node_parameters_interface();
-  const rclcpp::QoS actual_qos = !options.qos_overriding_options.get_policy_kinds().empty()
-                                   ? rclcpp::detail::declare_qos_parameters(
-                                       options.qos_overriding_options, node_parameters, topic_name_,
-                                       qos, rclcpp::detail::PublisherQosParametersTraits{})
-                                   : qos;
+  actual_qos_ = !options.qos_overriding_options.get_policy_kinds().empty()
+                  ? rclcpp::detail::declare_qos_parameters(
+                      options.qos_overriding_options, node_parameters, topic_name_, qos,
+                      rclcpp::detail::PublisherQosParametersTraits{})
+                  : qos;
 
-  validate_publisher_qos(actual_qos);
+  validate_publisher_qos(actual_qos_);
 
   const bool is_bridge = (role == PublisherRole::BridgeInternal);
   const std::string node_name = node->get_fully_qualified_name();
-  id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
+  id_ = initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
   generate_gid();
 
   if (role == PublisherRole::Default) {
@@ -177,14 +177,12 @@ rclcpp::QoS PublisherBase::init_base(
         topic_name_.c_str());
     }
   }
-
-  return actual_qos;
 }
 
-template rclcpp::QoS PublisherBase::init_base<rclcpp::Node>(
+template void PublisherBase::init_base<rclcpp::Node>(
   rclcpp::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
   const PublisherOptions &, PublisherRole);
-template rclcpp::QoS PublisherBase::init_base<agnocast::Node>(
+template void PublisherBase::init_base<agnocast::Node>(
   agnocast::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
   const PublisherOptions &, PublisherRole);
 
@@ -247,24 +245,24 @@ TypeErasedPublisher::TypeErasedPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
+  this->init_base(node, topic_name, topic_type, qos, options, role);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),
     static_cast<const void *>(node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-    topic_name_.c_str(), actual_qos.depth());
+    topic_name_.c_str(), actual_qos_.depth());
 }
 
 TypeErasedPublisher::TypeErasedPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
 {
-  const rclcpp::QoS actual_qos = this->init_base(node, topic_name, topic_type, qos, options, role);
+  this->init_base(node, topic_name, topic_type, qos, options, role);
 
   TRACEPOINT(
     agnocast_publisher_init, static_cast<const void *>(this),
     static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
-    actual_qos.depth());
+    actual_qos_.depth());
 }
 
 ipc_shared_ptr<void> TypeErasedPublisher::borrow_loaned_message(size_t size)

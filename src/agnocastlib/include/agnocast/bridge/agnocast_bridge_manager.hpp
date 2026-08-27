@@ -91,6 +91,7 @@ private:
   std::string on_socket_request() const;
 
   void register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPayload & req);
+  void register_daemon_service_request(const BridgeMsgDaemonServicePayload & req);
   bool is_daemon_forced(const std::string & topic_name, BridgeDirection direction) const;
   void create_daemon_forced_bridges();
   void activate_daemon_forced_bridge(

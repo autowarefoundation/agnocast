@@ -17,41 +17,83 @@ static bool IS_BRIDGE = false;
 // Small buffer size for KUnit tests to avoid exceeding kernel stack frame limits.
 #define KUNIT_PUB_SHM_BUF_SIZE 4
 
+static void setup_subscriber_impl(
+  struct kunit * test, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool is_transient_local, const uint32_t domain_id, const bool sub_is_bridge,
+  topic_local_id_t * subscriber_id)
+{
+  union ioctl_add_process_args add_process_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(
+      subscriber_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
+    0);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_subscriber(
+      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+      is_transient_local, IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, sub_is_bridge, -1,
+      &add_subscriber_args),
+    0);
+  *subscriber_id = add_subscriber_args.ret_id;
+}
+
 static void setup_one_subscriber(
   struct kunit * test, pid_t subscriber_pid, uint32_t qos_depth, bool is_transient_local,
   topic_local_id_t * subscriber_id)
 {
+  setup_subscriber_impl(
+    test, subscriber_pid, qos_depth, is_transient_local, 0, IS_BRIDGE, subscriber_id);
+}
+
+// RECEIVE resolves the wrapper by the caller's domain, so the subscriber of a cross-domain case
+// has to be current->tgid.
+static void setup_current_subscriber_in_domain(
+  struct kunit * test, const uint32_t domain_id, const bool sub_is_bridge,
+  topic_local_id_t * subscriber_id)
+{
+  setup_subscriber_impl(test, current->tgid, 1, false, domain_id, sub_is_bridge, subscriber_id);
+}
+
+static void setup_publisher_impl(
+  struct kunit * test, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool is_transient_local, const uint32_t domain_id, const bool pub_is_bridge,
+  topic_local_id_t * publisher_id, uint64_t * ret_addr)
+{
   union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(
+      publisher_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
+    0);
+  *ret_addr = add_process_args.ret_addr;
 
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth, is_transient_local,
-    IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1, &add_subscriber_args);
-  *subscriber_id = add_subscriber_args.ret_id;
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  union ioctl_add_publisher_args add_publisher_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_publisher(
+      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, qos_depth, is_transient_local,
+      pub_is_bridge, &add_publisher_args),
+    0);
+  *publisher_id = add_publisher_args.ret_id;
 }
 
 static void setup_one_publisher(
   struct kunit * test, pid_t publisher_pid, uint32_t qos_depth, bool is_transient_local,
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    publisher_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
-  *ret_addr = add_process_args.ret_addr;
+  setup_publisher_impl(
+    test, publisher_pid, qos_depth, is_transient_local, 0, IS_BRIDGE, publisher_id, ret_addr);
+}
 
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, qos_depth, is_transient_local,
-    IS_BRIDGE, &add_publisher_args);
-  *publisher_id = add_publisher_args.ret_id;
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+static void setup_publisher_in_domain(
+  struct kunit * test, const pid_t publisher_pid, const uint32_t domain_id,
+  const bool pub_is_bridge, topic_local_id_t * publisher_id, uint64_t * ret_addr)
+{
+  setup_publisher_impl(
+    test, publisher_pid, 1, false, domain_id, pub_is_bridge, publisher_id, ret_addr);
 }
 
 void test_case_receive_msg_no_topic_when_receive(struct kunit * test)
@@ -158,7 +200,7 @@ void test_case_receive_msg_receive_one(struct kunit * test)
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_sub_qos_depth_smaller_than_publish_num_smaller_than_pub_qos_depth(
+void test_case_receive_msg_sub_qos_smaller_than_publish_num_smaller_than_pub_qos(
   struct kunit * test)
 {
   // Arrange
@@ -207,7 +249,7 @@ void test_case_receive_msg_sub_qos_depth_smaller_than_publish_num_smaller_than_p
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_publish_num_smaller_than_sub_qos_depth_smaller_than_pub_qos_depth(
+void test_case_receive_msg_publish_num_smaller_than_sub_qos_smaller_than_pub_qos(
   struct kunit * test)
 {
   // Arrange
@@ -251,7 +293,7 @@ void test_case_receive_msg_publish_num_smaller_than_sub_qos_depth_smaller_than_p
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than_publish_num(
+void test_case_receive_msg_sub_qos_smaller_than_pub_qos_smaller_than_publish_num(
   struct kunit * test)
 {
   // Arrange
@@ -302,7 +344,7 @@ void test_case_receive_msg_sub_qos_depth_smaller_than_pub_qos_depth_smaller_than
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_publish_num_and_sub_qos_depth_and_pub_qos_depth_are_all_max_receive_num(
+void test_case_receive_msg_publish_num_and_sub_qos_and_pub_qos_are_all_max_receive_num(
   struct kunit * test)
 {
   // Arrange
@@ -414,7 +456,7 @@ void test_case_receive_msg_qos_depth_larger_than_max_receive_num(struct kunit * 
     last_entry_id);
 }
 
-void test_case_receive_msg_transient_local_sub_qos_and_pub_qos_and_publish_num_are_all_equal(
+void test_case_receive_msg_transient_sub_qos_and_pub_qos_and_publish_num_are_all_equal(
   struct kunit * test)
 {
   // Arrange
@@ -459,7 +501,7 @@ void test_case_receive_msg_transient_local_sub_qos_and_pub_qos_and_publish_num_a
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_transient_local_sub_qos_smaller_than_pub_qos_smaller_than_publish_num(
+void test_case_receive_msg_transient_sub_qos_smaller_than_pub_qos_smaller_than_publish_num(
   struct kunit * test)
 {
   // Arrange
@@ -515,7 +557,7 @@ void test_case_receive_msg_transient_local_sub_qos_smaller_than_pub_qos_smaller_
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_transient_local_sub_qos_smaller_than_publish_num_smaller_than_pub_qos(
+void test_case_receive_msg_transient_sub_qos_smaller_than_publish_num_smaller_than_pub_qos(
   struct kunit * test)
 {
   // Arrange
@@ -566,7 +608,7 @@ void test_case_receive_msg_transient_local_sub_qos_smaller_than_publish_num_smal
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
-void test_case_receive_msg_transient_local_publish_num_smaller_than_sub_qos_smaller_than_pub_qos(
+void test_case_receive_msg_transient_publish_num_smaller_than_sub_qos_smaller_than_pub_qos(
   struct kunit * test)
 {
   // Arrange
@@ -1042,4 +1084,66 @@ void test_case_receive_msg_ignore_local_same_pid_disabled(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret5, 0);
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 1);
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_ids[0], ioctl_publish_msg_ret.ret_entry_id);
+}
+
+void test_case_receive_msg_bridge_subscriber_in_other_domain_receives_nothing(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, 1000, 1, IS_BRIDGE, &publisher_id, &ret_addr);
+  topic_local_id_t subscriber_id;
+  setup_current_subscriber_in_domain(test, 2, true, &subscriber_id);
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_publish_msg(
+      TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret),
+    0);
+  union ioctl_receive_msg_args ioctl_receive_msg_ret;
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+
+  // Act
+  int ret = agnocast_ioctl_receive_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 0);
+}
+
+void test_case_receive_msg_bridge_publisher_in_other_domain_delivers_nothing(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, 1000, 1, true, &publisher_id, &ret_addr);
+  topic_local_id_t subscriber_id;
+  setup_current_subscriber_in_domain(test, 2, IS_BRIDGE, &subscriber_id);
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_publish_msg(
+      TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret),
+    0);
+  union ioctl_receive_msg_args ioctl_receive_msg_ret;
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+
+  // Act
+  int ret = agnocast_ioctl_receive_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 0);
 }

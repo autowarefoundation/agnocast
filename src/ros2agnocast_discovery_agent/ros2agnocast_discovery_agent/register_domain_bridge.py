@@ -12,7 +12,6 @@ discovery agent, which is observability-only and never registers rules.
 """
 import argparse
 import ctypes
-import os
 import sys
 
 import yaml
@@ -35,14 +34,11 @@ def main(argv=None) -> int:
         description='Register Agnocast domain bridge rules with the kernel module.')
     parser.add_argument(
         '--config',
-        default=os.environ.get(domain_bridge_config.CONFIG_ENV),
+        default=domain_bridge_config.resolve_config_path()[0],
         help='path to the domain_bridge YAML '
-             f'(default: ${domain_bridge_config.CONFIG_ENV})')
+             f'(default: ${domain_bridge_config.CONFIG_ENV}, '
+             f'else {domain_bridge_config.DEFAULT_CONFIG_PATH})')
     args = parser.parse_args(argv)
-
-    if not args.config:
-        parser.error(
-            f'no config given; pass --config or set {domain_bridge_config.CONFIG_ENV}')
 
     try:
         rules, skipped = domain_bridge_config.load_domain_bridge_rules(args.config)

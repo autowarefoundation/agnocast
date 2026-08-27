@@ -7,10 +7,16 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from importlib.resources import files
+from importlib.util import find_spec
 
 import em
 from ament_index_python.packages import get_package_share_directory
 from ros2cli.verb import VerbExtension
+
+
+def service_introspection_available():
+    """Report whether this ROS distribution has the <Srv>_Event messages, added in Iron."""
+    return find_spec('service_msgs') is not None
 
 
 def camel_to_snake(name):
@@ -67,6 +73,10 @@ class GenerateBridgePluginsVerb(VerbExtension):
         if args.all:
             message_types = self._get_all_types(InterfaceType.MESSAGE)
             service_types = self._get_all_types(InterfaceType.SERVICE)
+            # rosidl generates a <Srv>_Event for every service, but it has no interface file so
+            # `ros2 interface list` does not report it.
+            if service_introspection_available():
+                message_types += [f'{t}_Event' for t in service_types]
         else:
             message_types = args.message_types or []
             service_types = args.service_types or []
@@ -114,7 +124,13 @@ class GenerateBridgePluginsVerb(VerbExtension):
         for t in types:
             t = t.strip()
             parts = t.split('/')
-            if len(parts) == 3 and parts[1] == expected_mid:
+            # A <Srv>_Event is a message that lives under srv/, so it fails the msg/ check.
+            is_event = interface_type == InterfaceType.MESSAGE and parts[-1].endswith('_Event')
+            if is_event and not service_introspection_available():
+                print(f'Warning: skipping {t}: this ROS distribution has no <Srv>_Event messages', file=sys.stderr)
+                continue
+            accepted = ('msg', 'srv') if is_event else (expected_mid,)
+            if len(parts) == 3 and parts[1] in accepted:
                 valid_types.append(t)
             else:
                 print(f'Warning: Invalid {interface_type.name.lower()} type format: {t} (expected package/{expected_mid}/Type)', file=sys.stderr)
@@ -165,7 +181,11 @@ class GenerateBridgePluginsVerb(VerbExtension):
         cpp_type = typ.replace('/', '::')
 
         parts = typ.split('/')
-        parts[-1] = camel_to_snake(parts[-1])
+        base_name = parts[-1]
+        # A <Srv>_Event message is declared in the service's own header, not in one of its own.
+        if base_name.endswith('_Event'):
+            base_name = base_name[: -len('_Event')]
+        parts[-1] = camel_to_snake(base_name)
         header_path = '/'.join(parts) + '.hpp'
 
         if interface_type == InterfaceType.MESSAGE:

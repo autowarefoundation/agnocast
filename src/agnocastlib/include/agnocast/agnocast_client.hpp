@@ -7,6 +7,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+#include "agnocast/internal/service_typesupport.hpp"
 #include "agnocast/internal/service_wire_type.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
@@ -15,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <memory>
@@ -38,10 +40,23 @@ extern int agnocast_fd;
 enum class ClientRole : uint8_t {
   /// User-created client; issues an A2R bridge request.
   Default,
-  /// Used by the bridge plugin's own client; no bridge request is issued.
+  /// Used by the bridge implementation itself; marks the endpoints it creates as bridges in kmod
+  /// and issues no bridge request.
   /// Not intended for direct use by application code.
-  AgnocastOnly,
+  BridgeInternal,
 };
+
+constexpr SubscriptionRole to_subscription_role(const ClientRole role)
+{
+  return role == ClientRole::BridgeInternal ? SubscriptionRole::BridgeInternal
+                                            : SubscriptionRole::AgnocastOnly;
+}
+
+constexpr PublisherRole to_publisher_role(const ClientRole role)
+{
+  return role == ClientRole::BridgeInternal ? PublisherRole::BridgeInternal
+                                            : PublisherRole::AgnocastOnly;
+}
 
 namespace detail
 {
@@ -70,13 +85,19 @@ class ClientBase
 {
 protected:
   std::atomic<int64_t> next_sequence_number_{0};
+  std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string node_name_;
   std::string service_name_;
+  std::string response_topic_name_;
   std::function<bool()> check_context_ok_;
+
+  // Defined in the .cpp: agnocast::Node is only forward-declared here.
+  rclcpp::Logger get_logger() const;
 
   template <typename NodeT>
   void init_base(NodeT * node, const std::string & service_name)
   {
+    node_ = node;
     node_name_ = node->get_fully_qualified_name();
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
@@ -168,6 +189,24 @@ private:
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
+  template <typename Func>
+  int64_t send_request_impl(
+    ipc_shared_ptr<typename ServiceT::Request> && request, ResponseCallInfo && call_info,
+    Func && take_future)
+  {
+    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
+    const int64_t seqno = internal_request->RequestMeta::seqno;
+
+    {
+      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
+      take_future(
+        seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
+    }
+
+    publisher_->publish(std::move(internal_request));
+    return seqno;
+  }
+
   template <typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
@@ -181,16 +220,19 @@ private:
     agnocast::PublisherOptions pub_options;
     publisher_ = std::make_shared<ServiceRequestPublisher>(
       node, create_service_request_topic_name(service_name_), qos, pub_options,
-      PublisherRole::AgnocastOnly);
+      to_publisher_role(role));
 
-    auto subscriber_callback = [this, node](ipc_shared_ptr<ResponseT> && response) {
+    response_topic_name_ =
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+
+    auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
       /* --- critical section begin --- */
       // Get the corresponding ResponseCallInfo and remove it from the map
-      auto it = seqno2_response_call_info_.find(response->seqno);
+      auto it = seqno2_response_call_info_.find(response->ResponseMeta::seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(get_logger(), "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
@@ -205,10 +247,9 @@ private:
     };
 
     SubscriptionOptions options{group};
-    std::string topic_name = create_service_response_topic_name(service_name_, node_name_);
+    const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<ServiceResponseSubscriber>(
-      node, topic_name, qos, std::move(subscriber_callback), options,
-      SubscriptionRole::AgnocastOnly);
+      node, response_topic_name_, qos, std::move(subscriber_callback), options, subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(
@@ -216,6 +257,12 @@ private:
         std::nullopt);
     }
   }
+
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
 
 public:
   Client(
@@ -238,8 +285,13 @@ public:
   ipc_shared_ptr<typename ServiceT::Request> borrow_loaned_request()
   {
     auto request = publisher_->borrow_loaned_message();
-    request->node_name = node_name_;
-    request->seqno = next_sequence_number_.fetch_add(1);
+
+    request->RequestMeta::seqno = next_sequence_number_.fetch_add(1);
+    std::memcpy(
+      static_cast<void *>(request->RequestMeta::client_gid),
+      static_cast<const void *>(get_gid().data), RMW_GID_STORAGE_SIZE);
+    request->RequestMeta::response_topic_name = response_topic_name_;
+
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
@@ -255,16 +307,9 @@ public:
     std::function<void(SharedFuture)> callback)
   {
     SharedFuture shared_future;
-    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
-
-    {
-      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-      auto it = seqno2_response_call_info_.try_emplace(seqno, std::move(callback)).first;
-      shared_future = it->second.shared_future.value();
-    }
-
-    publisher_->publish(std::move(internal_request));
+    const int64_t seqno = send_request_impl(
+      std::move(request), ResponseCallInfo(std::move(callback)),
+      [&](ResponseCallInfo & info) { shared_future = info.shared_future.value(); });
     return SharedFutureAndRequestId(std::move(shared_future), seqno);
   }
 
@@ -276,16 +321,9 @@ public:
   FutureAndRequestId async_send_request(ipc_shared_ptr<typename ServiceT::Request> && request)
   {
     Future future;
-    auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
-    int64_t seqno = internal_request->seqno;
-
-    {
-      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-      auto it = seqno2_response_call_info_.try_emplace(seqno).first;
-      future = it->second.promise.get_future();
-    }
-
-    publisher_->publish(std::move(internal_request));
+    const int64_t seqno = send_request_impl(
+      std::move(request), ResponseCallInfo(),
+      [&](ResponseCallInfo & info) { future = info.promise.get_future(); });
     return FutureAndRequestId(std::move(future), seqno);
   }
 };
@@ -326,11 +364,7 @@ private:
   typename TypeErasedPublisher::SharedPtr publisher_;
   typename Subscription<void>::SharedPtr subscriber_;
 
-  std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
-  const rosidl_typesupport_introspection_cpp::MessageMembers * request_members_{nullptr};
-  const rosidl_typesupport_introspection_cpp::MessageMembers * response_members_{nullptr};
-
-  void load_typesupport_impl(const std::string & service_type);
+  ServiceTsBundle service_ts_bundle_;
 
   template <typename NodeT>
   void constructor_impl(
@@ -339,7 +373,7 @@ private:
   {
     init_base(node, service_name);
 
-    load_typesupport_impl(service_type);
+    service_ts_bundle_ = load_service_typesupport(service_type);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -347,11 +381,14 @@ private:
     agnocast::PublisherOptions pub_options;
     std::string req_topic_name = create_service_request_topic_name(service_name_);
     publisher_ = std::make_shared<TypeErasedPublisher>(
-      node, req_topic_name, "", qos, pub_options, PublisherRole::AgnocastOnly);
+      node, req_topic_name, "", qos, pub_options, to_publisher_role(role));
 
-    auto subscriber_callback = [this, node](ipc_shared_ptr<void> && response) {
+    response_topic_name_ =
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+
+    auto subscriber_callback = [this](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =
-        GenericResponseWrapper(response_members_, std::move(response));
+        GenericResponseWrapper(service_ts_bundle_.response_members, std::move(response));
       int64_t response_seqno = generic_response_wrapper.seqno();
 
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -360,7 +397,7 @@ private:
       auto it = seqno2_response_call_info_.find(response_seqno);
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
-        RCLCPP_ERROR(node->get_logger(), "Agnocast internal implementation error: bad entry id");
+        RCLCPP_ERROR(get_logger(), "Agnocast internal implementation error: bad entry id");
         return;
       }
       ResponseCallInfo info = std::move(it->second);
@@ -375,16 +412,22 @@ private:
     };
 
     SubscriptionOptions sub_options{group};
-    std::string res_topic_name = create_service_response_topic_name(service_name_, node_name_);
+    const SubscriptionRole subscriber_role = to_subscription_role(role);
     subscriber_ = std::make_shared<Subscription<void>>(
-      node, res_topic_name, "", qos, std::move(subscriber_callback), sub_options,
-      SubscriptionRole::AgnocastOnly);
+      node, response_topic_name_, "", qos, std::move(subscriber_callback), sub_options,
+      subscriber_role);
 
     if (role == ClientRole::Default) {
       register_service_bridge(
         service_type, service_name_, BridgeDirection::AGNOCAST_TO_ROS2, std::nullopt);
     }
   }
+
+  // Return the GID of this client.
+  //
+  // It is the same as the GID of the underlying publisher. Because every client has a distinct
+  // publisher that is not observable to users, we can safely reuse the GID for the client.
+  const rmw_gid_t & get_gid() const { return publisher_->get_gid(); }
 
 public:
   GenericClient(
