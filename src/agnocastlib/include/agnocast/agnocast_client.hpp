@@ -193,6 +193,7 @@ private:
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  // Declared before subscriber_ so that it outlives the callback that uses it.
   std::unique_ptr<ServiceEventPublisher> event_publisher_;
 #endif
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
