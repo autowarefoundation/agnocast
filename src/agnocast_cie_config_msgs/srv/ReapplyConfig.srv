@@ -15,6 +15,18 @@
 # by a wildcard likewise takes over at the next announcement; until then the
 # wildcard keeps applying to that instance, and from then on only the exact
 # entry does.
+#
+# kernel_threads / irqs entries are matched against a fresh /proc scan on
+# every reapply (no carry-over). Entries whose attribute values are all unset
+# (YAML null or UNMANAGEABLE) appear in no array. "applied" means ensured: an
+# entry already in the desired state counts as applied without any syscall
+# (compare-before-set). There is no skipped_irqs: an IRQ has no announce-later
+# state, so a missing IRQ is reported as failed.
+#
+# Exception: kernel_threads entries with policy SCHED_DEADLINE are always
+# re-applied (runtime/period/deadline cannot be read back from /proc, so
+# in-sync cannot be established); with a non-empty affinity each pass re-runs
+# the cgroup-based affinity setup for every matched thread.
 bool success                       # true iff parse + per-entry validation passed
 string error_message               # parse / validation failure reason (empty on success)
 string[] applied_callback_groups   # syscalls succeeded; format "<domain_id>:<callback_group_id>"
@@ -23,3 +35,8 @@ string[] failed_callback_groups    # syscall failed (details in configurator log
 string[] failed_non_ros_threads    # syscall failed (details in configurator log)
 string[] skipped_callback_groups   # thread_id not yet announced; will apply on next announcement
 string[] skipped_non_ros_threads
+string[] applied_kernel_threads    # in desired state; format "<comm>:<tid>", one per matched thread
+string[] failed_kernel_threads     # syscall failed, or an affinity differing from a per-CPU kthread's fixed one
+string[] skipped_kernel_threads    # managed comm matched no running kernel thread; format "<comm>"
+string[] applied_irqs              # in desired state; decimal IRQ number
+string[] failed_irqs               # identity mismatch, missing IRQ, irqbalance running, or write error

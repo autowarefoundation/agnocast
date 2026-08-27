@@ -92,6 +92,20 @@ def _write_config(cfg):
         yaml.safe_dump(cfg, f)
 
 
+def _irqbalance_running():
+    """Mirror the configurator's own detection (comm scan in its pid namespace)."""
+    for pid in os.listdir('/proc'):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(os.path.join('/proc', pid, 'comm')) as f:
+                if f.read().strip() == 'irqbalance':
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _call_reapply(timeout_sec=10.0):
     """Call the reapply_config service synchronously and return the response."""
     rclpy.init()
@@ -377,6 +391,115 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         response = _call_reapply()
         self.assertFalse(response.success)
         self.assertIn('Unknown scheduling policy', response.error_message)
+
+    def test_template_contains_kernel_threads_and_irqs_sections(
+            self, proc_output, thread_configurator):
+        cfg = _read_config()
+        self.assertIn('kernel_threads', cfg)
+        self.assertIn('irqs', cfg)
+        # In CI pid namespaces host kthreads are invisible, so kernel_threads
+        # may legitimately be empty; entries that do exist must be fully
+        # formed, with observed values (never YAML null) as the initial ones.
+        for entry in cfg['kernel_threads'] or []:
+            for key in ('comm', 'policy', 'affinity'):
+                self.assertIn(key, entry)
+                self.assertIsNotNone(entry[key])
+            # The emitter writes the policy-appropriate tunable: nice for CFS
+            # policies, priority for RT or UNMANAGEABLE policies.
+            if entry['policy'] in ('SCHED_OTHER', 'SCHED_BATCH', 'SCHED_IDLE'):
+                self.assertIn('nice', entry)
+                self.assertIsNotNone(entry['nice'])
+            else:
+                self.assertIn('priority', entry)
+                self.assertIsNotNone(entry['priority'])
+            self.assertFalse(entry['comm'].startswith('kworker/'))
+        for entry in cfg['irqs'] or []:
+            for key in ('irq', 'name', 'affinity'):
+                self.assertIn(key, entry)
+                self.assertIsNotNone(entry[key])
+
+    def test_startup_logs_kernel_irq_summary(self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Kernel threads and IRQs configured:',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+    def test_reapply_reports_unknown_kernel_thread_as_skipped(
+            self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+        cfg = _read_config()
+        added_entry = {
+            'comm': 'fictitious_kthread',
+            # SCHED_OTHER + positive nice mirrors the CI-safe pattern above;
+            # no syscall happens anyway for a comm with no live match.
+            'policy': 'SCHED_OTHER',
+            'nice': 10,
+            'affinity': None,
+        }
+        if not cfg.get('kernel_threads'):
+            cfg['kernel_threads'] = []
+        cfg['kernel_threads'].append(added_entry)
+        _write_config(cfg)
+
+        response = _call_reapply()
+        self.assertTrue(
+            response.success,
+            f'reapply rejected unexpectedly: error_message={response.error_message!r}',
+        )
+        self.assertIn('fictitious_kthread', list(response.skipped_kernel_threads))
+        for arr in (response.applied_kernel_threads, response.failed_kernel_threads):
+            for key in list(arr):
+                self.assertFalse(key.startswith('fictitious_kthread:'))
+
+    def test_reapply_irq_outcome_depends_on_irqbalance(
+            self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+        cfg = _read_config()
+        target = next(
+            (e for e in (cfg.get('irqs') or [])
+             if isinstance(e.get('affinity'), list)),
+            None,
+        )
+        if target is None:
+            self.skipTest('no IRQ with a readable affinity list in the template')
+
+        # The config is the untouched prerun output, so every desired value is
+        # still the observed one: without irqbalance the in-sync path must
+        # report the IRQ as applied WITHOUT writing (no privileges needed);
+        # with irqbalance running the validation must refuse the whole IRQ
+        # section and report it as failed instead. The configurator samples
+        # irqbalance at some point inside the call, so sample on both sides
+        # and skip when a state change makes the expected branch undecidable.
+        irqbalance_before = _irqbalance_running()
+        response = _call_reapply()
+        if _irqbalance_running() != irqbalance_before:
+            self.skipTest('irqbalance state changed during the reapply call')
+        self.assertTrue(
+            response.success,
+            f'reapply rejected unexpectedly: error_message={response.error_message!r}',
+        )
+        key = str(target['irq'])
+        applied = list(response.applied_irqs)
+        failed = list(response.failed_irqs)
+        self.assertEqual(
+            applied.count(key) + failed.count(key), 1,
+            'each managed IRQ must be reported exactly once',
+        )
+        if irqbalance_before:
+            self.assertIn(key, failed)
+        else:
+            self.assertIn(key, applied)
 
 
 @launch_testing.post_shutdown_test()

@@ -18,6 +18,8 @@
 class ThreadConfiguratorNode : public rclcpp::Node
 {
   using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
+  using KernelThreadConfig = agnocast_cie_thread_configurator::KernelThreadConfig;
+  using IrqConfig = agnocast_cie_thread_configurator::IrqConfig;
 
   // Concurrency:
   // - callback_group_configs_ / id_to_callback_group_config_ /
@@ -27,6 +29,8 @@ class ThreadConfiguratorNode : public rclcpp::Node
   // - non_ros_thread_configs_ / id_to_non_ros_thread_config_: written by both
   //   the NonRosThreadInfoListener reader thread and the reapply handler;
   //   all access must hold non_ros_state_mutex_.
+  // - kernel_thread_configs_ / irq_configs_: written only by the constructor
+  //   (pre-spin) and the reapply handler, so no mutex is needed.
   // - print_all_unapplied(): called only after stop() + executor return, so
   //   reads need no lock.
 
@@ -39,12 +43,33 @@ public:
   const std::vector<rclcpp::Node::SharedPtr> & get_domain_nodes() const;
 
 private:
+  // One kernel-thread/IRQ apply pass. Keys: "<comm>:<tid>" (applied/failed)
+  // and "<comm>" (skipped) for kernel threads; the decimal IRQ number for
+  // IRQs. "applied" = ensured: an already-matching entry counts without
+  // syscalls (compare-before-set).
+  struct SectionApplyOutcome
+  {
+    std::vector<std::string> applied;
+    std::vector<std::string> failed;
+    std::vector<std::string> skipped;
+  };
+
   void validate_hardware_info(const YAML::Node & yaml);
   void validate_rt_throttling(const YAML::Node & yaml);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
   // thread_id is passed explicitly because a wildcard entry applies to many
   // threads (one per matched_tids element), not just config.thread_id.
   bool issue_syscalls(const ThreadConfig & config, int64_t thread_id);
+  // policy is compared only against "SCHED_DEADLINE" (cgroup-based affinity);
+  // any other value takes the plain sched_setaffinity path.
+  bool issue_affinity_syscalls(
+    const std::string & thread_str, const std::string & policy, const std::vector<int> & affinity,
+    int64_t thread_id);
+  SectionApplyOutcome apply_kernel_thread_configs();
+  SectionApplyOutcome apply_irq_configs() const;
+  // Sole logging point for the write path: emits errno-specific guidance on
+  // any open/write/short-write failure (returning false) and the success line.
+  bool write_irq_affinity_file(const IrqConfig & config) const;
   void callback_group_callback(
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
@@ -69,6 +94,9 @@ private:
   std::vector<ThreadConfig> non_ros_thread_configs_;
   // thread_name -> ThreadConfig*
   std::map<std::string, ThreadConfig *> id_to_non_ros_thread_config_;
+
+  std::vector<KernelThreadConfig> kernel_thread_configs_;
+  std::vector<IrqConfig> irq_configs_;
 
   std::atomic<int> unapplied_num_{0};
   std::atomic<int> cgroup_num_{0};
