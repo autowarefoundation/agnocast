@@ -271,14 +271,14 @@ TEST_F(ServiceIntrospectionTest, LoweringFromContentsToMetadataStopsIncludingThe
   EXPECT_TRUE(events[1].response.empty());
 }
 
-TEST_F(ServiceIntrospectionTest, ATransitionThatKeepsThePublisherKeepsTheClockItWasCreatedWith)
+TEST_F(ServiceIntrospectionTest, ChangingOnlyTheStateKeepsTheClockIntrospectionWasEnabledWith)
 {
   // Arrange: steady time runs from boot, so its stamps cannot be mistaken for system time.
   auto steady_clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
   service_->configure_introspection(
     steady_clock, rclcpp::ServicesQoS(), RCL_SERVICE_INTROSPECTION_METADATA);
 
-  // Act: this transition keeps the publisher, so this clock must be ignored.
+  // Act: this call only changes the state, so this clock must be ignored.
   service_->configure_introspection(
     std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME), rclcpp::ServicesQoS(),
     RCL_SERVICE_INTROSPECTION_CONTENTS);
