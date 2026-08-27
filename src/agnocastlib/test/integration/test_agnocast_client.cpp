@@ -174,3 +174,58 @@ TEST_F(AgnocastNodeClientTest, WaitForServiceReturnsOnShutdown)
     << "wait_for_service() should return promptly on shutdown";
   EXPECT_FALSE(future.get()) << "wait_for_service() should return false on shutdown";
 }
+
+/* --- AgnocastNodeClientTest: end --- */
+
+class GenericClientTest : public ::testing::Test
+{
+  std::shared_ptr<rclcpp::Node> node_;
+  std::shared_ptr<agnocast::SingleThreadedAgnocastExecutor> executor_;
+  std::thread spin_thread_;
+
+protected:
+  void SetUp() override
+  {
+    rclcpp::init(0, nullptr);
+    node_ = std::make_shared<rclcpp::Node>("test_node");
+    executor_ = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>();
+    executor_->add_node(node_);
+    spin_thread_ = std::thread([this]() { executor_->spin(); });
+  }
+
+  void TearDown() override
+  {
+    executor_->cancel();
+    if (spin_thread_.joinable()) {
+      spin_thread_.join();
+    }
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
+    }
+  }
+
+  auto create_client()
+  {
+    auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    return std::make_shared<agnocast::GenericClient>(
+      node_.get(), "test_service", "std_srvs/srv/SetBool", rclcpp::ServicesQoS(), cb_group,
+      agnocast::ClientRole::AgnocastOnly);
+  }
+};
+
+TEST_F(GenericClientTest, LeakedRequestCausesTermination)
+{
+  auto generic_client = create_client();
+  EXPECT_DEATH(generic_client->borrow_loaned_request(), "")
+    << "request dropped without being sent or cancelled should cause termination";
+}
+
+TEST_F(GenericClientTest, CancelRequest)
+{
+  auto generic_client = create_client();
+  auto request = generic_client->borrow_loaned_request();
+  generic_client->cancel_request(std::move(request));
+  EXPECT_FALSE(static_cast<bool>(request)) << "request should be invalidated after being cancelled";
+}
+
+/* --- GenericClientTest: end --- */
