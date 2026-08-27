@@ -486,6 +486,11 @@ class DiscoveryAgent(Node):
             bridge_decider.dispatch_requests(
                 requests, self._ipc_ns_inode, logger=self.get_logger())
 
+        service_requests = bridge_decider.decide_service_bridges(local_state, remote_states)
+        if service_requests:
+            bridge_decider.dispatch_service_requests(
+                service_requests, self._ipc_ns_inode, logger=self.get_logger())
+
     def build_state(self) -> AgnocastDaemonState:
         msg = AgnocastDaemonState()
         msg.schema_version = SCHEMA_VERSION

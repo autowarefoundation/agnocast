@@ -6,6 +6,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -41,20 +42,21 @@ struct ServiceBridgeDeps
 //           │          └──▲───────▲──┘          │
 //           │             │       │             │
 //       (3) │         (4) │       │ (6)         │ (5)
-//     ROS 2 │       ROS 2 │       │ Agnocast    │ Agnocast service
-//   service │     service │       │ service or  │ and external
-//  detected │        gone │       │ last client │ ROS 2 client
-//           │             │       │ gone        │ both exist
+//  Agnocast │       ROS 2 │       │ Agnocast    │ Agnocast service
+//    client │  service or │       │ service or  │ and external
+// and ROS 2 │ last client │       │ last client │ ROS 2 client
+//   service │        gone │       │ gone        │ both exist
 //       ┌───▼───┐         │       │         ┌───▼───┐
 //       │  A2R  ├─────────┘       └─────────┤  R2A  │
 //       └───────┘                           └───────┘
 //
 // (1) an Agnocast service or client registered
 // (2) !agno_client_exists(), (3) false, and !(may_start_r2a_bridge_ && agno_service_exists())
-// (3) may_start_a2r_bridge_ && ros2_service_exists()
-// (4) !ros2_service_exists() || (may_start_r2a_bridge_ && agno_service_exists())
-// (5) may_start_r2a_bridge_ && agno_service_exists() && ros2_client_exists()
-// (6) !agno_service_exists() || !ros2_client_exists()
+// (3) may_start_a2r_bridge_ && ros2_service_exists() && agno_client_exists()
+// (4) !(ros2_service_exists() && agno_client_exists()) || (may_start_r2a_bridge_ &&
+//     agno_service_exists())
+// (5) may_start_r2a_bridge_ && agno_service_exists() && (ros2_client_exists() || daemon-forced R2A)
+// (6) !agno_service_exists() || !(ros2_client_exists() || daemon-forced R2A)
 //
 // Direction lives in flags, not in the state. handle_request() latches may_start_r2a_bridge_ (an
 // Agnocast service registered) and may_start_a2r_bridge_ (an Agnocast client registered), and
@@ -82,6 +84,16 @@ struct ServiceBridgeDeps
 // still running. may_start_r2a_bridge_ is set only by a ServiceRole::Default service, so a
 // BridgeInternal one never guards anything; and agno_service_exists() reads at most one entry, so
 // it reports false when two or more Agnocast services share the name.
+//
+// The daemon-forced lease in (5) and (6) exists because two IPC namespaces sharing one service
+// deadlock without it: the service side's (5) wants a ROS 2 client that only the client side's A2R
+// creates, and the client side's (3) wants a ROS 2 service that only the service side's R2A
+// creates. Only the discovery agent sees both namespaces, so it grants the lease.
+//
+// The lease covers R2A only, and that is enough to break the cycle: once (5) runs here, the ROS 2
+// service it publishes is the one term (3) was missing over on the client side. Leasing A2R too
+// would let it run before that service exists, and a request arriving in that window could be
+// neither forwarded nor refused -- an Agnocast client cannot observe a dropped request.
 enum class ServiceBridgeState { NONE, PENDING, A2R, R2A };
 
 class ServiceBridgeItem
@@ -94,6 +106,8 @@ class ServiceBridgeItem
   // Held, never read: an agnocast::Node creates no rcl_node_t of its own, so this stands in for one
   // under its name, in this process. Lifetime is decided in check_and_update_pending().
   std::shared_ptr<rcl_node_t> shadow_node_ = nullptr;
+
+  std::optional<std::chrono::steady_clock::time_point> r2a_forced_until_ = std::nullopt;
 
   // Configuration members; set once and never modified.
   std::string service_name_;
@@ -115,6 +129,8 @@ class ServiceBridgeItem
 
   bool ros2_service_exists(const ServiceBridgeDeps & deps);
   bool ros2_client_exists(const ServiceBridgeDeps & deps);
+
+  bool r2a_forced() const;
   bool agno_service_exists();
   bool agno_client_exists();
 
@@ -134,6 +150,7 @@ public:
   void check_and_update(const ServiceBridgeDeps & deps);
 
   void handle_request(const BridgeMsgServicePayload & payload);
+  void handle_daemon_request();
 };
 
 }  // namespace agnocast

@@ -206,6 +206,11 @@ void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
         return;
       }
       break;
+    case BridgeMsgType::DaemonService:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonServicePayload>())) {
+        return;
+      }
+      break;
     default:
       RCLCPP_WARN(
         logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
@@ -264,6 +269,10 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
       register_daemon_pubsub_request(msg.payload.daemon_pubsub);
       break;
     }
+    case BridgeMsgType::DaemonService: {
+      register_daemon_service_request(msg.payload.daemon_service);
+      break;
+    }
     default: {
       // parse_and_enqueue() must reject every unknown type before enqueuing,
       // so reaching here means the two switches drifted out of sync.
@@ -286,6 +295,17 @@ void BridgeManager::register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPa
     (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
   forced.insert_or_assign(
     topic_name, DaemonForcedRequest{message_type, daemon_request_qos(req), forced_until});
+}
+
+void BridgeManager::register_daemon_service_request(const BridgeMsgDaemonServicePayload & req)
+{
+  const std::string service_name = static_cast<const char *>(req.service_name);
+
+  auto it = active_service_bridges_.find(service_name);
+  if (it == active_service_bridges_.end()) {
+    return;
+  }
+  it->second.handle_daemon_request();
 }
 
 bool BridgeManager::is_daemon_forced(

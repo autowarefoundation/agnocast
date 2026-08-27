@@ -8,6 +8,9 @@ so the two reach each other through ROS 2 (DDS):
   * local publisher  + remote subscriber -> A2R bridge (publish to DDS)
   * local subscriber + remote publisher  -> R2A bridge (reinject from DDS)
 
+Agnocast services ride on an internal request topic, so the same comparison decides them; see
+``decide_service_bridges``, which emits type=DaemonService instead.
+
 The domain bridge rule config is a second, gossip-independent source of requests.
 
 The request is sent as a ``BridgeMsg`` (type=DaemonPubSub) to the per-namespace
@@ -27,9 +30,15 @@ from typing import Iterable, Optional
 
 TOPIC_NAME_BUFFER_SIZE = 256
 MESSAGE_TYPE_BUFFER_SIZE = 256
+SERVICE_NAME_BUFFER_SIZE = 256
 
-# BridgeMsgType::DaemonPubSub discriminator value (matches the C++ enum).
+# BridgeMsgType discriminator values (match the C++ enum).
 _BRIDGE_MSG_TYPE_DAEMON_PUBSUB = 2
+_BRIDGE_MSG_TYPE_DAEMON_SERVICE = 3
+
+# Only the request topic identifies a service; response topics are per-client.
+SRV_REQUEST_PREFIX = '/AGNOCAST_SRV_REQUEST'
+SRV_RESPONSE_PREFIX = '/AGNOCAST_SRV_RESPONSE'
 
 # BridgeMsg wire format for a DaemonPubSub-variant message (528 bytes total).
 # The C++ BridgeMsg is `uint32_t type` + union { pubsub | service | daemon_pubsub }.
@@ -50,10 +59,26 @@ _BRIDGE_MSG_TYPE_DAEMON_PUBSUB = 2
 # Must stay in sync with bridge_msg_wire_size<BridgeMsgDaemonPubSubPayload>() == 528.
 _MSG_PACK_FORMAT = '=I256s256sIIBB2x'
 
+# BridgeMsg wire format for a DaemonService-variant message (260 bytes total). It always means
+# "lease R2A for this service".
+#
+#   uint32 type                             [0..3]   = _BRIDGE_MSG_TYPE_DAEMON_SERVICE
+#   BridgeMsgDaemonServicePayload at union offset 4..259:
+#     char[256] service_name                [4..259]
+#
+# Must stay in sync with bridge_msg_wire_size<BridgeMsgDaemonServicePayload>() == 260.
+_SERVICE_MSG_PACK_FORMAT = '=I256s'
+
 DIRECTION_ROS2_TO_AGNOCAST = 0
 DIRECTION_AGNOCAST_TO_ROS2 = 1
 
 _BRIDGE_UDS_BASE = 'agnocast_bridge_manager'
+
+
+@dataclass(frozen=True)
+class ServiceBridgeRequest:
+    service_name: str
+    domain_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -82,6 +107,20 @@ def serialize_request(req: BridgeRequest) -> bytes:
         1 if req.qos_is_transient_local else 0,
         1 if req.qos_is_reliable else 0,
     )
+
+
+def serialize_service_request(req: ServiceBridgeRequest) -> bytes:
+    name = req.service_name.encode('utf-8')[: SERVICE_NAME_BUFFER_SIZE - 1]
+    return struct.pack(_SERVICE_MSG_PACK_FORMAT, _BRIDGE_MSG_TYPE_DAEMON_SERVICE, name)
+
+
+def _service_name_of(topic_name: str) -> Optional[str]:
+    """Return the service a request topic belongs to, or None if it is not one."""
+    if not topic_name.startswith(SRV_REQUEST_PREFIX):
+        return None
+    service_name = topic_name[len(SRV_REQUEST_PREFIX):]
+    # A bare prefix names no service; anything else must be an absolute service name.
+    return service_name if service_name.startswith('/') else None
 
 
 def _resolve_types(local_state, remote_states) -> dict:
@@ -117,6 +156,11 @@ def decide_bridges(local_state, remote_states) -> list:
         if host_uuid == local_state.host_uuid and ipc_ns_inode == local_state.ipc_ns_inode:
             continue
         for remote_topic in remote.topics:
+            # Handled by decide_service_bridges(), not as plain pub/sub.
+            if remote_topic.topic_name.startswith(
+                    (SRV_REQUEST_PREFIX, SRV_RESPONSE_PREFIX)):
+                continue
+
             local_topic = local_by_topic.get((remote_topic.topic_name, remote_topic.domain_id))
             if local_topic is None:
                 continue
@@ -156,6 +200,48 @@ def decide_bridges(local_state, remote_states) -> list:
                     qos_is_reliable=sub.qos_is_reliable,
                     domain_id=domain_id,
                 ))
+
+    return list(requests.values())
+
+
+def decide_service_bridges(local_state, remote_states) -> list:
+    """Return the service bridge requests this namespace should issue this tick.
+
+    Roles come from the request topic, which every Agnocast service subscribes to and every
+    Agnocast client publishes on: a local subscriber means the service lives here, and only that
+    side is leased. The client side's A2R comes up on the ordinary demand rule once the leased R2A
+    publishes the ROS 2 service it was waiting for, and must not be forced ahead of it --
+    ``agnocast_service_bridge.hpp`` has the argument.
+
+    Requests are collapsed to one per ``(service, domain)``, and matched within a domain only, as
+    for pub/sub.
+    """
+    requests = {}
+
+    local_by_topic = {(t.topic_name, t.domain_id): t for t in local_state.topics}
+
+    for (host_uuid, ipc_ns_inode), remote in remote_states.items():
+        if host_uuid == local_state.host_uuid and ipc_ns_inode == local_state.ipc_ns_inode:
+            continue
+        for remote_topic in remote.topics:
+            service_name = _service_name_of(remote_topic.topic_name)
+            if service_name is None:
+                continue
+
+            local_topic = local_by_topic.get((remote_topic.topic_name, remote_topic.domain_id))
+            if local_topic is None:
+                continue
+
+            domain_id = local_topic.domain_id
+
+            # Counting a bridge's own endpoints would keep every lease alive off its own bridge.
+            local_subs = [s for s in local_topic.subscribers if not s.is_bridge]
+            remote_pubs = [p for p in remote_topic.publishers if not p.is_bridge]
+
+            if local_subs and remote_pubs:
+                key = (service_name, domain_id)
+                requests.setdefault(
+                    key, ServiceBridgeRequest(service_name=service_name, domain_id=domain_id))
 
     return list(requests.values())
 
@@ -303,6 +389,20 @@ def send_request(uds_addr: str, payload: bytes) -> Optional[str]:
     finally:
         sock.close()
     return None
+
+
+def dispatch_service_requests(
+        requests: Iterable[ServiceBridgeRequest], ipc_ns_inode: int, logger=None) -> None:
+    """Deliver each service request to the per-namespace bridge_manager UDS.
+
+    Same delivery contract as ``dispatch_requests``: best-effort, re-issued idempotently every
+    tick, and a missing peer never stalls the daemon.
+    """
+    for req in requests:
+        err = send_request(
+            _bridge_uds_addr(ipc_ns_inode, req.domain_id), serialize_service_request(req))
+        if err is not None and logger is not None:
+            logger.warn(f'daemon service bridge dispatch failed: {err}')
 
 
 def dispatch_requests(

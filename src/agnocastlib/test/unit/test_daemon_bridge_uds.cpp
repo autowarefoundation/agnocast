@@ -54,11 +54,22 @@ TEST(DaemonBridgeUdsTest, DaemonPayloadWireLayout)
   EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_is_reliable), 521u);
 }
 
+// Same contract for the service variant, whose layout the daemon mirrors as
+// `_SERVICE_MSG_PACK_FORMAT`.
+TEST(DaemonBridgeUdsTest, DaemonServicePayloadWireLayout)
+{
+  using agnocast::BridgeMsgDaemonServicePayload;
+  EXPECT_EQ(sizeof(BridgeMsgDaemonServicePayload), 256u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonServicePayload, service_name), 0u);
+  EXPECT_EQ(agnocast::bridge_msg_wire_size<BridgeMsgDaemonServicePayload>(), 260u);
+}
+
 TEST(DaemonBridgeUdsTest, BridgeMsgTypeNumeric)
 {
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::PubSub), 0u);
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::Service), 1u);
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonPubSub), 2u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonService), 3u);
 }
 
 TEST(DaemonBridgeUdsTest, BridgeMsgWireLayout)

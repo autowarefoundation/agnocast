@@ -9,15 +9,25 @@ bytes) in ``agnocast_bridge_msg.hpp``.
 import struct
 from unittest.mock import MagicMock
 
+import pytest
+
+from rclpy.impl.rcutils_logger import RcutilsLogger
+
 from ros2agnocast_discovery_agent.bridge_decider import (
     BridgeRequest,
-    UNFORCED_WARN_AFTER_TICKS,
     decide_bridges,
     decide_domain_rule_bridges,
+    decide_service_bridges,
     DIRECTION_AGNOCAST_TO_ROS2,
     DIRECTION_ROS2_TO_AGNOCAST,
     dispatch_requests,
+    dispatch_service_requests,
     serialize_request,
+    serialize_service_request,
+    ServiceBridgeRequest,
+    SRV_REQUEST_PREFIX,
+    SRV_RESPONSE_PREFIX,
+    UNFORCED_WARN_AFTER_TICKS,
 )
 from ros2agnocast_discovery_msgs.msg import (
     AgnocastDaemonState,
@@ -450,3 +460,107 @@ def test_dispatch_routes_to_per_domain_uds(monkeypatch):
         '\x00agnocast_bridge_manager_12345',
         '\x00agnocast_bridge_manager_12345_d5',
     ]
+
+
+# --- cross-namespace service bridging -------------------------------------------------
+#
+# An Agnocast service subscribes to the request topic and an Agnocast client publishes on it, so
+# the roles below are the mirror image of the pub/sub ones: a local *subscriber* means the service
+# lives here and needs R2A.
+
+
+def _srv_topic(service_name, pubs=None, subs=None, domain=0):
+    # A service's internal topics carry no type name.
+    return _topic(SRV_REQUEST_PREFIX + service_name, type_name='',
+                  pubs=pubs, subs=subs, domain=domain)
+
+
+def test_service_decide_emits_r2a_when_local_service_remote_client():
+    local = _state(topics=[_srv_topic('/add', subs=[_endpoint('/svc')])])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_srv_topic('/add', pubs=[_endpoint('/cli')])])
+
+    reqs = decide_service_bridges(local, {('OTHER', 222): remote})
+
+    assert len(reqs) == 1
+    assert reqs[0].service_name == '/add'
+
+
+def test_service_decide_leaves_the_client_side_alone():
+    """The client side needs no lease: the peer's R2A publishes the service (3) waits for."""
+    local = _state(topics=[_srv_topic('/add', pubs=[_endpoint('/cli')])])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_srv_topic('/add', subs=[_endpoint('/svc')])])
+
+    assert decide_service_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_service_decide_skips_self_namespace():
+    local = _state(topics=[_srv_topic('/add', subs=[_endpoint('/svc')])])
+    same = _state(topics=[_srv_topic('/add', pubs=[_endpoint('/cli')])])
+
+    assert decide_service_bridges(local, {('HOST', 111): same}) == []
+
+
+def test_service_decide_skips_bridge_endpoints():
+    """A bridge-created endpoint must not keep its own lease alive."""
+    local = _state(topics=[_srv_topic('/add', subs=[_endpoint('/svc')])])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_srv_topic('/add', pubs=[_endpoint('/br', is_bridge=True)])])
+
+    assert decide_service_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_service_decide_skips_cross_domain_match():
+    local = _state(topics=[_srv_topic('/add', subs=[_endpoint('/svc')], domain=0)])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_srv_topic('/add', pubs=[_endpoint('/cli')], domain=5)])
+
+    assert decide_service_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_service_decide_collapses_clients_in_several_remotes():
+    """One bridge serves every remote client, so the request is emitted once."""
+    local = _state(topics=[_srv_topic('/add', subs=[_endpoint('/svc')])])
+    remotes = {
+        ('OTHER', 222): _state(host_uuid='OTHER', ipc_ns=222,
+                               topics=[_srv_topic('/add', pubs=[_endpoint('/cli_a')])]),
+        ('OTHER', 333): _state(host_uuid='OTHER', ipc_ns=333,
+                               topics=[_srv_topic('/add', pubs=[_endpoint('/cli_b')])]),
+    }
+
+    assert [r.service_name for r in decide_service_bridges(local, remotes)] == ['/add']
+
+
+@pytest.mark.parametrize('prefix', [SRV_REQUEST_PREFIX, SRV_RESPONSE_PREFIX])
+def test_pubsub_decider_ignores_service_topics(prefix):
+    """Relaying either half as plain pub/sub would drop request/response correlation."""
+    local = _state(topics=[_topic(prefix + '/add', pubs=[_endpoint('/cli')])])
+    remote = _state(host_uuid='OTHER', ipc_ns=222,
+                    topics=[_topic(prefix + '/add', subs=[_endpoint('/svc')])])
+
+    assert decide_bridges(local, {('OTHER', 222): remote}) == []
+
+
+def test_serialize_service_request_wire_layout():
+    """4-byte tag + 256-byte payload = 260 bytes, matching the C++ struct."""
+    payload = serialize_service_request(ServiceBridgeRequest(service_name='/add'))
+
+    assert len(payload) == 260
+    msg_type, name = struct.unpack('=I256s', payload)
+    assert msg_type == 3  # BridgeMsgType::DaemonService
+    assert name.split(b'\0', 1)[0] == b'/add'
+
+
+def test_dispatch_service_reports_a_failure_through_a_real_logger(monkeypatch):
+    """The rclpy logger takes no format arguments: a %s-style call raises instead of logging.
+
+    The assertion is that the call returns: a TypeError here escapes rclpy.spin() and ends the
+    agent.
+    """
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    monkeypatch.setattr(bd, 'send_request', lambda addr, payload: 'no such socket')
+
+    dispatch_service_requests(
+        [ServiceBridgeRequest(service_name='/add')], ipc_ns_inode=12345,
+        logger=RcutilsLogger('test_bridge_decider'))
