@@ -1,0 +1,173 @@
+name: kunit-coverage
+
+# Measures gcov line/function coverage for the Agnocast KUnit suite.
+#
+# The plain `kunit` workflow runs the suite for pass/fail; it can't report
+# coverage because that flow boots a kernel with no userspace and halts, so the
+# gcov data in /sys/kernel/debug/gcov is never exported. This job builds a
+# GCOV-instrumented kernel, boots it under QEMU with a tiny BusyBox initramfs
+# that copies /sys/kernel/debug/gcov out over a virtio-9p share, then runs lcov
+# on the host. Results go to the job summary and an HTML artifact.
+#
+# Shared setup (deps, kernel cache/clone, gcov-instrumented staging) lives in
+# the .github/actions/prepare-agnocast-kunit composite action.
+
+on:
+  pull_request:
+    paths:
+      - 'agnocast_kmod/**'
+      - '.github/kunit/**'
+      - '.github/actions/prepare-agnocast-kunit/**'
+      - '.github/workflows/kunit-coverage.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'agnocast_kmod/**'
+      - '.github/kunit/**'
+      - '.github/actions/prepare-agnocast-kunit/**'
+      - '.github/workflows/kunit-coverage.yaml'
+
+concurrency:
+  group: kunit-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LINUX_REF: v6.12
+  LINUX_REPO: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+
+jobs:
+  agnocast-kunit-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare kernel and stage Agnocast sources (gcov-instrumented)
+        uses: ./.github/actions/prepare-agnocast-kunit
+        with:
+          linux-ref: ${{ env.LINUX_REF }}
+          linux-repo: ${{ env.LINUX_REPO }}
+          build-dir: kunit-build-cov
+          cache-key: kunit-cov-${{ runner.os }}-${{ env.LINUX_REF }}-${{ hashFiles('agnocast_kmod/**', '.github/kunit/**', '.github/actions/prepare-agnocast-kunit/**', '.github/workflows/kunit-coverage.yaml') }}
+          restore-key: kunit-cov-${{ runner.os }}-${{ env.LINUX_REF }}-
+          gcov: 'true'
+          extra-packages: busybox-static cpio lcov
+
+      # Build the GCOV kernel. We boot it ourselves (below) rather than via
+      # `kunit.py run`, so we can attach an initramfs that exports the gcov data.
+      - name: Build GCOV-instrumented kernel
+        working-directory: linux
+        run: |
+          set -euo pipefail
+          ./tools/testing/kunit/kunit.py build \
+            --kunitconfig="${GITHUB_WORKSPACE}/.github/kunit/kunitconfig" \
+            --kunitconfig="${GITHUB_WORKSPACE}/.github/kunit/coverage.config" \
+            --arch=x86_64 \
+            --build_dir="${GITHUB_WORKSPACE}/kunit-build-cov" \
+            --jobs="$(nproc)"
+
+      # Minimal BusyBox initramfs whose /init mounts debugfs + a 9p share, copies
+      # the gcov tree out, and powers off. KUnit runs at boot (kunit.enable=1),
+      # before /init, so the gcov data is already populated. Build /init via echo
+      # (not a heredoc) so YAML indentation can't leak in and break the shebang.
+      - name: Build initramfs
+        run: |
+          set -euo pipefail
+          ir="${GITHUB_WORKSPACE}/initramfs"
+          rm -rf "${ir}"; mkdir -p "${ir}"/{bin,proc,sys,mnt,dev}
+          cp /bin/busybox "${ir}/bin/"
+          for a in sh mount cp dmesg poweroff sync; do ln -sf busybox "${ir}/bin/${a}"; done
+          {
+            echo '#!/bin/sh'
+            echo 'mount -t proc none /proc'
+            echo 'mount -t sysfs none /sys'
+            echo 'mount -t debugfs none /sys/kernel/debug'
+            echo 'mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt'
+            echo 'cp -r /sys/kernel/debug/gcov /mnt/gcov'
+            echo 'dmesg > /mnt/dmesg.txt'
+            echo 'sync'
+            echo 'poweroff -f'
+          } > "${ir}/init"
+          chmod +x "${ir}/init"
+          ( cd "${ir}" && find . | cpio -o -H newc 2>/dev/null | gzip > "${GITHUB_WORKSPACE}/initramfs.cpio.gz" )
+
+      - name: Run suite under QEMU and collect gcov
+        run: |
+          set -euo pipefail
+          share="${GITHUB_WORKSPACE}/cov-share"
+          rm -rf "${share}"; mkdir -p "${share}"
+          timeout 300 qemu-system-x86_64 \
+            -kernel kunit-build-cov/arch/x86/boot/bzImage \
+            -initrd initramfs.cpio.gz \
+            -append "console=ttyS0 kunit.enable=1 rdinit=/init" \
+            -fsdev local,id=fs0,path="${share}",security_model=none \
+            -device virtio-9p-pci,fsdev=fs0,mount_tag=hostshare \
+            -no-reboot -nographic -m 2G | tee qemu-console.log
+          if grep -q '^not ok' qemu-console.log; then
+            echo "::error::A KUnit test failed; see the console log."
+            exit 1
+          fi
+          n=$(find "${share}/gcov" -name '*.gcda' -path '*drivers/agnocast*' 2>/dev/null | wc -l)
+          echo "agnocast .gcda files captured: ${n}"
+          if [ "${n}" -lt 1 ]; then
+            echo "::error::No agnocast gcov data captured."
+            exit 1
+          fi
+
+      - name: Build coverage report
+        run: |
+          set -euo pipefail
+          build="${GITHUB_WORKSPACE}/kunit-build-cov"
+          share="${GITHUB_WORKSPACE}/cov-share"
+          # The debugfs tree mirrors the absolute build path. Copy only the .gcda
+          # files next to their .gcno in the build dir (the tree's .gcno are
+          # symlinks back into the build dir, so copying them would self-collide).
+          while IFS= read -r f; do
+            cp "${f}" "${f#${share}/gcov}"
+          done < <(find "${share}/gcov${build}" -name '*.gcda')
+          # geninfo_unexecuted_blocks=1 keeps gcov/gcc version skew from
+          # mis-counting (the "unexecuted block ... non-zero hit count" warning).
+          lcov --capture --quiet --rc geninfo_unexecuted_blocks=1 \
+            --directory "${build}/drivers/agnocast" -o coverage.info
+          # Keep only Agnocast production .c (drop the KUnit test code).
+          lcov --quiet --extract coverage.info '*/drivers/agnocast/*.c' -o coverage.info
+          lcov --quiet --remove coverage.info '*/agnocast_kunit/*' '*/agnocast_kunit_main.c' -o coverage.info
+          genhtml --quiet coverage.info --output-directory coverage-html
+          # Build the per-file table straight from the lcov tracefile
+          # (LH/LF lines, FNH/FNF functions) rather than `lcov --list`, which
+          # mis-renders the rates under lcov 2.x (shows ~0% functions). These
+          # numbers are the same ones genhtml puts in the uploaded HTML report.
+          table=$(awk '
+            /^SF:/  { sf = $0; sub(/.*\//, "", sf) }
+            /^LF:/  { lf = substr($0, 4) }
+            /^LH:/  { lh = substr($0, 4) }
+            /^FNF:/ { ff = substr($0, 5) }
+            /^FNH:/ { fh = substr($0, 5) }
+            /^end_of_record/ {
+              printf "| %s | %.1f%% (%d/%d) | %.1f%% (%d/%d) |\n", \
+                sf, (lf ? 100*lh/lf : 0), lh, lf, (ff ? 100*fh/ff : 0), fh, ff
+              TLF += lf; TLH += lh; TFF += ff; TFH += fh
+            }
+            END {
+              printf "| **Total** | **%.1f%% (%d/%d)** | **%.1f%% (%d/%d)** |\n", \
+                (TLF ? 100*TLH/TLF : 0), TLH, TLF, (TFF ? 100*TFH/TFF : 0), TFH, TFF
+            }' coverage.info)
+          echo "${table}"
+          {
+            echo '## Agnocast kmod KUnit coverage (production .c only)'
+            echo ''
+            echo '| File | Lines | Functions |'
+            echo '|---|---|---|'
+            echo "${table}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agnocast-kunit-coverage-${{ github.run_id }}
+          path: coverage-html
+          if-no-files-found: ignore
