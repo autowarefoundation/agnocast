@@ -100,6 +100,11 @@ std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml);
 // Defined in thread_config.cpp; both the parser and issue_syscalls() use it.
 extern const std::unordered_map<std::string, int> policy_to_sched_const;
 
+// True for the CFS policies (SCHED_OTHER/BATCH/IDLE), whose tunable is nice;
+// the RT policies' tunable is priority. The template emitter and the parser
+// must agree on this split.
+bool is_cfs_policy(const std::string & policy);
+
 // Parse the given YAML document and populate the two output vectors.
 // Throws std::runtime_error on per-entry validation error. Output ThreadConfigs
 // have thread_id=-1 and applied=false; callers that re-parse must carry

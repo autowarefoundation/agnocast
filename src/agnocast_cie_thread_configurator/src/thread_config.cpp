@@ -42,11 +42,6 @@ constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
 constexpr int k_rt_priority_max = 99;
 
-bool is_cfs_policy(const std::string & policy)
-{
-  return policy == "SCHED_OTHER" || policy == "SCHED_BATCH" || policy == "SCHED_IDLE";
-}
-
 // 'nice' is required for the CFS policies (SCHED_OTHER/BATCH/IDLE);
 // parse_rt_priority is the mirror image for SCHED_FIFO/SCHED_RR. `entry_desc`
 // is the "id=..."/"name=..." fragment used in messages.
@@ -183,6 +178,11 @@ const std::unordered_map<std::string, int> policy_to_sched_const = {
   {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
   {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
 };
+
+bool is_cfs_policy(const std::string & policy)
+{
+  return policy == "SCHED_OTHER" || policy == "SCHED_BATCH" || policy == "SCHED_IDLE";
+}
 
 bool ThreadConfig::is_wildcard() const noexcept
 {
