@@ -25,6 +25,12 @@ find_package(rcpputils REQUIRED)
 find_package(rmw REQUIRED)
 find_package(tracetools REQUIRED)
 find_package(LTTngUST REQUIRED)
+
+# service_msgs only exists from Iron on.
+if(rclcpp_VERSION_MAJOR GREATER_EQUAL 21)
+  find_package(service_msgs REQUIRED)
+  set(AGNOCAST_SERVICE_INTROSPECTION_DEPS service_msgs)
+endif()
 find_package(agnocast_cie_config_msgs REQUIRED)
 find_package(agnocast_cie_thread_configurator REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
@@ -44,7 +50,7 @@ add_library(agnocast SHARED
   src/agnocast_smart_pointer.cpp src/agnocast_callback_info.cpp src/agnocast_epoll.cpp src/agnocast_epoll_update_dispatcher.cpp src/agnocast_timer_info.cpp src/agnocast_timer.cpp src/agnocast_executor.cpp
   src/agnocast_single_threaded_executor.cpp src/agnocast_multi_threaded_executor.cpp
   src/agnocast_callback_isolated_executor.cpp
-  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp
+  src/agnocast_tracepoint_wrapper.c src/agnocast_client.cpp src/agnocast_service.cpp src/agnocast_service_event_publisher.cpp
   src/node/agnocast_node.cpp src/node/agnocast_arguments.cpp src/node/agnocast_context.cpp src/node/agnocast_signal_handler.cpp
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp src/node/agnocast_parameter_client.cpp
@@ -57,7 +63,7 @@ add_library(agnocast SHARED
   src/node/diagnostic_updater/diagnostic_updater.cpp
   src/vendor/rclcpp/generic_service.cpp src/vendor/rclcpp/generic_client.cpp)
 
-ament_target_dependencies(agnocast rclcpp rcpputils rmw agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
+ament_target_dependencies(agnocast rclcpp rcpputils rmw ${AGNOCAST_SERVICE_INTROSPECTION_DEPS} agnocast_cie_thread_configurator rosgraph_msgs agnocast_cie_config_msgs ament_index_cpp message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_introspection_cpp)
 
 target_link_libraries(agnocast
   ${rcl_yaml_param_parser_LIBRARIES}
@@ -162,7 +168,8 @@ if(BUILD_TESTING)
     test/unit/test_daemon_bridge_uds.cpp
     test/unit/test_agnocast_bridge_uds.cpp
     test/unit/test_discovery_agent_auto_fork.cpp
-    test/unit/test_bridge_node_name.cpp)
+    test/unit/test_bridge_node_name.cpp
+    test/unit/test_agnocast_service_event_publisher.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
@@ -364,6 +371,21 @@ if(BUILD_TESTING)
     TIMEOUT 60
     LABELS "requires_kernel_module;requires_heaphook"
   )
+
+  # Service introspection integration test (requires kernel module, no mock)
+  if(rclcpp_VERSION_MAJOR GREATER_EQUAL 21)
+    ament_add_gmock(test_integration_service_introspection_${PROJECT_NAME}
+      test/integration/test_agnocast_service_introspection.cpp)
+    target_include_directories(test_integration_service_introspection_${PROJECT_NAME} PRIVATE include)
+    target_link_libraries(test_integration_service_introspection_${PROJECT_NAME} agnocast)
+    ament_target_dependencies(test_integration_service_introspection_${PROJECT_NAME}
+      std_srvs ${AGNOCAST_SERVICE_INTROSPECTION_DEPS})
+    set_tests_properties(test_integration_service_introspection_${PROJECT_NAME} PROPERTIES
+      ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+      TIMEOUT 120
+      LABELS "requires_kernel_module;requires_heaphook"
+    )
+  endif()
 
   # Integration tests for agnocast_heaphook
   add_library(initialize_shutdown_mock SHARED test/integration/src/initialize_shutdown_mock.cpp)
