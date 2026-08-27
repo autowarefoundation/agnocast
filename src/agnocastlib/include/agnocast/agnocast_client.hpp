@@ -26,6 +26,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -198,6 +199,27 @@ private:
 #endif
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<typename ServiceT::Request> copy_request_if_contents(
+    const ipc_shared_ptr<RequestT> & request)
+  {
+    if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
+      return std::nullopt;
+    }
+    return static_cast<const typename ServiceT::Request &>(*request);
+  }
+
+  void publish_request_sent_event(
+    const int64_t seqno, const std::optional<typename ServiceT::Request> & request)
+  {
+    event_publisher_->publish_service_event_message(
+      service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? &*request : nullptr, seqno,
+      get_gid().data);
+  }
+#endif
+
   template <typename Func>
   int64_t send_request_impl(
     ipc_shared_ptr<typename ServiceT::Request> && request, ResponseCallInfo && call_info,
@@ -213,14 +235,15 @@ private:
     }
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    // Must precede the publish, which leaves `internal_request` empty.
-    event_publisher_->publish_service_event_message(
-      service_msgs::msg::ServiceEventInfo::REQUEST_SENT,
-      static_cast<const typename ServiceT::Request *>(internal_request.get()), seqno,
-      get_gid().data);
+    const auto sent_request = copy_request_if_contents(internal_request);
 #endif
 
     publisher_->publish(std::move(internal_request));
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    publish_request_sent_event(seqno, sent_request);
+#endif
+
     return seqno;
   }
 
