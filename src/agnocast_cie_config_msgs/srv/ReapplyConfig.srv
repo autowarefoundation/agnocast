@@ -39,4 +39,4 @@ string[] applied_kernel_threads    # in desired state; format "<comm>:<tid>", on
 string[] failed_kernel_threads     # syscall failed, or an affinity differing from a per-CPU kthread's fixed one
 string[] skipped_kernel_threads    # managed comm matched no running kernel thread; format "<comm>"
 string[] applied_irqs              # in desired state; decimal IRQ number
-string[] failed_irqs               # identity mismatch, missing IRQ, irqbalance running, or write error
+string[] failed_irqs               # identity mismatch, missing IRQ, write needed while irqbalance runs, or write error

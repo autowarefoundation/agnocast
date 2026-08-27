@@ -23,6 +23,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <system_error>
 #include <utility>
 
 using agnocast_cie_thread_configurator::policy_to_sched_const;
@@ -361,7 +362,12 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
 {
   const int my_id = cgroup_num_.fetch_add(1, std::memory_order_relaxed);
   std::string cgroup_path = "/sys/fs/cgroup/cpuset/" + std::to_string(my_id);
-  if (!std::filesystem::create_directory(cgroup_path)) {
+  // Non-throwing overload: on a cgroup v2 host /sys/fs/cgroup/cpuset does not
+  // exist and mkdir fails with ENOENT; the caller's instructive message
+  // depends on a false return, not an exception.
+  std::error_code ec;
+  const bool created = std::filesystem::create_directory(cgroup_path, ec);
+  if (ec || !created) {
     return false;
   }
 
@@ -614,21 +620,14 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_irq_co
   }
 
   // A running irqbalance would periodically rewrite smp_affinity, silently
-  // undoing whatever is applied here, so applying would only fake success.
-  // Checked immediately before the writes to keep the detection fresh.
-  if (agnocast_cie_thread_configurator::process_with_comm_exists("irqbalance")) {
-    RCLCPP_ERROR(
-      this->get_logger(),
-      "IRQ affinity configuration is requested but irqbalance is running; it would periodically "
-      "overwrite the configured affinities, so nothing is applied. Disable it (sudo systemctl "
-      "disable --now irqbalance) and call ~/reapply_config to retry.");
-    for (const auto & config : irq_configs_) {
-      if (config.is_managed()) {
-        outcome.failed.push_back(std::to_string(config.irq));
-      }
-    }
-    return outcome;
-  }
+  // undoing whatever is written here, so entries needing a write are failed
+  // instead of written. The gate sits after the per-entry compare-before-set:
+  // in-sync entries need no write and still count as applied, or every entry
+  // of an unedited template would be flagged on distros that enable
+  // irqbalance by default.
+  const bool irqbalance_detected =
+    agnocast_cie_thread_configurator::process_with_comm_exists("irqbalance");
+  bool irqbalance_reported = false;
 
   for (const auto & config : irq_configs_) {
     if (!config.is_managed()) {
@@ -658,7 +657,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_irq_co
       if (!std::getline(file, current)) {
         RCLCPP_WARN(
           this->get_logger(),
-          "Could not read the current affinity of IRQ %d; attempting an unconditional write.",
+          "Could not read the current affinity of IRQ %d; treating it as out "
+          "of sync.",
           config.irq);
       }
     }
@@ -667,6 +667,19 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_irq_co
       // Also spares kernel-managed IRQs (which reject every write with EIO)
       // from a spurious error when the recorded value is still current.
       outcome.applied.push_back(std::move(key));
+      continue;
+    }
+
+    if (irqbalance_detected) {
+      if (!irqbalance_reported) {
+        RCLCPP_ERROR(
+          this->get_logger(),
+          "IRQ affinity changes are needed but irqbalance is running; it would periodically "
+          "overwrite them, so the out-of-sync entries are failed instead of written. Disable it "
+          "(sudo systemctl disable --now irqbalance) and call ~/reapply_config to retry.");
+        irqbalance_reported = true;
+      }
+      outcome.failed.push_back(std::move(key));
       continue;
     }
 

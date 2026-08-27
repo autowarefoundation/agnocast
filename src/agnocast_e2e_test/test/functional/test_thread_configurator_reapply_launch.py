@@ -92,18 +92,23 @@ def _write_config(cfg):
         yaml.safe_dump(cfg, f)
 
 
-def _irqbalance_running():
-    """Mirror the configurator's own detection (comm scan in its pid namespace)."""
-    for pid in os.listdir('/proc'):
-        if not pid.isdigit():
-            continue
-        try:
-            with open(os.path.join('/proc', pid, 'comm')) as f:
-                if f.read().strip() == 'irqbalance':
-                    return True
-        except OSError:
-            continue
-    return False
+def _read_irq_affinity_cpus(irq):
+    """Live /proc/irq/<N>/smp_affinity_list as a CPU set, mirroring the node's
+    parse_manageable_cpu_list (CPUs at or above the configured count dropped).
+    None when unreadable."""
+    try:
+        with open(f'/proc/irq/{irq}/smp_affinity_list') as f:
+            raw = f.read().strip()
+        cpus = set()
+        for token in raw.split(','):
+            if '-' in token:
+                first, last = token.split('-')
+                cpus.update(range(int(first), int(last) + 1))
+            else:
+                cpus.add(int(token))
+        return {c for c in cpus if c < os.cpu_count()}
+    except (OSError, ValueError):
+        return None
 
 
 def _call_reapply(timeout_sec=10.0):
@@ -457,7 +462,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             for key in list(arr):
                 self.assertFalse(key.startswith('fictitious_kthread:'))
 
-    def test_reapply_irq_outcome_depends_on_irqbalance(
+    def test_reapply_reports_in_sync_irq_as_applied(
             self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received CallbackGroupInfo',
@@ -473,33 +478,36 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         )
         if target is None:
             self.skipTest('no IRQ with a readable affinity list in the template')
+        irq = target['irq']
 
-        # The config is the untouched prerun output, so every desired value is
-        # still the observed one: without irqbalance the in-sync path must
-        # report the IRQ as applied WITHOUT writing (no privileges needed);
-        # with irqbalance running the validation must refuse the whole IRQ
-        # section and report it as failed instead. The configurator samples
-        # irqbalance at some point inside the call, so sample on both sides
-        # and skip when a state change makes the expected branch undecidable.
-        irqbalance_before = _irqbalance_running()
+        # Compare-before-set precedes the irqbalance gate, so an entry whose
+        # live affinity still equals the template value must be reported as
+        # applied without any write (no privileges needed in CI, irqbalance
+        # running or not). Sample the live value on both sides of the call and
+        # skip when it moved mid-call, since the expectation is undecidable.
+        before = _read_irq_affinity_cpus(irq)
         response = _call_reapply()
-        if _irqbalance_running() != irqbalance_before:
-            self.skipTest('irqbalance state changed during the reapply call')
+        after = _read_irq_affinity_cpus(irq)
         self.assertTrue(
             response.success,
             f'reapply rejected unexpectedly: error_message={response.error_message!r}',
         )
-        key = str(target['irq'])
+        key = str(irq)
         applied = list(response.applied_irqs)
         failed = list(response.failed_irqs)
         self.assertEqual(
             applied.count(key) + failed.count(key), 1,
             'each managed IRQ must be reported exactly once',
         )
-        if irqbalance_before:
-            self.assertIn(key, failed)
-        else:
+        if before != after:
+            self.skipTest('IRQ affinity changed during the reapply call')
+        if before == set(target['affinity']):
             self.assertIn(key, applied)
+        else:
+            # A drifted entry needs a real write; whether that lands in
+            # applied or failed depends on privileges and irqbalance, both
+            # owned by the environment.
+            self.skipTest('live affinity no longer matches the template value')
 
 
 @launch_testing.post_shutdown_test()
