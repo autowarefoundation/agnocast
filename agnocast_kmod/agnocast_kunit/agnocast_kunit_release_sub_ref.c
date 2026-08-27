@@ -78,12 +78,12 @@ void test_case_release_sub_ref_no_pubsub_id(struct kunit * test)
 
   // Act: Attempt to release a reference using the publisher's local ID.
   // Publishers do not participate in reference counting, so their bit is never set.
-  // test_and_clear_bit detects the missing reference and returns -EINVAL.
   int ret_sut = agnocast_ioctl_release_message_entry_reference(
     TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, publish_msg_args.ret_entry_id);
 
-  // Assert
-  KUNIT_EXPECT_EQ(test, ret_sut, -EINVAL);
+  // Assert: releasing a reference that is not held is a no-op, not an error. The bit being clear
+  // already is the state the caller asked for, so the ioctl succeeds.
+  KUNIT_EXPECT_EQ(test, ret_sut, 0);
 }
 
 void test_case_release_sub_ref_last_reference(struct kunit * test)
@@ -124,6 +124,61 @@ void test_case_release_sub_ref_last_reference(struct kunit * test)
     publish_msg_args.ret_entry_id);
 
   // Assert
+  KUNIT_EXPECT_EQ(test, ret_sut, 0);
+  KUNIT_EXPECT_EQ(
+    test,
+    agnocast_get_entry_rc(
+      TOPIC_NAME, current->nsproxy->ipc_ns, publish_msg_args.ret_entry_id,
+      add_subscriber_args.ret_id),
+    0);
+}
+
+// Releasing twice must succeed both times. Userspace relies on this: a message reference that
+// outlives its Subscription is released after remove_subscriber() already cleared the bit, and that
+// second release must not be reported as an error.
+void test_case_release_sub_ref_already_released(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 0);
+
+  // Arrange: a real subscriber takes a reference and releases it once.
+  topic_local_id_t ret_publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &ret_publisher_id, &ret_addr);
+
+  union ioctl_publish_msg_args publish_msg_args;
+  int ret = agnocast_ioctl_publish_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, ret_publisher_id, ret_addr, &publish_msg_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  const pid_t subscriber_pid = 1000;
+  union ioctl_add_process_args add_process_args;
+  int ret2 = agnocast_ioctl_add_process(
+    subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret2, 0);
+
+  union ioctl_add_subscriber_args add_subscriber_args;
+  int ret3 = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, false, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
+    &add_subscriber_args);
+  KUNIT_ASSERT_EQ(test, ret3, 0);
+
+  int ret4 = agnocast_increment_message_entry_rc(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id,
+    publish_msg_args.ret_entry_id);
+  KUNIT_ASSERT_EQ(test, ret4, 0);
+
+  int ret5 = agnocast_ioctl_release_message_entry_reference(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id,
+    publish_msg_args.ret_entry_id);
+  KUNIT_ASSERT_EQ(test, ret5, 0);
+
+  // Act: release the same reference a second time.
+  int ret_sut = agnocast_ioctl_release_message_entry_reference(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id,
+    publish_msg_args.ret_entry_id);
+
+  // Assert: the redundant release is a no-op that succeeds, and the bit stays clear.
   KUNIT_EXPECT_EQ(test, ret_sut, 0);
   KUNIT_EXPECT_EQ(
     test,

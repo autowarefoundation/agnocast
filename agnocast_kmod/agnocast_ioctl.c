@@ -629,13 +629,18 @@ int agnocast_ioctl_release_message_entry_reference(
     goto unlock_all;
   }
 
+  // Releasing a reference is idempotent: this ioctl only clears the bit, and the entry itself is
+  // reclaimed elsewhere (on publish, on remove_subscriber, or on process exit) once no subscriber
+  // references it. A bit that is already clear therefore means the requested state is what we
+  // wanted, not an error. This legitimately happens when a message reference outlives the
+  // Subscription that delivered it: remove_subscriber() clears this subscriber's bit on every
+  // entry of the topic, so the later release finds nothing to clear.
   if (!test_and_clear_bit(pubsub_id, en->referencing_subscribers)) {
-    dev_warn(
+    dev_dbg(
       agnocast_device,
-      "pubsub_id %d does not hold a reference for entry (topic_name=%s entry_id=%lld). "
-      "(%s)\n",
+      "pubsub_id %d does not hold a reference for entry (topic_name=%s entry_id=%lld); "
+      "already released. (%s)\n",
       pubsub_id, topic_name, entry_id, __func__);
-    ret = -EINVAL;
     goto unlock_all;
   }
 
