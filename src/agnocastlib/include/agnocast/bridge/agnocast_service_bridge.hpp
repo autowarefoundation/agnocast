@@ -150,7 +150,7 @@ public:
   void check_and_update(const ServiceBridgeDeps & deps);
 
   void handle_request(const BridgeMsgServicePayload & payload);
-  void handle_daemon_request(const BridgeMsgDaemonServicePayload & payload);
+  void handle_daemon_request();
 };
 
 }  // namespace agnocast

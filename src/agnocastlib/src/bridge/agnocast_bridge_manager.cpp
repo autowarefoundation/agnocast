@@ -305,7 +305,7 @@ void BridgeManager::register_daemon_service_request(const BridgeMsgDaemonService
   if (it == active_service_bridges_.end()) {
     return;
   }
-  it->second.handle_daemon_request(req);
+  it->second.handle_daemon_request();
 }
 
 bool BridgeManager::is_daemon_forced(

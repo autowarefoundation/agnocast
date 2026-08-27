@@ -517,7 +517,7 @@ void ServiceBridgeItem::handle_request(const BridgeMsgServicePayload & payload)
   }
 }
 
-void ServiceBridgeItem::handle_daemon_request(const BridgeMsgDaemonServicePayload &)
+void ServiceBridgeItem::handle_daemon_request()
 {
   r2a_forced_until_ = daemon_force_deadline(std::chrono::steady_clock::now());
 }
