@@ -258,8 +258,11 @@ void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  const uint64_t msg_addr = setup_process(test, PID, DOMAIN_ID);
-  const topic_local_id_t publisher_id = add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
+  // The publisher runs as the calling thread, because publish_msg resolves the topic in the
+  // caller's domain rather than the publisher's.
+  const uint64_t msg_addr = setup_process(test, current->tgid, DOMAIN_ID);
+  const topic_local_id_t publisher_id =
+    add_publisher(test, TOPIC_NAME, NODE_NAME, current->tgid, false);
   union ioctl_publish_msg_args publish_msg_args;
   KUNIT_ASSERT_EQ(
     test,
@@ -273,9 +276,9 @@ void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
     agnocast_increment_message_entry_rc(
       TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, publish_msg_args.ret_entry_id),
     0);
-  agnocast_enqueue_exit_pid(PID);
+  agnocast_enqueue_exit_pid(current->tgid);
   msleep(20);
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(PID));
+  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(current->tgid));
   KUNIT_ASSERT_TRUE(
     test, agnocast_is_in_publisher_htable(TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id));
 
