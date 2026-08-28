@@ -76,10 +76,10 @@ ament_export_dependencies(agnocast_cie_config_msgs yaml-cpp rclcpp)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(test_${PROJECT_NAME}
+  ament_add_gtest(test_non_ros_thread_ipc
     test/test_non_ros_thread_ipc.cpp
   )
-  target_link_libraries(test_${PROJECT_NAME} agnocast_thread_configurator)
+  target_link_libraries(test_non_ros_thread_ipc agnocast_thread_configurator)
 
   ament_add_gtest(test_thread_config
     test/test_thread_config.cpp

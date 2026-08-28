@@ -511,6 +511,37 @@ public:
       options);
   }
 
+  /// Create a take-subscription (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return std::make_shared<TakeSubscription<MessageT>>(this, topic_name, qos, std::move(options));
+  }
+
+  /// Create a take-subscription (queue-size overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param queue_size History depth for the QoS profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, size_t queue_size,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return create_take_subscription<MessageT>(
+      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), std::move(options));
+  }
+
   /// Create a polling subscription (history-depth overload).
   /// @tparam MessageT ROS message type.
   /// @param topic_name Topic name.
@@ -521,7 +552,7 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::TakeSubscription directly.")]]
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
   {
@@ -539,7 +570,7 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::TakeSubscription directly.")]]
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
   {
