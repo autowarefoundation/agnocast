@@ -40,12 +40,12 @@ void increment_borrowed_publisher_num()
   mock_borrowed_publisher_num++;
 }
 
-topic_local_id_t initialize_publisher(
+PublisherRegistration initialize_publisher(
   const std::string &, const std::string &, const rclcpp::QoS & qos, const bool,
   const std::string &)
 {
   initialize_publisher_mock_last_qos_depth = qos.depth();
-  return 0;  // Dummy value
+  return {0, 0};  // Dummy value
 }
 union ioctl_publish_msg_args publish_core(
   const void *, const std::string &, const topic_local_id_t, const uint64_t)

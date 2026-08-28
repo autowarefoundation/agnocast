@@ -77,6 +77,7 @@ union ioctl_add_subscriber_args {
   struct
   {
     topic_local_id_t ret_id;
+    int64_t ret_serial;
   };
 };
 
@@ -92,6 +93,7 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
+    int64_t ret_serial;
   };
 };
 

@@ -223,7 +223,7 @@ private:
       to_publisher_role(role));
 
     response_topic_name_ =
-      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_serial());
 
     auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -384,7 +384,7 @@ private:
       node, req_topic_name, "", qos, pub_options, to_publisher_role(role));
 
     response_topic_name_ =
-      create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
+      create_service_response_topic_name(service_name_, node_name_, publisher_->get_serial());
 
     auto subscriber_callback = [this](ipc_shared_ptr<void> && response) {
       auto generic_response_wrapper =

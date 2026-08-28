@@ -177,6 +177,7 @@ static int add_topic(
     hash_init((*wrapper)->topic->pub_info_htable);
     hash_init((*wrapper)->topic->sub_info_htable);
     bitmap_zero((*wrapper)->topic->pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+    (*wrapper)->topic->current_pubsub_serial = 0;
     (*wrapper)->topic->current_entry_id = 0;
     (*wrapper)->topic->ros2_subscriber_num = 0;
     (*wrapper)->topic->ros2_publisher_num = 0;
@@ -378,6 +379,7 @@ static int insert_subscriber_info(
   set_bit(new_id, wrapper->topic->pubsub_id_map);
 
   (*new_info)->id = new_id;
+  (*new_info)->serial = wrapper->topic->current_pubsub_serial++;
   (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = subscriber_pid;
   (*new_info)->qos_depth = qos_depth;
@@ -505,8 +507,9 @@ static int insert_publisher_info(
     return ret;
   }
 
-  // After the last failure point, so a failed insert leaves the id free for the next caller.
+  // After the last failure point, so a failed insert consumes neither the id nor the serial.
   set_bit(new_id, wrapper->topic->pubsub_id_map);
+  (*new_info)->serial = wrapper->topic->current_pubsub_serial++;
 
   rebuild_notify_list(wrapper, *new_info);
 
@@ -900,6 +903,7 @@ int agnocast_ioctl_add_subscriber(
   }
 
   ioctl_ret->ret_id = sub_info->id;
+  ioctl_ret->ret_serial = sub_info->serial;
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -932,6 +936,7 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
+  ioctl_ret->ret_serial = pub_info->serial;
 
   // set true to subscriber_info.need_mmap_update to notify
   struct subscriber_info * sub_info;

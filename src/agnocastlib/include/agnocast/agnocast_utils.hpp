@@ -102,14 +102,15 @@ std::string create_shm_name(const pid_t pid);
 uint64_t get_self_ipc_ns_inode();
 std::string create_service_request_topic_name(const std::string & service_name);
 // A domain bridge merges two domains, where the same fully qualified node name may legitimately
-// appear twice, into one response topic. The publisher id separates such clients: it comes from a
-// counter the kernel module keeps per request topic.
+// appear twice, into one response topic. The publisher serial separates such clients: the kernel
+// module counts it up per request topic and never hands a value back, so a later client cannot
+// land on a name a server still publishes to.
 // This requires the *request* topic's own bridge rule: that rule is what makes the two domains
 // share one counter. Without it each domain counts from 0 and two clients with the same node name
 // compute the same name -- unchecked, so register the response rule only alongside the request one.
 std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name,
-  topic_local_id_t client_publisher_id);
+  int64_t client_publisher_serial);
 uint64_t agnocast_get_timestamp();
 
 // Returns a pointer to the inner node handle that can be used for the TRACEPOINT macro.

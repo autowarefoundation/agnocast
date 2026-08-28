@@ -17,7 +17,6 @@ static const bool IS_TAKE_SUB = false;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const bool IS_BRIDGE = false;
 
-
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args ioctl_ret;
@@ -27,15 +26,21 @@ static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
   return ioctl_ret.ret_addr;
 }
 
-static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t publisher_pid)
+static void add_one_publisher(
+  struct kunit * test, const pid_t publisher_pid, union ioctl_add_publisher_args * args)
 {
-  union ioctl_add_publisher_args add_publisher_args;
   int ret = agnocast_ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
+    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
   KUNIT_ASSERT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
+}
+
+static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t publisher_pid)
+{
+  union ioctl_add_publisher_args add_publisher_args;
+  add_one_publisher(test, publisher_pid, &add_publisher_args);
 
   return add_publisher_args.ret_id;
 }
@@ -192,4 +197,25 @@ void test_case_remove_and_add_publisher(struct kunit * test)
   // Assert
   // Note: This test verifies the specific algorithm for assigning the smallest usable ID.
   KUNIT_EXPECT_EQ(test, pub_id_1st, pub_id_2nd);
+}
+
+void test_case_remove_and_add_publisher_does_not_reuse_serial(struct kunit * test)
+{
+  // Arrange
+  // The subscriber keeps the topic, and with it the serial counter, alive across the removal.
+  const pid_t pid = PID_BASE;
+  setup_one_process(test, pid);
+  setup_one_subscriber(test, pid);
+  union ioctl_add_publisher_args first;
+  add_one_publisher(test, pid, &first);
+
+  // Act
+  int ret = agnocast_ioctl_remove_publisher(TOPIC_NAME, current->nsproxy->ipc_ns, first.ret_id);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  union ioctl_add_publisher_args second;
+  add_one_publisher(test, pid, &second);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, first.ret_id, second.ret_id);
+  KUNIT_EXPECT_NE(test, first.ret_serial, second.ret_serial);
 }

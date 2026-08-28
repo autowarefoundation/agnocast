@@ -20,8 +20,19 @@ class Node;
 
 const void * get_node_base_address(Node * node);
 
+// What the kernel module hands back when a publisher joins a topic.
+struct PublisherRegistration
+{
+  // Index into the topic's per-endpoint tables. Released for reuse when the publisher leaves, so
+  // it identifies this publisher only while it is registered.
+  topic_local_id_t id;
+  // Monotonic per topic and never reused, so it stays distinct from publishers that have already
+  // left. This is the one to build into a name or an identity that outlives them.
+  int64_t serial;
+};
+
 // These are cut out of the class for information hiding.
-topic_local_id_t initialize_publisher(
+PublisherRegistration initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
   const bool is_bridge, const std::string & type_name);
 union ioctl_publish_msg_args publish_core(
@@ -81,6 +92,7 @@ class PublisherBase
 
 protected:
   topic_local_id_t id_ = -1;
+  int64_t serial_ = -1;
   std::string topic_name_;
   rmw_gid_t gid_;
   // The depth is a placeholder: rclcpp::QoS has no default constructor.
@@ -115,6 +127,13 @@ public:
    */
   AGNOCAST_PUBLIC
   topic_local_id_t get_id() const { return id_; }
+
+  /**
+   * @brief Return the per-topic serial the kernel module assigned to this publisher.
+   * @return Publisher serial, never reused by a later publisher of the same topic.
+   */
+  AGNOCAST_PUBLIC
+  int64_t get_serial() const { return serial_; }
 
   /**
    * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).

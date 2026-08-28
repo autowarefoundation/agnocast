@@ -99,6 +99,8 @@ extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 struct publisher_info
 {
   topic_local_id_t id;
+  // Unlike id, never reused within the topic.
+  int64_t serial;
   // The endpoint's ROS domain. Equals the owning wrapper's domain; carried per
   // endpoint because grouped wrappers share one htable holding both domains.
   uint32_t domain_id;
@@ -122,6 +124,8 @@ struct publisher_info
 struct subscriber_info
 {
   topic_local_id_t id;
+  // Unlike id, never reused within the topic.
+  int64_t serial;
   // The endpoint's ROS domain (see publisher_info::domain_id).
   uint32_t domain_id;
   pid_t pid;
@@ -156,6 +160,11 @@ struct topic_struct
   DECLARE_HASHTABLE(pub_info_htable, PUB_INFO_HASH_BITS);
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
   DECLARE_BITMAP(pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  // Durable counterpart of pubsub_id_map: an id goes back into the map when its endpoint leaves,
+  // so anything that has to stay distinct from a departed endpoint is named after the serial
+  // instead, such as a service client's response topic. Per topic rather than per process, so it
+  // keeps rising across an endpoint process restart for as long as the topic survives.
+  int64_t current_pubsub_serial;
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager

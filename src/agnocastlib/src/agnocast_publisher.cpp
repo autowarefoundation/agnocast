@@ -13,7 +13,6 @@
 #include <rmw/serialized_message.h>
 #include <sys/types.h>
 
-#include <atomic>
 #include <new>
 
 namespace agnocast
@@ -51,7 +50,7 @@ void decrement_borrowed_publisher_num()
   borrowed_publisher_num--;
 }
 
-topic_local_id_t initialize_publisher(
+PublisherRegistration initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
   const bool is_bridge, const std::string & type_name)
 {
@@ -76,7 +75,7 @@ topic_local_id_t initialize_publisher(
     exit(EXIT_FAILURE);
   }
 
-  return pub_args.ret_id;
+  return {pub_args.ret_id, pub_args.ret_serial};
 }
 
 union ioctl_publish_msg_args publish_core(
@@ -162,7 +161,10 @@ void PublisherBase::init_base(
 
   const bool is_bridge = (role == PublisherRole::BridgeInternal);
   const std::string node_name = node->get_fully_qualified_name();
-  id_ = initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  const PublisherRegistration registration =
+    initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  id_ = registration.id;
+  serial_ = registration.serial;
   generate_gid();
 
   if (role == PublisherRole::Default) {
@@ -188,16 +190,10 @@ template void PublisherBase::init_base<agnocast::Node>(
 
 void PublisherBase::generate_gid()
 {
-  // Numbers every publisher this process creates, for the whole life of the process. The kmod's
-  // topic_local_id cannot serve as the identity: it is scoped to one topic and is handed back for
-  // reuse once its publisher is gone, so two publishers of the same topic can carry the same
-  // value. Wraps after 2^32 publishers, which no process reaches in practice.
-  static std::atomic<uint32_t> instance_counter{0};
-
   constexpr size_t kPidOffset = 2;
   constexpr size_t kHashOffset = 6;
   constexpr size_t kHashSize = 6;
-  constexpr size_t kInstanceOffset = 12;
+  constexpr size_t kSerialOffset = 12;
 
   std::memset(static_cast<void *>(&gid_.data[0]), 0, RMW_GID_STORAGE_SIZE);
 
@@ -213,9 +209,10 @@ void PublisherBase::generate_gid()
   const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
   std::memcpy(static_cast<void *>(&gid_.data[kHashOffset]), &topic_hash, kHashSize);
 
-  // [12-15]: publisher instance number within this process
-  const uint32_t instance = instance_counter.fetch_add(1, std::memory_order_relaxed);
-  std::memcpy(static_cast<void *>(&gid_.data[kInstanceOffset]), &instance, sizeof(instance));
+  // [12-15]: publisher serial, low 32 bits. Not topic_local_id: that value goes to a later
+  // publisher of the same topic once this one leaves.
+  const auto serial = static_cast<uint32_t>(serial_);
+  std::memcpy(static_cast<void *>(&gid_.data[kSerialOffset]), &serial, sizeof(serial));
 
   // Nothing may be stored past [15]: RMW_GID_STORAGE_SIZE is 24 on Humble but only 16 from Iron
   // on, so the bytes beyond do not exist on every supported distribution.
