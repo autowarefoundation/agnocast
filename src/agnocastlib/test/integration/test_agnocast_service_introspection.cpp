@@ -200,22 +200,23 @@ TEST_F(ServiceIntrospectionTest, ContentsPublishesRequestReceivedAndResponseSent
   EXPECT_EQ(events[1].response[0].message, "ok");
 }
 
-TEST_F(ServiceIntrospectionTest, BothEventsOfOneCallCarryTheSameCallerAndSequenceNumber)
+TEST_F(ServiceIntrospectionTest, BothEventsOfACallCarryTheSequenceNumberOfThatCall)
 {
-  // Arrange
+  // Arrange: two calls, so a constant cannot pass for a real sequence number.
   set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
+  ASSERT_TRUE(call_service(true));
+  const auto first = wait_for_events(2);
+  ASSERT_EQ(first.size(), 2u);
+  forget_events();
 
   // Act
   ASSERT_TRUE(call_service(true));
   const auto events = wait_for_events(2);
 
-  // Assert: a consumer pairs the two events by (client_gid, sequence_number).
+  // Assert: a consumer pairs the two events of a call by its sequence number.
   ASSERT_EQ(events.size(), 2u);
   EXPECT_EQ(events[0].info.sequence_number, events[1].info.sequence_number);
-  EXPECT_EQ(events[0].info.client_gid, events[1].info.client_gid);
-  const auto & gid = events[0].info.client_gid;
-  EXPECT_NE(std::count(gid.begin(), gid.end(), 0), static_cast<long>(gid.size()))
-    << "client_gid is all zeros, so the caller cannot be identified";
+  EXPECT_NE(events[0].info.sequence_number, first[0].info.sequence_number);
 }
 
 TEST_F(ServiceIntrospectionTest, MetadataPublishesEventsWithoutPayload)
@@ -367,9 +368,13 @@ TEST_F(ServiceIntrospectionTest, ContentsPublishesRequestSentAndResponseReceived
 
 TEST_F(ServiceIntrospectionTest, BothSidesTogetherCoverTheWholeExchange)
 {
-  // Arrange
+  // Arrange: two calls, so a constant cannot pass for a real sequence number.
   set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
   set_client_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
+  ASSERT_TRUE(call_service(true));
+  const auto first = wait_for_events(4);
+  ASSERT_EQ(first.size(), 4u);
+  forget_events();
 
   // Act
   ASSERT_TRUE(call_service(true));
@@ -381,6 +386,7 @@ TEST_F(ServiceIntrospectionTest, BothSidesTogetherCoverTheWholeExchange)
     EXPECT_EQ(event.info.sequence_number, events[0].info.sequence_number);
     EXPECT_EQ(event.info.client_gid, events[0].info.client_gid);
   }
+  EXPECT_NE(events[0].info.sequence_number, first[0].info.sequence_number);
 
   std::vector<uint8_t> types;
   types.reserve(events.size());
