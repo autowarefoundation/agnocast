@@ -93,3 +93,31 @@ void test_case_add_publisher_too_many(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
   KUNIT_EXPECT_TRUE(test, agnocast_is_in_topic_htable(topic_name, current->nsproxy->ipc_ns));
 }
+
+void test_case_add_publisher_serials_come_from_one_per_topic_sequence(struct kunit * test)
+{
+  // Arrange
+  union ioctl_add_publisher_args first_pub;
+  int ret = agnocast_ioctl_add_publisher(
+    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    qos_is_transient_local, is_bridge, &first_pub);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Act
+  union ioctl_add_subscriber_args sub;
+  ret = agnocast_ioctl_add_subscriber(
+    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    qos_is_transient_local, true, true, false, is_bridge, -1, &sub);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  union ioctl_add_publisher_args second_pub;
+  ret = agnocast_ioctl_add_publisher(
+    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
+    qos_is_transient_local, is_bridge, &second_pub);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Assert
+  // Publishers and subscribers share the sequence, so no two endpoints of one topic collide.
+  KUNIT_EXPECT_EQ(test, first_pub.ret_serial, (int64_t)0);
+  KUNIT_EXPECT_EQ(test, sub.ret_serial, (int64_t)1);
+  KUNIT_EXPECT_EQ(test, second_pub.ret_serial, (int64_t)2);
+}

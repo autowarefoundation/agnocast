@@ -99,6 +99,8 @@ extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 struct publisher_info
 {
   topic_local_id_t id;
+  // Identity rather than index; see topic_struct::current_pubsub_serial.
+  int64_t serial;
   // The endpoint's ROS domain. Equals the owning wrapper's domain; carried per
   // endpoint because grouped wrappers share one htable holding both domains.
   uint32_t domain_id;
@@ -129,6 +131,8 @@ static inline void free_publisher_info(struct publisher_info * pub_info)
 struct subscriber_info
 {
   topic_local_id_t id;
+  // Identity rather than index; see topic_struct::current_pubsub_serial.
+  int64_t serial;
   // The endpoint's ROS domain (see publisher_info::domain_id).
   uint32_t domain_id;
   pid_t pid;
@@ -171,7 +175,13 @@ struct topic_struct
   struct rb_root entries;
   DECLARE_HASHTABLE(pub_info_htable, PUB_INFO_HASH_BITS);
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
+  // Index space: addresses pub_info_htable / sub_info_htable and indexes
+  // entry_node::referencing_subscribers, so it is bounded by MAX_TOPIC_LOCAL_ID.
   topic_local_id_t current_pubsub_id;
+  // Identity space. Unbounded, and kept apart from current_pubsub_id so that userspace can name
+  // something after an endpoint -- a service client's response topic -- without that name being
+  // tied to the bounded index the tables need.
+  int64_t current_pubsub_serial;
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager

@@ -50,7 +50,7 @@ void decrement_borrowed_publisher_num()
   borrowed_publisher_num--;
 }
 
-topic_local_id_t initialize_publisher(
+PublisherRegistration initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
   const bool is_bridge, const std::string & type_name)
 {
@@ -75,7 +75,7 @@ topic_local_id_t initialize_publisher(
     exit(EXIT_FAILURE);
   }
 
-  return pub_args.ret_id;
+  return {pub_args.ret_id, pub_args.ret_serial};
 }
 
 union ioctl_publish_msg_args publish_core(
@@ -161,7 +161,10 @@ void PublisherBase::init_base(
 
   const bool is_bridge = (role == PublisherRole::BridgeInternal);
   const std::string node_name = node->get_fully_qualified_name();
-  id_ = initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  const PublisherRegistration registration =
+    initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  id_ = registration.id;
+  serial_ = registration.serial;
   generate_gid();
 
   if (role == PublisherRole::Default) {
@@ -190,7 +193,7 @@ void PublisherBase::generate_gid()
   constexpr size_t kPidOffset = 2;
   constexpr size_t kHashOffset = 6;
   constexpr size_t kHashSize = 6;
-  constexpr size_t kPubIdOffset = 12;
+  constexpr size_t kSerialOffset = 12;
 
   std::memset(static_cast<void *>(&gid_.data[0]), 0, RMW_GID_STORAGE_SIZE);
 
@@ -206,8 +209,10 @@ void PublisherBase::generate_gid()
   const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
   std::memcpy(static_cast<void *>(&gid_.data[kHashOffset]), &topic_hash, kHashSize);
 
-  // [12-15]: publisher id
-  std::memcpy(static_cast<void *>(&gid_.data[kPubIdOffset]), &id_, sizeof(id_));
+  // [12-15]: publisher serial, low 32 bits. Identity is the serial's job; the id only addresses
+  // the publisher while it is registered.
+  const auto serial = static_cast<uint32_t>(serial_);
+  std::memcpy(static_cast<void *>(&gid_.data[kSerialOffset]), &serial, sizeof(serial));
 
   // [16-23]: reserved
 

@@ -115,10 +115,10 @@ std::string create_service_request_topic_name(const std::string & service_name)
 
 std::string create_service_response_topic_name(
   const std::string & service_name, const std::string & client_node_name,
-  const topic_local_id_t client_publisher_id)
+  const int64_t client_publisher_serial)
 {
   return "/AGNOCAST_SRV_RESPONSE" + service_name + "_SEP_" + client_node_name + "_SEP_" +
-         std::to_string(client_publisher_id);
+         std::to_string(client_publisher_serial);
 }
 
 uint64_t agnocast_get_timestamp()
