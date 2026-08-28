@@ -276,7 +276,7 @@ public:
  *
  * Does not use a callback; the caller retrieves one message per call by calling take(), which
  * returns the newest message only with a history depth of 1. See take() for the behaviour with a
- * greater depth.
+ * greater depth. Allocate instances with `agnocast::create_take_subscription<MessageT>()`.
  *
  * @tparam MessageT  ROS message type.
  */
