@@ -304,6 +304,14 @@ private:
       type_name = rosidl_generator_traits::name<MessageT>();
     }
     init_base(node, qos, type_name, true, options, role);
+
+    if (options.callback_group) {
+      RCLCPP_WARN(
+        logger,
+        "SubscriptionOptions::callback_group is ignored for the take-subscription on topic '%s': "
+        "it has no callback to dispatch.",
+        topic_name_.c_str());
+    }
   }
 
 public:
