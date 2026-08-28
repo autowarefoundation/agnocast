@@ -306,6 +306,7 @@ The following tables compare methods that are **directly defined** in each class
 |-----|:------------:|:--------------:|-------|
 | `create_publisher<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Publisher vs agnocast::Publisher) |
 | `create_subscription<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Subscription vs agnocast::Subscription) |
+| `create_take_subscription<MessageT>()` | ✗ | ✓ | Agnocast-only. rclcpp takes from a callback subscription, while Agnocast fixes the mode at construction |
 | `create_generic_publisher()` | ✓ | ✗ | |
 | `create_generic_subscription()` | ✓ | ✗ | |
 

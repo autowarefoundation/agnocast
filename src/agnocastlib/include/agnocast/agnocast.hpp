@@ -191,6 +191,47 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
     std::forward<Func>(callback), options);
 }
 
+/// @brief Create an Agnocast take-subscription (Stage 1 free function, QoS overload).
+/// @tparam MessageT ROS message type.
+/// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
+/// @param node Pointer to the node.
+/// @param topic_name Topic name.
+/// @param qos Quality of service profile.
+/// @param options Subscription options.
+/// @return Shared pointer to the created take-subscription.
+AGNOCAST_PUBLIC
+template <typename MessageT, typename NodeT>
+typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+{
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
+  return std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options);
+}
+
+/// @brief Create an Agnocast take-subscription (Stage 1 free function, history-depth overload).
+/// @tparam MessageT ROS message type.
+/// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
+/// @param node Pointer to the node.
+/// @param topic_name Topic name.
+/// @param qos_history_depth History depth for the QoS profile.
+/// @param options Subscription options.
+/// @return Shared pointer to the created take-subscription.
+AGNOCAST_PUBLIC
+template <typename MessageT, typename NodeT>
+typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+  NodeT * node, const std::string & topic_name, const size_t qos_history_depth,
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+{
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
+  return std::make_shared<TakeSubscription<MessageT>>(
+    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
+}
+
 /// @brief Create an Agnocast polling subscription (Stage 1 free function, history-depth overload).
 /// @tparam MessageT ROS message type.
 /// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
@@ -202,8 +243,8 @@ AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
 [[deprecated(
   "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
-  "agnocast. Obtain a polling subscriber from the wrapper, or use agnocast::TakeSubscription "
-  "directly.")]]
+  "agnocast. Obtain a polling subscriber from the wrapper, or use "
+  "agnocast::create_take_subscription().")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const size_t qos_history_depth)
 {
@@ -225,8 +266,8 @@ AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
 [[deprecated(
   "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
-  "agnocast. Obtain a polling subscriber from the wrapper, or use agnocast::TakeSubscription "
-  "directly.")]]
+  "agnocast. Obtain a polling subscriber from the wrapper, or use "
+  "agnocast::create_take_subscription().")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
 {

@@ -37,7 +37,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 |---|---|
 | `run_no_rclcpp_talker.bash` | `no_rclcpp_talker.launch.xml` |
 | `run_no_rclcpp_listener.bash` | `no_rclcpp_listener.launch.xml` |
-| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (polling-style subscription) |
+| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (take-style subscription) |
 | `run_no_rclcpp_pubsub.bash` | `no_rclcpp_pubsub.launch.xml` |
 | `run_no_rclcpp_client.bash` | `no_rclcpp_client.launch.xml` |
 | `run_no_rclcpp_server.bash` | `no_rclcpp_server.launch.xml` |

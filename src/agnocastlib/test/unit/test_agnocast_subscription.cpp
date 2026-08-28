@@ -125,10 +125,25 @@ TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_of_a_take_subscription)
   const rclcpp::QoS qos = rclcpp::QoS(rclcpp::KeepLast(4)).best_effort();
 
   // Act
-  agnocast::TakeSubscription<StringMsg> sub(node.get(), "/test_actual_qos_take", qos);
+  auto sub =
+    agnocast::create_take_subscription<StringMsg>(node.get(), "/test_actual_qos_take", qos);
 
   // Assert
-  EXPECT_EQ(sub.get_actual_qos(), qos);
+  EXPECT_EQ(sub->get_actual_qos(), qos);
+}
+
+TEST_F(GetActualQosTest, get_actual_qos_reports_the_depth_of_a_take_subscription_of_agnocast_node)
+{
+  // Arrange
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  auto node = std::make_shared<agnocast::Node>("test_actual_qos_take_agnocast_node", options);
+
+  // Act
+  auto sub = node->create_take_subscription<StringMsg>("/test_actual_qos_take_agnocast_node", 4);
+
+  // Assert
+  EXPECT_EQ(sub->get_actual_qos().depth(), 4u);
 }
 
 TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_of_a_polling_subscriber)
