@@ -494,7 +494,8 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::create_take_subscription().")]]
+    "agnocast::create_take_subscription(): its take() returns each message at most once, so keep "
+    "the last returned message on the caller side to keep the latched behaviour.")]]
   const agnocast::ipc_shared_ptr<const MessageT> takeData()
   {
     return subscriber_->take(true);
@@ -510,7 +511,8 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::create_take_subscription().")]]
+    "agnocast::create_take_subscription(): its take() returns each message at most once, so keep "
+    "the last returned message on the caller side to keep the latched behaviour.")]]
   const agnocast::ipc_shared_ptr<const MessageT> take_data()
   {
     return subscriber_->take(true);
