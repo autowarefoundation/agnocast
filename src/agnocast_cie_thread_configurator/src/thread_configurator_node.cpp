@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cinttypes>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -421,7 +422,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
 
     if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
         config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
@@ -429,7 +430,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
     // Specify nice value
     if (setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure nice value (thread=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
         config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
@@ -440,7 +441,7 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
 
     if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
         config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
@@ -464,13 +465,13 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
 
     if (sched_setattr(thread_id, &attr, 0) == -1) {
       RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%ld): %s",
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
         config.thread_str.c_str(), thread_id, strerror(errno));
       return false;
     }
   } else {
     RCLCPP_ERROR(
-      this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%ld)",
+      this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%" PRId64 ")",
       config.policy.c_str(), config.thread_str.c_str(), thread_id);
     return false;
   }
@@ -486,7 +487,7 @@ bool ThreadConfiguratorNode::issue_affinity_syscalls(
     if (policy == "SCHED_DEADLINE") {
       if (!set_affinity_by_cgroup(thread_id, affinity)) {
         RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
+          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%" PRId64 "): %s",
           thread_str.c_str(), thread_id,
           "Please disable cgroup v2 if used: "
           "`systemd.unified_cgroup_hierarchy=0`");
@@ -500,7 +501,7 @@ bool ThreadConfiguratorNode::issue_affinity_syscalls(
       }
       if (sched_setaffinity(thread_id, sizeof(set), &set) == -1) {
         RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%ld): %s",
+          this->get_logger(), "Failed to configure affinity (thread=%s, tid=%" PRId64 "): %s",
           thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
@@ -570,7 +571,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
           agnocast_cie_thread_configurator::parse_manageable_cpu_list(info->affinity))) {
         RCLCPP_ERROR(
           this->get_logger(),
-          "Failed to configure affinity (thread=%s, tid=%ld): per-CPU kernel thread "
+          "Failed to configure affinity (thread=%s, tid=%" PRId64
+          "): per-CPU kernel thread "
           "(PF_NO_SETAFFINITY); the kernel fixes its affinity. Set 'affinity' to %s for this "
           "entry.",
           config.comm.c_str(), info->tid,
@@ -598,8 +600,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
 
       if (ok) {
         RCLCPP_INFO(
-          this->get_logger(), "Configured kernel thread (comm=%s, tid=%ld)", config.comm.c_str(),
-          info->tid);
+          this->get_logger(), "Configured kernel thread (comm=%s, tid=%" PRId64 ")",
+          config.comm.c_str(), info->tid);
         outcome.applied.push_back(std::move(key));
       } else {
         outcome.failed.push_back(std::move(key));
@@ -782,7 +784,7 @@ void ThreadConfiguratorNode::callback_group_callback(
       RCLCPP_INFO(
         this->get_logger(),
         "Received CallbackGroupInfo: but the yaml file does not "
-        "contain configuration for domain=%zu, id=%s (tid=%ld)",
+        "contain configuration for domain=%zu, id=%s (tid=%" PRId64 ")",
         domain_id, msg->callback_group_id.c_str(), msg->thread_id);
       return;
     }
@@ -800,12 +802,12 @@ void ThreadConfiguratorNode::callback_group_callback(
     RCLCPP_INFO(
       this->get_logger(),
       "Re-applying configuration for already tracked callback group "
-      "(domain=%zu, id=%s, tid=%ld)",
+      "(domain=%zu, id=%s, tid=%" PRId64 ")",
       domain_id, msg->callback_group_id.c_str(), msg->thread_id);
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
+    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%" PRId64 " | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
   // Record the tid before the syscall so a failed attempt can be retried via reapply.
   if (config->is_wildcard()) {
@@ -817,7 +819,8 @@ void ThreadConfiguratorNode::callback_group_callback(
   if (!issue_syscalls(*config, msg->thread_id)) {
     RCLCPP_WARN(
       this->get_logger(),
-      "Skipping configuration for callback group (domain=%zu, id=%s, tid=%ld) due to syscall "
+      "Skipping configuration for callback group (domain=%zu, id=%s, tid=%" PRId64
+      ") due to syscall "
       "failure.",
       domain_id, msg->callback_group_id.c_str(), msg->thread_id);
     return;
@@ -844,7 +847,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     RCLCPP_INFO(
       this->get_logger(),
       "Received NonRosThreadInfo: but the yaml file does not "
-      "contain configuration for name=%s (tid=%ld)",
+      "contain configuration for name=%s (tid=%" PRId64 ")",
       info.name.c_str(), info.tid);
     return;
   }
@@ -855,18 +858,20 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     // restarts, so we cannot use thread_id equality to skip reconfiguration.
     RCLCPP_INFO(
       this->get_logger(),
-      "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%ld)",
+      "Re-applying configuration for already configured non-ROS thread (name=%s, tid=%" PRId64 ")",
       info.name.c_str(), info.tid);
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
+    this->get_logger(), "Received NonRosThreadInfo: tid=%" PRId64 " | %s", info.tid,
+    info.name.c_str());
   config->thread_id = info.tid;
 
   if (!issue_syscalls(*config, info.tid)) {
     RCLCPP_WARN(
       this->get_logger(),
-      "Skipping configuration for non-ROS thread (name=%s, tid=%ld) due to syscall "
+      "Skipping configuration for non-ROS thread (name=%s, tid=%" PRId64
+      ") due to syscall "
       "failure.",
       info.name.c_str(), info.tid);
     return;
