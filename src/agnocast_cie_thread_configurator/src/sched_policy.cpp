@@ -18,16 +18,21 @@ struct PolicyEntry
   SchedPolicy policy;
   std::string_view name;
   int kernel_policy;
+  bool cfs;
 };
 
-// Indexed by the enumerator's underlying value (checked below).
-constexpr std::array<PolicyEntry, 6> k_policies{{
-  {SchedPolicy::Other, "SCHED_OTHER", SCHED_OTHER},
-  {SchedPolicy::Batch, "SCHED_BATCH", SCHED_BATCH},
-  {SchedPolicy::Idle, "SCHED_IDLE", SCHED_IDLE},
-  {SchedPolicy::Fifo, "SCHED_FIFO", SCHED_FIFO},
-  {SchedPolicy::Rr, "SCHED_RR", SCHED_RR},
-  {SchedPolicy::Deadline, "SCHED_DEADLINE", SCHED_DEADLINE},
+constexpr size_t k_num_policies = static_cast<size_t>(SchedPolicy::Deadline) + 1;
+
+// Indexed by the enumerator's underlying value. A missing row leaves a
+// value-initialized trailing entry (policy == Other), which the check below
+// rejects.
+constexpr std::array<PolicyEntry, k_num_policies> k_policies{{
+  {SchedPolicy::Other, "SCHED_OTHER", SCHED_OTHER, true},
+  {SchedPolicy::Batch, "SCHED_BATCH", SCHED_BATCH, true},
+  {SchedPolicy::Idle, "SCHED_IDLE", SCHED_IDLE, true},
+  {SchedPolicy::Fifo, "SCHED_FIFO", SCHED_FIFO, false},
+  {SchedPolicy::Rr, "SCHED_RR", SCHED_RR, false},
+  {SchedPolicy::Deadline, "SCHED_DEADLINE", SCHED_DEADLINE, false},
 }};
 
 constexpr bool indexed_by_enumerator()
@@ -39,16 +44,16 @@ constexpr bool indexed_by_enumerator()
   }
   return true;
 }
-static_assert(indexed_by_enumerator(), "k_policies must be ordered by SchedPolicy value");
+static_assert(indexed_by_enumerator(), "k_policies must have one row per SchedPolicy, in order");
 
-const PolicyEntry & entry(SchedPolicy policy)
+const PolicyEntry & entry(SchedPolicy policy) noexcept
 {
   return k_policies[static_cast<size_t>(policy)];
 }
 
 }  // namespace
 
-std::optional<SchedPolicy> parse_sched_policy(std::string_view name)
+std::optional<SchedPolicy> parse_sched_policy(std::string_view name) noexcept
 {
   const auto * const it = std::find_if(
     k_policies.begin(), k_policies.end(), [name](const PolicyEntry & e) { return e.name == name; });
@@ -58,17 +63,17 @@ std::optional<SchedPolicy> parse_sched_policy(std::string_view name)
   return it->policy;
 }
 
-std::string_view to_string(SchedPolicy policy)
+std::string_view to_string(SchedPolicy policy) noexcept
 {
   return entry(policy).name;
 }
 
-int to_kernel_policy(SchedPolicy policy)
+int to_kernel_policy(SchedPolicy policy) noexcept
 {
   return entry(policy).kernel_policy;
 }
 
-std::optional<SchedPolicy> from_kernel_policy(int kernel_policy)
+std::optional<SchedPolicy> from_kernel_policy(int kernel_policy) noexcept
 {
   const auto * const it = std::find_if(
     k_policies.begin(), k_policies.end(),
@@ -79,10 +84,9 @@ std::optional<SchedPolicy> from_kernel_policy(int kernel_policy)
   return it->policy;
 }
 
-bool is_cfs(SchedPolicy policy)
+bool is_cfs(SchedPolicy policy) noexcept
 {
-  return policy == SchedPolicy::Other || policy == SchedPolicy::Batch ||
-         policy == SchedPolicy::Idle;
+  return entry(policy).cfs;
 }
 
 std::string sched_policy_names()

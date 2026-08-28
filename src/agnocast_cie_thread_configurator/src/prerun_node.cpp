@@ -236,8 +236,8 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & info : kernel_threads) {
-    // A policy with no YAML representation: UNKNOWN(<n>), or SCHED_DEADLINE,
-    // whose runtime/period/deadline cannot be recovered from /proc.
+    // A policy the template cannot round-trip: UNKNOWN(<n>) has no name, and
+    // SCHED_DEADLINE's runtime/period/deadline cannot be recovered from /proc.
     const auto policy = agnocast_cie_thread_configurator::parse_sched_policy(info.policy);
     const bool policy_representable =
       policy.has_value() && *policy != agnocast_cie_thread_configurator::SchedPolicy::Deadline;

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(agnocast_cie_thread_configurator)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror=switch)
 endif()
 
 find_package(ament_cmake REQUIRED)

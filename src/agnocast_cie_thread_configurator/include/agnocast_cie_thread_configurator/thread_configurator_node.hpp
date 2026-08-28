@@ -1,6 +1,7 @@
 #pragma once
 
 #include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
@@ -12,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +22,7 @@ class ThreadConfiguratorNode : public rclcpp::Node
   using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
   using KernelThreadConfig = agnocast_cie_thread_configurator::KernelThreadConfig;
   using IrqConfig = agnocast_cie_thread_configurator::IrqConfig;
+  using SchedPolicy = agnocast_cie_thread_configurator::SchedPolicy;
 
   // Concurrency:
   // - callback_group_configs_ / id_to_callback_group_config_ /
@@ -60,11 +63,12 @@ private:
   // thread_id is passed explicitly because a wildcard entry applies to many
   // threads (one per matched_tids element), not just config.thread_id.
   bool issue_syscalls(const ThreadConfig & config, int64_t thread_id);
-  // policy is compared only against "SCHED_DEADLINE" (cgroup-based affinity);
-  // any other value takes the plain sched_setaffinity path.
+  // Only Deadline takes the cgroup-based affinity path; any other value,
+  // including nullopt (an observed policy with no YAML name), uses
+  // sched_setaffinity.
   bool issue_affinity_syscalls(
-    const std::string & thread_str, const std::string & policy, const std::vector<int> & affinity,
-    int64_t thread_id);
+    const std::string & thread_str, std::optional<SchedPolicy> policy,
+    const std::vector<int> & affinity, int64_t thread_id);
   SectionApplyOutcome apply_kernel_thread_configs();
   SectionApplyOutcome apply_irq_configs() const;
   // Sole logging point for the write path: emits errno-specific guidance on

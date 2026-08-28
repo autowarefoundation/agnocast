@@ -426,37 +426,27 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
     return false;
   }
 
+  // No default: -Werror=switch must reject an unhandled SchedPolicy, since an
+  // unhandled case would fall through to the affinity syscalls.
   switch (*policy) {
     case SchedPolicy::Other:
     case SchedPolicy::Batch:
-    case SchedPolicy::Idle: {
-      struct sched_param param;
-      param.sched_priority = 0;
-
-      if (sched_setscheduler(thread_id, to_kernel_policy(*policy), &param) == -1) {
-        RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
-        return false;
-      }
-
-      // Specify nice value
-      if (setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
-        RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
-        return false;
-      }
-      break;
-    }
+    case SchedPolicy::Idle:
     case SchedPolicy::Fifo:
     case SchedPolicy::Rr: {
       struct sched_param param;
-      param.sched_priority = config.priority;
+      param.sched_priority = is_cfs(*policy) ? 0 : config.priority;
 
       if (sched_setscheduler(thread_id, to_kernel_policy(*policy), &param) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+          config.thread_str.c_str(), thread_id, strerror(errno));
+        return false;
+      }
+
+      if (is_cfs(*policy) && setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
           config.thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
@@ -489,15 +479,15 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
     }
   }
 
-  return issue_affinity_syscalls(config.thread_str, config.policy, config.affinity, thread_id);
+  return issue_affinity_syscalls(config.thread_str, policy, config.affinity, thread_id);
 }
 
 bool ThreadConfiguratorNode::issue_affinity_syscalls(
-  const std::string & thread_str, const std::string & policy, const std::vector<int> & affinity,
-  int64_t thread_id)
+  const std::string & thread_str, std::optional<SchedPolicy> policy,
+  const std::vector<int> & affinity, int64_t thread_id)
 {
   if (affinity.size() > 0) {
-    if (parse_sched_policy(policy) == SchedPolicy::Deadline) {
+    if (policy == SchedPolicy::Deadline) {
       if (!set_affinity_by_cgroup(thread_id, affinity)) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (thread=%s, tid=%" PRId64 "): %s",
@@ -608,7 +598,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       } else {
         // Branch on the observed policy: an affinity-only entry matching a
         // thread currently under SCHED_DEADLINE needs the cgroup path.
-        ok = issue_affinity_syscalls(config.comm, info->policy, config.affinity, info->tid);
+        ok = issue_affinity_syscalls(
+          config.comm, parse_sched_policy(info->policy), config.affinity, info->tid);
       }
 
       if (ok) {

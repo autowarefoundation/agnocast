@@ -4,6 +4,8 @@
 #include <linux/sched.h>
 #include <sched.h>
 
+#include <cstddef>
+#include <iterator>
 #include <optional>
 
 namespace acie = agnocast_cie_thread_configurator;
@@ -14,6 +16,9 @@ constexpr acie::SchedPolicy kAllPolicies[] = {
   acie::SchedPolicy::Other, acie::SchedPolicy::Batch, acie::SchedPolicy::Idle,
   acie::SchedPolicy::Fifo,  acie::SchedPolicy::Rr,    acie::SchedPolicy::Deadline,
 };
+static_assert(
+  std::size(kAllPolicies) == static_cast<size_t>(acie::SchedPolicy::Deadline) + 1,
+  "kAllPolicies must list every SchedPolicy enumerator");
 }  // namespace
 
 TEST(SchedPolicy, NameRoundTrip)
