@@ -279,6 +279,7 @@ private:
       if (it == seqno2_response_call_info_.end()) {
         lock.unlock();
         RCLCPP_ERROR(get_logger(), "Agnocast internal implementation error: bad entry id");
+        // No RESPONSE_RECEIVED either: the event follows the pairing, not the arrival.
         return;
       }
       ResponseCallInfo info = std::move(it->second);
