@@ -35,6 +35,14 @@ using Event = std_srvs::srv::SetBool_Event;
 constexpr const char * kServiceName = "test_introspected_service";
 constexpr const char * kEventTopicName = "/test_introspected_service/_service_event";
 
+const Event * find_event(const std::vector<Event> & events, const uint8_t event_type)
+{
+  const auto it = std::find_if(events.begin(), events.end(), [event_type](const Event & event) {
+    return event.info.event_type == event_type;
+  });
+  return it == events.end() ? nullptr : &*it;
+}
+
 class IntrospectionFixture : public ::testing::Test
 {
 protected:
@@ -354,16 +362,18 @@ TEST_F(ServiceIntrospectionTest, ContentsPublishesRequestSentAndResponseReceived
   ASSERT_TRUE(call_service(true));
   const auto events = wait_for_events(2);
 
-  // Assert
+  // Assert: the two events are published from different threads, so look them up by type.
   ASSERT_EQ(events.size(), 2u);
-  EXPECT_EQ(events[0].info.event_type, ServiceEventInfo::REQUEST_SENT);
-  EXPECT_EQ(events[1].info.event_type, ServiceEventInfo::RESPONSE_RECEIVED);
+  const auto * sent = find_event(events, ServiceEventInfo::REQUEST_SENT);
+  const auto * received = find_event(events, ServiceEventInfo::RESPONSE_RECEIVED);
+  ASSERT_NE(sent, nullptr);
+  ASSERT_NE(received, nullptr);
 
-  ASSERT_EQ(events[0].request.size(), 1u);
-  EXPECT_TRUE(events[0].request[0].data);
-  ASSERT_EQ(events[1].response.size(), 1u);
-  EXPECT_TRUE(events[1].response[0].success);
-  EXPECT_EQ(events[1].response[0].message, "ok");
+  ASSERT_EQ(sent->request.size(), 1u);
+  EXPECT_TRUE(sent->request[0].data);
+  ASSERT_EQ(received->response.size(), 1u);
+  EXPECT_TRUE(received->response[0].success);
+  EXPECT_EQ(received->response[0].message, "ok");
 }
 
 TEST_F(ServiceIntrospectionTest, BothSidesTogetherCoverTheWholeExchange)
