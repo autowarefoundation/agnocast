@@ -208,7 +208,7 @@ typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
   static_assert(
     std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
     "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
-  return std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options);
+  return std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, std::move(options));
 }
 
 /// @brief Create an Agnocast take-subscription (Stage 1 free function, history-depth overload).
@@ -226,7 +226,7 @@ typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
   agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
   return create_take_subscription<MessageT>(
-    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
+    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), std::move(options));
 }
 
 /// @brief Create an Agnocast polling subscription (Stage 1 free function, history-depth overload).

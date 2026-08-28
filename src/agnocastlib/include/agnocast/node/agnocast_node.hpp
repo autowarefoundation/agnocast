@@ -523,7 +523,7 @@ public:
     const std::string & topic_name, const rclcpp::QoS & qos,
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
   {
-    return std::make_shared<TakeSubscription<MessageT>>(this, topic_name, qos, options);
+    return std::make_shared<TakeSubscription<MessageT>>(this, topic_name, qos, std::move(options));
   }
 
   /// Create a take-subscription (queue-size overload).
@@ -539,7 +539,7 @@ public:
     agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
   {
     return create_take_subscription<MessageT>(
-      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), options);
+      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), std::move(options));
   }
 
   /// Create a polling subscription (history-depth overload).
