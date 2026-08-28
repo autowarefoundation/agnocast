@@ -146,6 +146,40 @@ TEST_F(GetActualQosTest, get_actual_qos_reports_the_depth_of_a_take_subscription
   EXPECT_EQ(sub->get_actual_qos().depth(), 4u);
 }
 
+TEST_F(GetActualQosTest, get_actual_qos_reports_the_depth_of_a_take_subscription_free_function)
+{
+  // Arrange
+  rclcpp::NodeOptions node_options;
+  node_options.start_parameter_services(false);
+  auto node = std::make_shared<agnocast::Node>("test_actual_qos_take_free", node_options);
+
+  // Act
+  auto sub =
+    agnocast::create_take_subscription<StringMsg>(node.get(), "/test_actual_qos_take_free", 4);
+
+  // Assert
+  EXPECT_EQ(sub->get_actual_qos(), rclcpp::QoS(rclcpp::KeepLast(4)));
+}
+
+TEST_F(GetActualQosTest, a_take_subscription_forwards_the_options_to_the_qos_override)
+{
+  // Arrange: a node that overrides the subscription depth to 9.
+  rclcpp::NodeOptions node_options;
+  node_options.parameter_overrides(
+    {rclcpp::Parameter("qos_overrides./test_actual_qos_take_override.subscription.depth", 9)});
+  auto node = std::make_shared<rclcpp::Node>("test_actual_qos_take_override", node_options);
+
+  agnocast::SubscriptionOptions options;
+  options.qos_overriding_options = rclcpp::QosOverridingOptions({rclcpp::QosPolicyKind::Depth});
+
+  // Act: construct with depth 1, which the override is expected to replace.
+  auto sub = agnocast::create_take_subscription<StringMsg>(
+    node.get(), "/test_actual_qos_take_override", rclcpp::QoS{1}, options);
+
+  // Assert
+  EXPECT_EQ(sub->get_actual_qos().depth(), 9u);
+}
+
 TEST_F(GetActualQosTest, get_actual_qos_reports_the_qos_of_a_polling_subscriber)
 {
   // Arrange

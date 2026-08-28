@@ -225,10 +225,7 @@ typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
   NodeT * node, const std::string & topic_name, const size_t qos_history_depth,
   agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
 {
-  static_assert(
-    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
-    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
-  return std::make_shared<TakeSubscription<MessageT>>(
+  return create_take_subscription<MessageT>(
     node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), options);
 }
 
