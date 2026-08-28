@@ -4,6 +4,7 @@
 #include <std_msgs/msg/bool.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,7 +16,7 @@ private:
 
   // For Agnocast
   std::mutex mutex_for_agnocast_cbg_;
-  bool is_mutually_exclusive_agnocast_ = true;
+  std::atomic<bool> is_mutually_exclusive_agnocast_{true};
   rclcpp::CallbackGroup::SharedPtr agnocast_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr agnocast_timer_;
   std::atomic<uint64_t> agnocast_timer_fires_{0};
@@ -33,7 +34,7 @@ private:
 
   // For ROS 2
   std::mutex mutex_for_ros2_cbg_;
-  bool is_mutually_exclusive_ros2_ = true;
+  std::atomic<bool> is_mutually_exclusive_ros2_{true};
   rclcpp::CallbackGroup::SharedPtr ros2_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr ros2_timer_;
   std::atomic<uint64_t> ros2_timer_fires_{0};

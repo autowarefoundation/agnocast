@@ -146,8 +146,11 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
       // enough because rmw_fastrtps clears its trigger even when rmw_wait() times out, and
       // wait_for_work() ignores the notify waitable on a Timeout result, so a trigger that
       // coincides with a timeout is lost and the group's entities would never be waited on
-      // again. Trigger afterwards to wake threads blocked in wait_for_work().
-      entities_need_rebuild_.store(true);
+      // again (see issue #3240 in ros2/rclcpp). The store must not be weaker than release: it
+      // publishes the can_be_taken_from restore done in execute_any_executable() to the thread
+      // that consumes the flag in wait_for_work(). Trigger afterwards to wake threads blocked in
+      // wait_for_work().
+      entities_need_rebuild_.store(true, std::memory_order_release);
       interrupt_guard_condition_->trigger();
     }
 #endif

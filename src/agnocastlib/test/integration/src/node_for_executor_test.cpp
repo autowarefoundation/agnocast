@@ -125,7 +125,7 @@ void NodeForExecutorTest::agnocast_sub_cb(
 {
   std::unique_lock<std::mutex> lock(mutex_for_agnocast_cbg_, std::try_to_lock);
   if (!lock.owns_lock()) {
-    is_mutually_exclusive_agnocast_ = false;
+    is_mutually_exclusive_agnocast_.store(false, std::memory_order_relaxed);
   }
 
   agnocast_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
@@ -145,7 +145,7 @@ void NodeForExecutorTest::ros2_sub_cb(
 {
   std::unique_lock<std::mutex> lock(mutex_for_ros2_cbg_, std::try_to_lock);
   if (!lock.owns_lock()) {
-    is_mutually_exclusive_ros2_ = false;
+    is_mutually_exclusive_ros2_.store(false, std::memory_order_relaxed);
   }
 
   ros2_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
@@ -195,10 +195,10 @@ std::string NodeForExecutorTest::describe_progress() const
 
 bool NodeForExecutorTest::is_mutually_exclusive_agnocast() const
 {
-  return is_mutually_exclusive_agnocast_;
+  return is_mutually_exclusive_agnocast_.load(std::memory_order_relaxed);
 }
 
 bool NodeForExecutorTest::is_mutually_exclusive_ros2() const
 {
-  return is_mutually_exclusive_ros2_;
+  return is_mutually_exclusive_ros2_.load(std::memory_order_relaxed);
 }
