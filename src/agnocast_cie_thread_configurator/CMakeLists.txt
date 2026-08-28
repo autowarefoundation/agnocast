@@ -14,6 +14,7 @@ find_package(yaml-cpp REQUIRED)
 # Daemon-internal logic with no rclcpp dependency. Linked into the executables
 # and the unit tests; not installed.
 add_library(agnocast_thread_configurator_core STATIC
+  src/sched_policy.cpp
   src/thread_config.cpp
   src/system_scan.cpp
 )
@@ -94,6 +95,11 @@ if(BUILD_TESTING)
     test/test_non_ros_thread_ipc.cpp
   )
   target_link_libraries(test_non_ros_thread_ipc agnocast_thread_configurator)
+
+  ament_add_gtest(test_sched_policy
+    test/test_sched_policy.cpp
+  )
+  target_link_libraries(test_sched_policy agnocast_thread_configurator_core)
 
   ament_add_gtest(test_thread_config
     test/test_thread_config.cpp

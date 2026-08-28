@@ -1,6 +1,7 @@
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
-#include <linux/sched.h>
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
+
 #include <sched.h>
 #include <unistd.h>
 
@@ -172,17 +173,18 @@ std::vector<int> parse_affinity(
   return cpus;
 }
 
-}  // namespace
-
-const std::unordered_map<std::string, int> policy_to_sched_const = {
-  {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
-  {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
-};
-
-bool is_cfs_policy(const std::string & policy)
+SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string & entry_desc)
 {
-  return policy == "SCHED_OTHER" || policy == "SCHED_BATCH" || policy == "SCHED_IDLE";
+  const auto parsed = parse_sched_policy(policy);
+  if (!parsed) {
+    throw std::runtime_error(
+      "Unknown scheduling policy '" + policy + "' for " + entry_desc +
+      ". Valid policies: " + sched_policy_names());
+  }
+  return *parsed;
 }
+
+}  // namespace
 
 bool ThreadConfig::is_wildcard() const noexcept
 {
@@ -248,19 +250,13 @@ void parse_yaml(
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
     cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = cg["policy"].as<std::string>();
+    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "id=" + cfg.thread_str);
 
-    if (policy_to_sched_const.count(cfg.policy) == 0) {
-      throw std::runtime_error(
-        "Unknown scheduling policy '" + cfg.policy + "' for id=" + cfg.thread_str +
-        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
-        "SCHED_DEADLINE");
-    }
-
-    if (cfg.policy == "SCHED_DEADLINE") {
+    if (policy == SchedPolicy::Deadline) {
       cfg.runtime = cg["runtime"].as<unsigned int>();
       cfg.period = cg["period"].as<unsigned int>();
       cfg.deadline = cg["deadline"].as<unsigned int>();
-    } else if (is_cfs_policy(cfg.policy)) {
+    } else if (is_cfs(policy)) {
       cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
       cfg.priority =
@@ -275,19 +271,13 @@ void parse_yaml(
     cfg.thread_str = nrt["name"].as<std::string>();
     cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = nrt["policy"].as<std::string>();
+    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "name=" + cfg.thread_str);
 
-    if (policy_to_sched_const.count(cfg.policy) == 0) {
-      throw std::runtime_error(
-        "Unknown scheduling policy '" + cfg.policy + "' for name=" + cfg.thread_str +
-        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
-        "SCHED_DEADLINE");
-    }
-
-    if (cfg.policy == "SCHED_DEADLINE") {
+    if (policy == SchedPolicy::Deadline) {
       cfg.runtime = nrt["runtime"].as<unsigned int>();
       cfg.period = nrt["period"].as<unsigned int>();
       cfg.deadline = nrt["deadline"].as<unsigned int>();
-    } else if (is_cfs_policy(cfg.policy)) {
+    } else if (is_cfs(policy)) {
       cfg.nice =
         parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
@@ -385,14 +375,9 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
     } catch (const YAML::Exception &) {
       throw std::runtime_error("'policy' must be a string for comm=" + cfg.comm);
     }
-    if (policy_to_sched_const.count(*cfg.policy) == 0) {
-      throw std::runtime_error(
-        "Unknown scheduling policy '" + *cfg.policy + "' for comm=" + cfg.comm +
-        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
-        "SCHED_DEADLINE");
-    }
+    const SchedPolicy policy = parse_policy_or_throw(*cfg.policy, "comm=" + cfg.comm);
 
-    if (*cfg.policy == "SCHED_DEADLINE") {
+    if (policy == SchedPolicy::Deadline) {
       // Explicit check for a clear message: these fields are always
       // hand-written (prerun never emits DEADLINE) and easy to forget.
       if (
@@ -405,7 +390,7 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       cfg.runtime = parse_deadline_field(kt, "runtime", "comm=" + cfg.comm);
       cfg.period = parse_deadline_field(kt, "period", "comm=" + cfg.comm);
       cfg.deadline = parse_deadline_field(kt, "deadline", "comm=" + cfg.comm);
-    } else if (is_cfs_policy(*cfg.policy)) {
+    } else if (is_cfs(policy)) {
       cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     } else {
       cfg.priority =

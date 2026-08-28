@@ -1,5 +1,6 @@
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
 #include <sched.h>
@@ -104,10 +105,8 @@ std::optional<std::string_view> stat_token(
 
 std::string policy_const_to_string(int policy)
 {
-  for (const auto & [name, value] : policy_to_sched_const) {
-    if (value == policy) {
-      return name;
-    }
+  if (const auto parsed = from_kernel_policy(policy)) {
+    return std::string(to_string(*parsed));
   }
   return "UNKNOWN(" + std::to_string(policy) + ")";
 }
