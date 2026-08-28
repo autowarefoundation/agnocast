@@ -489,9 +489,12 @@ public:
       std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options, role);
   };
 
-  /// @deprecated Use take_data() instead. Behaves identically, including the history-depth
-  /// caveat documented there.
-  [[deprecated("Use take_data() instead.")]]
+  /// @deprecated Behaves identically to take_data(), including the history-depth caveat
+  /// documented there.
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::create_take_subscription().")]]
   const agnocast::ipc_shared_ptr<const MessageT> takeData()
   {
     return subscriber_->take(true);
