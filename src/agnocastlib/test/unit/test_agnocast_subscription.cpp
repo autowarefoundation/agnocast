@@ -143,7 +143,7 @@ TEST_F(GetActualQosTest, get_actual_qos_reports_the_depth_of_a_take_subscription
   auto sub = node->create_take_subscription<StringMsg>("/test_actual_qos_take_agnocast_node", 4);
 
   // Assert
-  EXPECT_EQ(sub->get_actual_qos().depth(), 4u);
+  EXPECT_EQ(sub->get_actual_qos(), rclcpp::QoS(rclcpp::KeepLast(4)));
 }
 
 TEST_F(GetActualQosTest, get_actual_qos_reports_the_depth_of_a_take_subscription_free_function)
