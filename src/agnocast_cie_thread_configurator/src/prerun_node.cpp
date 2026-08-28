@@ -9,6 +9,7 @@
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
 #include <algorithm>
+#include <cinttypes>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -118,7 +119,7 @@ void PrerunNode::topic_callback(
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
+    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%" PRId64 " | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
 }
 
@@ -126,13 +127,14 @@ void PrerunNode::non_ros_thread_callback(agnocast_cie_thread_configurator::NonRo
 {
   if (non_ros_thread_names_.find(info.name) != non_ros_thread_names_.end()) {
     RCLCPP_ERROR(
-      this->get_logger(), "Duplicate thread_name received: tid=%ld | %s", info.tid,
+      this->get_logger(), "Duplicate thread_name received: tid=%" PRId64 " | %s", info.tid,
       info.name.c_str());
     return;
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
+    this->get_logger(), "Received NonRosThreadInfo: tid=%" PRId64 " | %s", info.tid,
+    info.name.c_str());
 
   non_ros_thread_names_.insert(std::move(info.name));
 }
