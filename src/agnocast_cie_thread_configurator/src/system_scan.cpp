@@ -360,14 +360,18 @@ std::optional<std::vector<int>> parse_cpu_list(const std::string & s)
   return result;
 }
 
+int manageable_cpu_bound()
+{
+  return static_cast<int>(std::min<long>(CPU_SETSIZE, sysconf(_SC_NPROCESSORS_CONF))) - 1;
+}
+
 std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & s)
 {
   auto cpus = parse_cpu_list(s);
   if (!cpus) {
     return std::nullopt;
   }
-  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
-  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
+  const int max_cpu = manageable_cpu_bound();
   cpus->erase(
     std::remove_if(cpus->begin(), cpus->end(), [max_cpu](int cpu) { return cpu > max_cpu; }),
     cpus->end());

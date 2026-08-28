@@ -3,7 +3,6 @@
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 
-#include <sched.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -151,8 +150,7 @@ std::vector<int> parse_affinity(
     throw std::runtime_error(
       "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
   }
-  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
-  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
+  const int max_cpu = manageable_cpu_bound();
   for (const auto & cpu_node : affinity) {
     int cpu = 0;
     try {
@@ -165,7 +163,8 @@ std::vector<int> parse_affinity(
     if (cpu < 0 || cpu > max_cpu) {
       throw std::runtime_error(
         "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " + std::to_string(max_cpu) +
-        "] (this machine has " + std::to_string(num_cpus) + " CPUs) for " + entry_desc);
+        "] (this machine has " + std::to_string(sysconf(_SC_NPROCESSORS_CONF)) + " CPUs) for " +
+        entry_desc);
     }
     cpus.push_back(cpu);
   }

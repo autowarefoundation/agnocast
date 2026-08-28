@@ -336,7 +336,7 @@ TEST(ProcessWithCommExists, FindsByExactComm)
   EXPECT_FALSE(acie::process_with_comm_exists("nonexistent", tree.root.string()));
 }
 
-// ---------- is_kworker_comm ----------
+// ---------- is_kworker_comm / manageable_cpu_bound ----------
 
 TEST(IsKworkerComm, MatchesTheKworkerPrefixOnly)
 {
@@ -345,6 +345,12 @@ TEST(IsKworkerComm, MatchesTheKworkerPrefixOnly)
   EXPECT_FALSE(acie::is_kworker_comm("kworker"));
   EXPECT_FALSE(acie::is_kworker_comm("ksoftirqd/0"));
   EXPECT_FALSE(acie::is_kworker_comm(""));
+}
+
+TEST(ManageableCpuBound, IsOneBelowTheSmallerOfCpuSetSizeAndProcessorCount)
+{
+  const long bound = std::min<long>(CPU_SETSIZE, sysconf(_SC_NPROCESSORS_CONF));
+  EXPECT_EQ(acie::manageable_cpu_bound(), static_cast<int>(bound) - 1);
 }
 
 // ---------- format_cpu_list / parse_cpu_list ----------
