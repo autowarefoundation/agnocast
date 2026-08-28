@@ -2,6 +2,9 @@
 
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
+#include <sched.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -351,6 +354,23 @@ std::optional<std::vector<int>> parse_cpu_list(const std::string & s)
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
   return result;
+}
+
+std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & s)
+{
+  auto cpus = parse_cpu_list(s);
+  if (!cpus) {
+    return std::nullopt;
+  }
+  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
+  cpus->erase(
+    std::remove_if(cpus->begin(), cpus->end(), [max_cpu](int cpu) { return cpu > max_cpu; }),
+    cpus->end());
+  if (cpus->empty()) {
+    return std::nullopt;
+  }
+  return cpus;
 }
 
 }  // namespace agnocast_cie_thread_configurator

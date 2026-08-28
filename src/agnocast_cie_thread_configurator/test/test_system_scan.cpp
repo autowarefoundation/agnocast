@@ -1,8 +1,10 @@
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 
 #include <gtest/gtest.h>
+#include <sched.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -387,4 +389,20 @@ TEST(ParseCpuList, RoundTripsWithFormat)
   const auto parsed = acie::parse_cpu_list(acie::format_cpu_list(cpus));
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(*parsed, cpus);
+}
+
+TEST(ParseManageableCpuList, DropsCpusAboveTheManageableBound)
+{
+  // "0-8191" spans every CPU number parse_cpu_list accepts, so the result
+  // must be exactly the manageable range of the machine running the test.
+  const long bound = std::min<long>(CPU_SETSIZE, sysconf(_SC_NPROCESSORS_CONF));
+  const auto trimmed = acie::parse_manageable_cpu_list("0-8191");
+  ASSERT_TRUE(trimmed.has_value());
+  EXPECT_EQ(static_cast<long>(trimmed->size()), bound);
+  EXPECT_EQ(trimmed->front(), 0);
+  EXPECT_EQ(trimmed->back(), static_cast<int>(bound) - 1);
+
+  // Nothing manageable left, and malformed input propagates as nullopt.
+  EXPECT_EQ(acie::parse_manageable_cpu_list("8191"), std::nullopt);
+  EXPECT_EQ(acie::parse_manageable_cpu_list(""), std::nullopt);
 }

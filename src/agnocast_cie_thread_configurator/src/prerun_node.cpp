@@ -8,9 +8,6 @@
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
-#include <sched.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -36,26 +33,6 @@ std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> dedup_by_comm(
       [](const auto & a, const auto & b) { return a.comm == b.comm; }),
     scanned.end());
   return scanned;
-}
-
-// The kernel prints affinity over the possible-CPU mask, which can include
-// CPUs the apply-side parser rejects (it bounds them by the present CPUs);
-// keep only acceptable CPUs so the untouched template stays loadable.
-std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & raw)
-{
-  auto cpus = agnocast_cie_thread_configurator::parse_cpu_list(raw);
-  if (!cpus) {
-    return std::nullopt;
-  }
-  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
-  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
-  cpus->erase(
-    std::remove_if(cpus->begin(), cpus->end(), [max_cpu](int cpu) { return cpu > max_cpu; }),
-    cpus->end());
-  if (cpus->empty()) {
-    return std::nullopt;
-  }
-  return cpus;
 }
 
 }  // namespace
@@ -261,7 +238,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     const bool policy_representable =
       agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
       info.policy != "SCHED_DEADLINE";
-    const auto cpus = parse_manageable_cpu_list(info.affinity);
+    const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "comm" << YAML::Value << info.comm;
@@ -293,7 +270,7 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & info : irqs) {
-    const auto cpus = parse_manageable_cpu_list(info.affinity);
+    const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "irq" << YAML::Value << info.irq;
