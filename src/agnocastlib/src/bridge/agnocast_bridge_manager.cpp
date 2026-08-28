@@ -41,6 +41,12 @@ BridgeManager::~BridgeManager()
 {
   request_shutdown();
 
+  // Release the UDS address first. The kmod clears this process's bridge-manager flag as soon as
+  // shutdown is decided, so a process starting from here on forks a replacement manager, whose
+  // bind() fails while the address is still held. Leaving it to event_loop_'s destructor would
+  // release it only after the joins and the DDS teardown below, which can take seconds.
+  event_loop_.close_listener();
+
   // Join before any member is destroyed: the worker uses container_node_,
   // executor_ and the pending_msgs_ mutex/CV, which live only until this returns.
   if (worker_thread_.joinable()) {
