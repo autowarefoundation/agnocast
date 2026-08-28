@@ -1,6 +1,7 @@
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/system_scan.hpp"
 
 #include <sched.h>
 #include <unistd.h>
@@ -201,12 +202,6 @@ std::string ThreadConfig::wildcard_prefix() const
 std::string extract_node_part(const std::string & callback_group_id)
 {
   return callback_group_id.substr(0, callback_group_id.find('@'));
-}
-
-bool is_kworker_comm(const std::string & comm)
-{
-  constexpr std::string_view kworker_prefix = "kworker/";
-  return comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0;
 }
 
 void parse_yaml(

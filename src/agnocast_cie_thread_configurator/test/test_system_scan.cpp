@@ -336,6 +336,17 @@ TEST(ProcessWithCommExists, FindsByExactComm)
   EXPECT_FALSE(acie::process_with_comm_exists("nonexistent", tree.root.string()));
 }
 
+// ---------- is_kworker_comm ----------
+
+TEST(IsKworkerComm, MatchesTheKworkerPrefixOnly)
+{
+  EXPECT_TRUE(acie::is_kworker_comm("kworker/0:0H-events_highpri"));
+  EXPECT_TRUE(acie::is_kworker_comm("kworker/u16:3"));
+  EXPECT_FALSE(acie::is_kworker_comm("kworker"));
+  EXPECT_FALSE(acie::is_kworker_comm("ksoftirqd/0"));
+  EXPECT_FALSE(acie::is_kworker_comm(""));
+}
+
 // ---------- format_cpu_list / parse_cpu_list ----------
 
 TEST(FormatCpuList, JoinsWithCommas)

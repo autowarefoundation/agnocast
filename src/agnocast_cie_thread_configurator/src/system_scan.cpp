@@ -1,7 +1,6 @@
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
-#include "agnocast_cie_thread_configurator/thread_config.hpp"
 
 #include <sched.h>
 #include <unistd.h>
@@ -201,6 +200,12 @@ std::optional<KernelThreadInfo> read_kernel_thread(
 }
 
 }  // namespace
+
+bool is_kworker_comm(const std::string & comm)
+{
+  constexpr std::string_view kworker_prefix = "kworker/";
+  return comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0;
+}
 
 std::vector<KernelThreadInfo> scan_kernel_threads(const std::string & proc_root)
 {

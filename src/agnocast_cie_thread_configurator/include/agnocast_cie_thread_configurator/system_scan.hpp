@@ -30,6 +30,11 @@ struct IrqInfo
   std::string affinity;  // /proc/irq/<N>/smp_affinity_list, "" when unreadable
 };
 
+// kworker comms embed worker-pool/CPU state that mutates at runtime, so they
+// can never be matched reliably; both the scanner and the kernel_threads
+// parser exclude them.
+bool is_kworker_comm(const std::string & comm);
+
 // Sorted by (comm, tid); entries that vanish mid-scan are skipped silently.
 // kworker/* are excluded: their comms mutate at runtime, so they cannot be
 // managed per-thread.
