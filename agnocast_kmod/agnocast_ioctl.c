@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
+#include <linux/anon_inodes.h>
+#include <linux/file.h>
+
 #ifndef KUNIT_BUILD
 // Kernel module uses global PIDs, whereas user-space and the interface between them use local PIDs.
 // Thus, PIDs must be converted from global to local before they are passed from kernel to user.
@@ -898,6 +901,85 @@ int agnocast_ioctl_add_process(
 unlock:
   up_write(&global_htables_rwsem);
   return ret;
+}
+
+// The lease table is keyed by (role, domain_id) only; ipc_eq() separates namespaces on lookup, as
+// it does for every other table here. Requires global_htables_rwsem held.
+static uint32_t spawn_lease_hash(const enum process_role role, const uint32_t domain_id)
+{
+  return hash_min(((uint64_t)role << 32) | domain_id, SPAWN_LEASE_HASH_BITS);
+}
+
+static struct spawn_lease * find_spawn_lease(
+  const struct ipc_namespace * ipc_ns, const enum process_role role, const uint32_t domain_id)
+{
+  struct spawn_lease * lease;
+  hash_for_each_possible(spawn_lease_htable, lease, node, spawn_lease_hash(role, domain_id))
+  {
+    if (ipc_eq(ipc_ns, lease->ipc_ns) && lease->role == role && lease->domain_id == domain_id) {
+      return lease;
+    }
+  }
+  return NULL;
+}
+
+// Deciding under the same write lock add_process takes is what makes this exclusive: either a
+// daemon is counted first and no lease is granted, or the lease is granted first and the daemon
+// that registers under it is the only one.
+int agnocast_ioctl_acquire_spawn_lease(
+  const struct ipc_namespace * ipc_ns, const enum process_role role, const uint32_t domain_id,
+  struct spawn_lease ** out_lease)
+{
+  int ret = 0;
+  *out_lease = NULL;
+
+  if (role != PROCESS_ROLE_BRIDGE_MANAGER && role != PROCESS_ROLE_UNLINK_DAEMON) {
+    dev_warn(agnocast_device, "Role (%u) is not leased. (%s)\n", (uint32_t)role, __func__);
+    return -EINVAL;
+  }
+  if (role == PROCESS_ROLE_BRIDGE_MANAGER && domain_id == AGNOCAST_DOMAIN_ID_NONE) {
+    dev_warn(
+      agnocast_device, "Cannot lease the reserved domain_id (%u). (%s)\n", domain_id, __func__);
+    return -EINVAL;
+  }
+
+  const uint32_t key_domain_id =
+    (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
+
+  down_write(&global_htables_rwsem);
+
+  const bool daemon_exists = (role == PROCESS_ROLE_UNLINK_DAEMON)
+                               ? has_alive_unlink_daemon(ipc_ns)
+                               : has_alive_bridge_manager(ipc_ns, domain_id);
+  if (daemon_exists || find_spawn_lease(ipc_ns, role, key_domain_id)) {
+    goto unlock_lease;
+  }
+
+  struct spawn_lease * lease = kmalloc(sizeof(struct spawn_lease), GFP_KERNEL);
+  if (!lease) {
+    ret = -ENOMEM;
+    goto unlock_lease;
+  }
+  lease->role = role;
+  lease->ipc_ns = ipc_ns;
+  lease->domain_id = key_domain_id;
+  INIT_HLIST_NODE(&lease->node);
+  hash_add(spawn_lease_htable, &lease->node, spawn_lease_hash(role, key_domain_id));
+  *out_lease = lease;
+
+unlock_lease:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+void agnocast_ioctl_release_spawn_lease(struct spawn_lease * lease)
+{
+  if (!lease) return;
+
+  down_write(&global_htables_rwsem);
+  hash_del(&lease->node);
+  up_write(&global_htables_rwsem);
+  kfree(lease);
 }
 
 int agnocast_ioctl_add_subscriber(
@@ -3636,6 +3718,64 @@ static long add_discovery_agent_cmd(struct ioctl_add_discovery_agent_args __user
   return ret;
 }
 
+static int spawn_lease_release(struct inode * inode, struct file * file)
+{
+  agnocast_ioctl_release_spawn_lease(file->private_data);
+  return 0;
+}
+
+// .owner pins the module while any lease fd is open, so a lease can never outlive the table it is
+// linked into.
+static const struct file_operations spawn_lease_fops = {
+  .owner = THIS_MODULE,
+  .release = spawn_lease_release,
+};
+
+static long acquire_spawn_lease_cmd(struct ioctl_acquire_spawn_lease_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_acquire_spawn_lease_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  struct spawn_lease * lease = NULL;
+  int ret = agnocast_ioctl_acquire_spawn_lease(
+    ipc_ns, (enum process_role)args.role, args.domain_id, &lease);
+  if (ret) return ret;
+
+  args.ret_acquired = (lease != NULL);
+  args.ret_lease_fd = -1;
+  if (!lease) {
+    if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+    return 0;
+  }
+
+  // Nothing may fail once fd_install() has published the fd, so the fd and the file are prepared
+  // separately and installed only after the caller has been told about them.
+  int fd = get_unused_fd_flags(0);  // No O_CLOEXEC: a leased daemon must be free to exec.
+  if (fd < 0) {
+    agnocast_ioctl_release_spawn_lease(lease);
+    return fd;
+  }
+  struct file * file =
+    anon_inode_getfile("[agnocast-spawn-lease]", &spawn_lease_fops, lease, O_RDWR);
+  if (IS_ERR(file)) {
+    put_unused_fd(fd);
+    agnocast_ioctl_release_spawn_lease(lease);
+    return PTR_ERR(file);
+  }
+
+  args.ret_lease_fd = fd;
+  if (copy_to_user(arg, &args, sizeof(args))) {
+    put_unused_fd(fd);
+    fput(file);  // Drops the only reference, so spawn_lease_release() frees the lease.
+    return -EFAULT;
+  }
+
+  fd_install(fd, file);
+  return 0;
+}
+
 static long discovery_agent_exists_cmd(struct ioctl_discovery_agent_exists_args __user * arg)
 {
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
@@ -3717,6 +3857,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:
       return add_domain_bridge_prefix_cmd((struct ioctl_add_domain_bridge_prefix_args __user *)arg);
+    case AGNOCAST_ACQUIRE_SPAWN_LEASE_CMD:
+      return acquire_spawn_lease_cmd((struct ioctl_acquire_spawn_lease_args __user *)arg);
     default:
       return -EINVAL;
   }
@@ -3806,6 +3948,20 @@ int agnocast_get_discovery_agent_num(void)
   // Serialize against the exit path's hash_del_rcu()+kfree_rcu(), which runs under the write lock.
   down_read(&global_htables_rwsem);
   hash_for_each(discovery_agent_htable, bkt, agent, node)
+  {
+    count++;
+  }
+  up_read(&global_htables_rwsem);
+  return count;
+}
+
+int agnocast_get_spawn_lease_num(void)
+{
+  int count = 0;
+  struct spawn_lease * lease;
+  int bkt;
+  down_read(&global_htables_rwsem);
+  hash_for_each(spawn_lease_htable, bkt, lease, node)
   {
     count++;
   }

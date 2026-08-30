@@ -40,6 +40,20 @@ static void remove_all_discovery_agents(void)
   }
 }
 
+// Unreachable while a lease fd is open, since spawn_lease_fops pins the module. Needed for the
+// KUnit build, which acquires leases without ever wrapping them in a file.
+static void remove_all_spawn_leases(void)
+{
+  struct spawn_lease * lease;
+  int bkt;
+  struct hlist_node * tmp;
+  hash_for_each_safe(spawn_lease_htable, bkt, tmp, lease, node)
+  {
+    hash_del(&lease->node);
+    kfree(lease);
+  }
+}
+
 static void remove_all_bridge_info(void)
 {
   struct bridge_info * br_info;
@@ -74,6 +88,7 @@ void agnocast_exit_free_data(void)
   remove_all_topics();
   remove_all_process_info();
   remove_all_discovery_agents();
+  remove_all_spawn_leases();
   remove_all_bridge_info();
   remove_all_domain_rules();
   up_write(&global_htables_rwsem);

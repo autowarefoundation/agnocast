@@ -47,6 +47,8 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PROC_INFO_HASH_BITS 10
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
+// A lease exists only while a daemon is being forked, so the table is tinier still.
+#define SPAWN_LEASE_HASH_BITS 4
 
 // Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
 #define NOTIFY_CTXS_MIN_CAPACITY 8
@@ -266,6 +268,21 @@ struct discovery_agent_info
 };
 
 extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+
+// The exclusive right to fork one namespace-singleton daemon, owned by an open file rather than by
+// a pid: see struct ioctl_acquire_spawn_lease_args. No rcu_head, because unlike the entries above
+// this is never read from the atomic sched_process_exit path.
+struct spawn_lease
+{
+  enum process_role role;
+  const struct ipc_namespace * ipc_ns;
+  // AGNOCAST_DOMAIN_ID_NONE for the unlink daemon, so every caller resolves to the same key
+  // whatever ROS_DOMAIN_ID it happens to run under.
+  uint32_t domain_id;
+  struct hlist_node node;
+};
+
+extern DECLARE_HASHTABLE(spawn_lease_htable, SPAWN_LEASE_HASH_BITS);
 
 // Both require global_htables_rwsem held (read for find, write for remove).
 struct discovery_agent_info * agnocast_find_discovery_agent(

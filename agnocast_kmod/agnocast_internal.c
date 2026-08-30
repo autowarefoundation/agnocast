@@ -9,6 +9,7 @@ DECLARE_RWSEM(global_htables_rwsem);
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+DEFINE_HASHTABLE(spawn_lease_htable, SPAWN_LEASE_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);

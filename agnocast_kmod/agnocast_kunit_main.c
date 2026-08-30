@@ -31,6 +31,7 @@
 #include "agnocast_kunit/agnocast_kunit_remove_subscriber.h"
 #include "agnocast_kunit/agnocast_kunit_set_ros2_publisher_num.h"
 #include "agnocast_kunit/agnocast_kunit_set_ros2_subscriber_num.h"
+#include "agnocast_kunit/agnocast_kunit_spawn_lease.h"
 #include "agnocast_kunit/agnocast_kunit_take_msg.h"
 #include "agnocast_memory_allocator.h"
 
@@ -49,6 +50,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_TAKE_MSG,
   TEST_CASES_ADD_PROCESS,
   TEST_CASES_DISCOVERY_AGENT,
+  TEST_CASES_SPAWN_LEASE,
   TEST_CASES_BRIDGE_SHUTDOWN,
   TEST_CASES_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN,
   TEST_CASES_GET_SUBSCRIBER_NUM,

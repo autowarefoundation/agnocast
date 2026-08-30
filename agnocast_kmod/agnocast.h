@@ -71,6 +71,24 @@ union ioctl_add_process_args {
   };
 };
 
+// The exclusive right to fork one of the namespace-singleton daemons.
+//
+// Held as an fd rather than as a record keyed by pid: the holder forks, the parent closes its
+// copy, and the lease then lives exactly as long as the child that is meant to become the daemon.
+// A child that dies before it registers -- or a fork() that never happens -- drops the last
+// reference, so the kernel releases the lease with no timeout to tune and no pid to track.
+//
+// The discovery agent is deliberately not leased. It already claims its slot from the forked child
+// before exec (AGNOCAST_ADD_DISCOVERY_AGENT_CMD), and a second, weaker claim over the same
+// singleton would only give it two sources of truth.
+struct ioctl_acquire_spawn_lease_args
+{
+  uint32_t role;       // enum process_role; only BRIDGE_MANAGER and UNLINK_DAEMON are leased
+  uint32_t domain_id;  // Ignored for the unlink daemon, which is namespace-scoped.
+  bool ret_acquired;
+  int32_t ret_lease_fd;  // -1 unless ret_acquired.
+};
+
 union ioctl_add_subscriber_args {
   struct
   {
@@ -359,6 +377,7 @@ struct ioctl_add_domain_bridge_prefix_args
 #define AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD \
   _IOW(0xA6, 32, struct ioctl_add_domain_bridge_prefix_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+#define AGNOCAST_ACQUIRE_SPAWN_LEASE_CMD _IOWR(0xA6, 34, struct ioctl_acquire_spawn_lease_args)
 
 // ================================================
 // ros2cli ioctls
@@ -467,6 +486,18 @@ int agnocast_ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret);
 
+// Defined in agnocast_internal.h; the lease is opaque to everything but the fd that owns it.
+struct spawn_lease;
+
+// Grants the lease for (ipc_ns, role, domain_id) to the caller, or leaves *out_lease NULL when a
+// daemon is already registered or another process still holds it. The caller must hand the lease
+// to a file, whose release is what frees it.
+int agnocast_ioctl_acquire_spawn_lease(
+  const struct ipc_namespace * ipc_ns, const enum process_role role, const uint32_t domain_id,
+  struct spawn_lease ** out_lease);
+
+void agnocast_ioctl_release_spawn_lease(struct spawn_lease * lease);
+
 int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   union ioctl_get_subscriber_num_args * ioctl_ret);
@@ -574,6 +605,7 @@ int agnocast_increment_message_entry_rc(
   const int64_t entry_id);
 int agnocast_get_alive_proc_num(void);
 int agnocast_get_discovery_agent_num(void);
+int agnocast_get_spawn_lease_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
 int64_t agnocast_get_latest_received_entry_id(

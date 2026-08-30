@@ -199,7 +199,36 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
   };
 }
 
-void poll_for_unlink()
+// The spawn lease is the exclusive right to fork one of the namespace-singleton daemons. The
+// kernel module grants it to a single process per (namespace, role, domain), which is what keeps a
+// launch of N processes to one daemon fork rather than N. Returns the lease fd, or -1 when a
+// daemon already runs or another process is already forking one.
+//
+// The lease is an fd rather than a record keyed by pid so that nothing has to notice a failure:
+// the forked child inherits it, and a child that dies before it registers drops the last reference
+// and releases the lease, with no timeout to wait out.
+int acquire_spawn_lease(const enum process_role role, const uint32_t domain_id)
+{
+  struct ioctl_acquire_spawn_lease_args args = {};
+  args.role = role;
+  args.domain_id = domain_id;
+  if (ioctl(agnocast_fd, AGNOCAST_ACQUIRE_SPAWN_LEASE_CMD, &args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_ACQUIRE_SPAWN_LEASE_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+  return args.ret_acquired ? args.ret_lease_fd : -1;
+}
+
+// Takes -1 so the daemons that are spawned without a lease need no special case.
+void release_spawn_lease(const int lease_fd)
+{
+  if (lease_fd >= 0) {
+    close(lease_fd);
+  }
+}
+
+void poll_for_unlink(const int lease_fd)
 {
   // Register so the kernel module can tell a live daemon from a dead one. No domain_id: the
   // kernel module records this daemon as belonging to none.
@@ -211,7 +240,14 @@ void poll_for_unlink()
     exit(EXIT_FAILURE);
   }
 
-  // Another daemon won the race and registered first; this one has nothing to do.
+  // The lease only had to cover the window between the fork and this registration; from here on
+  // the registration itself is what tells a starting process that a daemon exists. Holding the
+  // lease any longer would block a replacement during the window between this daemon
+  // deregistering in agnocast_commit_exit_process() and actually dying.
+  release_spawn_lease(lease_fd);
+
+  // The lease makes this unreachable in practice, but the kernel module's decision is the
+  // authoritative one and costs nothing to honour.
   if (add_process_args.ret_unlink_daemon_exist) {
     close(agnocast_fd);
     exit(EXIT_SUCCESS);
@@ -242,10 +278,12 @@ void poll_for_unlink()
   exit(0);
 }
 
-void poll_for_bridge_manager()
+void poll_for_bridge_manager(const int lease_fd)
 {
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
+    // Registered, so the lease has done its job; see poll_for_unlink().
+    release_spawn_lease(lease_fd);
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     BridgeManager manager;
     manager.run();
@@ -451,8 +489,11 @@ bool discovery_agent_auto_fork_disabled()
          (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "yes") == 0);
 }
 
+// lease_fd is the spawn lease acquired by the caller, or -1 for a daemon that is not leased. The
+// child inherits it and hands it back once it has registered; the parent must drop its own copy as
+// soon as the fork returns, or the lease would outlive the child it is meant to track.
 template <typename Func>
-pid_t spawn_daemon_process(Func && func)
+pid_t spawn_daemon_process(const int lease_fd, Func && func)
 {
   auto fail = [](const char * err_fmt) {
     RCLCPP_ERROR(logger, err_fmt, strerror(errno));
@@ -514,10 +555,11 @@ pid_t spawn_daemon_process(Func && func)
       fail("setsid failed: %s");
     }
 
-    func();
+    func(lease_fd);
     exit(0);
   }
 
+  release_spawn_lease(lease_fd);
   return pid;
 }
 
@@ -569,21 +611,23 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
-  bool should_spawn_bridge = false;
   auto bridge_mode = get_bridge_mode();
 
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
-  // ret_unlink_daemon_exist is only an early-out hint: poll_for_unlink() makes the singleton
-  // decision when it registers.
+  // ret_unlink_daemon_exist is only an early-out hint that saves an ioctl; the spawn lease is what
+  // decides, so that N processes starting at once cost one fork in total rather than one each.
   if (!add_process_args.ret_unlink_daemon_exist) {
-    spawn_daemon_process([]() { poll_for_unlink(); });
-  }
-  if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
-    should_spawn_bridge = true;
+    const int lease_fd = acquire_spawn_lease(PROCESS_ROLE_UNLINK_DAEMON, AGNOCAST_DOMAIN_ID_NONE);
+    if (lease_fd >= 0) {
+      spawn_daemon_process(lease_fd, [](const int fd) { poll_for_unlink(fd); });
+    }
   }
 
-  if (should_spawn_bridge) {
-    spawn_daemon_process([]() { poll_for_bridge_manager(); });
+  if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
+    const int lease_fd = acquire_spawn_lease(PROCESS_ROLE_BRIDGE_MANAGER, domain_id);
+    if (lease_fd >= 0) {
+      spawn_daemon_process(lease_fd, [](const int fd) { poll_for_bridge_manager(fd); });
+    }
   }
 
   // The forked agent inherits this process's IPC namespace and ROS_DOMAIN_ID, and self-exits when
@@ -599,7 +643,9 @@ struct initialize_agnocast_result initialize_agnocast(
         "auto-started. Source the workspace that installs ros2agnocast_discovery_agent to enable "
         "Agnocast observability.");
     } else {
-      spawn_daemon_process([domain_id, agent_path]() {
+      // Not leased: the agent already claims its own slot from this child before exec, so a
+      // second claim over the same singleton would only give it two sources of truth.
+      spawn_daemon_process(-1, [domain_id, agent_path](const int /*lease_fd*/) {
         // Claiming here rather than in the agent keeps the launch O(1): N processes starting at
         // once cost one fork each, not N Python interpreters.
         switch (claim_discovery_agent(domain_id)) {

@@ -265,6 +265,16 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module;requires_heaphook"
   )
 
+  # Spawn lease integration test. Needs the kernel module but not the heaphook: it only opens
+  # /dev/agnocast and drives the lease ioctl, and never registers as an Agnocast process.
+  ament_add_gmock(test_integration_agnocast_spawn_lease_${PROJECT_NAME}
+    test/integration/test_agnocast_spawn_lease.cpp)
+  target_include_directories(test_integration_agnocast_spawn_lease_${PROJECT_NAME} PRIVATE include)
+  set_tests_properties(test_integration_agnocast_spawn_lease_${PROJECT_NAME} PROPERTIES
+    TIMEOUT 60
+    LABELS "requires_kernel_module"
+  )
+
   # agnocast::Node construction integration test (requires kernel module, no mock)
   ament_add_gmock(test_integration_agnocast_node_${PROJECT_NAME}
     test/integration/test_agnocast_node.cpp)

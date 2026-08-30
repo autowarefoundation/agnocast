@@ -90,6 +90,20 @@ union ioctl_add_process_args {
 };
 #pragma GCC diagnostic pop
 
+// Mirrors struct ioctl_acquire_spawn_lease_args in the kernel module.
+//
+// The exclusive right to fork one of the namespace-singleton daemons, handed back as an fd. The
+// holder forks and closes its own copy, leaving the lease to live exactly as long as the child
+// that is meant to become the daemon; a child that dies before it registers releases it with no
+// timeout to wait out.
+struct ioctl_acquire_spawn_lease_args
+{
+  uint32_t role;       // enum process_role; only BRIDGE_MANAGER and UNLINK_DAEMON are leased
+  uint32_t domain_id;  // Ignored for the unlink daemon, which is namespace-scoped.
+  bool ret_acquired;
+  int32_t ret_lease_fd;  // -1 unless ret_acquired.
+};
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_subscriber_args {
@@ -391,5 +405,6 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+#define AGNOCAST_ACQUIRE_SPAWN_LEASE_CMD _IOWR(0xA6, 34, struct ioctl_acquire_spawn_lease_args)
 
 }  // namespace agnocast
