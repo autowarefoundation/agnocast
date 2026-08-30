@@ -17,6 +17,7 @@ static const bool IS_TAKE_SUB = false;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const bool IS_BRIDGE = false;
 
+
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args ioctl_ret;
@@ -166,4 +167,30 @@ void test_case_remove_publisher_leaves_orphaned_messages(struct kunit * test)
     test, agnocast_get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, sub_id), 1);
   KUNIT_EXPECT_EQ(
     test, agnocast_get_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id, pub_id), 0);
+}
+
+void test_case_remove_and_add_publisher(struct kunit * test)
+{
+  // Arrange
+  const pid_t pid = PID_BASE;
+  setup_one_process(test, pid);
+  const topic_local_id_t pub_id_1st = setup_one_publisher(test, pid);
+
+  // Check initial state
+  KUNIT_ASSERT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
+  union ioctl_get_publisher_num_args get_pub_args;
+  int ret = agnocast_ioctl_get_publisher_num(TOPIC_NAME, current->nsproxy->ipc_ns, &get_pub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, get_pub_args.ret_publisher_num, 1);
+
+  // Act
+  ret = agnocast_ioctl_remove_publisher(TOPIC_NAME, current->nsproxy->ipc_ns, pub_id_1st);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 0);
+  KUNIT_EXPECT_FALSE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
+  const topic_local_id_t pub_id_2nd = setup_one_publisher(test, pid);
+
+  // Assert
+  // Note: This test verifies the specific algorithm for assigning the smallest usable ID.
+  KUNIT_EXPECT_EQ(test, pub_id_1st, pub_id_2nd);
 }

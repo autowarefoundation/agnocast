@@ -13,6 +13,7 @@
 #include <rmw/serialized_message.h>
 #include <sys/types.h>
 
+#include <atomic>
 #include <new>
 
 namespace agnocast
@@ -187,10 +188,16 @@ template void PublisherBase::init_base<agnocast::Node>(
 
 void PublisherBase::generate_gid()
 {
+  // Numbers every publisher this process creates, for the whole life of the process. The kmod's
+  // topic_local_id cannot serve as the identity: it is scoped to one topic and is handed back for
+  // reuse once its publisher is gone, so two publishers of the same topic can carry the same
+  // value. Wraps after 2^32 publishers, which no process reaches in practice.
+  static std::atomic<uint32_t> instance_counter{0};
+
   constexpr size_t kPidOffset = 2;
   constexpr size_t kHashOffset = 6;
   constexpr size_t kHashSize = 6;
-  constexpr size_t kPubIdOffset = 12;
+  constexpr size_t kInstanceOffset = 12;
 
   std::memset(static_cast<void *>(&gid_.data[0]), 0, RMW_GID_STORAGE_SIZE);
 
@@ -206,10 +213,12 @@ void PublisherBase::generate_gid()
   const uint64_t topic_hash = static_cast<uint64_t>(std::hash<std::string>{}(topic_name_));
   std::memcpy(static_cast<void *>(&gid_.data[kHashOffset]), &topic_hash, kHashSize);
 
-  // [12-15]: publisher id
-  std::memcpy(static_cast<void *>(&gid_.data[kPubIdOffset]), &id_, sizeof(id_));
+  // [12-15]: publisher instance number within this process
+  const uint32_t instance = instance_counter.fetch_add(1, std::memory_order_relaxed);
+  std::memcpy(static_cast<void *>(&gid_.data[kInstanceOffset]), &instance, sizeof(instance));
 
-  // [16-23]: reserved
+  // Nothing may be stored past [15]: RMW_GID_STORAGE_SIZE is 24 on Humble but only 16 from Iron
+  // on, so the bytes beyond do not exist on every supported distribution.
 
   gid_.implementation_identifier = "agnocast";
 }

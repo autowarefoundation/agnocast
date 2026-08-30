@@ -176,7 +176,7 @@ static int add_topic(
     (*wrapper)->topic->entries = RB_ROOT;
     hash_init((*wrapper)->topic->pub_info_htable);
     hash_init((*wrapper)->topic->sub_info_htable);
-    (*wrapper)->topic->current_pubsub_id = 0;
+    bitmap_zero((*wrapper)->topic->pubsub_id_map, MAX_TOPIC_LOCAL_ID);
     (*wrapper)->topic->current_entry_id = 0;
     (*wrapper)->topic->ros2_subscriber_num = 0;
     (*wrapper)->topic->ros2_publisher_num = 0;
@@ -316,7 +316,7 @@ void agnocast_unlink_subscriber_info(
   // must precede the release below, so that no list is left pointing at a freed context.
   if (was_notifiable) rebuild_all_notify_lists(wrapper);
 
-  free_subscriber_info(sub_info);
+  free_subscriber_info(wrapper->topic, sub_info);
 }
 
 static int insert_subscriber_info(
@@ -339,13 +339,16 @@ static int insert_subscriber_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic->current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+  // Smallest unused id, so ids freed by removed pubs/subs are reused.
+  const topic_local_id_t new_id =
+    find_first_zero_bit(wrapper->topic->pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  if (new_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
       agnocast_device,
-      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "pubsub_id for the topic (topic_name=%s) reached the upper "
       "bound (MAX_TOPIC_LOCAL_ID=%d), so no new subscriber can be "
       "added. (%s)\n",
-      wrapper->topic->current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
+      wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
     return -ENOSPC;
   }
 
@@ -372,8 +375,7 @@ static int insert_subscriber_info(
     }
   }
 
-  const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
-  wrapper->topic->current_pubsub_id++;
+  set_bit(new_id, wrapper->topic->pubsub_id_map);
 
   (*new_info)->id = new_id;
   (*new_info)->domain_id = wrapper->domain_id;
@@ -457,13 +459,16 @@ static int insert_publisher_info(
     return -ENOBUFS;
   }
 
-  if (wrapper->topic->current_pubsub_id >= MAX_TOPIC_LOCAL_ID) {
+  // Smallest unused id, so ids freed by removed pubs/subs are reused.
+  const topic_local_id_t new_id =
+    find_first_zero_bit(wrapper->topic->pubsub_id_map, MAX_TOPIC_LOCAL_ID);
+  if (new_id >= MAX_TOPIC_LOCAL_ID) {
     dev_warn(
       agnocast_device,
-      "current_pubsub_id (%d) for the topic (topic_name=%s) reached the upper "
+      "pubsub_id for the topic (topic_name=%s) reached the upper "
       "bound (MAX_TOPIC_LOCAL_ID=%d), so no new publisher can be "
       "added. (%s)\n",
-      wrapper->topic->current_pubsub_id, wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
+      wrapper->key, MAX_TOPIC_LOCAL_ID, __func__);
     return -ENOSPC;
   }
 
@@ -477,9 +482,6 @@ static int insert_publisher_info(
     kfree(*new_info);
     return -ENOMEM;
   }
-
-  const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
-  wrapper->topic->current_pubsub_id++;
 
   (*new_info)->id = new_id;
   (*new_info)->domain_id = wrapper->domain_id;
@@ -498,9 +500,14 @@ static int insert_publisher_info(
   // subscriber table and the fields set above, so the publisher need not be linked yet.
   int ret = reserve_notify_ctxs(*new_info, notifiable_subscriber_num(wrapper));
   if (ret < 0) {
-    free_publisher_info(*new_info);
+    // set_bit has not run yet, so the clear inside is a no-op on an already-free id.
+    free_publisher_info(wrapper->topic, *new_info);
     return ret;
   }
+
+  // After the last failure point, so a failed insert leaves the id free for the next caller.
+  set_bit(new_id, wrapper->topic->pubsub_id_map);
+
   rebuild_notify_list(wrapper, *new_info);
 
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
@@ -2311,7 +2318,7 @@ int agnocast_ioctl_remove_subscriber(
     pub_info->entries_num--;
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
-      free_publisher_info(pub_info);
+      free_publisher_info(wrapper->topic, pub_info);
     }
   }
 
@@ -2365,7 +2372,7 @@ int agnocast_ioctl_remove_publisher(
 
   if (pub_info->entries_num == 0) {
     hash_del(&pub_info->node);
-    free_publisher_info(pub_info);
+    free_publisher_info(wrapper->topic, pub_info);
 
     if (!is_parameter_service_topic(topic_name)) {
       dev_info(

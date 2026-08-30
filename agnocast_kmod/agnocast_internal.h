@@ -118,13 +118,6 @@ struct publisher_info
   struct hlist_node node;
 };
 
-static inline void free_publisher_info(struct publisher_info * pub_info)
-{
-  kvfree(pub_info->notify_ctxs);
-  kfree(pub_info->node_name);
-  kfree(pub_info);
-}
-
 struct subscriber_info
 {
   topic_local_id_t id;
@@ -144,15 +137,6 @@ struct subscriber_info
   struct hlist_node node;
 };
 
-// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
-// subscriber leaving a live topic must also leave the publishers' notify lists.
-static inline void free_subscriber_info(struct subscriber_info * sub_info)
-{
-  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
-  kfree(sub_info->node_name);
-  kfree(sub_info);
-}
-
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
 // Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
 static inline long copy_name_from_user(char * dst, size_t dst_size, const struct name_info * src)
@@ -170,7 +154,7 @@ struct topic_struct
   struct rb_root entries;
   DECLARE_HASHTABLE(pub_info_htable, PUB_INFO_HASH_BITS);
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
-  topic_local_id_t current_pubsub_id;
+  DECLARE_BITMAP(pubsub_id_map, MAX_TOPIC_LOCAL_ID);
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
@@ -188,6 +172,37 @@ struct topic_struct
   // the publish/receive hot path can check delivery direction without a lookup.
   const struct domain_bridge_rule * rule;
 };
+
+// Both frees release the endpoint's topic_local_id back to topic->pubsub_id_map, so the next
+// insert can reuse it. Callers hold global_htables_rwsem WRITE, so the bitmap update needs no
+// further serialization.
+static inline void free_publisher_info(
+  struct topic_struct * topic, struct publisher_info * pub_info)
+{
+  if (pub_info->id >= 0 && pub_info->id < MAX_TOPIC_LOCAL_ID) {
+    clear_bit(pub_info->id, topic->pubsub_id_map);
+  } else {
+    WARN_ONCE(true, "publisher_id %d out of range [0, %d)\n", pub_info->id, MAX_TOPIC_LOCAL_ID);
+  }
+  kvfree(pub_info->notify_ctxs);
+  kfree(pub_info->node_name);
+  kfree(pub_info);
+}
+
+// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
+// subscriber leaving a live topic must also leave the publishers' notify lists.
+static inline void free_subscriber_info(
+  struct topic_struct * topic, struct subscriber_info * sub_info)
+{
+  if (sub_info->id >= 0 && sub_info->id < MAX_TOPIC_LOCAL_ID) {
+    clear_bit(sub_info->id, topic->pubsub_id_map);
+  } else {
+    WARN_ONCE(true, "subscriber_id %d out of range [0, %d)\n", sub_info->id, MAX_TOPIC_LOCAL_ID);
+  }
+  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
+  kfree(sub_info->node_name);
+  kfree(sub_info);
+}
 
 struct topic_wrapper
 {
