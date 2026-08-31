@@ -2,6 +2,7 @@
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"

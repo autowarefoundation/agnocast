@@ -3,6 +3,7 @@
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -211,17 +212,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
 {
-  if (!yaml["rt_throttling"]) {
-    return;
-  }
-
-  const auto & rt_bw = yaml["rt_throttling"];
-
-  // Writing to /proc/sys/kernel/sched_rt_{period,runtime}_us requires root (uid 0).
-  // Linux capabilities (CAP_SYS_ADMIN etc.) cannot bypass the proc sysctl DAC check.
-  // Instead, we validate that the current kernel values match the config and guide the
-  // user to apply them via /etc/sysctl.d/ if they differ.
-
+  // The reader reports its own failures; check_rt_throttling records such a
+  // key with an unset actual, which is skipped below.
   auto read_sysctl = [this](const std::string & path) -> std::optional<int> {
     std::ifstream file(path);
     if (!file) {
@@ -236,91 +228,48 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     return value;
   };
 
-  bool mismatch = false;
+  const auto report = agnocast_cie_thread_configurator::check_rt_throttling(yaml, read_sysctl);
 
-  if (rt_bw["period_us"]) {
-    int expected = rt_bw["period_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_period_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_period_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_period_us is already set to %d", expected);
-      }
+  for (const auto & check : report.checks) {
+    if (!check.actual.has_value()) {
+      continue;
+    }
+    if (*check.actual != check.expected) {
+      RCLCPP_ERROR(
+        this->get_logger(), "%s mismatch: expected %d, actual %d", check.key.c_str(),
+        check.expected, *check.actual);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "%s is already set to %d", check.key.c_str(), check.expected);
     }
   }
 
-  if (rt_bw["runtime_us"]) {
-    int expected = rt_bw["runtime_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_runtime_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_runtime_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_runtime_us is already set to %d", expected);
-      }
-    }
-  }
-
-  if (mismatch) {
-    std::string message =
-      "rt_throttling values do not match the configuration. "
-      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
-      "(or run 'sudo sysctl --system'):\n";
-
-    if (rt_bw["period_us"]) {
-      message +=
-        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
-    }
-    if (rt_bw["runtime_us"]) {
-      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
-    }
-
-    RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
+  if (report.mismatch) {
+    RCLCPP_ERROR(this->get_logger(), "%s", report.sysctl_guidance.c_str());
   }
 }
 
 void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
 {
-  if (!yaml["hardware_info"]) {
+  const auto mismatches = agnocast_cie_thread_configurator::check_hardware_info(
+    yaml, agnocast_cie_thread_configurator::get_hardware_info());
+  if (!mismatches.has_value()) {
     RCLCPP_WARN(
       this->get_logger(),
       "No hardware_info section found in configuration file. Skipping hardware validation.");
     return;
   }
 
-  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
-  const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
-
-  std::vector<std::string> mismatches;
-
-  for (const auto & [key, current_value] : current_hw_info) {
-    if (!yaml_hw_info[key]) {
-      continue;
-    }
-
-    std::string yaml_value = yaml_hw_info[key].as<std::string>();
-    if (yaml_value != current_value) {
-      mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
-    }
-  }
-
-  if (!mismatches.empty()) {
+  if (!mismatches->empty()) {
     std::string error_msg = "Hardware validation failed with the following mismatches:\n";
-    for (const auto & mismatch : mismatches) {
-      error_msg += "  - " + mismatch + "\n";
+    for (const auto & mismatch : *mismatches) {
+      error_msg += "  - " + mismatch.key + ": expected '" + mismatch.expected + "', got '" +
+                   mismatch.actual + "'\n";
     }
     throw std::runtime_error(error_msg);
-  } else {
-    RCLCPP_INFO(
-      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
   }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Hardware validation successful. Configuration matches this system.");
 }
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
