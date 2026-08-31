@@ -296,42 +296,28 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
     return;
   }
 
-  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
-
   if (current_hw_info.empty()) {
     RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
     return;
   }
 
-  std::vector<std::string> mismatches;
-  size_t compared_count = 0;
-
-  for (const auto & [key, current_value] : current_hw_info) {
-    if (!yaml_hw_info[key]) {
-      continue;
-    }
-
-    compared_count++;
-    std::string yaml_value = yaml_hw_info[key].as<std::string>();
-    if (yaml_value != current_value) {
-      mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
-    }
-  }
-
-  if (!mismatches.empty()) {
-    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
-    for (const auto & mismatch : mismatches) {
-      error_msg += "  - " + mismatch + "\n";
-    }
-    throw std::runtime_error(error_msg);
-  }
-
-  if (compared_count == 0) {
+  const auto mismatches =
+    agnocast_cie_thread_configurator::check_hardware_info(yaml, current_hw_info);
+  if (!mismatches.has_value()) {
     RCLCPP_WARN(
       this->get_logger(),
       "hardware_info has none of the keys reported by lscpu. Skipping hardware validation.");
     return;
+  }
+
+  if (!mismatches->empty()) {
+    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
+    for (const auto & mismatch : *mismatches) {
+      error_msg += "  - " + mismatch.key + ": expected '" + mismatch.expected + "', got '" +
+                   mismatch.actual + "'\n";
+    }
+    throw std::runtime_error(error_msg);
   }
 
   RCLCPP_INFO(
