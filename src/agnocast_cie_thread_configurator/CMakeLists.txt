@@ -105,7 +105,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_startup_checks
     test/test_startup_checks.cpp
   )
-  target_link_libraries(test_startup_checks agnocast_thread_configurator_core yaml-cpp)
+  target_link_libraries(test_startup_checks agnocast_thread_configurator_core)
 
   ament_add_gtest(test_thread_config
     test/test_thread_config.cpp
