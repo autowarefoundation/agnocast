@@ -20,7 +20,7 @@ TEST(ParseLscpuOutput, ExtractsExactlyTheRecordedKeys)
     "CPU min MHz:                     2200.0000\n"
     "Vendor ID:                       AuthenticAMD\n";
   const auto info = acie::parse_lscpu_output(output);
-  EXPECT_EQ(info.size(), 7u);
+  ASSERT_EQ(info.size(), 7u);
   EXPECT_EQ(info.at("model_name"), "AMD Ryzen 7 5800X 8-Core Processor");
   EXPECT_EQ(info.at("cpu_family"), "25");
   EXPECT_EQ(info.at("model"), "33");
@@ -35,6 +35,29 @@ TEST(ParseLscpuOutput, TrimsWhitespaceAroundValues)
   const auto info = acie::parse_lscpu_output("Model name:\t  Cortex-A76  \r\n");
   ASSERT_EQ(info.size(), 1u);
   EXPECT_EQ(info.at("model_name"), "Cortex-A76");
+}
+
+TEST(ParseLscpuOutput, TrimsWhitespaceOnlyValuesToEmpty)
+{
+  const auto info = acie::parse_lscpu_output("Frequency boost:   \r\nModel name:\n");
+  ASSERT_EQ(info.size(), 2u);
+  EXPECT_EQ(info.at("frequency_boost"), "");
+  EXPECT_EQ(info.at("model_name"), "");
+}
+
+TEST(ParseLscpuOutput, MatchesIndentedHierarchicKeys)
+{
+  // The indented layout util-linux >= 2.38 emits for hybrid-CPU machines.
+  const char * output =
+    "CPU(s):                 20\n"
+    "  Model name:           12th Gen Intel(R) Core(TM) i7-12700H\n"
+    "    CPU family:         6\n"
+    "    Thread(s) per core: 2\n";
+  const auto info = acie::parse_lscpu_output(output);
+  ASSERT_EQ(info.size(), 3u);
+  EXPECT_EQ(info.at("model_name"), "12th Gen Intel(R) Core(TM) i7-12700H");
+  EXPECT_EQ(info.at("cpu_family"), "6");
+  EXPECT_EQ(info.at("threads_per_core"), "2");
 }
 
 TEST(ParseLscpuOutput, IgnoresMalformedAndUnknownLines)

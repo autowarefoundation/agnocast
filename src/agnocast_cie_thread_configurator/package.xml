@@ -25,6 +25,9 @@
 
   <depend>agnocast_cie_config_msgs</depend>
 
+  <!-- get_hardware_info shells out to /usr/bin/lscpu -->
+  <exec_depend>util-linux</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>
