@@ -1,17 +1,42 @@
 #include "agnocast_cie_thread_configurator/prerun_node.hpp"
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/system_scan.hpp"
+#include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
 
+#include <algorithm>
+#include <cinttypes>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
+
+namespace
+{
+
+// One template entry per comm (it manages every thread sharing that comm).
+// The scan is sorted by (comm, tid), so the kept observed values are the
+// lowest tid's.
+std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> dedup_by_comm(
+  std::vector<agnocast_cie_thread_configurator::KernelThreadInfo> scanned)
+{
+  scanned.erase(
+    std::unique(
+      scanned.begin(), scanned.end(),
+      [](const auto & a, const auto & b) { return a.comm == b.comm; }),
+    scanned.end());
+  return scanned;
+}
+
+}  // namespace
 
 PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node", options)
 {
@@ -94,7 +119,7 @@ void PrerunNode::topic_callback(
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%ld | %s", domain_id,
+    this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%" PRId64 " | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
 }
 
@@ -102,13 +127,14 @@ void PrerunNode::non_ros_thread_callback(agnocast_cie_thread_configurator::NonRo
 {
   if (non_ros_thread_names_.find(info.name) != non_ros_thread_names_.end()) {
     RCLCPP_ERROR(
-      this->get_logger(), "Duplicate thread_name received: tid=%ld | %s", info.tid,
+      this->get_logger(), "Duplicate thread_name received: tid=%" PRId64 " | %s", info.tid,
       info.name.c_str());
     return;
   }
 
   RCLCPP_INFO(
-    this->get_logger(), "Received NonRosThreadInfo: tid=%ld | %s", info.tid, info.name.c_str());
+    this->get_logger(), "Received NonRosThreadInfo: tid=%" PRId64 " | %s", info.tid,
+    info.name.c_str());
 
   non_ros_thread_names_.insert(std::move(info.name));
 }
@@ -177,6 +203,85 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
     emit_unmanaged_affinity();
     out << YAML::Key << "policy" << YAML::Value << "SCHED_OTHER";
     out << YAML::Key << "nice" << YAML::Value << 0;
+    out << YAML::EndMap;
+    out << YAML::Newline;
+  }
+
+  out << YAML::EndSeq;
+
+  // Add kernel_threads and irqs sections: observed values become the initial
+  // desired values (compare-before-set keeps unedited entries no-ops), and
+  // UNMANAGEABLE marks values that cannot be provided or changed (YAML null
+  // stays the user's opt-out).
+  const std::string unmanageable(agnocast_cie_thread_configurator::k_unmanageable);
+  const auto kernel_threads =
+    dedup_by_comm(agnocast_cie_thread_configurator::scan_kernel_threads());
+  const auto irqs = agnocast_cie_thread_configurator::scan_irqs();
+  RCLCPP_INFO(
+    this->get_logger(), "Scanned %zu kernel thread comms and %zu device-backed IRQs",
+    kernel_threads.size(), irqs.size());
+  if (kernel_threads.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No kernel threads found; the /proc scan likely failed (restricted /proc?)");
+  }
+  if (irqs.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "No device-backed IRQs found; is /sys/kernel/irq available (kernel >= 4.12)?");
+  }
+
+  out << YAML::Key << "kernel_threads";
+  out << YAML::Value << YAML::BeginSeq;
+
+  for (const auto & info : kernel_threads) {
+    // A policy with no YAML representation: UNKNOWN(<n>), or SCHED_DEADLINE,
+    // whose runtime/period/deadline cannot be recovered from /proc.
+    const bool policy_representable =
+      agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
+      info.policy != "SCHED_DEADLINE";
+    const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "comm" << YAML::Value << info.comm;
+    if (policy_representable) {
+      const bool is_cfs = agnocast_cie_thread_configurator::is_cfs_policy(info.policy);
+      out << YAML::Key << "policy" << YAML::Value << info.policy;
+      if (is_cfs) {
+        out << YAML::Key << "nice" << YAML::Value << info.nice;
+      } else {
+        out << YAML::Key << "priority" << YAML::Value << info.rt_priority;
+      }
+    } else {
+      out << YAML::Key << "policy" << YAML::Value << unmanageable;
+      out << YAML::Key << "priority" << YAML::Value << unmanageable;
+    }
+    if (info.no_setaffinity || !cpus) {
+      out << YAML::Key << "affinity" << YAML::Value << unmanageable;
+    } else {
+      out << YAML::Key << "affinity" << YAML::Value << YAML::Flow << *cpus;
+    }
+    out << YAML::EndMap;
+    out << YAML::Newline;
+  }
+
+  out << YAML::EndSeq;
+
+  // Add irqs section
+  out << YAML::Key << "irqs";
+  out << YAML::Value << YAML::BeginSeq;
+
+  for (const auto & info : irqs) {
+    const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "irq" << YAML::Value << info.irq;
+    out << YAML::Key << "name" << YAML::Value << info.name;
+    if (cpus) {
+      out << YAML::Key << "affinity" << YAML::Value << YAML::Flow << *cpus;
+    } else {
+      out << YAML::Key << "affinity" << YAML::Value << unmanageable;
+    }
     out << YAML::EndMap;
     out << YAML::Newline;
   }

@@ -31,6 +31,8 @@
   <depend>rmw</depend>
   <depend>rosgraph_msgs</depend>
   <depend>rosidl_typesupport_introspection_cpp</depend>
+  <!-- service_msgs does not exist before Iron. -->
+  <depend condition="$ROS_DISTRO &gt;= iron">service_msgs</depend>
   <depend>tracetools</depend>
 
   <depend>agnocast_cie_config_msgs</depend>

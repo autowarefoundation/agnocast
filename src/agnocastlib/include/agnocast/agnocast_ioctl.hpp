@@ -23,6 +23,7 @@ namespace agnocast
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define NODE_NAME_BUFFER_SIZE 256
+#define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
@@ -50,10 +51,32 @@ struct ioctl_get_version_args
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
+};
+#pragma GCC diagnostic pop
+
+// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
+#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
+
+// Mirrors enum process_role in the kernel module.
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
+    uint32_t role;       // enum process_role
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -191,6 +214,9 @@ union ioctl_get_subscriber_num_args {
     uint32_t ret_other_process_subscriber_num;
     uint32_t ret_same_process_subscriber_num;
     uint32_t ret_ros2_subscriber_num;
+    // Subscribers in the domain a bridge rule pairs this one with, counted only where the rule
+    // delivers this way round. Disjoint from the own-domain counts above.
+    uint32_t ret_other_domain_subscriber_num;
     bool ret_a2r_bridge_exist;
     bool ret_r2a_bridge_exist;
   };
@@ -364,5 +390,6 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 
 }  // namespace agnocast

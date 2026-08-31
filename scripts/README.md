@@ -13,7 +13,7 @@ All scripts are intended to be invoked from the repository root unless noted oth
 | Script | Purpose |
 |---|---|
 | `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast over CycloneDDS. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
-| `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
+| `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` and `CAP_DAC_OVERRIDE` (for writing `/proc/irq/<N>/smp_affinity_list`) to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
 | `switch_kmod.bash` | Swap the host's `agnocast-kmod-v<ver>` to another version. For container-based setups where only the host-side kmod needs replacing; the kmod and in-container heaphook must share the same ioctl ABI version. |
 
 ### sample_application/
@@ -37,7 +37,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 |---|---|
 | `run_no_rclcpp_talker.bash` | `no_rclcpp_talker.launch.xml` |
 | `run_no_rclcpp_listener.bash` | `no_rclcpp_listener.launch.xml` |
-| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (polling-style subscription) |
+| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (take-style subscription) |
 | `run_no_rclcpp_pubsub.bash` | `no_rclcpp_pubsub.launch.xml` |
 | `run_no_rclcpp_client.bash` | `no_rclcpp_client.launch.xml` |
 | `run_no_rclcpp_server.bash` | `no_rclcpp_server.launch.xml` |

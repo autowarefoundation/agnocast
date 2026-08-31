@@ -235,3 +235,10 @@ TEST(AgnocastUtilsTest, validate_subscription_qos_liveliness_lease_duration_warn
   EXPECT_EQ(captured_warn_count, 1);
   EXPECT_NE(captured_log.find("liveliness_lease_duration"), std::string::npos) << captured_log;
 }
+
+TEST(AgnocastUtilsTest, create_service_response_topic_name_appends_client_identity)
+{
+  EXPECT_EQ(
+    agnocast::create_service_response_topic_name("/srv/add", "/client_node", 7),
+    "/AGNOCAST_SRV_RESPONSE/srv/add_SEP_/client_node_SEP_7");
+}

@@ -406,6 +406,15 @@ public:
   AGNOCAST_PUBLIC
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  /// Return the fully qualified names of the nodes in this IPC namespace and ROS_DOMAIN_ID.
+  ///
+  /// Reports the agnocast nodes that own an endpoint, plus this node itself. DDS is not consulted,
+  /// so a ROS 2 node without an agnocast endpoint is not reported. See
+  /// docs/agnocast_node_interface_comparison.md.
+  /// @return Node names, with a name shared by several nodes repeated once per node.
+  AGNOCAST_PUBLIC
+  std::vector<std::string> get_node_names() const { return node_graph_->get_node_names(); }
+
   /// Return the number of publishers on a topic.
   ///
   /// Counts the agnocast publishers in the same domain, plus the ROS 2 publishers reported by a
@@ -503,6 +512,37 @@ public:
       options);
   }
 
+  /// Create a take-subscription (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return std::make_shared<TakeSubscription<MessageT>>(this, topic_name, qos, std::move(options));
+  }
+
+  /// Create a take-subscription (queue-size overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param queue_size History depth for the QoS profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, size_t queue_size,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return create_take_subscription<MessageT>(
+      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), std::move(options));
+  }
+
   /// Create a polling subscription (history-depth overload).
   /// @tparam MessageT ROS message type.
   /// @param topic_name Topic name.
@@ -513,7 +553,7 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::TakeSubscription directly.")]]
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
   {
@@ -531,7 +571,7 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::TakeSubscription directly.")]]
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
   {

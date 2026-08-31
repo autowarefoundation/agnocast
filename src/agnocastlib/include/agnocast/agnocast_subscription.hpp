@@ -277,7 +277,7 @@ public:
  *
  * Does not use a callback; the caller retrieves one message per call by calling take(), which
  * returns the newest message only with a history depth of 1. See take() for the behaviour with a
- * greater depth.
+ * greater depth. Allocate instances with `agnocast::create_take_subscription<MessageT>()`.
  *
  * @tparam MessageT  ROS message type.
  */
@@ -305,6 +305,14 @@ private:
       type_name = rosidl_generator_traits::name<MessageT>();
     }
     init_base(node, qos, type_name, true, options, role);
+
+    if (options.callback_group) {
+      RCLCPP_WARN(
+        logger,
+        "SubscriptionOptions::callback_group is ignored for the take-subscription on topic '%s': "
+        "it has no callback to dispatch.",
+        topic_name_.c_str());
+    }
   }
 
 public:
@@ -494,9 +502,13 @@ public:
       std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, options, role);
   };
 
-  /// @deprecated Use take_data() instead. Behaves identically, including the history-depth
-  /// caveat documented there.
-  [[deprecated("Use take_data() instead.")]]
+  /// @deprecated Behaves identically to take_data(), including the history-depth caveat
+  /// documented there.
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::create_take_subscription(): its take() returns each message at most once, so keep "
+    "the last returned message on the caller side to keep the latched behaviour.")]]
   const agnocast::ipc_shared_ptr<const MessageT> takeData()
   {
     return subscriber_->take(true);
@@ -512,7 +524,8 @@ public:
   [[deprecated(
     "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
     "from agnocast. Obtain a polling subscriber from the wrapper, or use "
-    "agnocast::TakeSubscription directly.")]]
+    "agnocast::create_take_subscription(): its take() returns each message at most once, so keep "
+    "the last returned message on the caller side to keep the latched behaviour.")]]
   const agnocast::ipc_shared_ptr<const MessageT> take_data()
   {
     return subscriber_->take(true);

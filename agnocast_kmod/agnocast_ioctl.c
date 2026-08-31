@@ -99,6 +99,10 @@ static struct topic_struct * find_grouped_topic_struct(
     return NULL;
   }
 
+  // A prefix rule's stored names are the prefix, not a topic name; it pairs this cell with the
+  // identical name in the partner domain.
+  if (rule->is_prefix) partner_name = topic_name;
+
   struct topic_wrapper * partner = find_topic(partner_name, ipc_ns, partner_domain);
   return partner ? partner->topic : NULL;
 }
@@ -106,10 +110,17 @@ static struct topic_struct * find_grouped_topic_struct(
 // Whether a publication in pub_domain may be delivered to a subscriber in
 // sub_domain within this topic_struct. Same domain is always allowed; crossing
 // domains requires a rule permitting that direction (from_domain -> to_domain).
+//
+// A bridge endpoint is excluded from crossing at all: it stands for one domain's ROS 2 side, and
+// relaying between domains is the external domain_bridge's job. A rule that reached one would
+// duplicate what that node already carries.
 static bool domain_delivery_allowed(
-  const struct topic_struct * topic, uint32_t pub_domain, uint32_t sub_domain)
+  const struct topic_struct * topic, const uint32_t pub_domain, const bool pub_is_bridge,
+  const uint32_t sub_domain, const bool sub_is_bridge)
 {
   if (pub_domain == sub_domain) return true;
+
+  if (pub_is_bridge || sub_is_bridge) return false;
 
   const struct domain_bridge_rule * rule = topic->rule;
   if (!rule) return false;
@@ -266,7 +277,9 @@ static void rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher
   {
     // NULL exactly for take subs, which poll instead of being woken.
     if (!sub_info->notify_ctx) continue;
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge))
       continue;
     if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
 
@@ -573,9 +586,10 @@ static struct entry_node * find_message_entry(
 }
 
 // Forward declaration
-static int get_process_num(const struct ipc_namespace * ipc_ns);
-static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
-static int get_alive_process_num_in_domain(
+static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns);
+static int get_process_num_in_domain_except_unlink_daemon(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+static int get_alive_process_num_in_domain_except_unlink_daemon(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
 
 // Release subscriber reference from message entry (set boolean flag to false).
@@ -687,7 +701,7 @@ static int insert_message_entry(
 }
 
 static int set_publisher_shm_info(
-  const struct topic_wrapper * wrapper, const pid_t subscriber_pid,
+  const struct topic_wrapper * wrapper, const pid_t subscriber_pid, const bool sub_is_bridge,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   uint32_t * ret_pub_shm_num)
 {
@@ -702,7 +716,9 @@ static int set_publisher_shm_info(
 
     // A subscriber only reads from publishers that deliver to it; a one-way
     // bridge rule can exclude opposite-domain publishers, so skip mapping them.
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, wrapper->domain_id,
+          sub_is_bridge)) {
       continue;
     }
 
@@ -779,7 +795,23 @@ static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const 
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->is_bridge_manager && !proc_info->exited) {
+      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
+// abruptly still reads as alive until the worker drains its pid, so a process registering in that
+// window is not told to spawn a replacement.
+static bool has_alive_unlink_daemon(const struct ipc_namespace * ipc_ns)
+{
+  struct process_info * proc_info;
+  int bkt;
+  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
       return true;
     }
   }
@@ -787,10 +819,28 @@ static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const 
 }
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
+
+  if (
+    role != PROCESS_ROLE_APPLICATION && role != PROCESS_ROLE_BRIDGE_MANAGER &&
+    role != PROCESS_ROLE_UNLINK_DAEMON) {
+    dev_warn(
+      agnocast_device, "Process (pid=%d) has an unknown role (%u). (%s)\n", pid, (uint32_t)role,
+      __func__);
+    return -EINVAL;
+  }
+
+  // AGNOCAST_DOMAIN_ID_NONE marks the daemon as belonging to no domain, so no other process may
+  // hold it. The daemon's own domain_id is assigned below regardless of what it sends.
+  if (role != PROCESS_ROLE_UNLINK_DAEMON && domain_id == AGNOCAST_DOMAIN_ID_NONE) {
+    dev_warn(
+      agnocast_device, "Process (pid=%d) cannot use the reserved domain_id (%u). (%s)\n", pid,
+      domain_id, __func__);
+    return -EINVAL;
+  }
 
   down_write(&global_htables_rwsem);
 
@@ -799,11 +849,16 @@ int agnocast_ioctl_add_process(
     ret = -EINVAL;
     goto unlock;
   }
-  ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
+  ioctl_ret->ret_unlink_daemon_exist = has_alive_unlink_daemon(ipc_ns);
   ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
-  if (is_bridge_manager && ioctl_ret->ret_bridge_daemon_exist) {
+  // Deciding under the write lock add_process already holds is what stops two daemons starting
+  // at once from both registering.
+  if (role == PROCESS_ROLE_BRIDGE_MANAGER && ioctl_ret->ret_bridge_daemon_exist) {
+    goto unlock;
+  }
+  if (role == PROCESS_ROLE_UNLINK_DAEMON && ioctl_ret->ret_unlink_daemon_exist) {
     goto unlock;
   }
 
@@ -814,7 +869,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
-  new_proc_info->is_bridge_manager = is_bridge_manager;
+  new_proc_info->role = role;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -830,7 +885,8 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->ipc_ns = ipc_ns;
-  new_proc_info->domain_id = domain_id;
+  new_proc_info->domain_id =
+    (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
 
   INIT_HLIST_NODE(&new_proc_info->node);
   uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
@@ -1151,7 +1207,9 @@ static int receive_msg_core(
       continue;
     }
 
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge)) {
       continue;
     }
 
@@ -1243,7 +1301,8 @@ int agnocast_ioctl_receive_msg(
   }
 
   ret = set_publisher_shm_info(
-    wrapper, sub_info->pid, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+    wrapper, sub_info->pid, sub_info->is_bridge, pub_shm_infos, pub_shm_infos_size,
+    &ioctl_ret->ret_pub_shm_num);
   if (ret < 0) {
     goto unlock_all;
   }
@@ -1325,7 +1384,9 @@ int agnocast_ioctl_take_msg(
       continue;
     }
 
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge)) {
       continue;
     }
 
@@ -1356,7 +1417,8 @@ int agnocast_ioctl_take_msg(
   }
 
   ret = set_publisher_shm_info(
-    wrapper, sub_info->pid, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+    wrapper, sub_info->pid, sub_info->is_bridge, pub_shm_infos, pub_shm_infos_size,
+    &ioctl_ret->ret_pub_shm_num);
   if (ret < 0) {
     goto unlock_all;
   }
@@ -1381,6 +1443,7 @@ int agnocast_ioctl_get_subscriber_num(
   ioctl_ret->ret_other_process_subscriber_num = 0;
   ioctl_ret->ret_same_process_subscriber_num = 0;
   ioctl_ret->ret_ros2_subscriber_num = 0;
+  ioctl_ret->ret_other_domain_subscriber_num = 0;
   ioctl_ret->ret_a2r_bridge_exist = false;
   ioctl_ret->ret_r2a_bridge_exist = false;
 
@@ -1397,16 +1460,23 @@ int agnocast_ioctl_get_subscriber_num(
 
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
+  uint32_t other_domain_count = 0;
 
-  // Match ROS 2's get_subscription_count: report only same-domain subscribers.
-  // A bridge rule still delivers cross-domain (see the publish/receive paths),
-  // but a publisher does not count subscribers in another domain. Ungrouped
-  // topics hold only one domain, so this is a no-op for them.
+  // Match ROS 2's get_subscription_count: the same/other-process counts report only same-domain
+  // subscribers. A bridge rule still delivers cross-domain (see the publish/receive paths), but a
+  // publisher does not count subscribers in another domain. Ungrouped topics hold only one domain,
+  // so this is a no-op for them.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
     if (sub_info->domain_id != wrapper->domain_id) {
+      // The ioctl names a topic, not a publisher, so the asking side is assumed not to be a
+      // bridge. A bridge publisher asking would be over-counted: nothing it publishes crosses.
+      if (domain_delivery_allowed(
+            wrapper->topic, wrapper->domain_id, false, sub_info->domain_id, sub_info->is_bridge)) {
+        other_domain_count++;
+      }
       continue;
     }
     if (sub_info->is_bridge) {
@@ -1431,6 +1501,7 @@ int agnocast_ioctl_get_subscriber_num(
 
   ioctl_ret->ret_other_process_subscriber_num = inter_count;
   ioctl_ret->ret_same_process_subscriber_num = intra_count;
+  ioctl_ret->ret_other_domain_subscriber_num = other_domain_count;
   ioctl_ret->ret_ros2_subscriber_num = wrapper->topic->ros2_subscriber_num;
 
   up_read(&wrapper->topic->rwsem);
@@ -1570,7 +1641,8 @@ pid_t agnocast_ioctl_get_exit_process(
 }
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit)
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
+  bool * ret_daemon_should_exit)
 {
   down_write(&global_htables_rwsem);
 
@@ -1582,7 +1654,19 @@ void agnocast_commit_exit_process(
     }
   }
 
-  *ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
+  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ipc_ns) == 0);
+
+  // Deregistering only on death would leave a window where a starting process is told a daemon
+  // exists and skips spawning its replacement. Restricted to the idle poll because that is the
+  // only call whose flag poll_for_unlink() acts on; the drain loop discards the rest.
+  if (*ret_daemon_should_exit && global_pid < 0 && caller_pid >= 0) {
+    struct process_info * caller_info = agnocast_find_process_info(caller_pid);
+    if (caller_info && caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+      hash_del_rcu(&caller_info->node);
+      kfree_rcu(caller_info, rcu_head);
+      free_memory(caller_pid);
+    }
+  }
 
   up_write(&global_htables_rwsem);
 }
@@ -1643,6 +1727,140 @@ int agnocast_ioctl_get_topic_list(
 
 unlock:
   up_read(&global_htables_rwsem);
+  return ret;
+}
+
+// Nothing may sleep under global_htables_rwsem: it is writer-preferring, so a sleeping reader
+// stalls every publish behind a waiting endpoint add/remove. Hence the scratch preallocated
+// below, and the copy_to_user left to get_node_names_cmd.
+
+#define NODE_NAME_SLOT_BITS 11
+#define NODE_NAME_SLOT_NUM (1u << NODE_NAME_SLOT_BITS)
+// add_unique_node's probe loop has no bound: it terminates only because a free slot always exists.
+static_assert(NODE_NAME_SLOT_NUM >= 2 * MAX_NODE_NUM, "node name slots must outnumber the names");
+
+struct collected_node
+{
+  uint32_t name_index;
+  pid_t pid;
+};
+
+struct node_name_collector
+{
+  struct collected_node * slots;
+  char * buf;
+  uint32_t capacity;
+  uint32_t num;
+};
+
+static char * node_name_at(const struct node_name_collector * col, const uint32_t index)
+{
+  return col->buf + (size_t)index * NODE_NAME_BUFFER_SIZE;
+}
+
+// The dedup key is (pid, name), not the name alone, so that same-named nodes in different
+// processes stay distinct as rclcpp reports them. Two in one process still collapse, which rclcpp
+// does not: the kmod has no node identity finer than the process.
+static int add_unique_node(struct node_name_collector * col, const char * name, const pid_t pid)
+{
+  const size_t len = strlen(name) + 1;
+  uint32_t idx = full_name_hash(NULL, name, len - 1) & (NODE_NAME_SLOT_NUM - 1);
+
+  while (col->slots[idx].pid != 0) {
+    const struct collected_node * slot = &col->slots[idx];
+    if (slot->pid == pid && strcmp(node_name_at(col, slot->name_index), name) == 0) {
+      return 0;  // already collected
+    }
+    idx = (idx + 1) & (NODE_NAME_SLOT_NUM - 1);
+  }
+
+  if (col->num >= col->capacity) return -ENOBUFS;
+
+  memcpy(node_name_at(col, col->num), name, len);
+  col->slots[idx].name_index = col->num;
+  col->slots[idx].pid = pid;
+  col->num++;
+  return 0;
+}
+
+// A publisher_info outlives its process while a subscriber still references its entries.
+// Caller holds global_htables_rwsem.
+static bool owner_is_alive(const pid_t pid)
+{
+  const struct process_info * proc_info = agnocast_find_process_info(pid);
+  return proc_info && !proc_info->exited;
+}
+
+// Collects the nodes owning an endpoint of one topic. Caller holds global_htables_rwsem.
+static int collect_node_names_of_topic(
+  struct topic_wrapper * wrapper, const uint32_t domain_id, struct node_name_collector * col)
+{
+  int ret = 0;
+
+  down_read(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != domain_id || pub_info->is_bridge) continue;
+    if (!owner_is_alive(pub_info->pid)) continue;
+
+    ret = add_unique_node(col, pub_info->node_name, pub_info->pid);
+    if (ret) goto unlock;
+  }
+
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != domain_id || sub_info->is_bridge) continue;
+    if (!owner_is_alive(sub_info->pid)) continue;
+
+    ret = add_unique_node(col, sub_info->node_name, sub_info->pid);
+    if (ret) goto unlock;
+  }
+
+unlock:
+  up_read(&wrapper->topic->rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num)
+{
+  int ret = 0;
+  struct node_name_collector col = {.buf = buf, .capacity = buf_node_num};
+
+  // Beyond MAX_NODE_NUM the dedup table could fill and add_unique_node's probe loop would not
+  // terminate.
+  if (buf_node_num > MAX_NODE_NUM) return -EINVAL;
+
+  col.slots = kvcalloc(NODE_NAME_SLOT_NUM, sizeof(*col.slots), GFP_KERNEL);
+  if (!col.slots) return -ENOMEM;
+
+  down_read(&global_htables_rwsem);
+
+  const uint32_t domain_id = get_process_domain_id(pid);
+
+  struct topic_wrapper * wrapper;
+  int bkt_topic;
+  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
+  {
+    if (!ipc_eq(ipc_ns, wrapper->ipc_ns) || wrapper->domain_id != domain_id) {
+      continue;
+    }
+
+    ret = collect_node_names_of_topic(wrapper, domain_id, &col);
+    if (ret) goto unlock;
+  }
+
+  *ret_node_num = col.num;
+
+unlock:
+  up_read(&global_htables_rwsem);
+  kvfree(col.slots);
   return ret;
 }
 
@@ -2268,6 +2486,8 @@ unlock:
 
 // A rule is keyed by cell = (name, domain). Rules are few (one per bridged topic
 // pair), so a full scan is cheaper than maintaining a dual-name hash.
+// Registration keeps prefix and exact rules disjoint, so a cell has at most one match and the
+// first one found can be returned.
 static struct domain_bridge_rule * find_domain_rule(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
 {
@@ -2276,6 +2496,12 @@ static struct domain_bridge_rule * find_domain_rule(
   hash_for_each(domain_rule_htable, bkt, rule, node)
   {
     if (ipc_ns != rule->ipc_ns) continue;
+    if (domain_id != rule->domain_a && domain_id != rule->domain_b) continue;
+    if (rule->is_prefix) {
+      // Both names equal the prefix, so which side matched does not matter.
+      if (strncmp(rule->topic_name_a, topic_name, strlen(rule->topic_name_a)) == 0) return rule;
+      continue;
+    }
     if (
       (domain_id == rule->domain_a && strcmp(rule->topic_name_a, topic_name) == 0) ||
       (domain_id == rule->domain_b && strcmp(rule->topic_name_b, topic_name) == 0)) {
@@ -2285,86 +2511,256 @@ static struct domain_bridge_rule * find_domain_rule(
   return NULL;
 }
 
-int agnocast_ioctl_add_domain_bridge(
+// The caller holds global_htables_rwsem for write and has verified, over everything the new rule
+// would cover -- two cells for an exact rule, every name under the prefix for a prefix rule --
+// that no domain_bridge_rule overlaps it and that no endpoint has joined it.
+static int insert_domain_rule(
   const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
-  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+  const uint32_t to_domain, const bool is_prefix, const struct ipc_namespace * ipc_ns)
 {
-  int ret = 0;
-
-  if (from_domain == to_domain) return -EINVAL;
-
   // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
   // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
   // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
   // domain_delivery_allowed.
   const bool from_is_a = from_domain < to_domain;
-  const uint32_t domain_a = from_is_a ? from_domain : to_domain;
-  const uint32_t domain_b = from_is_a ? to_domain : from_domain;
   const char * name_a = from_is_a ? topic_name_from : topic_name_to;
   const char * name_b = from_is_a ? topic_name_to : topic_name_from;
 
-  down_write(&global_htables_rwsem);
-
-  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
-  // exactly two cells. r_a == r_b (non-NULL) means an existing rule already pairs exactly
-  // these two cells -- a re-declaration or the reverse direction, so just OR in the
-  // direction. Any other overlap (a cell already paired with a different cell) is a
-  // fan-out and is rejected. This is the one place that enforces one pair per cell.
-  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
-  struct domain_bridge_rule * r_a = find_domain_rule(name_a, ipc_ns, domain_a);
-  struct domain_bridge_rule * r_b = find_domain_rule(name_b, ipc_ns, domain_b);
-  if (r_a || r_b) {
-    if (r_a == r_b) {
-      r_a->a_to_b |= from_is_a;
-      r_a->b_to_a |= !from_is_a;
-
-      // Unlike the paths below, this one runs after endpoints may have registered, and the
-      // direction just enabled was denied when their notify lists were built. Both cells share one
-      // topic_struct once grouped, so either wrapper reaches every publisher.
-      struct topic_wrapper * wrapper = find_topic(name_a, ipc_ns, domain_a);
-      if (!wrapper) wrapper = find_topic(name_b, ipc_ns, domain_b);
-      if (wrapper) rebuild_all_notify_lists(wrapper);
-    } else {
-      ret = -EBUSY;
-    }
-    goto unlock;
-  }
-
-  // Grouping merges the two domains' id and entry_id spaces, which is only safe
-  // before either side has allocated any; reject if an endpoint already joined.
-  if (find_topic(name_a, ipc_ns, domain_a) || find_topic(name_b, ipc_ns, domain_b)) {
-    ret = -EBUSY;
-    goto unlock;
-  }
-
   struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
-  if (!rule) {
-    ret = -ENOMEM;
-    goto unlock;
-  }
+  if (!rule) return -ENOMEM;
+
   rule->topic_name_a = kstrdup(name_a, GFP_KERNEL);
   rule->topic_name_b = kstrdup(name_b, GFP_KERNEL);
   if (!rule->topic_name_a || !rule->topic_name_b) {
     kfree(rule->topic_name_a);
     kfree(rule->topic_name_b);
     kfree(rule);
-    ret = -ENOMEM;
-    goto unlock;
+    return -ENOMEM;
   }
   rule->ipc_ns = ipc_ns;
-  rule->domain_a = domain_a;
-  rule->domain_b = domain_b;
+  rule->domain_a = from_is_a ? from_domain : to_domain;
+  rule->domain_b = from_is_a ? to_domain : from_domain;
   rule->a_to_b = from_is_a;
   rule->b_to_a = !from_is_a;
+  rule->is_prefix = is_prefix;
   INIT_HLIST_NODE(&rule->node);
   // find_domain_rule scans every bucket, so the hash key is only for even distribution.
   hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, name_a, strlen(name_a)));
 
   dev_info(
-    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", topic_name_from, from_domain,
-    topic_name_to, to_domain);
+    agnocast_device, "Domain bridge %srule added (%s@%u -> %s@%u).\n", is_prefix ? "prefix " : "",
+    topic_name_from, from_domain, topic_name_to, to_domain);
+  return 0;
+}
 
-unlock:
+// The caller holds global_htables_rwsem for write.
+static int add_domain_rule(
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+{
+  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
+  // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
+  // these two cells -- a re-declaration or the reverse direction. Any other overlap (a cell
+  // already paired with a different cell) is a fan-out and is rejected. This is the one place
+  // that enforces one pair per cell.
+  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
+  struct domain_bridge_rule * r_from = find_domain_rule(topic_name_from, ipc_ns, from_domain);
+  struct domain_bridge_rule * r_to = find_domain_rule(topic_name_to, ipc_ns, to_domain);
+  if (r_from || r_to) {
+    if (r_from != r_to) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: a cell is already paired with another "
+        "cell. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // Only a prefix rule can pair a name nobody declared. Taking it as a re-declaration would let
+    // one exact declaration turn on a direction for every cell the prefix covers.
+    if (r_from->is_prefix) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: covered by a prefix rule. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // Re-running the registration tool with an unchanged config must succeed even after nodes
+    // started, so a declaration that enables nothing new is simply accepted.
+    const bool from_is_a = from_domain < to_domain;
+    if ((from_is_a && r_from->a_to_b) || (!from_is_a && r_from->b_to_a)) return 0;
+
+    // Endpoints that joined while this direction was denied were left out of their publishers'
+    // notify lists and skipped by set_publisher_shm_info; neither is repaired here.
+    if (
+      find_topic(topic_name_from, ipc_ns, from_domain) ||
+      find_topic(topic_name_to, ipc_ns, to_domain)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: it adds a direction after an endpoint "
+        "joined. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    if (from_is_a) {
+      r_from->a_to_b = true;
+    } else {
+      r_from->b_to_a = true;
+    }
+    return 0;
+  }
+
+  // Grouping merges the two domains' id and entry_id spaces, which is only safe
+  // before either side has allocated any; reject if an endpoint already joined.
+  if (
+    find_topic(topic_name_from, ipc_ns, from_domain) ||
+    find_topic(topic_name_to, ipc_ns, to_domain)) {
+    dev_warn(
+      agnocast_device,
+      "Domain bridge rule (%s@%u -> %s@%u) rejected: an endpoint has already joined. (%s)\n",
+      topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+    return -EBUSY;
+  }
+
+  return insert_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, false, ipc_ns);
+}
+
+// A prefix rule groups every cell it covers, and grouping merges id spaces, so it must be
+// declared before any of them exist.
+static bool any_topic_under_prefix(
+  const char * prefix, const struct ipc_namespace * ipc_ns, const uint32_t from_domain,
+  const uint32_t to_domain)
+{
+  const size_t prefix_len = strlen(prefix);
+  struct topic_wrapper * wrapper;
+  int bkt;
+  hash_for_each(topic_hashtable, bkt, wrapper, node)
+  {
+    if (!ipc_eq(wrapper->ipc_ns, ipc_ns)) continue;
+    if (wrapper->domain_id != from_domain && wrapper->domain_id != to_domain) continue;
+    if (strncmp(wrapper->key, prefix, prefix_len) == 0) return true;
+  }
+  return false;
+}
+
+// Registers a prefix rule, or folds a re-declaration into the identical existing one. Every other
+// overlap is rejected so find_domain_rule never has to choose between two candidates.
+// The caller holds global_htables_rwsem for write.
+static int add_prefix_domain_rule(
+  const char * prefix, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  const size_t prefix_len = strlen(prefix);
+  const uint32_t domain_a = min(from_domain, to_domain);
+  const uint32_t domain_b = max(from_domain, to_domain);
+  struct domain_bridge_rule * same = NULL;
+  struct domain_bridge_rule * rule;
+  int bkt;
+
+  hash_for_each(domain_rule_htable, bkt, rule, node)
+  {
+    if (ipc_ns != rule->ipc_ns) continue;
+
+    if (rule->is_prefix) {
+      const size_t len = strlen(rule->topic_name_a);
+      const bool nests = (len <= prefix_len) ? strncmp(rule->topic_name_a, prefix, len) == 0
+                                             : strncmp(prefix, rule->topic_name_a, prefix_len) == 0;
+      // find_domain_rule filters by domain before testing the name, so two prefix rules can both
+      // match a lookup only if their pairs share a domain; over disjoint pairs nesting is harmless.
+      const bool shares_domain = rule->domain_a == domain_a || rule->domain_a == domain_b ||
+                                 rule->domain_b == domain_a || rule->domain_b == domain_b;
+      if (!nests || !shares_domain) continue;
+
+      if (len == prefix_len) {
+        if (rule->domain_a == domain_a && rule->domain_b == domain_b) {
+          same = rule;
+          continue;
+        }
+        dev_warn(
+          agnocast_device,
+          "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: the prefix is already paired with "
+          "another domain. (%s)\n",
+          prefix, from_domain, prefix, to_domain, __func__);
+        return -EBUSY;
+      }
+
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: it nests with an existing prefix "
+        "rule. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // An exact rule for a covered name would shadow the prefix, so keep the two disjoint.
+    if (
+      ((rule->domain_a == domain_a || rule->domain_a == domain_b) &&
+       strncmp(prefix, rule->topic_name_a, prefix_len) == 0) ||
+      ((rule->domain_b == domain_a || rule->domain_b == domain_b) &&
+       strncmp(prefix, rule->topic_name_b, prefix_len) == 0)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: an exact rule already covers a name "
+        "under it. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+  }
+
+  // A re-declaration that enables nothing new must keep working once nodes are up, so only a new
+  // direction needs the guarantee below: endpoints that joined while it was denied were left out
+  // of their publishers' notify lists and skipped by set_publisher_shm_info.
+  if (same) {
+    const bool from_is_a = from_domain < to_domain;
+    if ((from_is_a && same->a_to_b) || (!from_is_a && same->b_to_a)) return 0;
+    if (any_topic_under_prefix(prefix, ipc_ns, from_domain, to_domain)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: it adds a direction after a covered "
+        "endpoint joined. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+    same->a_to_b |= from_is_a;
+    same->b_to_a |= !from_is_a;
+    return 0;
+  }
+
+  if (any_topic_under_prefix(prefix, ipc_ns, from_domain, to_domain)) {
+    dev_warn(
+      agnocast_device,
+      "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: an endpoint under it has already "
+      "joined. (%s)\n",
+      prefix, from_domain, prefix, to_domain, __func__);
+    return -EBUSY;
+  }
+
+  return insert_domain_rule(prefix, prefix, from_domain, to_domain, true, ipc_ns);
+}
+
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+{
+  if (from_domain == to_domain) return -EINVAL;
+
+  down_write(&global_htables_rwsem);
+  const int ret = add_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, ipc_ns);
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_add_domain_bridge_prefix(
+  const char * topic_name_prefix, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  if (from_domain == to_domain) return -EINVAL;
+  if (topic_name_prefix[0] != '/' || topic_name_prefix[1] == '\0') return -EINVAL;
+
+  down_write(&global_htables_rwsem);
+  const int ret = add_prefix_domain_rule(topic_name_prefix, from_domain, to_domain, ipc_ns);
   up_write(&global_htables_rwsem);
   return ret;
 }
@@ -2421,38 +2817,22 @@ unlock:
   return ret;
 }
 
-static int get_process_num(const struct ipc_namespace * ipc_ns)
+// Counting the unlink daemon would keep it from ever deciding the namespace is done.
+static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns)
 {
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
   hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
   {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns)) {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
       count++;
     }
   }
   return count;
 }
 
-static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Like get_process_num_in_domain() but excludes processes that have exited and are still
-// pending cleanup. The discovery agent tracks live endpoints, so an exited entry that lingers
-// until the unlink daemon drains it must not gate the agent's spawn or self-exit.
-static int get_alive_process_num_in_domain(
+static int get_process_num_in_domain_except_unlink_daemon(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   int count = 0;
@@ -2462,7 +2842,29 @@ static int get_alive_process_num_in_domain(
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      !proc_info->exited) {
+      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// Like get_process_num_in_domain_except_unlink_daemon() but also excludes processes that have
+// exited and are still pending cleanup. The discovery agent tracks live endpoints, so an exited
+// entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
+// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
+// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
+static int get_alive_process_num_in_domain_except_unlink_daemon(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (
+      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
+      !proc_info->exited && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
       count++;
     }
   }
@@ -2474,7 +2876,7 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
-    proc_info->is_bridge_manager = false;
+    proc_info->role = PROCESS_ROLE_APPLICATION;
   }
   up_write(&global_htables_rwsem);
   return 0;
@@ -2508,13 +2910,14 @@ int agnocast_ioctl_discovery_agent_should_exit(
 {
   if (!commit) {
     down_read(&global_htables_rwsem);
-    *ret_should_exit = (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0);
+    *ret_should_exit =
+      (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0);
     up_read(&global_htables_rwsem);
     return 0;
   }
 
   down_write(&global_htables_rwsem);
-  if (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0) {
+  if (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0) {
     agnocast_remove_discovery_agent_by_pid(pid);
     *ret_should_exit = true;
   } else {
@@ -2577,12 +2980,11 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   down_write(&global_htables_rwsem);
   // A bridge manager is per (ipc_ns, domain), so it must shut down once its
   // own domain is empty -- counting the whole namespace would keep it alive while an
-  // unrelated domain is busy. The manager itself is the remaining process (count == 1),
-  // and poll_for_unlink is not registered here, so it is excluded.
-  if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
+  // unrelated domain is busy. The manager itself is the remaining process (count == 1).
+  if (get_process_num_in_domain_except_unlink_daemon(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
-      proc_info->is_bridge_manager = false;
+      proc_info->role = PROCESS_ROLE_APPLICATION;
     }
     ioctl_ret->ret_should_shutdown = true;
   } else {
@@ -2611,9 +3013,9 @@ static long add_process_cmd(union ioctl_add_process_args __user * arg)
 
   union ioctl_add_process_args add_process_args;
   if (copy_from_user(&add_process_args, arg, sizeof(add_process_args))) return -EFAULT;
-  bool is_bridge_manager = add_process_args.is_bridge_manager;
+  enum process_role role = (enum process_role)add_process_args.role;
   uint32_t domain_id = add_process_args.domain_id;
-  ret = agnocast_ioctl_add_process(pid, ipc_ns, is_bridge_manager, domain_id, &add_process_args);
+  ret = agnocast_ioctl_add_process(pid, ipc_ns, role, domain_id, &add_process_args);
   if (ret == 0) {
     if (copy_to_user(arg, &add_process_args, sizeof(add_process_args))) return -EFAULT;
   }
@@ -2857,7 +3259,7 @@ static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg
 
   // Commit: free proc_info. Safe because user-space already has ret_pid.
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(ipc_ns, global_pid, &daemon_should_exit);
+  agnocast_commit_exit_process(ipc_ns, global_pid, current->tgid, &daemon_should_exit);
 
   // Patch ret_daemon_should_exit. Not fatal: when a pid was returned, its proc_info has already
   // been committed, so -EFAULT would make the daemon exit while discarding the ret_pid whose shm
@@ -2879,6 +3281,40 @@ static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
   if (ret == 0) {
     if (copy_to_user(arg, &topic_list_args, sizeof(topic_list_args))) return -EFAULT;
   }
+  return ret;
+}
+
+static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_get_node_names_args get_node_names_args;
+  if (copy_from_user(&get_node_names_args, arg, sizeof(get_node_names_args))) return -EFAULT;
+
+  const uint32_t buf_node_num =
+    min_t(uint32_t, get_node_names_args.node_name_buffer_size, MAX_NODE_NUM);
+  char __user * user_buf =
+    (char __user *)u64_to_user_ptr(get_node_names_args.node_name_buffer_addr);
+
+  char * buf = kvzalloc((size_t)buf_node_num * NODE_NAME_BUFFER_SIZE, GFP_KERNEL);
+  if (!buf) return -ENOMEM;
+
+  uint32_t node_num = 0;
+  long ret = agnocast_ioctl_get_node_names(ipc_ns, current->tgid, buf, buf_node_num, &node_num);
+  if (ret == 0) {
+    if (copy_to_user(user_buf, buf, (size_t)node_num * NODE_NAME_BUFFER_SIZE)) {
+      ret = -EFAULT;
+    } else {
+      get_node_names_args.ret_node_num = node_num;
+      if (copy_to_user(arg, &get_node_names_args, sizeof(get_node_names_args))) ret = -EFAULT;
+    }
+  } else if (ret == -ENOBUFS) {
+    dev_warn(
+      agnocast_device, "Node count exceeds limit: MAX_NODE_NUM=%d, node_name_buffer_size=%u\n",
+      MAX_NODE_NUM, get_node_names_args.node_name_buffer_size);
+  }
+
+  kvfree(buf);
   return ret;
 }
 
@@ -3080,6 +3516,21 @@ static long add_domain_bridge_cmd(struct ioctl_add_domain_bridge_args __user * a
     ipc_ns);
 }
 
+static long add_domain_bridge_prefix_cmd(struct ioctl_add_domain_bridge_prefix_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_add_domain_bridge_prefix_args prefix_args;
+  if (copy_from_user(&prefix_args, arg, sizeof(prefix_args))) return -EFAULT;
+
+  char prefix_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(prefix_buf, sizeof(prefix_buf), &prefix_args.topic_name_prefix);
+  if (ret) return ret;
+
+  return agnocast_ioctl_add_domain_bridge_prefix(
+    prefix_buf, prefix_args.from_domain, prefix_args.to_domain, ipc_ns);
+}
+
 static long remove_bridge_cmd(struct ioctl_remove_bridge_args __user * arg)
 {
   int ret = 0;
@@ -3224,6 +3675,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_exit_process_cmd((struct ioctl_get_exit_process_args __user *)arg);
     case AGNOCAST_GET_TOPIC_LIST_CMD:
       return get_topic_list_cmd((union ioctl_topic_list_args __user *)arg);
+    case AGNOCAST_GET_NODE_NAMES_CMD:
+      return get_node_names_cmd((union ioctl_get_node_names_args __user *)arg);
     case AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD:
       return get_node_subscriber_topics_cmd((union ioctl_node_info_args __user *)arg);
     case AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD:
@@ -3262,6 +3715,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return add_discovery_agent_cmd((struct ioctl_add_discovery_agent_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
+    case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:
+      return add_domain_bridge_prefix_cmd((struct ioctl_add_domain_bridge_prefix_args __user *)arg);
     default:
       return -EINVAL;
   }

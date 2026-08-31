@@ -21,7 +21,10 @@
     KUNIT_CASE(test_case_publish_msg_stops_signaling_exited_subscriber),                      \
     KUNIT_CASE(test_case_publish_msg_address_below_mempool),                                  \
     KUNIT_CASE(test_case_publish_msg_address_above_mempool),                                  \
-    KUNIT_CASE(test_case_publish_msg_no_process)
+    KUNIT_CASE(test_case_publish_msg_no_process),                                             \
+    KUNIT_CASE(test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified),         \
+    KUNIT_CASE(test_case_publish_msg_bridge_publisher_does_not_notify_other_domain),          \
+    KUNIT_CASE(test_case_publish_msg_bridge_subscriber_in_own_domain_notified)
 
 void test_case_publish_msg_no_topic(struct kunit * test);
 void test_case_publish_msg_no_publisher(struct kunit * test);
@@ -43,3 +46,6 @@ void test_case_publish_msg_stops_signaling_exited_subscriber(struct kunit * test
 void test_case_publish_msg_address_below_mempool(struct kunit * test);
 void test_case_publish_msg_address_above_mempool(struct kunit * test);
 void test_case_publish_msg_no_process(struct kunit * test);
+void test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified(struct kunit * test);
+void test_case_publish_msg_bridge_publisher_does_not_notify_other_domain(struct kunit * test);
+void test_case_publish_msg_bridge_subscriber_in_own_domain_notified(struct kunit * test);

@@ -110,6 +110,13 @@ public:
   const rmw_gid_t & get_gid() const { return gid_; }
 
   /**
+   * @brief Return the per-topic id the kernel module assigned to this publisher.
+   * @return Publisher id.
+   */
+  AGNOCAST_PUBLIC
+  topic_local_id_t get_id() const { return id_; }
+
+  /**
    * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).
    * @return Total subscriber count.
    */

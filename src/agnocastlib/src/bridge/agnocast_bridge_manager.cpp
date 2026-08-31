@@ -206,6 +206,11 @@ void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
         return;
       }
       break;
+    case BridgeMsgType::DaemonService:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonServicePayload>())) {
+        return;
+      }
+      break;
     default:
       RCLCPP_WARN(
         logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
@@ -235,7 +240,6 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
   switch (msg.type) {
     case BridgeMsgType::Service: {
       const auto & payload = msg.payload.service;
-      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
       std::string service_name = static_cast<const char *>(payload.service_name);
       ServiceBridgeItem sb_item;
 
@@ -245,10 +249,8 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
         active_service_bridges_.erase(it);
       }
 
-      sb_item.handle_request(payload, deps);
-      if (sb_item.state() != ServiceBridgeState::NONE) {
-        active_service_bridges_.emplace(service_name, std::move(sb_item));
-      }
+      sb_item.handle_request(payload);
+      active_service_bridges_.emplace(service_name, std::move(sb_item));
       break;
     }
     case BridgeMsgType::PubSub: {
@@ -265,6 +267,10 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
     }
     case BridgeMsgType::DaemonPubSub: {
       register_daemon_pubsub_request(msg.payload.daemon_pubsub);
+      break;
+    }
+    case BridgeMsgType::DaemonService: {
+      register_daemon_service_request(msg.payload.daemon_service);
       break;
     }
     default: {
@@ -289,6 +295,17 @@ void BridgeManager::register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPa
     (req.direction == BridgeDirection::ROS2_TO_AGNOCAST) ? daemon_forced_r2a_ : daemon_forced_a2r_;
   forced.insert_or_assign(
     topic_name, DaemonForcedRequest{message_type, daemon_request_qos(req), forced_until});
+}
+
+void BridgeManager::register_daemon_service_request(const BridgeMsgDaemonServicePayload & req)
+{
+  const std::string service_name = static_cast<const char *>(req.service_name);
+
+  auto it = active_service_bridges_.find(service_name);
+  if (it == active_service_bridges_.end()) {
+    return;
+  }
+  it->second.handle_daemon_request();
 }
 
 bool BridgeManager::is_daemon_forced(

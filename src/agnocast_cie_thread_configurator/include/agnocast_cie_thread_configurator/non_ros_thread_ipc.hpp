@@ -17,6 +17,7 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace agnocast_cie_thread_configurator
 {
@@ -150,6 +151,39 @@ inline void send_non_ros_thread_info(
   ::close(fd);
 }
 
+// Owns one file descriptor and closes it on destruction or reset().
+class UniqueFd
+{
+public:
+  UniqueFd() noexcept = default;
+  explicit UniqueFd(int fd) noexcept : fd_(fd) {}
+  ~UniqueFd() noexcept { reset(); }
+  UniqueFd(const UniqueFd &) = delete;
+  UniqueFd & operator=(const UniqueFd &) = delete;
+  UniqueFd(UniqueFd && other) noexcept : fd_(other.release()) {}
+  UniqueFd & operator=(UniqueFd && other) noexcept
+  {
+    if (this != &other) {
+      reset(other.release());
+    }
+    return *this;
+  }
+
+  int get() const noexcept { return fd_; }
+  explicit operator bool() const noexcept { return fd_ >= 0; }
+  int release() noexcept { return std::exchange(fd_, -1); }
+  void reset(int fd = -1) noexcept
+  {
+    if (fd_ >= 0) {
+      ::close(fd_);
+    }
+    fd_ = fd;
+  }
+
+private:
+  int fd_ = -1;
+};
+
 /// Receives non-ROS thread announcements over an abstract Unix datagram
 /// socket and dispatches each to the user callback on a private reader
 /// thread.
@@ -190,9 +224,9 @@ private:
 
   Callback callback_;
   rclcpp::Logger logger_;
-  int listener_fd_ = -1;
-  int stop_eventfd_ = -1;
-  int epfd_ = -1;
+  UniqueFd listener_fd_;
+  UniqueFd stop_eventfd_;
+  UniqueFd epfd_;
   std::thread thread_;
   std::atomic<bool> stopped_{false};
 };
