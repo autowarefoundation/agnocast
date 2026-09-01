@@ -3,6 +3,7 @@
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -297,6 +298,11 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
 
   const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+
+  if (current_hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
+    return;
+  }
 
   std::vector<std::string> mismatches;
 
