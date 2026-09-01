@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace agnocast_cie_thread_configurator
 {
@@ -100,6 +101,51 @@ std::optional<std::vector<HardwareMismatch>> check_hardware_info(
   }
 
   return mismatches;
+}
+
+RtThrottlingReport check_rt_throttling(
+  const YAML::Node & yaml,
+  const std::function<std::optional<int>(const std::string & path)> & read_sysctl)
+{
+  RtThrottlingReport report;
+  if (!yaml["rt_throttling"]) {
+    return report;
+  }
+
+  const auto & rt_bw = yaml["rt_throttling"];
+
+  for (const char * yaml_key : {"period_us", "runtime_us"}) {
+    if (!rt_bw[yaml_key]) {
+      continue;
+    }
+    RtThrottlingCheck check;
+    check.key = std::string("sched_rt_") + yaml_key;
+    check.expected = rt_bw[yaml_key].as<int>();
+    check.actual = read_sysctl("/proc/sys/kernel/" + check.key);
+    if (check.actual.has_value() && *check.actual != check.expected) {
+      report.mismatch = true;
+    }
+    report.checks.push_back(std::move(check));
+  }
+
+  if (report.mismatch) {
+    std::string message =
+      "rt_throttling values do not match the configuration. "
+      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
+      "(or run 'sudo sysctl --system'):\n";
+
+    if (rt_bw["period_us"]) {
+      message +=
+        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
+    }
+    if (rt_bw["runtime_us"]) {
+      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
+    }
+
+    report.sysctl_guidance = std::move(message);
+  }
+
+  return report;
 }
 
 }  // namespace agnocast_cie_thread_configurator

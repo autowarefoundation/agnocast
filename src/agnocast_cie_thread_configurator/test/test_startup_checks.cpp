@@ -3,6 +3,11 @@
 #include <gtest/gtest.h>
 #include <yaml-cpp/yaml.h>
 
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
 namespace acie = agnocast_cie_thread_configurator;
 
 TEST(ParseLscpuOutput, ExtractsExactlyTheRecordedKeys)
@@ -103,4 +108,110 @@ TEST(CheckHardwareInfo, ComparesOnlyKeysPresentOnBothSides)
   const auto result = acie::check_hardware_info(yaml, {{"model", "33"}, {"cpu_min_mhz", "2200"}});
   ASSERT_TRUE(result.has_value());
   EXPECT_TRUE(result->empty());
+}
+
+// ---------- check_rt_throttling ----------
+
+namespace
+{
+
+// read_sysctl double: records the requested paths and serves fixed values.
+struct FakeSysctl
+{
+  std::map<std::string, std::optional<int>> values;
+  mutable std::vector<std::string> requested;
+
+  std::function<std::optional<int>(const std::string &)> reader() const
+  {
+    return [this](const std::string & path) {
+      requested.push_back(path);
+      const auto it = values.find(path);
+      return it == values.end() ? std::nullopt : it->second;
+    };
+  }
+};
+
+constexpr const char * k_period_path = "/proc/sys/kernel/sched_rt_period_us";
+constexpr const char * k_runtime_path = "/proc/sys/kernel/sched_rt_runtime_us";
+
+}  // namespace
+
+TEST(CheckRtThrottling, MissingSectionYieldsEmptyReport)
+{
+  FakeSysctl sysctl;
+  const auto report = acie::check_rt_throttling(YAML::Load("callback_groups: []"), sysctl.reader());
+  EXPECT_TRUE(report.checks.empty());
+  EXPECT_FALSE(report.mismatch);
+  EXPECT_TRUE(report.sysctl_guidance.empty());
+  EXPECT_TRUE(sysctl.requested.empty());
+}
+
+TEST(CheckRtThrottling, ReadsTheKernelSysctlPathsInYamlKeyOrder)
+{
+  FakeSysctl sysctl;
+  sysctl.values[k_period_path] = 1000000;
+  sysctl.values[k_runtime_path] = 950000;
+  const auto yaml = YAML::Load("rt_throttling:\n  period_us: 1000000\n  runtime_us: 950000\n");
+  const auto report = acie::check_rt_throttling(yaml, sysctl.reader());
+
+  EXPECT_EQ(sysctl.requested, (std::vector<std::string>{k_period_path, k_runtime_path}));
+  ASSERT_EQ(report.checks.size(), 2u);
+  EXPECT_EQ(report.checks[0].key, "sched_rt_period_us");
+  EXPECT_EQ(report.checks[0].expected, 1000000);
+  EXPECT_EQ(report.checks[0].actual, 1000000);
+  EXPECT_EQ(report.checks[1].key, "sched_rt_runtime_us");
+  EXPECT_EQ(report.checks[1].expected, 950000);
+  EXPECT_EQ(report.checks[1].actual, 950000);
+  EXPECT_FALSE(report.mismatch);
+  EXPECT_TRUE(report.sysctl_guidance.empty());
+}
+
+TEST(CheckRtThrottling, MismatchGuidanceListsEveryConfiguredKey)
+{
+  FakeSysctl sysctl;
+  sysctl.values[k_period_path] = 1000000;  // matches
+  sysctl.values[k_runtime_path] = -1;      // differs
+  const auto yaml = YAML::Load("rt_throttling:\n  period_us: 1000000\n  runtime_us: 950000\n");
+  const auto report = acie::check_rt_throttling(yaml, sysctl.reader());
+
+  EXPECT_TRUE(report.mismatch);
+  EXPECT_EQ(
+    report.sysctl_guidance,
+    "rt_throttling values do not match the configuration. "
+    "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
+    "(or run 'sudo sysctl --system'):\n"
+    "  kernel.sched_rt_period_us = 1000000\n"
+    "  kernel.sched_rt_runtime_us = 950000");
+}
+
+TEST(CheckRtThrottling, ChecksOnlyTheConfiguredKeys)
+{
+  FakeSysctl sysctl;
+  sysctl.values[k_runtime_path] = -1;
+  const auto yaml = YAML::Load("rt_throttling:\n  runtime_us: 950000\n");
+  const auto report = acie::check_rt_throttling(yaml, sysctl.reader());
+
+  EXPECT_EQ(sysctl.requested, (std::vector<std::string>{k_runtime_path}));
+  ASSERT_EQ(report.checks.size(), 1u);
+  EXPECT_EQ(report.checks[0].key, "sched_rt_runtime_us");
+  EXPECT_TRUE(report.mismatch);
+  EXPECT_EQ(
+    report.sysctl_guidance,
+    "rt_throttling values do not match the configuration. "
+    "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
+    "(or run 'sudo sysctl --system'):\n"
+    "  kernel.sched_rt_runtime_us = 950000");
+}
+
+TEST(CheckRtThrottling, UnreadableSysctlIsRecordedButNeverAMismatch)
+{
+  FakeSysctl sysctl;  // serves nothing: every read returns nullopt
+  const auto yaml = YAML::Load("rt_throttling:\n  period_us: 1000000\n  runtime_us: 950000\n");
+  const auto report = acie::check_rt_throttling(yaml, sysctl.reader());
+
+  ASSERT_EQ(report.checks.size(), 2u);
+  EXPECT_FALSE(report.checks[0].actual.has_value());
+  EXPECT_FALSE(report.checks[1].actual.has_value());
+  EXPECT_FALSE(report.mismatch);
+  EXPECT_TRUE(report.sysctl_guidance.empty());
 }
