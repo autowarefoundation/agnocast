@@ -309,13 +309,16 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 // enqueued (via is_agnocast_pid()), each exiting at most once, so the ring buffer cannot overflow.
 // pid_queue_lock is a raw_spinlock_t and worker_wait an swait queue because
 // agnocast_enqueue_exit_pid() runs in tracepoint context, where sleeping locks are forbidden on
-// PREEMPT_RT (spinlock_t and wait_queue_head locks become sleeping rt_mutexes there).
+// PREEMPT_RT (spinlock_t, including the one embedded in wait_queue_head, becomes a sleeping
+// rt_mutex there).
 extern raw_spinlock_t pid_queue_lock;
 extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
 extern uint32_t queue_tail;
 
-// For controlling the kernel thread
+// For controlling the kernel thread.
+// worker_wait is an swait queue (see the pid_queue_lock comment above); swake_up_one() wakes
+// exactly one waiter, so the exit worker must remain the only waiter on worker_wait.
 extern struct task_struct * worker_task;
 extern struct swait_queue_head worker_wait;
 extern int has_new_pid;

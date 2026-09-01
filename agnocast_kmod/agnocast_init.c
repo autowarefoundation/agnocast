@@ -24,9 +24,9 @@ static const struct file_operations fops = {
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
+    // Pairs with smp_store_release() in agnocast_enqueue_exit_pid(); ensures all
+    // queue writes from the enqueuer are visible before we read the queue.
     swait_event_interruptible_exclusive(
-      // Pairs with smp_store_release() in agnocast_enqueue_exit_pid(); ensures all
-      // queue writes from the enqueuer are visible before we read the queue.
       worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
