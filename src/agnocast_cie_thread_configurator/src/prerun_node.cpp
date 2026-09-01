@@ -157,14 +157,12 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginMap;
 
   const auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  if (hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu; hardware_info will be empty.");
+  }
 
-  if (!hw_info) {
-    RCLCPP_WARN(
-      this->get_logger(), "Failed to read hardware info from lscpu; hardware_info will be empty.");
-  } else {
-    for (const auto & [key, value] : *hw_info) {
-      out << YAML::Key << key << YAML::Value << value;
-    }
+  for (const auto & [key, value] : hw_info) {
+    out << YAML::Key << key << YAML::Value << value;
   }
 
   out << YAML::EndMap;
