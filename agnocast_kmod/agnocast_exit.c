@@ -81,7 +81,7 @@ void agnocast_exit_free_data(void)
 
 void agnocast_exit_kthread(void)
 {
-  wake_up_interruptible(&worker_wait);
+  swake_up_one(&worker_wait);
   kthread_stop(worker_task);
 }
 

@@ -24,9 +24,10 @@ static const struct file_operations fops = {
 static int exit_worker_thread(void * data)
 {
   while (!kthread_should_stop()) {
-    // Pairs with smp_store_release() in agnocast_enqueue_exit_pid(); ensures all
-    // queue writes from the enqueuer are visible before we read the queue.
-    wait_event_interruptible(worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
+    swait_event_interruptible_exclusive(
+      // Pairs with smp_store_release() in agnocast_enqueue_exit_pid(); ensures all
+      // queue writes from the enqueuer are visible before we read the queue.
+      worker_wait, smp_load_acquire(&has_new_pid) || kthread_should_stop());
 
     if (kthread_should_stop()) break;
 
@@ -36,7 +37,7 @@ static int exit_worker_thread(void * data)
       unsigned long flags;
       bool got_pid = false;
 
-      spin_lock_irqsave(&pid_queue_lock, flags);
+      raw_spin_lock_irqsave(&pid_queue_lock, flags);
 
       if (queue_head != queue_tail) {
         pid = exit_pid_queue[queue_head];
@@ -48,7 +49,7 @@ static int exit_worker_thread(void * data)
       // preventing the enqueuer from seeing a stale 0 after re-checking the queue.
       if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
-      spin_unlock_irqrestore(&pid_queue_lock, flags);
+      raw_spin_unlock_irqrestore(&pid_queue_lock, flags);
 
       if (!got_pid) break;
 

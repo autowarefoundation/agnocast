@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
+#include <linux/swait.h>
 #include <linux/tracepoint.h>
 #include <linux/version.h>
 
@@ -306,14 +307,17 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 // Ring buffer to hold exited pids.
 // EXIT_QUEUE_SIZE (65536) far exceeds mempool_num (default 4096), and only Agnocast PIDs are
 // enqueued (via is_agnocast_pid()), each exiting at most once, so the ring buffer cannot overflow.
-extern spinlock_t pid_queue_lock;
+// pid_queue_lock is a raw_spinlock_t and worker_wait an swait queue because
+// agnocast_enqueue_exit_pid() runs in tracepoint context, where sleeping locks are forbidden on
+// PREEMPT_RT (spinlock_t and wait_queue_head locks become sleeping rt_mutexes there).
+extern raw_spinlock_t pid_queue_lock;
 extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
 extern uint32_t queue_tail;
 
 // For controlling the kernel thread
 extern struct task_struct * worker_task;
-extern struct wait_queue_head worker_wait;
+extern struct swait_queue_head worker_wait;
 extern int has_new_pid;
 
 extern struct tracepoint * tp_sched_process_exit;
