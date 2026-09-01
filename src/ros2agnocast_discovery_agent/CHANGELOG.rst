@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast_discovery_agent
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * fix(ros2agnocast_discovery_agent): resolve domain bridge config topic names to absolute names (`#1578 <https://github.com/tier4/agnocast/issues/1578>`_)
 * fix(agnocastlib): break the cross-IPC-namespace service bridge deadlock (`#1552 <https://github.com/tier4/agnocast/issues/1552>`_)
 * Fix/daemon force cross domain bridge (`#1574 <https://github.com/tier4/agnocast/issues/1574>`_)

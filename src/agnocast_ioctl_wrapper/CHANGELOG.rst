@@ -2,8 +2,8 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * perf(agnocastlib)[need-minor-update]: exec the discovery agent directly instead of via ros2 run (`#1473 <https://github.com/tier4/agnocast/issues/1473>`_)
 * feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): register renamed domain bridge rules from the YAML remap field (`#1437 <https://github.com/tier4/agnocast/issues/1437>`_)
 * feat(agnocast_kmod)[needs minor version update]: support cross-domain topic rename in the domain bridge (`#1436 <https://github.com/tier4/agnocast/issues/1436>`_)

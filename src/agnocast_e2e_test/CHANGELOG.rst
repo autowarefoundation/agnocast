@@ -2,8 +2,8 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)
 * feat(agnocast_cie_thread_configurator): apply kernel thread and IRQ configs with reapply support (`#1546 <https://github.com/tier4/agnocast/issues/1546>`_)
 * test(e2e_test): add e2e service tests (`#1476 <https://github.com/tier4/agnocast/issues/1476>`_)

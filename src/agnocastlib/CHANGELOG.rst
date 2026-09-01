@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * fix(agnocastlib): support building with TRACETOOLS_DISABLED (`#1537 <https://github.com/tier4/agnocast/issues/1537>`_)
 * fix(agnocast_kmod): track the unlink daemon instead of inferring it from the process count (`#1582 <https://github.com/tier4/agnocast/issues/1582>`_)
 * feat(agnocastlib): support service introspection on the client side (`#1580 <https://github.com/tier4/agnocast/issues/1580>`_)

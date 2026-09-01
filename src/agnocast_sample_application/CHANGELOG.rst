@@ -2,8 +2,8 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)
 * fix(sample_application): store callback groups as class members (`#1530 <https://github.com/tier4/agnocast/issues/1530>`_)
 * feat(agnocastlib): add AsyncParametersClient to Node (`#1510 <https://github.com/tier4/agnocast/issues/1510>`_)

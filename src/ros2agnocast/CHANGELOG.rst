@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * feat(agnocastlib): support service introspection on the server side (`#1551 <https://github.com/tier4/agnocast/issues/1551>`_)
 * feat(agnocastlib): mark bridge-owned services and clients as bridges in kmod (`#1555 <https://github.com/tier4/agnocast/issues/1555>`_)
 * feat(ros2agnocast): add --spin-time to topic list_agnocast (`#1483 <https://github.com/tier4/agnocast/issues/1483>`_)

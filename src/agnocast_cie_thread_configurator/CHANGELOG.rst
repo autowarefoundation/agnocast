@@ -2,8 +2,8 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.0 (2026-09-01)
+------------------
 * refactor(agnocast_cie_thread_configurator): share the manageable CPU bound between parser and scanner (`#1589 <https://github.com/tier4/agnocast/issues/1589>`_)
 * refactor(agnocast_cie_thread_configurator): move is_kworker_comm to system_scan (`#1588 <https://github.com/tier4/agnocast/issues/1588>`_)
 * refactor(agnocast_cie_thread_configurator): replace policy strings with a SchedPolicy enum (`#1587 <https://github.com/tier4/agnocast/issues/1587>`_)
