@@ -135,13 +135,22 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
 
     execute_any_executable(any_executable);
 
-    // On rclcpp 28+ (Jazzy), interrupt_guard_condition_ is a shared_ptr.
-    // Wake up threads that may be blocked in wait_for_work() so they can re-check
-    // MutuallyExclusive callback groups whose can_be_taken_from was just restored.
 #if RCLCPP_VERSION_MAJOR >= 28
     if (
       any_executable.callback_group &&
       any_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
+      // On rclcpp 28+ (Jazzy), a wait set rebuild that runs while this callback is executing
+      // leaves out every entity of its MutuallyExclusive group (build_entities_collection()
+      // skips groups whose can_be_taken_from is false), and they return only with the next
+      // rebuild. Request that rebuild through the flag itself: the guard condition alone is not
+      // enough because rmw_fastrtps clears its trigger even when rmw_wait() times out, and
+      // wait_for_work() ignores the notify waitable on a Timeout result, so a trigger that
+      // coincides with a timeout is lost and the group's entities would never be waited on
+      // again (see issue #3240 in ros2/rclcpp). The store must not be weaker than release: it
+      // publishes the can_be_taken_from restore done in execute_any_executable() to the thread
+      // that consumes the flag in wait_for_work(). Trigger afterwards to wake threads blocked in
+      // wait_for_work().
+      entities_need_rebuild_.store(true, std::memory_order_release);
       interrupt_guard_condition_->trigger();
     }
 #endif

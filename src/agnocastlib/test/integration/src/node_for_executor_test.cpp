@@ -3,6 +3,8 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
+#include <sstream>
+
 NodeForExecutorTest::NodeForExecutorTest(
   const size_t num_agnocast_sub_cbs, const size_t num_ros2_sub_cbs,
   const size_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
@@ -103,6 +105,7 @@ void NodeForExecutorTest::dummy_work(std::chrono::milliseconds exec_time)
 // It stands in for a publisher, signalling each notification eventfd as the kernel does.
 void NodeForExecutorTest::agnocast_timer_cb()
 {
+  agnocast_timer_fires_.fetch_add(1, std::memory_order_relaxed);
   for (int notify_eventfd : notify_eventfds_) {
     const uint64_t one = 1;
     if (write(notify_eventfd, &one, sizeof(one)) == -1 && errno != EAGAIN) {
@@ -122,7 +125,7 @@ void NodeForExecutorTest::agnocast_sub_cb(
 {
   std::unique_lock<std::mutex> lock(mutex_for_agnocast_cbg_, std::try_to_lock);
   if (!lock.owns_lock()) {
-    is_mutually_exclusive_agnocast_ = false;
+    is_mutually_exclusive_agnocast_.store(false, std::memory_order_relaxed);
   }
 
   agnocast_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
@@ -131,6 +134,7 @@ void NodeForExecutorTest::agnocast_sub_cb(
 
 void NodeForExecutorTest::ros2_timer_cb()
 {
+  ros2_timer_fires_.fetch_add(1, std::memory_order_relaxed);
   std_msgs::msg::Bool msg;
   msg.data = true;
   ros2_pub_->publish(msg);
@@ -141,7 +145,7 @@ void NodeForExecutorTest::ros2_sub_cb(
 {
   std::unique_lock<std::mutex> lock(mutex_for_ros2_cbg_, std::try_to_lock);
   if (!lock.owns_lock()) {
-    is_mutually_exclusive_ros2_ = false;
+    is_mutually_exclusive_ros2_.store(false, std::memory_order_relaxed);
   }
 
   ros2_sub_cbs_called_[cb_i].store(true, std::memory_order_release);
@@ -168,12 +172,33 @@ bool NodeForExecutorTest::is_all_agnocast_sub_cbs_called() const
   return true;
 }
 
+std::string NodeForExecutorTest::describe_progress() const
+{
+  std::ostringstream oss;
+  oss << "agnocast_timer_fires=" << agnocast_timer_fires_.load(std::memory_order_relaxed)
+      << " ros2_timer_fires=" << ros2_timer_fires_.load(std::memory_order_relaxed)
+      << " uncalled_agnocast_sub_cbs=[";
+  for (size_t i = 0; i < num_total_agnocast_sub_cbs_; i++) {
+    if (!agnocast_sub_cbs_called_[i].load(std::memory_order_acquire)) {
+      oss << " " << i;
+    }
+  }
+  oss << " ] uncalled_ros2_sub_cbs=[";
+  for (size_t i = 0; i < num_ros2_sub_cbs_; i++) {
+    if (!ros2_sub_cbs_called_[i].load(std::memory_order_acquire)) {
+      oss << " " << i;
+    }
+  }
+  oss << " ]";
+  return oss.str();
+}
+
 bool NodeForExecutorTest::is_mutually_exclusive_agnocast() const
 {
-  return is_mutually_exclusive_agnocast_;
+  return is_mutually_exclusive_agnocast_.load(std::memory_order_relaxed);
 }
 
 bool NodeForExecutorTest::is_mutually_exclusive_ros2() const
 {
-  return is_mutually_exclusive_ros2_;
+  return is_mutually_exclusive_ros2_.load(std::memory_order_relaxed);
 }
