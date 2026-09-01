@@ -267,7 +267,7 @@ void test_case_add_process_unlink_daemon_stays_registered_while_draining(struct 
   agnocast_commit_exit_process(current->nsproxy->ipc_ns, app_pid, daemon_pid, &daemon_should_exit);
 
   // Assert
-  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  KUNIT_EXPECT_FALSE(test, daemon_should_exit);
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 1);
   union ioctl_add_process_args next_args;
   KUNIT_EXPECT_EQ(

@@ -1650,12 +1650,13 @@ void agnocast_commit_exit_process(
     }
   }
 
-  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ipc_ns) == 0);
+  // Only the idle poll answers this: poll_for_unlink() drains until a call returns no pid and
+  // acts on that call's flag alone, so reporting it earlier would be reporting it to nobody.
+  *ret_daemon_should_exit = (global_pid < 0) && (get_process_num_except_unlink_daemon(ipc_ns) == 0);
 
   // Deregistering only on death would leave a window where a starting process is told a daemon
-  // exists and skips spawning its replacement. Restricted to the idle poll because that is the
-  // only call whose flag poll_for_unlink() acts on; the drain loop discards the rest.
-  if (*ret_daemon_should_exit && global_pid < 0 && caller_pid >= 0) {
+  // exists and skips spawning its replacement.
+  if (*ret_daemon_should_exit && caller_pid >= 0) {
     struct process_info * caller_info = agnocast_find_process_info(caller_pid);
     if (caller_info && caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
       hash_del_rcu(&caller_info->node);

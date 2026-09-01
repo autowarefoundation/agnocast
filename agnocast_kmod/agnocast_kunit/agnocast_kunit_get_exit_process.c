@@ -8,10 +8,10 @@
 static const pid_t PID = 1000;
 
 // get_exit_process_cmd tolerates a failed ret_daemon_should_exit copy_to_user because the flag is
-// re-derived on the next poll. That fallback only works if agnocast_commit_exit_process() derives
-// the flag unconditionally, including on an idle poll where Phase 1 found nothing and passes
-// global_pid == -1. These cases pin that down so gating the derivation behind global_pid >= 0
-// cannot silently strand the daemon.
+// re-derived on the next poll. That fallback only works if the idle poll, where Phase 1 found
+// nothing and passes global_pid == -1, is the one that derives it. These cases pin that down so
+// neither gating the derivation behind global_pid >= 0 nor dropping the idle poll's own
+// derivation can silently strand the daemon.
 
 static void setup_one_process(struct kunit * test, const pid_t pid)
 {
@@ -80,9 +80,9 @@ void test_case_get_exit_process_commit_last_process(struct kunit * test)
   agnocast_commit_exit_process(
     current->nsproxy->ipc_ns, next_global_pid, -1, &next_daemon_should_exit);
 
-  // Assert: the flag is still derived on the idle poll that follows the commit.
+  // Assert: the commit that returned a pid says nothing; the idle poll that follows does.
   KUNIT_EXPECT_EQ(test, global_pid, PID);
-  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  KUNIT_EXPECT_FALSE(test, daemon_should_exit);
   KUNIT_EXPECT_EQ(test, next_global_pid, -1);
   KUNIT_EXPECT_TRUE(test, next_daemon_should_exit);
 }
