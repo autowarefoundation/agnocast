@@ -316,9 +316,6 @@ extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
 extern uint32_t queue_tail;
 
-// For controlling the kernel thread.
-// worker_wait is an swait queue (see the pid_queue_lock comment above); swake_up_one() wakes
-// exactly one waiter, so the exit worker must remain the only waiter on worker_wait.
 extern struct task_struct * worker_task;
 extern struct swait_queue_head worker_wait;
 extern int has_new_pid;

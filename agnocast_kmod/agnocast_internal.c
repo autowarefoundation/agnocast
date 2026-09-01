@@ -333,7 +333,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   // here before the proc_info lookup (which would otherwise return early for the agent's pid).
   agnocast_remove_discovery_agent_by_pid(pid);
 
-  // The PID was already filtered by is_agnocast_pid() in the tracepoint probe, but the state may
+  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
   // have changed between then and now (e.g., the process was already cleaned up by a prior call).
   struct process_info * proc_info = NULL;
   uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
