@@ -299,15 +299,14 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
 
-  if (!current_hw_info) {
-    RCLCPP_WARN(
-      this->get_logger(), "Failed to read hardware info from lscpu. Skipping hardware validation.");
+  if (current_hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
     return;
   }
 
   std::vector<std::string> mismatches;
 
-  for (const auto & [key, current_value] : *current_hw_info) {
+  for (const auto & [key, current_value] : current_hw_info) {
     if (!yaml_hw_info[key]) {
       continue;
     }

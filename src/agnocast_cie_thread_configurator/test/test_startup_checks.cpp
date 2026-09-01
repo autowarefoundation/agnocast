@@ -4,8 +4,6 @@
 
 namespace acie = agnocast_cie_thread_configurator;
 
-// ---------- parse_lscpu_output ----------
-
 TEST(ParseLscpuOutput, ExtractsExactlyTheRecordedKeys)
 {
   const char * output =
@@ -30,19 +28,14 @@ TEST(ParseLscpuOutput, ExtractsExactlyTheRecordedKeys)
   EXPECT_EQ(info.at("cpu_min_mhz"), "2200.0000");
 }
 
-TEST(ParseLscpuOutput, TrimsWhitespaceAroundValues)
+TEST(ParseLscpuOutput, TrimsValuesAndEmptiesWhitespaceOnlyOnes)
 {
-  const auto info = acie::parse_lscpu_output("Model name:\t  Cortex-A76  \r\n");
-  ASSERT_EQ(info.size(), 1u);
+  const auto info =
+    acie::parse_lscpu_output("Model name:\t  Cortex-A76  \r\nFrequency boost:   \r\nModel:\n");
+  ASSERT_EQ(info.size(), 3u);
   EXPECT_EQ(info.at("model_name"), "Cortex-A76");
-}
-
-TEST(ParseLscpuOutput, TrimsWhitespaceOnlyValuesToEmpty)
-{
-  const auto info = acie::parse_lscpu_output("Frequency boost:   \r\nModel name:\n");
-  ASSERT_EQ(info.size(), 2u);
   EXPECT_EQ(info.at("frequency_boost"), "");
-  EXPECT_EQ(info.at("model_name"), "");
+  EXPECT_EQ(info.at("model"), "");
 }
 
 TEST(ParseLscpuOutput, MatchesIndentedHierarchicKeys)
