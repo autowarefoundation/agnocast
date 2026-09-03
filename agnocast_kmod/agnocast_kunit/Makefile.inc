@@ -1,4 +1,5 @@
 KUNIT_TEST_OBJS := \
+  agnocast_kunit_helpers.o \
   agnocast_kunit_add_process.o \
   agnocast_kunit_add_subscriber.o \
   agnocast_kunit_add_publisher.o \

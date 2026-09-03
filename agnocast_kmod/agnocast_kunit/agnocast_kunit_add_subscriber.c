@@ -4,6 +4,7 @@
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
 #include "agnocast_kunit_eventfd.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -14,22 +15,6 @@ static const bool QOS_IS_RELIABLE = true;
 static const bool IS_TAKE_SUB = false;
 static const bool IGNORE_LOCAL_PUBLICATIONS = false;
 static const bool IS_BRIDGE = false;
-
-static void setup_process(struct kunit * test, const pid_t pid)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
-
-static void setup_process_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
 
 static int add_pubsub_pair(
   struct kunit * test, const pid_t pub_pid, const pid_t sub_pid, const uint32_t qos_depth)
@@ -52,8 +37,8 @@ void test_case_add_subscriber_domain_isolation(struct kunit * test)
 {
   const pid_t pub_pid = 2000;
   const pid_t sub_pid = 2001;
-  setup_process_domain(test, pub_pid, 0);
-  setup_process_domain(test, sub_pid, 1);
+  agnocast_kunit_setup_process(test, pub_pid, 0);
+  agnocast_kunit_setup_process(test, sub_pid, 1);
 
   KUNIT_ASSERT_EQ(test, add_pubsub_pair(test, pub_pid, sub_pid, 1), 0);
 
@@ -67,8 +52,8 @@ void test_case_add_subscriber_same_domain_shared(struct kunit * test)
 {
   const pid_t pub_pid = 2002;
   const pid_t sub_pid = 2003;
-  setup_process_domain(test, pub_pid, 0);
-  setup_process_domain(test, sub_pid, 0);
+  agnocast_kunit_setup_process(test, pub_pid, 0);
+  agnocast_kunit_setup_process(test, sub_pid, 0);
 
   KUNIT_ASSERT_EQ(test, add_pubsub_pair(test, pub_pid, sub_pid, 1), 0);
 
@@ -81,7 +66,7 @@ void test_case_add_subscriber_normal(struct kunit * test)
   union ioctl_add_subscriber_args add_subscriber_args;
   const pid_t subscriber_pid = 1000;
   const uint32_t qos_depth = 1;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
   KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 1);
   KUNIT_ASSERT_FALSE(test, agnocast_is_proc_exited(subscriber_pid));
 
@@ -115,7 +100,7 @@ void test_case_add_subscriber_acquires_notify_context(struct kunit * test)
   const pid_t subscriber_pid = 1000;
   const uint32_t qos_depth = 1;
   const int eventfd = 0;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
@@ -141,7 +126,7 @@ void test_case_add_subscriber_take_sub_acquires_no_notify_context(struct kunit *
   const pid_t subscriber_pid = 1000;
   const uint32_t qos_depth = 1;
   const int eventfd = 0;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
@@ -165,7 +150,7 @@ void test_case_add_subscriber_invalid_eventfd(struct kunit * test)
   union ioctl_add_subscriber_args add_subscriber_args;
   const pid_t subscriber_pid = 1000;
   const uint32_t qos_depth = 1;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
@@ -187,7 +172,7 @@ void test_case_add_subscriber_releases_notify_context_on_failure(struct kunit * 
   agnocast_kunit_eventfd_reset();
   const pid_t subscriber_pid = 1000;
   const uint32_t qos_depth = 1;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
   for (uint32_t i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
     union ioctl_add_subscriber_args filler_args;
     agnocast_ioctl_add_subscriber(
@@ -220,7 +205,7 @@ void test_case_add_subscriber_too_many_subscribers(struct kunit * test)
   union ioctl_add_subscriber_args add_subscriber_args;
   const uint32_t qos_depth = 1;
   const pid_t subscriber_pid = 1000;
-  setup_process(test, subscriber_pid);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
   for (uint32_t i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
     union ioctl_add_subscriber_args add_subscriber_args;
     agnocast_ioctl_add_subscriber(
