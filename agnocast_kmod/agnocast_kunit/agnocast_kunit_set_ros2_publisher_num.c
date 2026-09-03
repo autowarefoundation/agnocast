@@ -2,28 +2,21 @@
 #include "agnocast_kunit_set_ros2_publisher_num.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
-static char * node_name = "/kunit_test_node";
-static uint32_t qos_depth = 10;
-static bool qos_is_transient_local = false;
-static pid_t publisher_pid = 3000;
-static bool is_bridge = false;
+static const char * node_name = "/kunit_test_node";
+static const uint32_t qos_depth = 10;
+static const bool qos_is_transient_local = false;
+static const bool is_bridge = false;
 
 static void setup_one_publisher(struct kunit * test, char * topic_name)
 {
+  static pid_t publisher_pid = 3000;
   publisher_pid++;
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    publisher_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-    qos_is_transient_local, is_bridge, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  agnocast_kunit_setup_one_publisher(
+    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0,
+    NULL);
 }
 
 void test_case_set_ros2_publisher_num_normal(struct kunit * test)

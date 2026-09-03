@@ -2,6 +2,7 @@
 #include "agnocast_kunit_get_node_names.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -16,38 +17,20 @@ static const uint32_t QOS_DEPTH = 1;
 static const uint32_t DOMAIN_ID = 1;
 static const uint32_t OTHER_DOMAIN_ID = 2;
 
-// Returns the process's mempool base address, used as a valid publish address.
-static uint64_t setup_process(struct kunit * test, const pid_t pid, const uint32_t domain_id)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-  return add_process_args.ret_addr;
-}
-
 static topic_local_id_t add_publisher(
   struct kunit * test, const char * topic_name, const char * node_name, const pid_t pid,
   const bool is_bridge)
 {
-  union ioctl_add_publisher_args add_pub_args;
-  int ret = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, pid, QOS_DEPTH, false, is_bridge,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-  return add_pub_args.ret_id;
+  return agnocast_kunit_setup_publisher(
+    test, topic_name, node_name, pid, QOS_DEPTH, false, is_bridge);
 }
 
 static topic_local_id_t add_subscriber(
   struct kunit * test, const char * topic_name, const char * node_name, const pid_t pid,
   const bool is_bridge)
 {
-  union ioctl_add_subscriber_args add_sub_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, pid, QOS_DEPTH, false, true, false, false,
-    is_bridge, -1, &add_sub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-  return add_sub_args.ret_id;
+  return agnocast_kunit_setup_subscriber(
+    test, topic_name, node_name, pid, QOS_DEPTH, false, true, false, false, is_bridge, -1);
 }
 
 // Returns how many of the `num` names in `buf` equal `name`.
@@ -83,7 +66,7 @@ void test_case_get_node_names_multiple_nodes(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_subscriber(test, TOPIC_NAME2, NODE_NAME2, PID, false);
 
@@ -105,7 +88,7 @@ void test_case_get_node_names_deduplicates(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_publisher(test, TOPIC_NAME2, NODE_NAME, PID, false);
   add_subscriber(test, TOPIC_NAME, NODE_NAME, PID, false);
@@ -127,8 +110,8 @@ void test_case_get_node_names_same_name_in_two_processes(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
-  setup_process(test, PID2, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID2, DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID2, false);
 
@@ -149,7 +132,7 @@ void test_case_get_node_names_excludes_bridge_publisher(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
   add_subscriber(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_publisher(test, TOPIC_NAME, NODE_NAME2, PID, true);
 
@@ -169,7 +152,7 @@ void test_case_get_node_names_excludes_bridge_subscriber(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_subscriber(test, TOPIC_NAME, NODE_NAME2, PID, true);
 
@@ -190,8 +173,8 @@ void test_case_get_node_names_other_domain(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
-  setup_process(test, PID2, OTHER_DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID2, OTHER_DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
 
   // Act
@@ -216,8 +199,8 @@ void test_case_get_node_names_excludes_the_bridged_domain(struct kunit * test)
     agnocast_ioctl_add_domain_bridge(
       TOPIC_NAME, TOPIC_NAME, DOMAIN_ID, OTHER_DOMAIN_ID, current->nsproxy->ipc_ns),
     0);
-  setup_process(test, PID, DOMAIN_ID);
-  setup_process(test, PID2, OTHER_DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID2, OTHER_DOMAIN_ID);
   add_publisher(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_publisher(test, TOPIC_NAME, NODE_NAME2, PID2, false);
 
@@ -238,7 +221,7 @@ void test_case_get_node_names_buffer_too_small(struct kunit * test)
   uint32_t node_num = 0;
 
   // Arrange
-  setup_process(test, PID, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID, DOMAIN_ID);
   add_subscriber(test, TOPIC_NAME, NODE_NAME, PID, false);
   add_subscriber(test, TOPIC_NAME, NODE_NAME2, PID, false);
 
@@ -260,7 +243,7 @@ void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
   // Arrange
   // The publisher runs as the calling thread, because publish_msg resolves the topic in the
   // caller's domain rather than the publisher's.
-  const uint64_t msg_addr = setup_process(test, current->tgid, DOMAIN_ID);
+  const uint64_t msg_addr = agnocast_kunit_setup_process(test, current->tgid, DOMAIN_ID);
   const topic_local_id_t publisher_id =
     add_publisher(test, TOPIC_NAME, NODE_NAME, current->tgid, false);
   union ioctl_publish_msg_args publish_msg_args;
@@ -269,7 +252,7 @@ void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
     agnocast_ioctl_publish_msg(
       TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, msg_addr, &publish_msg_args),
     0);
-  setup_process(test, PID2, DOMAIN_ID);
+  agnocast_kunit_setup_process(test, PID2, DOMAIN_ID);
   const topic_local_id_t subscriber_id = add_subscriber(test, TOPIC_NAME, NODE_NAME2, PID2, false);
   KUNIT_ASSERT_EQ(
     test,
