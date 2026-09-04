@@ -98,7 +98,10 @@ union ioctl_publish_msg_args publish_core(
   return publish_msg_args;
 }
 
-uint32_t get_subscription_count_core(const std::string & topic_name)
+namespace
+{
+
+union ioctl_get_subscriber_num_args query_subscriber_num(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};
@@ -107,7 +110,13 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
+  return args;
+}
 
+// The kernel module reports other-domain subscribers only when a bridge rule delivers to them, and
+// already leaves out bridge-owned ones.
+uint32_t reachable_outside_process(const union ioctl_get_subscriber_num_args & args)
+{
   uint32_t inter_count = args.ret_other_process_subscriber_num;
   // If an A2R bridge exists, exclude the agnocast subscriber created by the bridge
   if (args.ret_a2r_bridge_exist && inter_count > 0) {
@@ -120,20 +129,25 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
     ros2_count--;
   }
 
-  return inter_count + ros2_count;
+  return inter_count + ros2_count + args.ret_other_domain_subscriber_num;
+}
+
+}  // namespace
+
+uint32_t get_subscription_count_core(const std::string & topic_name)
+{
+  return reachable_outside_process(query_subscriber_num(topic_name));
 }
 
 uint32_t get_intra_subscription_count_core(const std::string & topic_name)
 {
-  union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
-  get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &get_subscriber_count_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
+  return query_subscriber_num(topic_name).ret_same_process_subscriber_num;
+}
 
-  return get_subscriber_count_args.ret_same_process_subscriber_num;
+uint32_t count_subscribers_core(const std::string & topic_name)
+{
+  const union ioctl_get_subscriber_num_args args = query_subscriber_num(topic_name);
+  return args.ret_same_process_subscriber_num + reachable_outside_process(args);
 }
 
 template <typename NodeT>
