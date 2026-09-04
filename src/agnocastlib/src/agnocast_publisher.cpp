@@ -109,7 +109,8 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
   }
 
   uint32_t inter_count = args.ret_other_process_subscriber_num;
-  // If an A2R bridge exists, exclude the agnocast subscriber created by the bridge
+  // If an A2R bridge exists, exclude the agnocast subscriber created by the bridge. The bridge
+  // runs in a forked process, so it is never part of the same-process count.
   if (args.ret_a2r_bridge_exist && inter_count > 0) {
     inter_count--;
   }
@@ -120,10 +121,10 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
     ros2_count--;
   }
 
-  return inter_count + ros2_count;
+  return inter_count + args.ret_same_process_subscriber_num + ros2_count;
 }
 
-uint32_t get_intra_subscription_count_core(const std::string & topic_name)
+uint32_t get_same_process_subscription_count_core(const std::string & topic_name)
 {
   union ioctl_get_subscriber_num_args get_subscriber_count_args = {};
   get_subscriber_count_args.topic_name = {topic_name.c_str(), topic_name.size()};
@@ -149,6 +150,7 @@ void PublisherBase::init_base(
   }
 
   topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
+  use_intra_process_ = node->get_node_base_interface()->get_use_intra_process_default();
 
   auto node_parameters = node->get_node_parameters_interface();
   actual_qos_ = !options.qos_overriding_options.get_policy_kinds().empty()
