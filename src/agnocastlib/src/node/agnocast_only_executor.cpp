@@ -5,6 +5,7 @@
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "agnocast_context_internal.hpp"
 #include "agnocast_signal_handler.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -46,10 +47,19 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
     exit(EXIT_FAILURE);
   }
 
+  // Bring up the signal handler if agnocast::init() was never called, e.g. when this
+  // executor is created from inside an agnocast::Node that a component container loaded.
+  ensure_initialized();
+
   if (!SignalHandler::register_shutdown_event(shutdown_event_fd_)) {
-    RCLCPP_ERROR(logger, "Failed to register shutdown eventfd with signal handler");
-    close(shutdown_event_fd_);
-    exit(EXIT_FAILURE);
+    // Reachable once the context has been shut down, i.e. during teardown, since
+    // ensure_initialized() deliberately does not reinstall the handler then. Losing shutdown
+    // notifications at that point is harmless because the spin loops also stop on
+    // agnocast::ok(), so keep the process alive rather than aborting it.
+    RCLCPP_WARN(
+      logger,
+      "Failed to register shutdown eventfd with signal handler; this executor will not be "
+      "notified on SIGINT/SIGTERM");
   }
 }
 

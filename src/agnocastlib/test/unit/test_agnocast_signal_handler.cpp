@@ -152,6 +152,11 @@ bool sigactions_equal(const struct sigaction & a, const struct sigaction & b)
 class SignalHandlerTest : public ::testing::Test
 {
 protected:
+  // An agnocast::Node or an Agnocast-only executor built by an earlier test in this binary
+  // leaves the handler installed: the context is a latch, so destroying them does not undo it.
+  // These cases measure what install() changes, so they have to start from a known state.
+  void SetUp() override { agnocast::SignalHandler::uninstall(); }
+
   void TearDown() override
   {
     agnocast::SignalHandler::uninstall();
