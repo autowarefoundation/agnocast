@@ -1,26 +1,5 @@
 #pragma once
 
-// GPU device-memory sharing model used by agnocastlib.
-//
-// Each publisher owns one device-memory region, divided into fixed-size slots.
-// Each slot stores exactly one message. Therefore, a slot has the same lifetime
-// as its corresponding kmod entry, and the kmod's referencing_subscribers bitmap
-// is the sole authority for determining when the slot can be reused. No
-// additional reference count is maintained.
-//
-// Regions are allocated at initialization, never per message. Sharing a device
-// allocation between processes requires an export and a matching import, and the
-// import is synchronous host-side work that every subscriber must finish before
-// it can read. Allocating per message would place that work between publish and
-// callback, so delivery would depend on an operation that cannot be issued on a
-// stream, cannot be overlapped with GPU execution, and cannot be scheduled. A
-// pool performs the exchange once per publisher-subscriber pair at startup, and
-// leaves nothing but a slot index on the message path.
-//
-// Under NvSciBuf the point is not cost but feasibility: allocation requires an
-// attribute list reconciled across every peer beforehand, so the participants
-// have to be known before any memory exists.
-
 #include "agnocast/agnocast_ioctl.hpp"
 
 #include <array>
