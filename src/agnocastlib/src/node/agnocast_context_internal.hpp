@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rclcpp/context.hpp>
+
 namespace agnocast
 {
 
@@ -17,6 +19,9 @@ namespace agnocast
 //
 // Unlike agnocast::init(), this does not parse command-line arguments and does not
 // configure rcl logging, so it never takes over global state that rclcpp owns.
-void ensure_initialized();
+//
+// Pass the rclcpp context the caller belongs to, when it has one; see
+// Context::adopt_rclcpp_context().
+void ensure_initialized(const rclcpp::Context::SharedPtr & rclcpp_context = nullptr);
 
 }  // namespace agnocast

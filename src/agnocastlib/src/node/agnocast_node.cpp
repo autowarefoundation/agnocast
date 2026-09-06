@@ -13,14 +13,13 @@ namespace agnocast
 namespace
 {
 
-// local_args_ is the first member, so this runs before any of the node interfaces are
-// built. That ordering matters: NodeTimeSource can spawn an AgnocastOnlySingleThreadedExecutor
-// for the use_sim_time clock thread, and that executor needs the Agnocast context and
-// signal handler to already be up.
-ParsedArguments init_and_parse_arguments(const std::vector<std::string> & arguments)
+// local_args_ is the first member, so this runs before anything can observe agnocast::ok().
+// That ordering is what lets everything hung off a node -- its clients, its updater, the tf2
+// buffer -- rely on "an agnocast::Node exists" implying "agnocast::ok()".
+ParsedArguments init_and_parse_arguments(const rclcpp::NodeOptions & options)
 {
-  ensure_initialized();
-  return parse_arguments(arguments);
+  ensure_initialized(options.context());
+  return parse_arguments(options.arguments());
 }
 
 }  // namespace
@@ -33,7 +32,7 @@ Node::Node(const std::string & node_name, const rclcpp::NodeOptions & options)
 Node::Node(
   const std::string & node_name, const std::string & namespace_,
   const rclcpp::NodeOptions & options)
-: local_args_(init_and_parse_arguments(options.arguments())),
+: local_args_(init_and_parse_arguments(options)),
   node_base_(std::make_shared<node_interfaces::NodeBase>(
     node_name, namespace_, options.context(), local_args_.get(), options.use_global_arguments(),
     options.use_intra_process_comms(), options.enable_topic_statistics())),

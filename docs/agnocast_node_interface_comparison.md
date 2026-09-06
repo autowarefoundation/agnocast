@@ -391,7 +391,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | Aspect | agnocast | Notes |
 |--------|----------|-------|
-| Global context required | ✗ (Optional) | Works without agnocast::init() |
+| Global context required | ✗ (Optional) | Works without agnocast::init(); call it before the first node, or not at all |
 | NodeOptions support | ✓ | Supports parameter_overrides, context, arguments, etc. |
 | Sub-nodes | ✗ | agnocast does not support sub-nodes |
 | Lifecycle nodes | ✗ | Not applicable |
@@ -406,13 +406,16 @@ The following tables compare methods that are **directly defined** in each class
 
 ### 5.1 What a Component Container does not provide
 
-A container's `main()` calls `rclcpp::init()` but never `agnocast::init()`, so the Agnocast global context is brought up lazily when the first `agnocast::Node` (or Agnocast-only executor) is created. This has three consequences:
+A container's `main()` calls `rclcpp::init()` but never `agnocast::init()`, so the Agnocast global context is brought up lazily when the first `agnocast::Node` (or Agnocast-only executor) is created. This has four consequences:
 
 - **Global arguments do not apply.** `agnocast::init()` is what parses the process command line, so a lazily initialized context exposes no global arguments. Only the `NodeOptions::arguments()` that the Component Manager passes in are honored; remaps and parameter overrides given as global `--ros-args` to the container do not reach the node.
 - **Logging stays under rclcpp's control.** The lazy path deliberately skips `rcl_logging_configure_with_output_handler()` so that it does not take over the output handler that `rclcpp::init()` installed for the whole container.
 - **Agnocast installs SIGINT/SIGTERM handlers.** They chain to the handlers `rclcpp::init()` installed rather than replacing them, so the container's own shutdown path still runs. This is what lets the Agnocast-only executors that `agnocast::Node` spawns internally (the `use_sim_time` clock thread, the `tf2` listener thread) stop on Ctrl-C.
+- **`agnocast::ok()` follows `rclcpp::ok()`.** A lazily initialized context records the `rclcpp::Context` its first node belongs to, and reports itself as running only while that context is valid. So `rclcpp::shutdown()` stops the Agnocast side too, whether or not a signal was involved — without it, every loop that polls `agnocast::ok()` (the Agnocast-only executors, the `tf2` buffer, the service clients) would keep waiting for a process that is already on its way out.
 
 Once the context has been shut down, creating further nodes does not revive it; only an explicit `agnocast::init()` does.
+
+The recorded context is the one that governs the process, not a statement about which Agnocast API brought the context up. A process that calls `agnocast::init()` **and** runs under rclcpp — for instance a standalone `main()` that wants Agnocast to see the command line — still follows `rclcpp::shutdown()`. An AgnocastOnly process hands its nodes the global default `rclcpp::Context` as well, but never initializes it, so that one is not adopted and `agnocast::ok()` keeps its original meaning there.
 
 Note also that the container drives the node with its own `rclcpp::Executor`-derived executor (`SingleThreadedAgnocastExecutor`, `MultiThreadedAgnocastExecutor`, `CallbackIsolatedAgnocastExecutor`). The `AgnocastOnly*` executors cannot be used by a Component Manager because they do not derive from `rclcpp::Executor`.
 

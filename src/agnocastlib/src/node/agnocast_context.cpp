@@ -10,6 +10,8 @@
 #include <rcutils/logging.h>
 #include <rcutils/logging_macros.h>
 
+#include <stdexcept>
+
 namespace agnocast
 {
 
@@ -18,11 +20,15 @@ std::mutex g_context_mtx;
 
 void Context::init(int argc, char const * const * argv)
 {
-  // Only a previous init() makes this a no-op. A lazy init_without_arguments() leaves
-  // parsed_arguments_ empty, so an explicit init() afterwards must still parse the command
-  // line instead of silently dropping the global arguments.
-  if (initialized_ && parsed_arguments_.is_valid()) {
-    return;
+  if (initialized_) {
+    // parsed_arguments_ is valid if and only if a previous init() ran: rcl allocates the
+    // impl even for an empty command line, and init_without_arguments() never parses one.
+    if (parsed_arguments_.is_valid()) {
+      throw std::runtime_error("agnocast::init() called on an already-initialized context");
+    }
+    throw std::runtime_error(
+      "agnocast::init() was called after an agnocast::Node or an Agnocast-only executor had "
+      "already brought the context up. Call it before creating either, or not at all.");
   }
 
   // Copy argv into a safe container to avoid pointer arithmetic
@@ -56,6 +62,27 @@ void Context::init(int argc, char const * const * argv)
   TRACEPOINT(agnocast_init, static_cast<const void *>(this));
 }
 
+void Context::adopt_rclcpp_context(const rclcpp::Context::SharedPtr & rclcpp_context)
+{
+  if (rclcpp_context_) {
+    return;
+  }
+  if (rclcpp_context && rclcpp_context->is_valid()) {
+    rclcpp_context_ = rclcpp_context;
+  }
+}
+
+bool Context::is_ok() const
+{
+  if (!initialized_) {
+    return false;
+  }
+  if (rclcpp_context_) {
+    return rclcpp_context_->is_valid();
+  }
+  return true;
+}
+
 bool Context::init_without_arguments()
 {
   if (initialized_ || shutdown_called_) {
@@ -71,6 +98,9 @@ bool Context::init_without_arguments()
 
 void Context::shutdown()
 {
+  // A later init() starts a fresh cycle and must not inherit a context that is on its way out.
+  rclcpp_context_.reset();
+
   if (!initialized_) {
     return;
   }
@@ -87,16 +117,18 @@ void init(int argc, char const * const * argv)
   SignalHandler::install();
 }
 
-void ensure_initialized()
+void ensure_initialized(const rclcpp::Context::SharedPtr & rclcpp_context)
 {
   bool initialized = false;
   {
     std::lock_guard<std::mutex> lock(g_context_mtx);
+    g_context.adopt_rclcpp_context(rclcpp_context);
     initialized = g_context.init_without_arguments();
   }
 
-  // Skip while the context is shut down, so that objects created during teardown do not
-  // reinstall the handler that agnocast::shutdown() has just removed.
+  // Skip while the context is shut down. Objects created during teardown must neither revive
+  // agnocast::ok() nor, when the teardown came from agnocast::shutdown(), reinstall the handler
+  // it has just removed.
   if (initialized) {
     SignalHandler::install();
   }
@@ -123,7 +155,7 @@ void shutdown()
 bool ok()
 {
   std::lock_guard<std::mutex> lock(g_context_mtx);
-  return g_context.is_initialized();
+  return g_context.is_ok();
 }
 
 }  // namespace agnocast
