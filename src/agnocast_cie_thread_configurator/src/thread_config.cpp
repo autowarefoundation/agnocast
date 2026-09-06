@@ -1,8 +1,7 @@
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 
-#include "agnocast_cie_thread_configurator/sched_policy.hpp"
-#include "agnocast_cie_thread_configurator/system_scan.hpp"
-
+#include <linux/sched.h>
+#include <sched.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -150,7 +149,8 @@ std::vector<int> parse_affinity(
     throw std::runtime_error(
       "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
   }
-  const int max_cpu = manageable_cpu_bound();
+  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
   for (const auto & cpu_node : affinity) {
     int cpu = 0;
     try {
@@ -163,8 +163,7 @@ std::vector<int> parse_affinity(
     if (cpu < 0 || cpu > max_cpu) {
       throw std::runtime_error(
         "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " + std::to_string(max_cpu) +
-        "] (this machine has " + std::to_string(sysconf(_SC_NPROCESSORS_CONF)) + " CPUs) for " +
-        entry_desc);
+        "] (this machine has " + std::to_string(num_cpus) + " CPUs) for " + entry_desc);
     }
     cpus.push_back(cpu);
   }
@@ -173,18 +172,17 @@ std::vector<int> parse_affinity(
   return cpus;
 }
 
-SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string & entry_desc)
-{
-  const auto parsed = parse_sched_policy(policy);
-  if (!parsed) {
-    throw std::runtime_error(
-      "Unknown scheduling policy '" + policy + "' for " + entry_desc +
-      ". Valid policies: " + sched_policy_names());
-  }
-  return *parsed;
-}
-
 }  // namespace
+
+const std::unordered_map<std::string, int> policy_to_sched_const = {
+  {"SCHED_OTHER", SCHED_OTHER}, {"SCHED_BATCH", SCHED_BATCH}, {"SCHED_IDLE", SCHED_IDLE},
+  {"SCHED_FIFO", SCHED_FIFO},   {"SCHED_RR", SCHED_RR},       {"SCHED_DEADLINE", SCHED_DEADLINE},
+};
+
+bool is_cfs_policy(const std::string & policy)
+{
+  return policy == "SCHED_OTHER" || policy == "SCHED_BATCH" || policy == "SCHED_IDLE";
+}
 
 bool ThreadConfig::is_wildcard() const noexcept
 {
@@ -201,6 +199,12 @@ std::string ThreadConfig::wildcard_prefix() const
 std::string extract_node_part(const std::string & callback_group_id)
 {
   return callback_group_id.substr(0, callback_group_id.find('@'));
+}
+
+bool is_kworker_comm(const std::string & comm)
+{
+  constexpr std::string_view kworker_prefix = "kworker/";
+  return comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0;
 }
 
 void parse_yaml(
@@ -244,13 +248,19 @@ void parse_yaml(
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
     cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = cg["policy"].as<std::string>();
-    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "id=" + cfg.thread_str);
 
-    if (policy == SchedPolicy::Deadline) {
+    if (policy_to_sched_const.count(cfg.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + cfg.policy + "' for id=" + cfg.thread_str +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
+
+    if (cfg.policy == "SCHED_DEADLINE") {
       cfg.runtime = cg["runtime"].as<unsigned int>();
       cfg.period = cg["period"].as<unsigned int>();
       cfg.deadline = cg["deadline"].as<unsigned int>();
-    } else if (is_cfs(policy)) {
+    } else if (is_cfs_policy(cfg.policy)) {
       cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
       cfg.priority =
@@ -265,13 +275,19 @@ void parse_yaml(
     cfg.thread_str = nrt["name"].as<std::string>();
     cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     cfg.policy = nrt["policy"].as<std::string>();
-    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "name=" + cfg.thread_str);
 
-    if (policy == SchedPolicy::Deadline) {
+    if (policy_to_sched_const.count(cfg.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + cfg.policy + "' for name=" + cfg.thread_str +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
+
+    if (cfg.policy == "SCHED_DEADLINE") {
       cfg.runtime = nrt["runtime"].as<unsigned int>();
       cfg.period = nrt["period"].as<unsigned int>();
       cfg.deadline = nrt["deadline"].as<unsigned int>();
-    } else if (is_cfs(policy)) {
+    } else if (is_cfs_policy(cfg.policy)) {
       cfg.nice =
         parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
@@ -369,9 +385,14 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
     } catch (const YAML::Exception &) {
       throw std::runtime_error("'policy' must be a string for comm=" + cfg.comm);
     }
-    const SchedPolicy policy = parse_policy_or_throw(*cfg.policy, "comm=" + cfg.comm);
+    if (policy_to_sched_const.count(*cfg.policy) == 0) {
+      throw std::runtime_error(
+        "Unknown scheduling policy '" + *cfg.policy + "' for comm=" + cfg.comm +
+        ". Valid policies: SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR, "
+        "SCHED_DEADLINE");
+    }
 
-    if (policy == SchedPolicy::Deadline) {
+    if (*cfg.policy == "SCHED_DEADLINE") {
       // Explicit check for a clear message: these fields are always
       // hand-written (prerun never emits DEADLINE) and easy to forget.
       if (
@@ -384,7 +405,7 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       cfg.runtime = parse_deadline_field(kt, "runtime", "comm=" + cfg.comm);
       cfg.period = parse_deadline_field(kt, "period", "comm=" + cfg.comm);
       cfg.deadline = parse_deadline_field(kt, "deadline", "comm=" + cfg.comm);
-    } else if (is_cfs(policy)) {
+    } else if (is_cfs_policy(*cfg.policy)) {
       cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     } else {
       cfg.priority =

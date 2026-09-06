@@ -2,11 +2,6 @@
 Changelog for package agnocast_cie_config_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-2.4.0 (2026-09-01)
-------------------
-* feat(agnocast_cie_thread_configurator): apply kernel thread and IRQ configs with reapply support (`#1546 <https://github.com/tier4/agnocast/issues/1546>`_)
-* feat(agnocast_cie_thread_configurator): support wildcard callback group ids (<node name>/*) in the config YAML (`#1454 <https://github.com/tier4/agnocast/issues/1454>`_)
-
 2.3.5 (2026-06-09)
 ------------------
 

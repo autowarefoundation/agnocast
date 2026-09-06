@@ -1,7 +1,6 @@
 #include "agnocast_cie_thread_configurator/prerun_node.hpp"
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
-#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -236,18 +235,19 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & info : kernel_threads) {
-    // A policy the template cannot round-trip: UNKNOWN(<n>) has no name, and
-    // SCHED_DEADLINE's runtime/period/deadline cannot be recovered from /proc.
-    const auto policy = agnocast_cie_thread_configurator::parse_sched_policy(info.policy);
+    // A policy with no YAML representation: UNKNOWN(<n>), or SCHED_DEADLINE,
+    // whose runtime/period/deadline cannot be recovered from /proc.
     const bool policy_representable =
-      policy.has_value() && *policy != agnocast_cie_thread_configurator::SchedPolicy::Deadline;
+      agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
+      info.policy != "SCHED_DEADLINE";
     const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "comm" << YAML::Value << info.comm;
     if (policy_representable) {
+      const bool is_cfs = agnocast_cie_thread_configurator::is_cfs_policy(info.policy);
       out << YAML::Key << "policy" << YAML::Value << info.policy;
-      if (agnocast_cie_thread_configurator::is_cfs(*policy)) {
+      if (is_cfs) {
         out << YAML::Key << "nice" << YAML::Value << info.nice;
       } else {
         out << YAML::Key << "priority" << YAML::Value << info.rt_priority;

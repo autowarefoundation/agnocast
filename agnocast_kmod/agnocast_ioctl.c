@@ -1138,36 +1138,23 @@ unlock_only_global:
   return ret;
 }
 
-// Whether `sub_info` may be handed `en`: 1 when it may, 0 when the entry has to be skipped,
-// -ENODATA when the entry's publisher is no longer in the topic.
-// Caller holds global_htables_rwsem (read), which keeps pub_info and proc_info alive, and
-// wrapper->topic->rwsem (read), which keeps `en` alive.
-static int is_entry_deliverable(
-  const struct topic_wrapper * wrapper, const struct subscriber_info * sub_info,
-  const struct entry_node * en)
+// Find the first entry with entry_id >= target_entry_id
+static struct rb_node * find_first_entry_ge(struct rb_root * root, const int64_t target_entry_id)
 {
-  const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
-  if (!pub_info) {
-    dev_warn(
-      agnocast_device,
-      "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
-      "topic(topic_name=%s). (%s)\n",
-      en->publisher_id, en->entry_id, wrapper->key, __func__);
-    return -ENODATA;
+  struct rb_node ** curr = &(root->rb_node);
+  struct rb_node * candidate = NULL;
+
+  while (*curr) {
+    const struct entry_node * en = container_of(*curr, struct entry_node, node);
+    if (en->entry_id >= target_entry_id) {
+      candidate = *curr;
+      curr = &((*curr)->rb_left);
+    } else {
+      curr = &((*curr)->rb_right);
+    }
   }
 
-  const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-  if (!proc_info || proc_info->exited) {
-    return 0;
-  }
-
-  if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
-    return 0;
-  }
-
-  return domain_delivery_allowed(
-    wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
-    sub_info->is_bridge);
+  return candidate;
 }
 
 static int receive_msg_core(
@@ -1182,51 +1169,51 @@ static int receive_msg_core(
     return 0;
   }
 
-  if (sub_info->qos_depth == 0) {
-    return 0;
-  }
+  const struct entry_node * newest_en = container_of(newest_node, struct entry_node, node);
+  const int64_t newest_entry_id = newest_en->entry_id;
 
-  // node ends up on the qos_depth-th newest entry the subscriber can be handed, on its oldest
-  // unreceived deliverable entry when fewer than qos_depth of them are, and NULL when none are.
-  const int64_t oldest_wanted_entry_id = sub_info->latest_received_entry_id + 1;
-  struct rb_node * node = NULL;
-  uint32_t deliverable_num = 0;
-  for (struct rb_node * back = newest_node; back; back = rb_prev(back)) {
-    const struct entry_node * en = container_of(back, struct entry_node, node);
-    if (en->entry_id < oldest_wanted_entry_id) {
-      break;
-    }
-    int ret = is_entry_deliverable(wrapper, sub_info, en);
-    if (ret < 0) {
-      return ret;
-    }
-    if (ret == 0) {
-      continue;
-    }
+  // Calculate start_entry_id = max(newest - qos_depth + 1, latest_received_entry_id + 1)
+  const int64_t latest_received_entry_id = sub_info->latest_received_entry_id;
+  const int64_t qos_start = newest_entry_id - (int64_t)sub_info->qos_depth + 1;
+  const int64_t start_entry_id =
+    (qos_start > latest_received_entry_id) ? qos_start : (latest_received_entry_id + 1);
 
-    node = back;
-    if (++deliverable_num >= sub_info->qos_depth) {
-      break;
-    }
-  }
+  struct rb_node * node = find_first_entry_ge(&wrapper->topic->entries, start_entry_id);
 
   for (; node; node = rb_next(node)) {
     struct entry_node * en = container_of(node, struct entry_node, node);
 
     if (ioctl_ret->ret_entry_num == MAX_RECEIVE_NUM) {
-      ioctl_ret->ret_call_again = ioctl_ret->ret_entry_num < deliverable_num;
+      ioctl_ret->ret_call_again = true;
       break;
     }
 
-    int ret = is_entry_deliverable(wrapper, sub_info, en);
-    if (ret < 0) {
-      return ret;
+    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
+    if (!pub_info) {
+      dev_warn(
+        agnocast_device,
+        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
+        "topic(topic_name=%s). (%s)\n",
+        en->publisher_id, en->entry_id, wrapper->key, __func__);
+      return -ENODATA;
     }
-    if (ret == 0) {
+
+    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+    if (!proc_info || proc_info->exited) {
       continue;
     }
 
-    ret = add_subscriber_reference(en, subscriber_id, false);
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge)) {
+      continue;
+    }
+
+    int ret = add_subscriber_reference(en, subscriber_id, false);
     if (ret < 0) {
       return ret;
     }
@@ -1377,12 +1364,29 @@ int agnocast_ioctl_take_msg(
       break;  // Never take any messages that are older than the most recently received
     }
 
-    const int deliverable = is_entry_deliverable(wrapper, sub_info, en);
-    if (deliverable < 0) {
-      ret = deliverable;
+    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
+    if (!pub_info) {
+      dev_warn(
+        agnocast_device,
+        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
+        "topic(topic_name=%s). (%s)\n",
+        en->publisher_id, en->entry_id, topic_name, __func__);
+      ret = -ENODATA;
       goto unlock_all;
     }
-    if (deliverable == 0) {
+
+    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+    if (!proc_info || proc_info->exited) {
+      continue;
+    }
+
+    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+      continue;
+    }
+
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge)) {
       continue;
     }
 

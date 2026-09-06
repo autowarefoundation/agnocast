@@ -2,7 +2,6 @@
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
-#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -28,10 +27,7 @@
 #include <system_error>
 #include <utility>
 
-using agnocast_cie_thread_configurator::is_cfs;
-using agnocast_cie_thread_configurator::parse_sched_policy;
-using agnocast_cie_thread_configurator::SchedPolicy;
-using agnocast_cie_thread_configurator::to_kernel_policy;
+using agnocast_cie_thread_configurator::policy_to_sched_const;
 
 namespace
 {
@@ -57,8 +53,7 @@ bool kernel_thread_in_sync(
   const agnocast_cie_thread_configurator::KernelThreadInfo & info)
 {
   if (config.policy.has_value()) {
-    const auto policy = parse_sched_policy(*config.policy);
-    if (!policy || *policy == SchedPolicy::Deadline) {
+    if (*config.policy == "SCHED_DEADLINE") {
       return false;
     }
     if (*config.policy != info.policy) {
@@ -66,8 +61,9 @@ bool kernel_thread_in_sync(
     }
     // The policy classes tune different knobs: nice for CFS, rt_priority for
     // FIFO/RR (the emitter and parser agree on this split).
-    const bool tunable_in_sync =
-      is_cfs(*policy) ? config.nice == info.nice : config.priority == info.rt_priority;
+    const bool tunable_in_sync = agnocast_cie_thread_configurator::is_cfs_policy(*config.policy)
+                                   ? config.nice == info.nice
+                                   : config.priority == info.rt_priority;
     if (!tunable_in_sync) {
       return false;
     }
@@ -418,76 +414,77 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
 
 bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t thread_id)
 {
-  const auto policy = parse_sched_policy(config.policy);
-  if (!policy) {
+  if (
+    config.policy == "SCHED_OTHER" || config.policy == "SCHED_BATCH" ||
+    config.policy == "SCHED_IDLE") {
+    struct sched_param param;
+    param.sched_priority = 0;
+
+    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+        config.thread_str.c_str(), thread_id, strerror(errno));
+      return false;
+    }
+
+    // Specify nice value
+    if (setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
+        config.thread_str.c_str(), thread_id, strerror(errno));
+      return false;
+    }
+
+  } else if (config.policy == "SCHED_FIFO" || config.policy == "SCHED_RR") {
+    struct sched_param param;
+    param.sched_priority = config.priority;
+
+    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+        config.thread_str.c_str(), thread_id, strerror(errno));
+      return false;
+    }
+
+  } else if (config.policy == "SCHED_DEADLINE") {
+    struct sched_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.size = sizeof(attr);
+    // SCHED_FLAG_RESET_ON_FORK lets the target thread still call fork(2)/clone(2)
+    // after being placed under SCHED_DEADLINE; without it, clone(2) returns EAGAIN.
+    // Children reset to SCHED_OTHER; each callback-group thread that needs its own
+    // SCHED_DEADLINE gets it via its own CallbackGroupInfo message.
+    attr.sched_flags = SCHED_FLAG_RESET_ON_FORK;
+    attr.sched_nice = 0;
+    attr.sched_priority = 0;
+
+    attr.sched_policy = SCHED_DEADLINE;
+    attr.sched_runtime = config.runtime;
+    attr.sched_period = config.period;
+    attr.sched_deadline = config.deadline;
+
+    if (sched_setattr(thread_id, &attr, 0) == -1) {
+      RCLCPP_ERROR(
+        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+        config.thread_str.c_str(), thread_id, strerror(errno));
+      return false;
+    }
+  } else {
     RCLCPP_ERROR(
       this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%" PRId64 ")",
       config.policy.c_str(), config.thread_str.c_str(), thread_id);
     return false;
   }
 
-  // No default: -Werror=switch must reject an unhandled SchedPolicy, since an
-  // unhandled case would fall through to the affinity syscalls.
-  switch (*policy) {
-    case SchedPolicy::Other:
-    case SchedPolicy::Batch:
-    case SchedPolicy::Idle:
-    case SchedPolicy::Fifo:
-    case SchedPolicy::Rr: {
-      struct sched_param param;
-      param.sched_priority = is_cfs(*policy) ? 0 : config.priority;
-
-      if (sched_setscheduler(thread_id, to_kernel_policy(*policy), &param) == -1) {
-        RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
-        return false;
-      }
-
-      if (is_cfs(*policy) && setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
-        RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
-        return false;
-      }
-      break;
-    }
-    case SchedPolicy::Deadline: {
-      struct sched_attr attr;
-      memset(&attr, 0, sizeof(attr));
-      attr.size = sizeof(attr);
-      // SCHED_FLAG_RESET_ON_FORK lets the target thread still call fork(2)/clone(2)
-      // after being placed under SCHED_DEADLINE; without it, clone(2) returns EAGAIN.
-      // Children reset to SCHED_OTHER; each callback-group thread that needs its own
-      // SCHED_DEADLINE gets it via its own CallbackGroupInfo message.
-      attr.sched_flags = SCHED_FLAG_RESET_ON_FORK;
-      attr.sched_nice = 0;
-      attr.sched_priority = 0;
-
-      attr.sched_policy = SCHED_DEADLINE;
-      attr.sched_runtime = config.runtime;
-      attr.sched_period = config.period;
-      attr.sched_deadline = config.deadline;
-
-      if (sched_setattr(thread_id, &attr, 0) == -1) {
-        RCLCPP_ERROR(
-          this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
-        return false;
-      }
-      break;
-    }
-  }
-
-  return issue_affinity_syscalls(config.thread_str, policy, config.affinity, thread_id);
+  return issue_affinity_syscalls(config.thread_str, config.policy, config.affinity, thread_id);
 }
 
 bool ThreadConfiguratorNode::issue_affinity_syscalls(
-  const std::string & thread_str, std::optional<SchedPolicy> policy,
-  const std::vector<int> & affinity, int64_t thread_id)
+  const std::string & thread_str, const std::string & policy, const std::vector<int> & affinity,
+  int64_t thread_id)
 {
   if (affinity.size() > 0) {
-    if (policy == SchedPolicy::Deadline) {
+    if (policy == "SCHED_DEADLINE") {
       if (!set_affinity_by_cgroup(thread_id, affinity)) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (thread=%s, tid=%" PRId64 "): %s",
@@ -598,8 +595,7 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       } else {
         // Branch on the observed policy: an affinity-only entry matching a
         // thread currently under SCHED_DEADLINE needs the cgroup path.
-        ok = issue_affinity_syscalls(
-          config.comm, parse_sched_policy(info->policy), config.affinity, info->tid);
+        ok = issue_affinity_syscalls(config.comm, info->policy, config.affinity, info->tid);
       }
 
       if (ok) {

@@ -2,10 +2,13 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <array>
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -83,11 +86,21 @@ std::map<std::string, std::string> get_hardware_info()
 
 size_t get_default_domain_id()
 {
+  // Match agnocast::get_ros_domain_id() (agnocastlib): unset, empty, unparsable,
+  // or out-of-range ROS_DOMAIN_ID must fall back to 0 instead of throwing.
+  // This package does not depend on agnocastlib, so the parser is inlined here.
   const char * env_value = std::getenv("ROS_DOMAIN_ID");
-  if (env_value != nullptr) {
-    return static_cast<size_t>(std::stoul(env_value));
+  if (env_value == nullptr || *env_value == '\0') {
+    return 0;
   }
-  return 0;  // default domain ID
+  char * end = nullptr;
+  errno = 0;
+  const unsigned long value = std::strtoul(env_value, &end, 10);
+  if (end == env_value || *end != '\0' || errno != 0 ||
+      value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
+    return 0;
+  }
+  return static_cast<size_t>(value);
 }
 
 rclcpp::Node::SharedPtr create_node_for_domain(size_t domain_id)
