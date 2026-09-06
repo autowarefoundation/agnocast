@@ -4,11 +4,12 @@
 // discrete GPUs and automotive SoCs, so it is the default wherever the device
 // reports support for it.
 
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_backend.hpp"
 
 #include <cuda.h>
 
 #include <mutex>
+#include <optional>
 
 namespace agnocast::gpu
 {
@@ -25,17 +26,17 @@ public:
 
   [[nodiscard]] bool is_supported() const noexcept override;
 
-  [[nodiscard]] bool create_region(
-    uint32_t slot_size, uint32_t slot_count, agnocast::internal::GpuRegion & out_region) override;
-  [[nodiscard]] bool export_for(
-    const agnocast::internal::GpuRegion & region, topic_local_id_t subscriber_id,
-    agnocast::internal::GpuRegionDescriptor & out_desc) override;
-  [[nodiscard]] bool import_region(
-    const agnocast::internal::GpuRegionDescriptor & desc,
-    agnocast::internal::GpuRegion & out_region) override;
+  [[nodiscard]] agnocast::internal::MappedGpuRegion create_region(
+    uint32_t slot_size, uint32_t slot_count) override;
+  [[nodiscard]] std::optional<agnocast::internal::GpuRegionExport> export_for(
+    const agnocast::internal::MappedGpuRegion & region, topic_local_id_t subscriber_id) override;
+  [[nodiscard]] agnocast::internal::MappedGpuRegion import_region(
+    const agnocast::internal::GpuRegionExport & exported) override;
 
 private:
-  void release_region(const agnocast::internal::GpuRegionMapping & mapping) noexcept override;
+  void release_region(
+    void * base, const agnocast::internal::GpuRegionGeometry & geometry,
+    uint64_t backend_token) noexcept override;
 
   // Binds the context for one operation. Push/pop rather than set, because a
   // context binding belongs to the calling thread and these operations run on

@@ -376,14 +376,18 @@ struct ioctl_set_ros2_publisher_num_args
 // copies are hand-maintained and the major.minor version gate is what stands
 // between a missed edit and silent memory corruption.
 //
-// A region belongs to exactly one publisher, so publisher_id identifies it and
-// no separate region id exists. The kernel module stores the export without
-// interpreting it: it holds the region's liveness reference so the memory
-// survives the publishing process, and installs a fresh descriptor for each
-// importer rather than having descriptors passed between processes.
+// A publisher owns a list of regions rather than one: it grows its pool by
+// adding a region instead of failing to borrow, so a message names the region it
+// was written into. The kernel module stores each export without interpreting
+// it: it holds the region's liveness reference so the memory survives the
+// publishing process, and installs a fresh descriptor for each importer rather
+// than having descriptors passed between processes.
 #define GPU_DEVICE_UUID_SIZE 16
 #define MAX_GPU_HANDLE_BLOB_SIZE 4096
+#define MAX_GPU_REGION_NUM_PER_PUBLISHER 16
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_gpu_region_args {
   struct
   {
@@ -404,7 +408,10 @@ union ioctl_add_gpu_region_args {
   // produced it.
   uint32_t ret_region_id;
 };
+#pragma GCC diagnostic pop
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_get_gpu_region_args {
   struct
   {
@@ -434,6 +441,7 @@ union ioctl_get_gpu_region_args {
     uint32_t ret_region_id;
   };
 };
+#pragma GCC diagnostic pop
 
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD \

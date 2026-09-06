@@ -66,9 +66,11 @@ void test_case_gpu_region_round_trip(struct kunit * test)
   KUNIT_ASSERT_EQ(test, ret, 0);
   const uint32_t assigned_region_id = add_args.ret_region_id;
 
+  // region_id 0 asks for "any", which is what a caller that has not yet seen a
+  // message uses.
   memset(&get_args, 0, sizeof(get_args));
   ret = agnocast_ioctl_get_gpu_region(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, NULL, 0, &get_args, &handle_file);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, 0, NULL, 0, &get_args, &handle_file);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, get_args.ret_backend_type, 1u);
@@ -107,7 +109,7 @@ void test_case_gpu_region_blob(struct kunit * test)
   memset(&get_args, 0, sizeof(get_args));
   memset(out, 0, sizeof(out));
   ret = agnocast_ioctl_get_gpu_region(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, out, sizeof(out), &get_args,
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, 0, out, sizeof(out), &get_args,
     &handle_file);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -146,9 +148,9 @@ void test_case_gpu_region_reject_empty_geometry(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
-// A region lasts as long as its publisher, so a second registration means the
-// caller lost track of the first, which would leak its liveness reference.
-void test_case_gpu_region_reject_second_registration(struct kunit * test)
+// A publisher grows its pool by adding regions, so a second registration is
+// normal and must yield a distinct id: a message names the region it used.
+void test_case_gpu_region_second_registration_gets_a_new_id(struct kunit * test)
 {
   const topic_local_id_t publisher_id = setup_publisher(test);
   union ioctl_add_gpu_region_args add_args;
@@ -157,9 +159,92 @@ void test_case_gpu_region_reject_second_registration(struct kunit * test)
   fill_args(&add_args, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
   ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
   KUNIT_ASSERT_EQ(test, ret, 0);
+  const uint32_t first_id = add_args.ret_region_id;
 
+  fill_args(&add_args, publisher_id, SLOT_SIZE * 2, SLOT_COUNT, MAPPED_SIZE * 2);
   ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
-  KUNIT_EXPECT_EQ(test, ret, -EEXIST);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  KUNIT_EXPECT_NE(test, first_id, add_args.ret_region_id);
+}
+
+// The id a message carries must select that region and not merely any of the
+// publisher's, otherwise a slot index would be applied to the wrong geometry.
+void test_case_gpu_region_get_selects_the_named_region(struct kunit * test)
+{
+  const topic_local_id_t publisher_id = setup_publisher(test);
+  union ioctl_add_gpu_region_args add_args;
+  union ioctl_get_gpu_region_args get_args;
+  struct file * handle_file = NULL;
+  int ret;
+
+  fill_args(&add_args, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+  ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  const uint32_t first_id = add_args.ret_region_id;
+
+  fill_args(&add_args, publisher_id, SLOT_SIZE * 2, SLOT_COUNT, MAPPED_SIZE * 2);
+  ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  const uint32_t second_id = add_args.ret_region_id;
+
+  memset(&get_args, 0, sizeof(get_args));
+  ret = agnocast_ioctl_get_gpu_region(
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, second_id, NULL, 0, &get_args,
+    &handle_file);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, get_args.ret_region_id, second_id);
+  KUNIT_EXPECT_EQ(test, get_args.ret_slot_size, SLOT_SIZE * 2);
+
+  memset(&get_args, 0, sizeof(get_args));
+  ret = agnocast_ioctl_get_gpu_region(
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, first_id, NULL, 0, &get_args,
+    &handle_file);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, get_args.ret_region_id, first_id);
+  KUNIT_EXPECT_EQ(test, get_args.ret_slot_size, SLOT_SIZE);
+}
+
+// Ids are never reused, so one that names a region this publisher does not own
+// must resolve to nothing rather than to whichever region happens to be first.
+void test_case_gpu_region_get_unknown_id(struct kunit * test)
+{
+  const topic_local_id_t publisher_id = setup_publisher(test);
+  union ioctl_add_gpu_region_args add_args;
+  union ioctl_get_gpu_region_args get_args;
+  struct file * handle_file = NULL;
+  int ret;
+
+  fill_args(&add_args, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+  ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  memset(&get_args, 0, sizeof(get_args));
+  ret = agnocast_ioctl_get_gpu_region(
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, add_args.ret_region_id + 1000, NULL, 0,
+    &get_args, &handle_file);
+  KUNIT_EXPECT_EQ(test, ret, -ENOENT);
+  KUNIT_EXPECT_PTR_EQ(test, handle_file, NULL);
+}
+
+// Growth is driven by a userspace process, and each region pins device memory
+// plus a file reference the module holds until the publisher is gone.
+void test_case_gpu_region_reject_beyond_the_cap(struct kunit * test)
+{
+  const topic_local_id_t publisher_id = setup_publisher(test);
+  union ioctl_add_gpu_region_args add_args;
+  int ret;
+
+  for (int i = 0; i < MAX_GPU_REGION_NUM_PER_PUBLISHER; i++) {
+    fill_args(&add_args, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+    ret =
+      agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
+    KUNIT_ASSERT_EQ(test, ret, 0);
+  }
+
+  fill_args(&add_args, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+  ret = agnocast_ioctl_add_gpu_region(TOPIC_NAME, current->nsproxy->ipc_ns, &add_args, NULL, NULL);
+  KUNIT_EXPECT_EQ(test, ret, -ENOSPC);
 }
 
 void test_case_gpu_region_add_topic_not_found(struct kunit * test)
@@ -193,7 +278,7 @@ void test_case_gpu_region_get_publisher_not_found(struct kunit * test)
 
   memset(&get_args, 0, sizeof(get_args));
   ret = agnocast_ioctl_get_gpu_region(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id + 1, 0, NULL, 0, &get_args, &handle_file);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id + 1, 0, 0, NULL, 0, &get_args, &handle_file);
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
   KUNIT_EXPECT_PTR_EQ(test, handle_file, NULL);
 }
@@ -207,7 +292,7 @@ void test_case_gpu_region_get_without_registration(struct kunit * test)
 
   memset(&get_args, 0, sizeof(get_args));
   ret = agnocast_ioctl_get_gpu_region(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, NULL, 0, &get_args, &handle_file);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, 0, NULL, 0, &get_args, &handle_file);
   KUNIT_EXPECT_EQ(test, ret, -ENOENT);
   KUNIT_EXPECT_PTR_EQ(test, handle_file, NULL);
 }
@@ -230,7 +315,7 @@ void test_case_gpu_region_get_blob_buffer_too_small(struct kunit * test)
 
   memset(&get_args, 0, sizeof(get_args));
   ret = agnocast_ioctl_get_gpu_region(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, out, sizeof(out), &get_args,
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, 0, 0, out, sizeof(out), &get_args,
     &handle_file);
   KUNIT_EXPECT_EQ(test, ret, -ENOSPC);
   KUNIT_EXPECT_PTR_EQ(test, handle_file, NULL);

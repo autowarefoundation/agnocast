@@ -43,12 +43,14 @@ public:
 private:
   void inspect(const agnocast::ipc_shared_ptr<const agnocast::gpu::PointCloud2> & cloud)
   {
-    dispatch(
-      reads(cloud), downloads(results_, sum_, 1, TransferOptions::kAllocateDeviceAsync),
-      downloads(results_ + 1, peak_, 1, TransferOptions::kAllocateDeviceAsync),
-      [&](cudaStream_t stream) {
-        inspect_kernel<<<1, 1, 0, stream>>>(cloud->data.get(), 256, sum_, peak_);
-      });
+    if (!dispatch(
+          reads(cloud), downloads(results_, sum_, 1, TransferOptions::kAllocateDeviceAsync),
+          downloads(results_ + 1, peak_, 1, TransferOptions::kAllocateDeviceAsync),
+          [&](cudaStream_t stream) {
+            inspect_kernel<<<1, 1, 0, stream>>>(cloud->data.get(), 256, sum_, peak_);
+          })) {
+      return;
+    }
 
     RCLCPP_INFO(
       get_logger(), "from %s: %zu bytes on device, sum=%u peak=%u", cloud->header.frame_id.c_str(),

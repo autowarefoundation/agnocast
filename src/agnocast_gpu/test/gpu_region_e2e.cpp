@@ -11,7 +11,8 @@
 
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_message.hpp"
+#include "agnocast/internal/gpu_slot_pool.hpp"
 
 #include <cuda_runtime.h>
 #include <fcntl.h>
@@ -84,42 +85,52 @@ int run_publisher(int notify_fd)
   }
   const agnocast::topic_local_id_t publisher_id = pub_args.ret_id;
 
-  auto pool = agnocast::internal::create_gpu_slot_pool(kTopic, publisher_id, kSlotSize, kSlotCount);
+  auto pool = agnocast::internal::GpuSlotPool::create(kTopic, publisher_id, kSlotSize, kSlotCount);
   if (pool == nullptr) {
-    std::fprintf(stderr, "create_gpu_slot_pool failed\n");
+    std::fprintf(stderr, "GpuSlotPool::create failed\n");
     return 1;
   }
   if (pool->available() != kSlotCount) return 1;
 
-  uint32_t slot_index = 0;
-  if (!pool->acquire(slot_index)) {
-    std::fprintf(stderr, "pool exhausted with every slot free\n");
+  uint32_t rejected = 0;
+  if (pool->acquire(static_cast<uint64_t>(kSlotSize) + 1, rejected)) {
+    std::fprintf(stderr, "pool handed out a slot too small for the payload\n");
     return 1;
   }
-  if (pool->available() != kSlotCount - 1) return 1;
 
-  const agnocast::internal::gpu_array<uint8_t> data(
-    pool->region_id(), slot_index, kPayload, publisher_id);
+  bool subscriber_ok = false;
+  {
+    uint32_t slot_index = 0;
+    if (!pool->acquire(kPayload, slot_index)) {
+      std::fprintf(stderr, "pool exhausted with every slot free\n");
+      return 1;
+    }
+    if (pool->available() != kSlotCount - 1) return 1;
 
-  std::vector<uint8_t> pattern(kPayload);
-  for (size_t i = 0; i < kPayload; i++) pattern[i] = static_cast<uint8_t>(i % 251);
+    const agnocast::internal::gpu_array<uint8_t> data(
+      pool->region_id(), slot_index, kPayload, publisher_id);
 
-  const cudaError_t copy = cudaMemcpy(data.get(), pattern.data(), kPayload, cudaMemcpyHostToDevice);
-  if (copy != cudaSuccess) {
-    std::fprintf(stderr, "publisher cudaMemcpy failed: %s\n", cudaGetErrorString(copy));
-    return 1;
+    std::vector<uint8_t> pattern(kPayload);
+    for (size_t i = 0; i < kPayload; i++) pattern[i] = static_cast<uint8_t>(i % 251);
+
+    const cudaError_t copy =
+      cudaMemcpy(data.get(), pattern.data(), kPayload, cudaMemcpyHostToDevice);
+    if (copy != cudaSuccess) {
+      std::fprintf(stderr, "publisher cudaMemcpy failed: %s\n", cudaGetErrorString(copy));
+      return 1;
+    }
+    cudaDeviceSynchronize();
+
+    const Message msg = {publisher_id, data.region_id(), data.slot_index(), data.size()};
+    if (write(notify_fd, &msg, sizeof(msg)) != sizeof(msg)) return 1;
+
+    int status = 0;
+    wait(&status);
+    subscriber_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
   }
-  cudaDeviceSynchronize();
 
-  const Message msg = {publisher_id, data.region_id(), data.slot_index(), data.size()};
-  if (write(notify_fd, &msg, sizeof(msg)) != sizeof(msg)) return 1;
-
-  int status = 0;
-  wait(&status);
-  const bool subscriber_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-
-  // Reclaim is what the kernel module's release of the message entry will drive.
-  pool->release(slot_index);
+  // Destroying the handle is what returns the slot. In a real publisher the same
+  // path runs when the kmod releases the message entry.
   if (pool->available() != kSlotCount) {
     std::fprintf(stderr, "slot was not returned to the pool\n");
     return 1;
@@ -137,9 +148,10 @@ int run_subscriber(int notify_fd)
 
   // Mapping a publisher's region is a one-off on first receipt, as it would be
   // for a previously unseen publisher on a live topic.
-  if (!agnocast::internal::ensure_gpu_region_mapped(
-        kTopic, msg.publisher_id, /*subscriber_id=*/0, msg.region_id)) {
-    std::fprintf(stderr, "ensure_gpu_region_mapped failed\n");
+  const agnocast::internal::GpuRegionRef ref{
+    kTopic, msg.publisher_id, /*subscriber_id=*/0, msg.region_id};
+  if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
+    std::fprintf(stderr, "ensure_mapped failed\n");
     return 1;
   }
 

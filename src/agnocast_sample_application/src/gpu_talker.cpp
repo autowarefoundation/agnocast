@@ -69,13 +69,16 @@ private:
 
     // The device buffers start null and are allocated on the dispatch stream,
     // so no synchronous allocation happens inside the callback.
-    dispatch(
+    // Dropping the borrow returns its slot, so a failed fill costs one frame
+    // rather than publishing whatever the slot held before.
+    const bool filled = dispatch(
       uploads(transform_, parameters_, 4, TransferOptions::kAllocateDeviceAsync),
       uploads(calibration_, parameters_ + 4, 4, TransferOptions::kAllocateDeviceAsync),
       writes(cloud), [&](cudaStream_t stream) {
         fill_kernel<<<(kCapacity + 255) / 256, 256, 0, stream>>>(
           cloud->data.get(), kCapacity, seq, transform_, calibration_);
       });
+    if (!filled) return;
 
     publisher_->publish(std::move(cloud));
     RCLCPP_INFO(get_logger(), "published cloud %ld", seq_++);

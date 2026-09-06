@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocast_gpu</name>
-  <version>2.3.5</version>
+  <version>2.4.0</version>
   <description>
     GPU device memory sharing backends for Agnocast. Builds only where the CUDA
     driver headers are available, and loads libcuda.so.1 at run time so the
@@ -21,6 +21,8 @@
 
   <depend>agnocastlib</depend>
   <depend>rclcpp</depend>
+  <!-- message_types.hpp, which this package installs, includes sensor_msgs headers. -->
+  <depend>sensor_msgs</depend>
 
   <test_depend>ament_cmake_gmock</test_depend>
 

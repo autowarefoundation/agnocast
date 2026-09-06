@@ -36,7 +36,6 @@ extern struct device * agnocast_device;
 // - Write lock (down_write): when adding/removing entries from hashtables
 extern struct rw_semaphore global_htables_rwsem;
 
-
 // =========================================
 // data structure
 
@@ -80,11 +79,10 @@ struct process_info
 
 extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 
-// A publisher's GPU device-memory region, present only for publishers that
-// registered one. The kernel module stores the export verbatim and does not
-// interpret it; its role is to hold the region's liveness reference so the
-// memory outlives the publishing process, and to hand each importer its own
-// descriptor for the same open file.
+// One of a publisher's GPU device-memory regions. The kernel module stores the
+// export verbatim and does not interpret it; its role is to hold the region's
+// liveness reference so the memory outlives the publishing process, and to hand
+// each importer its own descriptor for the same open file.
 struct gpu_region_info
 {
   uint32_t region_id;
@@ -98,8 +96,6 @@ struct gpu_region_info
   struct file * handle_file;
   uint8_t * blob;
   uint32_t blob_size;
-  // A publisher grows its pool by adding regions rather than failing to borrow,
-  // so it owns a list of them and a message names the one it used.
   struct list_head node;
 };
 
@@ -115,8 +111,10 @@ struct publisher_info
   bool qos_is_transient_local;
   uint32_t entries_num;
   bool is_bridge;
-  // Empty unless this publisher registered GPU regions.
+  // Empty unless this publisher registered GPU regions. Bounded by
+  // MAX_GPU_REGION_NUM_PER_PUBLISHER.
   struct list_head gpu_regions;
+  uint32_t gpu_region_num;
   struct hlist_node node;
 };
 

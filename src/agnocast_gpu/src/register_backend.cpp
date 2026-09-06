@@ -1,4 +1,4 @@
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_backend.hpp"
 #include "vmm_backend.hpp"
 
 namespace agnocast::gpu

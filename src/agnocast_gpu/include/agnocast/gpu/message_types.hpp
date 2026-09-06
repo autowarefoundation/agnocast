@@ -11,7 +11,7 @@
 // `data.get()` yields a device pointer valid in the calling process, which is
 // the shape cuda_blackboard users already write against.
 
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_message.hpp"
 
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>

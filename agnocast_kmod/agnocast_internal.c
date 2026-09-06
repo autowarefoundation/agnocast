@@ -51,11 +51,11 @@ void agnocast_free_publisher_info(struct publisher_info * pub_info)
     kfree(region->blob);
     kfree(region);
   }
+  pub_info->gpu_region_num = 0;
 
   kfree(pub_info->node_name);
   kfree(pub_info);
 }
-
 
 static void pre_handler_subscriber_exit(
   struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)

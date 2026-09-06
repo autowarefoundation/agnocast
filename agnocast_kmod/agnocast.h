@@ -405,16 +405,21 @@ union ioctl_topic_info_args {
 
 // GPU device-memory region sharing.
 //
-// A region belongs to exactly one publisher, so publisher_id identifies it and
-// no separate region id exists. The kernel module stores the export without
-// interpreting it: its role is to hold the region's liveness reference, so the
-// memory survives the publishing process, and to install a fresh descriptor for
-// each importer rather than have descriptors passed between processes.
+// A publisher owns a list of regions rather than one: it grows its pool by
+// adding a region instead of failing to borrow, so a message names the region it
+// was written into. The kernel module stores each export without interpreting
+// it. Its role is to hold the region's liveness reference, so the memory
+// survives the publishing process, and to install a fresh descriptor for each
+// importer rather than have descriptors passed between processes.
 #define GPU_DEVICE_UUID_SIZE 16
 // Bounds the exported descriptor a mechanism may carry. CUDA VMM uses none (the
 // file descriptor is the handle); NvSciBuf export descriptors are the reason a
 // blob exists at all.
 #define MAX_GPU_HANDLE_BLOB_SIZE 4096
+// Growth is driven by a userspace process, and each region pins device memory
+// plus a file reference the module holds until the publisher is gone. A
+// publisher that never returns a slot would otherwise grow without bound.
+#define MAX_GPU_REGION_NUM_PER_PUBLISHER 16
 
 union ioctl_add_gpu_region_args {
   struct
@@ -564,10 +569,10 @@ int agnocast_ioctl_add_gpu_region(
 // or release; it is NULL for mechanisms without a descriptor. `blob_buf` receives
 // the exported descriptor.
 int agnocast_ioctl_get_gpu_region(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
-  const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
-  const uint32_t wanted_region_id, uint8_t * blob_buf, uint32_t blob_buf_size,
-  union ioctl_get_gpu_region_args * ioctl_ret, struct file ** out_handle_file);
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
+  const topic_local_id_t subscriber_id, const uint32_t wanted_region_id, uint8_t * blob_buf,
+  uint32_t blob_buf_size, union ioctl_get_gpu_region_args * ioctl_ret,
+  struct file ** out_handle_file);
 
 int agnocast_ioctl_add_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns,

@@ -4,6 +4,7 @@ project(agnocast_gpu)
 find_package(ament_cmake REQUIRED)
 find_package(agnocastlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 # Only the CUDA *headers* are needed at build time: driver symbols are resolved
 # with dlopen("libcuda.so.1") at run time (see src/cuda_driver_loader.hpp). The
@@ -27,7 +28,7 @@ add_library(agnocast_gpu SHARED
 
 target_include_directories(agnocast_gpu PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 
-ament_target_dependencies(agnocast_gpu agnocastlib rclcpp)
+ament_target_dependencies(agnocast_gpu agnocastlib rclcpp sensor_msgs)
 
 # Deliberately NOT linked against CUDA::cuda_driver. The stub library the toolkit
 # ships satisfies the linker while providing no driver behind it, which would
@@ -43,7 +44,7 @@ install(TARGETS agnocast_gpu
   LIBRARY DESTINATION lib)
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(agnocastlib rclcpp)
+ament_export_dependencies(agnocastlib rclcpp sensor_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
@@ -61,7 +62,7 @@ if(BUILD_TESTING)
   # No GPU required: these cover descriptor ownership, slot arithmetic and the
   # library-constructor registration, all of which must work on a machine with
   # no driver.
-  ament_add_gmock(test_agnocast_gpu test/test_gpu_region.cpp)
+  ament_add_gmock(test_agnocast_gpu test/test_gpu_backend.cpp)
   target_include_directories(test_agnocast_gpu PRIVATE src ${CUDAToolkit_INCLUDE_DIRS})
   target_link_libraries(test_agnocast_gpu agnocast_gpu)
   ament_target_dependencies(test_agnocast_gpu agnocastlib rclcpp)

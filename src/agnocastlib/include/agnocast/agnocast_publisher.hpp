@@ -6,7 +6,8 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_message.hpp"
+#include "agnocast/internal/gpu_slot_pool.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
@@ -15,7 +16,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 
 namespace agnocast
@@ -89,10 +92,12 @@ protected:
   uint32_t qos_depth_ = 1;
   // Grown on demand rather than fixed, so a borrow never fails for want of a
   // slot. The first is created on the first GPU borrow.
+  mutable std::mutex gpu_pools_mtx_;
   std::vector<std::unique_ptr<internal::GpuSlotPool>> gpu_pools_;
 
-  // One slot per message that may be in flight, plus one being filled.
-  uint32_t gpu_slot_count() const { return qos_depth_ + 1; }
+  // One slot per message that may be in flight, plus one being filled. KeepAll
+  // reports a depth of 0, which would size a region for a single message.
+  uint32_t gpu_slot_count() const { return std::max(qos_depth_, 1U) + 1; }
   std::string topic_name_;
   // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
   // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
@@ -217,16 +222,19 @@ public:
 
   /**
    * @brief Borrow a message whose payload lives in GPU device memory.
-   * @param capacity Payload size in bytes. Fixes the region's slot size on the
-   * first call; later calls must not exceed it.
-   * @return A message whose `data` already refers to a reserved slot.
+   * @param capacity Payload size in bytes.
+   * @return A message whose `data` already refers to a reserved slot, or an
+   * empty pointer when no region could be provided.
    *
-   * The region is allocated once, on the first borrow, and sized from the
-   * publisher's QoS depth: "messages in flight simultaneously" is what depth
-   * already expresses. Later borrows only reserve a slot, so in steady state no
-   * GPU allocation happens on the message path. If the pool is exhausted a
-   * further region is allocated rather than the borrow failing, which costs
-   * latency on that one publish but never data.
+   * A region is allocated on the first borrow and sized from the publisher's QoS
+   * depth, since "messages in flight simultaneously" is what depth already
+   * expresses. Later borrows only reserve a slot, so in steady state no GPU
+   * allocation happens on the message path. When no existing region can serve
+   * the request -- every slot is in flight, or `capacity` outgrew the slots a
+   * region was sized for -- another region is allocated rather than the borrow
+   * failing. That costs latency on the one publish that hits it, but never data.
+   * A message names its own region and a subscriber maps an unseen one on first
+   * receipt, so additional regions need no coordination.
    */
   ipc_shared_ptr<MessageT> borrow_loaned_message(const size_t capacity)
   {
@@ -234,46 +242,49 @@ public:
       internal::is_gpu_message_v<MessageT>,
       "the capacity overload is for messages whose payload lives in GPU memory");
 
-    internal::GpuSlotPool * pool = nullptr;
-    uint32_t slot_index = 0;
-
-    for (const auto & candidate : gpu_pools_) {
-      if (candidate->acquire(slot_index)) {
-        pool = candidate.get();
-        break;
-      }
+    if (capacity == 0 || capacity > std::numeric_limits<uint32_t>::max()) {
+      RCLCPP_ERROR(
+        logger, "GPU payload capacity %zu is out of range for topic '%s'", capacity,
+        topic_name_.c_str());
+      return ipc_shared_ptr<MessageT>();
     }
 
-    if (pool == nullptr) {
-      // Never fail for want of a slot. Waiting would stall this thread on
-      // subscribers it does not control, and dropping would lose data, so grow
-      // instead: allocating a region is synchronous and shows up as a latency
-      // spike, but only on the publish that hits the limit. A message names its
-      // own region, and a subscriber maps an unseen one on first receipt, so
-      // additional regions need no coordination.
-      if (!gpu_pools_.empty()) {
-        RCLCPP_WARN(
-          logger,
-          "every GPU slot for topic '%s' is in flight; allocating another region. Raise the QoS "
-          "depth to size the pool for this workload and avoid the allocation.",
-          topic_name_.c_str());
+    uint32_t region_id = 0;
+    uint32_t slot_index = 0;
+    {
+      const std::lock_guard<std::mutex> lock(gpu_pools_mtx_);
+
+      internal::GpuSlotPool * pool = nullptr;
+      for (const auto & candidate : gpu_pools_) {
+        if (candidate->acquire(capacity, slot_index)) {
+          pool = candidate.get();
+          break;
+        }
       }
-      auto grown = internal::create_gpu_slot_pool(
-        topic_name_, id_, static_cast<uint32_t>(capacity), gpu_slot_count());
-      if (grown == nullptr) {
-        RCLCPP_ERROR(logger, "no GPU region for topic '%s'", topic_name_.c_str());
-        return ipc_shared_ptr<MessageT>();
+
+      if (pool == nullptr) {
+        if (!gpu_pools_.empty()) {
+          RCLCPP_WARN(
+            logger,
+            "no GPU slot for topic '%s' fits a %zu byte payload; allocating another region. Raise "
+            "the QoS depth, or keep the payload size stable, to avoid the allocation.",
+            topic_name_.c_str(), capacity);
+        }
+        auto grown = internal::GpuSlotPool::create(
+          topic_name_, id_, static_cast<uint32_t>(capacity), gpu_slot_count());
+        if (grown == nullptr || !grown->acquire(capacity, slot_index)) {
+          RCLCPP_ERROR(logger, "no GPU region for topic '%s'", topic_name_.c_str());
+          return ipc_shared_ptr<MessageT>();
+        }
+        pool = grown.get();
+        gpu_pools_.push_back(std::move(grown));
       }
-      pool = grown.get();
-      gpu_pools_.push_back(std::move(grown));
-      if (!pool->acquire(slot_index)) {
-        return ipc_shared_ptr<MessageT>();
-      }
+      region_id = pool->region_id();
     }
 
     increment_borrowed_publisher_num();
     MessageT * ptr = new MessageT();
-    ptr->data = internal::gpu_array<uint8_t>(pool->region_id(), slot_index, capacity, id_);
+    ptr->data = internal::gpu_array<uint8_t>(region_id, slot_index, capacity, id_);
     return ipc_shared_ptr<MessageT>(ptr, topic_name_.c_str(), id_);
   }
 
