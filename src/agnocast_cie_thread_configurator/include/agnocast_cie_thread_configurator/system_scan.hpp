@@ -30,11 +30,6 @@ struct IrqInfo
   std::string affinity;  // /proc/irq/<N>/smp_affinity_list, "" when unreadable
 };
 
-// kworker comms embed worker-pool/CPU state that mutates at runtime, so they
-// can never be matched reliably; both the scanner and the kernel_threads
-// parser exclude them.
-bool is_kworker_comm(const std::string & comm);
-
 // Sorted by (comm, tid); entries that vanish mid-scan are skipped silently.
 // kworker/* are excluded: their comms mutate at runtime, so they cannot be
 // managed per-thread.
@@ -66,15 +61,13 @@ std::string format_cpu_list(const std::vector<int> & cpus);
 // nullopt on empty or malformed input.
 std::optional<std::vector<int>> parse_cpu_list(const std::string & s);
 
-// Highest CPU number this tool manages on this machine:
-// min(CPU_SETSIZE, _SC_NPROCESSORS_CONF) - 1. The YAML affinity parser and
-// parse_manageable_cpu_list both bound by it, so an untouched template entry
-// compares equal to the observed value it was emitted from.
-int manageable_cpu_bound();
-
-// parse_cpu_list, additionally dropping CPUs above manageable_cpu_bound():
-// the kernel prints affinity over the possible-CPU mask, which can exceed the
-// present CPUs. nullopt when nothing manageable remains.
+// parse_cpu_list, additionally dropping CPUs above this machine's manageable
+// bound (min(CPU_SETSIZE, _SC_NPROCESSORS_CONF) - 1): the kernel prints
+// affinity over the possible-CPU mask, which can exceed the present CPUs.
+// Template emission and the apply-side compare-before-set must share this
+// bound with parse_affinity, or an untouched template entry stops comparing
+// equal to the value it was observed from. nullopt when nothing manageable
+// remains.
 std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & s);
 
 }  // namespace agnocast_cie_thread_configurator

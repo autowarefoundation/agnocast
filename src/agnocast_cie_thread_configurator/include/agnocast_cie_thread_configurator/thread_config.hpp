@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace agnocast_cie_thread_configurator
@@ -45,6 +46,11 @@ struct ThreadConfig
 // Node-name part of an incoming callback_group_id: the substring before the
 // first '@' (the whole string when no '@' is present).
 std::string extract_node_part(const std::string & callback_group_id);
+
+// kworker comms embed worker-pool/CPU state that mutates at runtime, so they
+// can never be matched reliably; both the system scanner and the
+// kernel_threads parser exclude them.
+bool is_kworker_comm(const std::string & comm);
 
 // Sentinel for kernel_threads/irqs attribute values: the kernel or this tool
 // cannot manage the attribute (fixed per-CPU affinity, a policy with no YAML
@@ -89,6 +95,15 @@ struct IrqConfig
 // std::runtime_error on validation error.
 std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml);
 std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml);
+
+// Mapping from the policy string in the YAML to the kernel SCHED_* constant.
+// Defined in thread_config.cpp; both the parser and issue_syscalls() use it.
+extern const std::unordered_map<std::string, int> policy_to_sched_const;
+
+// True for the CFS policies (SCHED_OTHER/BATCH/IDLE), whose tunable is nice;
+// the RT policies' tunable is priority. The template emitter and the parser
+// must agree on this split.
+bool is_cfs_policy(const std::string & policy);
 
 // Parse the given YAML document and populate the two output vectors.
 // Throws std::runtime_error on per-entry validation error. Output ThreadConfigs

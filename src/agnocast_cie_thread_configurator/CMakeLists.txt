@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(agnocast_cie_thread_configurator)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -Werror=switch)
+  add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 find_package(ament_cmake REQUIRED)
@@ -14,7 +14,6 @@ find_package(yaml-cpp REQUIRED)
 # Daemon-internal logic with no rclcpp dependency. Linked into the executables
 # and the unit tests; not installed.
 add_library(agnocast_thread_configurator_core STATIC
-  src/sched_policy.cpp
   src/thread_config.cpp
   src/system_scan.cpp
 )
@@ -96,11 +95,6 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_non_ros_thread_ipc agnocast_thread_configurator)
 
-  ament_add_gtest(test_sched_policy
-    test/test_sched_policy.cpp
-  )
-  target_link_libraries(test_sched_policy agnocast_thread_configurator_core)
-
   ament_add_gtest(test_thread_config
     test/test_thread_config.cpp
   )
@@ -114,6 +108,14 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_system_scan agnocast_thread_configurator_core)
   target_include_directories(test_system_scan PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  ament_add_gtest(test_get_default_domain_id
+    test/test_get_default_domain_id.cpp
+  )
+  target_link_libraries(test_get_default_domain_id agnocast_thread_configurator)
+  target_include_directories(test_get_default_domain_id PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
 endif()

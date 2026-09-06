@@ -19,7 +19,8 @@ namespace agnocast_cie_thread_configurator
 // Get hardware information from lscpu command
 std::map<std::string, std::string> get_hardware_info();
 
-// Get default domain ID from ROS_DOMAIN_ID environment variable
+// Get default domain ID from ROS_DOMAIN_ID environment variable (never throws;
+// falls back to 0 on unset, empty, unparsable, or out-of-range values).
 size_t get_default_domain_id();
 
 // Create a node for a different domain

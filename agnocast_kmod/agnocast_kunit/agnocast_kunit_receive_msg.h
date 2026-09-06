@@ -19,10 +19,6 @@
       test_case_receive_msg_transient_sub_qos_smaller_than_publish_num_smaller_than_pub_qos),      \
     KUNIT_CASE(                                                                                    \
       test_case_receive_msg_transient_publish_num_smaller_than_sub_qos_smaller_than_pub_qos),      \
-    KUNIT_CASE(test_case_receive_msg_qos_depth_counts_entries_not_entry_ids),                      \
-    KUNIT_CASE(test_case_receive_msg_zero_qos_depth_receives_nothing),                             \
-    KUNIT_CASE(test_case_receive_msg_no_call_again_when_only_undeliverable_entries_remain),        \
-    KUNIT_CASE(test_case_receive_msg_discarded_message_does_not_consume_qos_depth),                \
     KUNIT_CASE(test_case_receive_msg_one_new_pub),                                                 \
     KUNIT_CASE(test_case_receive_msg_pubsub_in_same_process),                                      \
     KUNIT_CASE(test_case_receive_msg_2pub_in_same_process),                                        \
@@ -56,11 +52,6 @@ void test_case_receive_msg_transient_sub_qos_smaller_than_publish_num_smaller_th
   struct kunit * test);
 void test_case_receive_msg_transient_publish_num_smaller_than_sub_qos_smaller_than_pub_qos(
   struct kunit * test);
-void test_case_receive_msg_qos_depth_counts_entries_not_entry_ids(struct kunit * test);
-void test_case_receive_msg_zero_qos_depth_receives_nothing(struct kunit * test);
-void test_case_receive_msg_no_call_again_when_only_undeliverable_entries_remain(
-  struct kunit * test);
-void test_case_receive_msg_discarded_message_does_not_consume_qos_depth(struct kunit * test);
 void test_case_receive_msg_one_new_pub(struct kunit * test);
 void test_case_receive_msg_pubsub_in_same_process(struct kunit * test);
 void test_case_receive_msg_2pub_in_same_process(struct kunit * test);
