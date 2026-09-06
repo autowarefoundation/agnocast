@@ -65,7 +65,7 @@ private:
     out->row_step = in->row_step;
     out->is_dense = in->is_dense;
 
-    dispatch(
+    const bool filtered = dispatch(
       reads(in), writes(out),
       uploads(device_gain_, gain_, 1, TransferOptions::kAllocateDeviceAsync),
       downloads(kept_, device_kept_, 1, TransferOptions::kAllocateDeviceAsync),
@@ -73,6 +73,7 @@ private:
         filter_kernel<<<(bytes + 255) / 256, 256, 0, stream>>>(
           in->data.get(), out->data.get(), bytes, device_gain_, device_kept_);
       });
+    if (!filtered) return;
 
     out->width = *kept_ / out->point_step;
 

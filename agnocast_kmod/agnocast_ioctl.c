@@ -503,6 +503,7 @@ static int insert_publisher_info(
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
   INIT_LIST_HEAD(&(*new_info)->gpu_regions);
+  (*new_info)->gpu_region_num = 0;
   INIT_HLIST_NODE(&(*new_info)->node);
 
   // Before hash_add, so a failure needs no more undo than the free below: the fill reads only the
@@ -3033,8 +3034,9 @@ int agnocast_ioctl_add_gpu_region(
 {
   int ret = 0;
 
-  if (args->slot_size == 0 || args->slot_count == 0 ||
-      (uint64_t)args->slot_size * args->slot_count > args->mapped_size) {
+  if (
+    args->slot_size == 0 || args->slot_count == 0 ||
+    (uint64_t)args->slot_size * args->slot_count > args->mapped_size) {
     dev_warn(
       agnocast_device, "Region geometry does not fit its mapping (topic_name=%s). (%s)\n",
       topic_name, __func__);
@@ -3058,6 +3060,15 @@ int agnocast_ioctl_add_gpu_region(
       agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
       args->publisher_id, topic_name, __func__);
     ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  if (pub_info->gpu_region_num >= MAX_GPU_REGION_NUM_PER_PUBLISHER) {
+    dev_warn(
+      agnocast_device,
+      "Publisher (id=%d) for the topic (topic_name=%s) already holds %u GPU regions. (%s)\n",
+      args->publisher_id, topic_name, pub_info->gpu_region_num, __func__);
+    ret = -ENOSPC;
     goto unlock_all;
   }
 
@@ -3086,6 +3097,7 @@ int agnocast_ioctl_add_gpu_region(
   region->region_id = (uint32_t)atomic_inc_return(&next_gpu_region_id);
 
   list_add_tail(&region->node, &pub_info->gpu_regions);
+  pub_info->gpu_region_num++;
   args->ret_region_id = region->region_id;
 
 unlock_all:
@@ -3096,10 +3108,10 @@ unlock_only_global:
 }
 
 int agnocast_ioctl_get_gpu_region(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
-  const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
-  const uint32_t wanted_region_id, uint8_t * blob_buf, uint32_t blob_buf_size,
-  union ioctl_get_gpu_region_args * ioctl_ret, struct file ** out_handle_file)
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
+  const topic_local_id_t subscriber_id, const uint32_t wanted_region_id, uint8_t * blob_buf,
+  uint32_t blob_buf_size, union ioctl_get_gpu_region_args * ioctl_ret,
+  struct file ** out_handle_file)
 {
   int ret = 0;
   (void)subscriber_id;

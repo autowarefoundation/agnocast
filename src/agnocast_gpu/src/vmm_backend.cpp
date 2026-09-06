@@ -9,9 +9,9 @@ namespace agnocast::gpu
 {
 
 using agnocast::internal::GpuMemoryBackendType;
-using agnocast::internal::GpuRegion;
-using agnocast::internal::GpuRegionDescriptor;
-using agnocast::internal::GpuRegionMapping;
+using agnocast::internal::GpuRegionExport;
+using agnocast::internal::GpuRegionGeometry;
+using agnocast::internal::MappedGpuRegion;
 using agnocast::internal::UniqueFd;
 using agnocast::internal::VmmExportHandle;
 
@@ -201,22 +201,22 @@ bool VmmBackend::map_and_grant(
   return true;
 }
 
-bool VmmBackend::create_region(uint32_t slot_size, uint32_t slot_count, GpuRegion & out_region)
+MappedGpuRegion VmmBackend::create_region(uint32_t slot_size, uint32_t slot_count)
 {
   if (slot_size == 0 || slot_count == 0) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: invalid region geometry (slot_size=%u, slot_count=%u)", slot_size,
       slot_count);
-    return false;
+    return MappedGpuRegion{};
   }
-  if (!ensure_context()) return false;
+  if (!ensure_context()) return MappedGpuRegion{};
 
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
   const ScopedContext ctx(cuda, context_);
-  if (!ctx.ok()) return false;
+  if (!ctx.ok()) return MappedGpuRegion{};
 
   const size_t granularity = query_granularity();
-  if (granularity == 0) return false;
+  if (granularity == 0) return MappedGpuRegion{};
 
   // The region is rounded, not each slot, so peers compute slot offsets without
   // knowing the granularity and the rounding waste is one granule per region.
@@ -231,96 +231,84 @@ bool VmmBackend::create_region(uint32_t slot_size, uint32_t slot_count, GpuRegio
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: cuMemCreate(%zu) failed: %s", total, cuda->describe(r).c_str());
-    return false;
+    return MappedGpuRegion{};
   }
 
   void * base = nullptr;
   if (!map_and_grant(handle, total, granularity, &base)) {
     cuda->cuMemRelease(handle);
-    return false;
+    return MappedGpuRegion{};
   }
 
-  GpuRegionMapping mapping;
-  mapping.base = base;
-  mapping.mapped_size = total;
-  mapping.slot_size = slot_size;
-  mapping.slot_count = slot_count;
-  mapping.device_uuid = device_uuid_;
-  mapping.backend_token = static_cast<uint64_t>(handle);
-  adopt(out_region, mapping);
-  return true;
+  GpuRegionGeometry geometry;
+  geometry.slot_size = slot_size;
+  geometry.slot_count = slot_count;
+  geometry.mapped_size = total;
+  geometry.device_uuid = device_uuid_;
+  return MappedGpuRegion(*this, base, geometry, static_cast<uint64_t>(handle));
 }
 
-bool VmmBackend::export_for(
-  const GpuRegion & region, topic_local_id_t /*subscriber_id*/, GpuRegionDescriptor & out_desc)
+std::optional<GpuRegionExport> VmmBackend::export_for(
+  const MappedGpuRegion & region, topic_local_id_t /*subscriber_id*/)
 {
   // A VMM shareable handle is not bound to a destination, so every subscriber
-  // receives an equivalent descriptor.
+  // receives an equivalent export.
   if (!region.valid()) {
     RCLCPP_ERROR(logger, "Agnocast GPU: cannot export an unmapped region");
-    return false;
+    return std::nullopt;
   }
-  if (!ensure_context()) return false;
+  if (!ensure_context()) return std::nullopt;
 
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
   const ScopedContext ctx(cuda, context_);
-  if (!ctx.ok()) return false;
-
-  const GpuRegionMapping & mapping = mapping_of(region);
+  if (!ctx.ok()) return std::nullopt;
 
   int raw_fd = -1;
   const CUresult r = cuda->cuMemExportToShareableHandle(
-    &raw_fd, static_cast<CUmemGenericAllocationHandle>(mapping.backend_token),
+    &raw_fd, static_cast<CUmemGenericAllocationHandle>(region.backend_token()),
     CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0);
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: cuMemExportToShareableHandle failed: %s", cuda->describe(r).c_str());
-    return false;
+    return std::nullopt;
   }
 
-  out_desc.backend = GpuMemoryBackendType::Vmm;
-  out_desc.slot_size = mapping.slot_size;
-  out_desc.slot_count = mapping.slot_count;
-  out_desc.mapped_size = mapping.mapped_size;
-  out_desc.device_uuid = mapping.device_uuid;
-  out_desc.handle = VmmExportHandle{UniqueFd(raw_fd)};
-  return true;
+  GpuRegionExport exported;
+  exported.backend = GpuMemoryBackendType::Vmm;
+  exported.geometry = region.geometry();
+  exported.handle = VmmExportHandle{UniqueFd(raw_fd)};
+  return exported;
 }
 
-bool VmmBackend::import_region(const GpuRegionDescriptor & desc, GpuRegion & out_region)
+MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
 {
-  const auto * exported = std::get_if<VmmExportHandle>(&desc.handle);
-  if (desc.backend != GpuMemoryBackendType::Vmm || exported == nullptr || !exported->fd.valid()) {
+  const auto * vmm = std::get_if<VmmExportHandle>(&exported.handle);
+  if (exported.backend != GpuMemoryBackendType::Vmm || vmm == nullptr || !vmm->fd.valid()) {
     RCLCPP_ERROR(
-      logger, "Agnocast GPU: region descriptor is not a VMM export (backend=%u)",
-      static_cast<uint32_t>(desc.backend));
-    return false;
+      logger, "Agnocast GPU: region export is not a VMM export (backend=%u)",
+      static_cast<uint32_t>(exported.backend));
+    return MappedGpuRegion{};
   }
-  // Geometry crosses a process boundary, so it is checked here rather than
-  // trusted. slot_address() derives an offset from slot_size and bounds it only
-  // against slot_count, so a slot_count too large for the mapping would produce
-  // addresses past its end.
-  if (
-    desc.slot_size == 0 || desc.slot_count == 0 ||
-    static_cast<uint64_t>(desc.slot_size) * desc.slot_count > desc.mapped_size) {
+  // Geometry crosses a process boundary, so it is checked rather than trusted.
+  if (!exported.geometry.is_consistent()) {
     RCLCPP_ERROR(
-      logger, "Agnocast GPU: region descriptor geometry does not fit its mapping (%u * %u > %lu)",
-      desc.slot_size, desc.slot_count, desc.mapped_size);
-    return false;
+      logger, "Agnocast GPU: region geometry does not fit its mapping (%u * %u > %lu)",
+      exported.geometry.slot_size, exported.geometry.slot_count, exported.geometry.mapped_size);
+    return MappedGpuRegion{};
   }
-  if (!ensure_context()) return false;
+  if (!ensure_context()) return MappedGpuRegion{};
 
-  if (desc.device_uuid != device_uuid_) {
+  if (exported.geometry.device_uuid != device_uuid_) {
     RCLCPP_ERROR(
       logger,
       "Agnocast GPU: the publisher's region is on a different GPU than this process uses. "
       "Check CUDA_VISIBLE_DEVICES on both processes.");
-    return false;
+    return MappedGpuRegion{};
   }
 
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
   const ScopedContext ctx(cuda, context_);
-  if (!ctx.ok()) return false;
+  if (!ctx.ok()) return MappedGpuRegion{};
 
   // The descriptor is borrowed, not surrendered: the caller's UniqueFd closes it.
   // NVIDIA documents no ownership rule for this API -- the wording about the
@@ -331,38 +319,31 @@ bool VmmBackend::import_region(const GpuRegionDescriptor & desc, GpuRegion & out
   // object and is released by the importer's own cuMemRelease.
   CUmemGenericAllocationHandle handle = 0;
   const CUresult r = cuda->cuMemImportFromShareableHandle(
-    &handle, reinterpret_cast<void *>(static_cast<uintptr_t>(exported->fd.get())),
+    &handle, reinterpret_cast<void *>(static_cast<uintptr_t>(vmm->fd.get())),
     CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: cuMemImportFromShareableHandle failed: %s", cuda->describe(r).c_str());
-    return false;
+    return MappedGpuRegion{};
   }
 
   const size_t granularity = query_granularity();
   if (granularity == 0) {
     cuda->cuMemRelease(handle);
-    return false;
+    return MappedGpuRegion{};
   }
 
   void * base = nullptr;
-  if (!map_and_grant(handle, desc.mapped_size, granularity, &base)) {
+  if (!map_and_grant(handle, exported.geometry.mapped_size, granularity, &base)) {
     cuda->cuMemRelease(handle);
-    return false;
+    return MappedGpuRegion{};
   }
 
-  GpuRegionMapping mapping;
-  mapping.base = base;
-  mapping.mapped_size = desc.mapped_size;
-  mapping.slot_size = desc.slot_size;
-  mapping.slot_count = desc.slot_count;
-  mapping.device_uuid = desc.device_uuid;
-  mapping.backend_token = static_cast<uint64_t>(handle);
-  adopt(out_region, mapping);
-  return true;
+  return MappedGpuRegion(*this, base, exported.geometry, static_cast<uint64_t>(handle));
 }
 
-void VmmBackend::release_region(const GpuRegionMapping & mapping) noexcept
+void VmmBackend::release_region(
+  void * base, const GpuRegionGeometry & geometry, uint64_t backend_token) noexcept
 try {
   if (!ensure_context()) return;
 
@@ -381,22 +362,22 @@ try {
 
   // Each failure leaks device memory or address space for the process lifetime,
   // and the caller has no other way to learn of it.
-  const auto ptr = reinterpret_cast<CUdeviceptr>(mapping.base);
-  r = cuda->cuMemUnmap(ptr, mapping.mapped_size);
+  const auto ptr = reinterpret_cast<CUdeviceptr>(base);
+  r = cuda->cuMemUnmap(ptr, geometry.mapped_size);
   if (r != CUDA_SUCCESS) {
     RCLCPP_WARN(logger, "Agnocast GPU: cuMemUnmap failed: %s", cuda->describe(r).c_str());
   }
-  r = cuda->cuMemAddressFree(ptr, mapping.mapped_size);
+  r = cuda->cuMemAddressFree(ptr, geometry.mapped_size);
   if (r != CUDA_SUCCESS) {
     RCLCPP_WARN(logger, "Agnocast GPU: cuMemAddressFree failed: %s", cuda->describe(r).c_str());
   }
-  r = cuda->cuMemRelease(static_cast<CUmemGenericAllocationHandle>(mapping.backend_token));
+  r = cuda->cuMemRelease(static_cast<CUmemGenericAllocationHandle>(backend_token));
   if (r != CUDA_SUCCESS) {
     RCLCPP_WARN(logger, "Agnocast GPU: cuMemRelease failed: %s", cuda->describe(r).c_str());
   }
 } catch (...) {
-  // Reached from ~GpuRegion. Locking and logging can throw, and terminating
-  // during teardown would be worse than the leak the exception implies.
+  // Reached from ~MappedGpuRegion. Locking and logging can throw, and
+  // terminating during teardown would be worse than the leak it implies.
 }
 
 }  // namespace agnocast::gpu

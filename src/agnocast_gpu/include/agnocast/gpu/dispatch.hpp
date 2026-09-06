@@ -22,11 +22,12 @@
 
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/internal/gpu_region.hpp"
+#include "agnocast/internal/gpu_message.hpp"
 
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -143,14 +144,24 @@ struct is_declaration<Download> : std::true_type
 {
 };
 
+// Logged rather than returned only, because a CUDA failure on this path means
+// the message a node is about to publish holds whatever was there before.
+inline bool check(cudaError_t status, const char * what)
+{
+  if (status == cudaSuccess) return true;
+  RCLCPP_ERROR(agnocast::logger, "%s failed: %s", what, cudaGetErrorString(status));
+  return false;
+}
+
 // One stream per thread. A callback never runs two dispatches at once, and the
 // callback-isolated executor gives each callback its own thread, so this is one
 // stream per callback without the library tracking callbacks itself.
 inline cudaStream_t stream()
 {
   static thread_local cudaStream_t s = nullptr;
-  if (s == nullptr) {
-    cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
+  if (
+    s == nullptr && !check(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking), "stream create")) {
+    s = nullptr;
   }
   return s;
 }
@@ -161,8 +172,11 @@ inline cudaStream_t stream()
 inline cudaEvent_t completion_event()
 {
   static thread_local cudaEvent_t e = nullptr;
-  if (e == nullptr) {
-    cudaEventCreateWithFlags(&e, cudaEventDisableTiming | cudaEventBlockingSync);
+  if (
+    e == nullptr && !check(
+                      cudaEventCreateWithFlags(&e, cudaEventDisableTiming | cudaEventBlockingSync),
+                      "event create")) {
+    e = nullptr;
   }
   return e;
 }
@@ -194,51 +208,59 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
 // the first frame from an unseen publisher establishes the mapping, and every
 // later one resolves against it. The publisher's own region is already mapped,
 // so this is a lookup for it.
+// Returns whether the work may run. A message whose region could not be mapped
+// resolves to a null device pointer, so launching anyway would fault the device
+// or, worse, publish untouched memory.
 template <typename T>
-void prepare(const Reads<T> & declaration, cudaStream_t)
+bool prepare(const Reads<T> & declaration, cudaStream_t)
 {
   const auto & message = *declaration.message;
-  if (!message) return;
-  if (!agnocast::internal::ensure_gpu_region_mapped(
-        message.get_topic_name(), message->data.publisher_id(), 0, message->data.region_id())) {
-    RCLCPP_ERROR_ONCE(
-      agnocast::logger, "could not map the GPU region of topic '%s'",
-      message.get_topic_name().c_str());
+  if (!message) return true;
+
+  const std::string topic_name = message.get_topic_name();
+  const agnocast::internal::GpuRegionRef ref{
+    topic_name, message->data.publisher_id(), 0, message->data.region_id()};
+  if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
+    RCLCPP_ERROR(
+      agnocast::logger, "could not map the GPU region of topic '%s'", topic_name.c_str());
+    return false;
   }
+  return message->data.get() != nullptr;
 }
 
 template <typename T>
-void prepare(const Writes<T> &, cudaStream_t)
+bool prepare(const Writes<T> & declaration, cudaStream_t)
 {
+  const auto & message = *declaration.message;
+  return !message || message->data.get() != nullptr;
 }
 
 // Device buffers are created before the work and on the same stream, so the work
 // can address them without the host having synchronized first.
-inline void allocate_if_requested(
+inline bool allocate_if_requested(
   void ** device_ptr, size_t bytes, TransferOptions options, cudaStream_t s)
 {
-  if (!has_option(options, TransferOptions::kAllocateDeviceAsync)) return;
-  if (*device_ptr != nullptr) return;
-  if (cudaMallocAsync(device_ptr, bytes, s) != cudaSuccess) {
-    RCLCPP_ERROR_ONCE(agnocast::logger, "stream-ordered device allocation failed");
-  }
+  if (!has_option(options, TransferOptions::kAllocateDeviceAsync)) return true;
+  if (*device_ptr != nullptr) return true;
+  return check(cudaMallocAsync(device_ptr, bytes, s), "cudaMallocAsync");
 }
 
-inline void prepare(const Upload & u, cudaStream_t s)
+inline bool prepare(const Upload & u, cudaStream_t s)
 {
-  allocate_if_requested(u.device_dst, u.bytes, u.options, s);
+  return allocate_if_requested(u.device_dst, u.bytes, u.options, s);
 }
 
-inline void prepare(const Download & d, cudaStream_t s)
+inline bool prepare(const Download & d, cudaStream_t s)
 {
-  allocate_if_requested(d.device_src, d.bytes, d.options, s);
+  return allocate_if_requested(d.device_src, d.bytes, d.options, s);
 }
 
 template <typename T>
-void issue_upload(const T &, cudaStream_t)
+bool issue_upload(const T &, cudaStream_t)
 {
+  return true;
 }
-inline void issue_upload(const Upload & u, cudaStream_t s)
+inline bool issue_upload(const Upload & u, cudaStream_t s)
 {
   if (!host_buffer_is_pinned(u.host_src)) {
     RCLCPP_WARN_ONCE(
@@ -246,14 +268,16 @@ inline void issue_upload(const Upload & u, cudaStream_t s)
       "uploads() was given pageable host memory; the copy will block the host and its cost will "
       "be counted as GPU time. Allocate it with cudaMallocHost.");
   }
-  cudaMemcpyAsync(*u.device_dst, u.host_src, u.bytes, cudaMemcpyHostToDevice, s);
+  return check(
+    cudaMemcpyAsync(*u.device_dst, u.host_src, u.bytes, cudaMemcpyHostToDevice, s), "upload");
 }
 
 template <typename T>
-void issue_download(const T &, cudaStream_t)
+bool issue_download(const T &, cudaStream_t)
 {
+  return true;
 }
-inline void issue_download(const Download & d, cudaStream_t s)
+inline bool issue_download(const Download & d, cudaStream_t s)
 {
   if (!host_buffer_is_pinned(d.host_dst)) {
     RCLCPP_WARN_ONCE(
@@ -261,11 +285,12 @@ inline void issue_download(const Download & d, cudaStream_t s)
       "downloads() was given pageable host memory; the copy will block the host. Allocate it with "
       "cudaMallocHost.");
   }
-  cudaMemcpyAsync(d.host_dst, *d.device_src, d.bytes, cudaMemcpyDeviceToHost, s);
+  return check(
+    cudaMemcpyAsync(d.host_dst, *d.device_src, d.bytes, cudaMemcpyDeviceToHost, s), "download");
 }
 
 template <typename Tuple, size_t... I>
-void run(Tuple && parts, std::index_sequence<I...>)
+bool run(Tuple && parts, std::index_sequence<I...>)
 {
   constexpr size_t kWork = sizeof...(I);
   static_assert(
@@ -273,39 +298,49 @@ void run(Tuple && parts, std::index_sequence<I...>)
     "every argument before the last must be reads(), writes(), uploads() or downloads()");
 
   cudaStream_t s = stream();
+  cudaEvent_t done = completion_event();
+  if (s == nullptr || done == nullptr) return false;
 
-  (prepare(std::get<I>(parts), s), ...);
+  // Folded so that every declaration is prepared even once one has failed:
+  // allocations made here are the caller's from then on.
+  bool ready = true;
+  ((ready = prepare(std::get<I>(parts), s) && ready), ...);
+  if (!ready) return false;
 
   gate();
-  (issue_upload(std::get<I>(parts), s), ...);
+  bool ok = true;
+  ((ok = issue_upload(std::get<I>(parts), s) && ok), ...);
 
   std::get<kWork>(parts)(s);
+  ok = check(cudaGetLastError(), "work submission") && ok;
 
-  cudaEvent_t done = completion_event();
-  cudaEventRecord(done, s);
-  cudaEventSynchronize(done);
+  ok = check(cudaEventRecord(done, s), "event record") && ok;
+  ok = check(cudaEventSynchronize(done), "event synchronize") && ok;
   gate_release();
 
   // Downloads follow the release so the GPU is available to the next admitted
   // node while this one copies its results back.
-  (issue_download(std::get<I>(parts), s), ...);
-  cudaStreamSynchronize(s);
+  ((ok = issue_download(std::get<I>(parts), s) && ok), ...);
+  ok = check(cudaStreamSynchronize(s), "stream synchronize") && ok;
+  return ok;
 }
 
 }  // namespace detail
 
 /**
  * @brief Submit GPU work over Agnocast messages, returning once it has completed.
+ * @return Whether everything succeeded. Failures are logged either way, so a
+ * caller that has nothing better to do than carry on may ignore this.
  *
  * Takes any number of declarations followed by a callable of `void(cudaStream_t)`.
  * They arrive in one parameter pack with the callable taken from the tail,
  * because a parameter pack in non-final position is not deduced.
  */
 template <typename... Args>
-void dispatch(Args &&... args)
+bool dispatch(Args &&... args)
 {
   static_assert(sizeof...(Args) >= 1, "dispatch() needs at least the work lambda");
-  detail::run(
+  return detail::run(
     std::forward_as_tuple(std::forward<Args>(args)...),
     std::make_index_sequence<sizeof...(Args) - 1>{});
 }

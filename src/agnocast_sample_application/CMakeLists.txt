@@ -215,6 +215,13 @@ if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
     target_include_directories(${gpu_target} PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS} ${agnocast_gpu_INCLUDE_DIRS})
     target_link_libraries(${gpu_target} CUDA::cudart)
+    # Replaces the directory-wide options rather than adding to them: nvcc hands
+    # the host compiler its own generated stubs, whose #line directives -Wpedantic
+    # rejects, and the resulting warnings are about generated code.
+    set_property(TARGET ${gpu_target} PROPERTY COMPILE_OPTIONS -Wall -Wextra)
+    # Samples run on whatever GPU is present, so leave the architecture to nvcc's
+    # default rather than pinning one here.
+    set_property(TARGET ${gpu_target} PROPERTY CUDA_ARCHITECTURES OFF)
     ament_target_dependencies(${gpu_target} agnocastlib rclcpp agnocast_gpu sensor_msgs)
     install(TARGETS ${gpu_target} DESTINATION lib/${PROJECT_NAME})
   endforeach()
