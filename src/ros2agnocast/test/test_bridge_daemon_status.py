@@ -10,6 +10,8 @@ import socket
 import threading
 from unittest.mock import mock_open, patch
 
+import pytest
+
 from ros2agnocast.verb import agnocast_bridge_daemon_status as br
 from ros2agnocast.verb.agnocast_bridge_daemon_status import (
     _BridgeResult,
@@ -94,23 +96,23 @@ def test_build_summary_no_results_is_ng():
     assert 'not running' in summary.lower()
 
 
-def test_build_summary_single_performance_ok():
-    summary, is_ng = _build_summary([_ok(100, 'performance')])
+def test_build_summary_single_bridge_ok():
+    summary, is_ng = _build_summary([_ok(100, 'bridge')])
     assert is_ng is False
     assert 'running' in summary.lower()
     assert '100' in summary
 
 
 def test_build_summary_multiple_bridges_is_ng():
-    summary, is_ng = _build_summary([_ok(100, 'performance'), _ok(101, 'performance')])
+    summary, is_ng = _build_summary([_ok(100, 'bridge'), _ok(101, 'bridge')])
     assert is_ng is True
     assert 'multiple' in summary.lower()
     assert '100' in summary
     assert '101' in summary
 
 
-def test_build_summary_performance_ng():
-    summary, is_ng = _build_summary([_ng(100, 'performance')])
+def test_build_summary_bridge_ng():
+    summary, is_ng = _build_summary([_ng(100, 'bridge')])
     assert is_ng is True
     assert 'not working' in summary.lower()
     assert '100' in summary
@@ -152,14 +154,14 @@ def _unique_abstract_addr(suffix: str = '') -> str:
     return f'\x00agnocast_bridge_test_{os.getpid()}_{threading.get_ident()}{suffix}'
 
 
-def test_recv_msg_returns_ok_for_valid_performance_json():
-    addr = _unique_abstract_addr('_perf')
-    payload = b'{"type":"performance","ipc_ns":99,"pid":456}'
+def test_recv_msg_returns_ok_for_valid_bridge_json():
+    addr = _unique_abstract_addr('_bridge')
+    payload = b'{"type":"bridge","ipc_ns":99,"pid":456}'
     t = _start_server(addr, payload)
     result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
     t.join(timeout=2.0)
     assert isinstance(result, RecvMsgOk)
-    assert result.type == 'performance'
+    assert result.type == 'bridge'
     assert result.ipc_ns == 99
     assert result.pid == 456
 
@@ -188,7 +190,7 @@ def test_recv_msg_returns_parse_error_for_invalid_json():
 
 def test_recv_msg_returns_parse_error_for_missing_fields():
     addr = _unique_abstract_addr('_missingfields')
-    t = _start_server(addr, payload=b'{"type":"performance"}')
+    t = _start_server(addr, payload=b'{"type":"bridge"}')
     result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
     t.join(timeout=2.0)
     assert isinstance(result, RecvMsgParseError)
@@ -212,24 +214,25 @@ def _make_verb(result_map: dict) -> BridgeDaemonStatusVerb:
     return verb
 
 
-def test_collect_bridge_results_ok_performance():
+def test_collect_bridge_results_ok_bridge():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='performance', ipc_ns=ipc_inode, pid=pid)})
+    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, pid=pid)})
     results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert len(results) == 1
     assert results[0].is_ok is True
-    assert results[0].bridge_type == 'performance'
+    assert results[0].bridge_type == 'bridge'
 
 
-def test_collect_bridge_results_standard_type_gives_unknown_ng():
+@pytest.mark.parametrize('legacy_type', ['standard', 'performance'])
+def test_collect_bridge_results_legacy_type_gives_legacy_ng(legacy_type):
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='standard', ipc_ns=ipc_inode, pid=pid)})
+    verb = _make_verb({sock_addr: RecvMsgOk(type=legacy_type, ipc_ns=ipc_inode, pid=pid)})
     results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert results[0].bridge_type == 'unknown'
-    assert results[0].ng_message == br._NG_MSG_STANDARD_TYPE
+    assert results[0].ng_message == br._NG_MSG_LEGACY_TYPE
 
 
 def test_collect_bridge_results_recv_failed_gives_unknown_ng():
@@ -265,7 +268,7 @@ def test_collect_bridge_results_unknown_bridge_type_gives_ng():
 def test_collect_bridge_results_mismatched_pid_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='performance', ipc_ns=ipc_inode, pid=999)})
+    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, pid=999)})
     results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert 'pid=999' in results[0].ng_message
@@ -274,7 +277,7 @@ def test_collect_bridge_results_mismatched_pid_gives_ng():
 def test_collect_bridge_results_mismatched_ipc_ns_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='performance', ipc_ns=999, pid=pid)})
+    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=999, pid=pid)})
     results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
     assert results[0].is_ok is False
     assert 'ipc_ns=999' in results[0].ng_message

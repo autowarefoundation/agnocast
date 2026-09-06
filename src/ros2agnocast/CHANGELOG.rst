@@ -2,6 +2,28 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.0 (2026-09-01)
+------------------
+* feat(agnocastlib): support service introspection on the server side (`#1551 <https://github.com/tier4/agnocast/issues/1551>`_)
+* feat(agnocastlib): mark bridge-owned services and clients as bridges in kmod (`#1555 <https://github.com/tier4/agnocast/issues/1555>`_)
+* feat(ros2agnocast): add --spin-time to topic list_agnocast (`#1483 <https://github.com/tier4/agnocast/issues/1483>`_)
+* refactor(kmod)[need-minor-update]: rename performance bridge manager to bridge manager (`#1513 <https://github.com/tier4/agnocast/issues/1513>`_)
+* refactor(ros2agnocast_discovery_agent): rename the executable to agnocast_discovery_agent (`#1496 <https://github.com/tier4/agnocast/issues/1496>`_)
+* feat(agnocastlib): add generic A2R service bridge fallback (`#1475 <https://github.com/tier4/agnocast/issues/1475>`_)
+* fix(bridge): A2R bridge subscription lost when its group is classified before the sub exists (`#1455 <https://github.com/tier4/agnocast/issues/1455>`_)
+* refactor(agnocastlib): extract ClientBase class with shared client functionality (`#1468 <https://github.com/tier4/agnocast/issues/1468>`_)
+* perf(bridge): avoid redundant copying in service bridge plugin (`#1453 <https://github.com/tier4/agnocast/issues/1453>`_)
+* feat(ros2agnocast): hide internal CIE and discovery agent nodes/topics unless -d is passed (`#1456 <https://github.com/tier4/agnocast/issues/1456>`_)
+* fix(ros2agnocast): error handling for discovery agent (`#1444 <https://github.com/tier4/agnocast/issues/1444>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): claim the discovery-agent singleton via the kmod (`#1427 <https://github.com/tier4/agnocast/issues/1427>`_)
+* feat(bridge): add performance-mode A2R service bridging (`#1383 <https://github.com/tier4/agnocast/issues/1383>`_)
+* fix(ros2agnocast): don't flag a missing discovery agent when there is no Agnocast (`#1429 <https://github.com/tier4/agnocast/issues/1429>`_)
+* refactor(agnocastlib): remove the BridgeRegistrationPolicy template parameter from pub/sub classes (`#1412 <https://github.com/tier4/agnocast/issues/1412>`_)
+* fix(ros2agnocast): probe the per-(namespace, domain) discovery-agent lock (`#1425 <https://github.com/tier4/agnocast/issues/1425>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): make cross-NS discovery and bridge decisions domain-aware (`#1410 <https://github.com/tier4/agnocast/issues/1410>`_)
+* chore(docs, ros2agnocast, agnocast_kmod): reflect standard bridge removal (`#1406 <https://github.com/tier4/agnocast/issues/1406>`_)
+* refactor(agnocastlib): rename bridge "request" APIs to "registration" (`#1388 <https://github.com/tier4/agnocast/issues/1388>`_)
+
 2.3.5 (2026-06-09)
 ------------------
 * Feat/ros2 bag record agnocast/topic filter (`#1377 <https://github.com/autowarefoundation/agnocast/issues/1377>`_)

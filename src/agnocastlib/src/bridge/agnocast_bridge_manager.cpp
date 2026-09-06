@@ -1,5 +1,5 @@
 
-#include "agnocast/bridge/performance/agnocast_performance_bridge_manager.hpp"
+#include "agnocast/bridge/agnocast_bridge_manager.hpp"
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
 #include "agnocast/agnocast_ioctl.hpp"
@@ -21,12 +21,12 @@
 namespace agnocast
 {
 
-PerformanceBridgeManager::PerformanceBridgeManager()
-: logger_(rclcpp::get_logger("agnocast_performance_bridge_manager")),
+BridgeManager::BridgeManager()
+: logger_(rclcpp::get_logger("agnocast_bridge_manager")),
   clock_(std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME)),
   self_ipc_ns_inode_(get_self_ipc_ns_inode()),
   event_loop_(logger_),
-  loader_(std::make_shared<PerformanceBridgeLoader>(logger_))
+  loader_(std::make_shared<BridgeLoader>(logger_))
 {
   if (rclcpp::ok()) {
     rclcpp::shutdown();
@@ -37,7 +37,7 @@ PerformanceBridgeManager::PerformanceBridgeManager()
   rclcpp::init(0, nullptr, init_options);
 }
 
-PerformanceBridgeManager::~PerformanceBridgeManager()
+BridgeManager::~BridgeManager()
 {
   request_shutdown();
 
@@ -56,7 +56,7 @@ PerformanceBridgeManager::~PerformanceBridgeManager()
   }
 }
 
-void PerformanceBridgeManager::run()
+void BridgeManager::run()
 {
   constexpr int EVENT_LOOP_TIMEOUT_MS = 1000;
 
@@ -80,7 +80,7 @@ void PerformanceBridgeManager::run()
   }
 }
 
-void PerformanceBridgeManager::worker_loop()
+void BridgeManager::worker_loop()
 {
   // Also the maintenance polling interval, not just a safety net for the CV: the
   // sweep below must run periodically (bridge teardown, daemon lease expiry) even
@@ -133,9 +133,9 @@ void PerformanceBridgeManager::worker_loop()
   }
 }
 
-void PerformanceBridgeManager::start_ros_execution()
+void BridgeManager::start_ros_execution()
 {
-  const std::string node_name = get_performance_bridge_node_name(self_ipc_ns_inode_);
+  const std::string node_name = get_bridge_node_name(self_ipc_ns_inode_);
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
 
   // We must not use single-threaded executors because of how service bridges work. Service bridges
@@ -157,12 +157,12 @@ void PerformanceBridgeManager::start_ros_execution()
   });
 }
 
-void PerformanceBridgeManager::start_worker_thread()
+void BridgeManager::start_worker_thread()
 {
   worker_thread_ = std::thread([this]() { this->worker_loop(); });
 }
 
-void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t size)
+void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
 {
   if (shutdown_requested_.load(std::memory_order_relaxed)) {
     return;
@@ -206,6 +206,11 @@ void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t 
         return;
       }
       break;
+    case BridgeMsgType::DaemonService:
+      if (!validate_variant_size(bridge_msg_wire_size<BridgeMsgDaemonServicePayload>())) {
+        return;
+      }
+      break;
     default:
       RCLCPP_WARN(
         logger_, "Received bridge message with unknown type: %u", static_cast<uint32_t>(msg.type));
@@ -230,12 +235,11 @@ void PerformanceBridgeManager::parse_and_enqueue(const void * data, std::size_t 
   }
 }
 
-void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
+void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
 {
   switch (msg.type) {
     case BridgeMsgType::Service: {
       const auto & payload = msg.payload.service;
-      ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
       std::string service_name = static_cast<const char *>(payload.service_name);
       ServiceBridgeItem sb_item;
 
@@ -245,10 +249,8 @@ void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
         active_service_bridges_.erase(it);
       }
 
-      sb_item.handle_request(payload, deps);
-      if (sb_item.state() != ServiceBridgeState::NONE) {
-        active_service_bridges_.emplace(service_name, std::move(sb_item));
-      }
+      sb_item.handle_request(payload);
+      active_service_bridges_.emplace(service_name, std::move(sb_item));
       break;
     }
     case BridgeMsgType::PubSub: {
@@ -267,6 +269,10 @@ void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
       register_daemon_pubsub_request(msg.payload.daemon_pubsub);
       break;
     }
+    case BridgeMsgType::DaemonService: {
+      register_daemon_service_request(msg.payload.daemon_service);
+      break;
+    }
     default: {
       // parse_and_enqueue() must reject every unknown type before enqueuing,
       // so reaching here means the two switches drifted out of sync.
@@ -279,8 +285,7 @@ void PerformanceBridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
   }
 }
 
-void PerformanceBridgeManager::register_daemon_pubsub_request(
-  const BridgeMsgDaemonPubSubPayload & req)
+void BridgeManager::register_daemon_pubsub_request(const BridgeMsgDaemonPubSubPayload & req)
 {
   const std::string topic_name = static_cast<const char *>(req.topic_name);
   const std::string message_type = static_cast<const char *>(req.type_name);
@@ -292,7 +297,18 @@ void PerformanceBridgeManager::register_daemon_pubsub_request(
     topic_name, DaemonForcedRequest{message_type, daemon_request_qos(req), forced_until});
 }
 
-bool PerformanceBridgeManager::is_daemon_forced(
+void BridgeManager::register_daemon_service_request(const BridgeMsgDaemonServicePayload & req)
+{
+  const std::string service_name = static_cast<const char *>(req.service_name);
+
+  auto it = active_service_bridges_.find(service_name);
+  if (it == active_service_bridges_.end()) {
+    return;
+  }
+  it->second.handle_daemon_request();
+}
+
+bool BridgeManager::is_daemon_forced(
   const std::string & topic_name, BridgeDirection direction) const
 {
   const auto & forced =
@@ -302,7 +318,7 @@ bool PerformanceBridgeManager::is_daemon_forced(
          is_daemon_force_active(it->second.forced_until, std::chrono::steady_clock::now());
 }
 
-void PerformanceBridgeManager::create_daemon_forced_bridges()
+void BridgeManager::create_daemon_forced_bridges()
 {
   for (const bool is_r2a : {true, false}) {
     auto & forced = is_r2a ? daemon_forced_r2a_ : daemon_forced_a2r_;
@@ -329,12 +345,12 @@ void PerformanceBridgeManager::create_daemon_forced_bridges()
   }
 }
 
-void PerformanceBridgeManager::activate_daemon_forced_bridge(
+void BridgeManager::activate_daemon_forced_bridge(
   const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
   bool is_r2a)
 {
   try {
-    PerformancePubsubBridgeResult result =
+    PubsubBridgeResult result =
       is_r2a ? loader_->create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos)
              : loader_->create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
     if (!result.entity_handle) {
@@ -371,7 +387,7 @@ void PerformanceBridgeManager::activate_daemon_forced_bridge(
   }
 }
 
-void PerformanceBridgeManager::request_shutdown()
+void BridgeManager::request_shutdown()
 {
   // Write the flag under the same mutex that the worker's cv predicate reads.
   // Without this pairing, a shutdown could be missed if the worker evaluates
@@ -381,12 +397,17 @@ void PerformanceBridgeManager::request_shutdown()
     shutdown_requested_ = true;
   }
   pending_msgs_cv_.notify_all();
+
   if (executor_) {
     executor_->cancel();
   }
+
+  // Wake up the event loop immediately so that spin_once() returns and the run() loop can observe
+  // shutdown_requested_.
+  event_loop_.wakeup();
 }
 
-void PerformanceBridgeManager::on_signal()
+void BridgeManager::on_signal()
 {
   if (ioctl(agnocast_fd, AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD) < 0) {
     RCLCPP_ERROR(logger_, "Failed to notify bridge shutdown: %s", strerror(errno));
@@ -394,13 +415,13 @@ void PerformanceBridgeManager::on_signal()
   request_shutdown();
 }
 
-std::string PerformanceBridgeManager::on_socket_request() const
+std::string BridgeManager::on_socket_request() const
 {
-  return R"({"type":"performance","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
+  return R"({"type":"bridge","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
          std::to_string(getpid()) + "}";
 }
 
-void PerformanceBridgeManager::check_and_create_pubsub_bridges()
+void BridgeManager::check_and_create_pubsub_bridges()
 {
   for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
     const auto & topic_name = cache_it->first;
@@ -427,7 +448,7 @@ void PerformanceBridgeManager::check_and_create_pubsub_bridges()
   }
 }
 
-void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
+void BridgeManager::check_and_remove_pubsub_bridges()
 {
   auto r2a_it = active_pubsub_r2a_bridges_.begin();
   while (r2a_it != active_pubsub_r2a_bridges_.end()) {
@@ -500,7 +521,7 @@ void PerformanceBridgeManager::check_and_remove_pubsub_bridges()
   }
 }
 
-void PerformanceBridgeManager::check_and_update_service_bridges()
+void BridgeManager::check_and_update_service_bridges()
 {
   ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
 
@@ -517,7 +538,7 @@ void PerformanceBridgeManager::check_and_update_service_bridges()
   }
 }
 
-void PerformanceBridgeManager::check_and_remove_request_cache()
+void BridgeManager::check_and_remove_request_cache()
 {
   for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
     const auto & topic_name = cache_it->first;
@@ -533,7 +554,7 @@ void PerformanceBridgeManager::check_and_remove_request_cache()
   }
 }
 
-void PerformanceBridgeManager::check_and_request_shutdown()
+void BridgeManager::check_and_request_shutdown()
 {
   struct ioctl_check_and_request_bridge_shutdown_args args = {};
   if (ioctl(agnocast_fd, AGNOCAST_CHECK_AND_REQUEST_BRIDGE_SHUTDOWN_CMD, &args) < 0) {
@@ -546,7 +567,7 @@ void PerformanceBridgeManager::check_and_request_shutdown()
   }
 }
 
-bool PerformanceBridgeManager::should_create_pubsub_bridge(
+bool BridgeManager::should_create_pubsub_bridge(
   const std::string & topic_name, BridgeDirection direction) const
 {
   if (direction == BridgeDirection::ROS2_TO_AGNOCAST) {
@@ -573,7 +594,7 @@ bool PerformanceBridgeManager::should_create_pubsub_bridge(
   return has_external_ros2_subscriber(container_node_.get(), topic_name);
 }
 
-void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
+void BridgeManager::create_pubsub_bridge_if_needed(
   const std::string & topic_name, RequestMap & requests, const std::string & message_type,
   BridgeDirection direction)
 {
@@ -595,7 +616,7 @@ void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
   try {
     const bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
 
-    PerformancePubsubBridgeResult result;
+    PubsubBridgeResult result;
     if (is_r2a) {
       auto qos = get_subscriber_qos(topic_name, qos_source_id);
       result = loader_->create_r2a_pubsub_bridge(container_node_, topic_name, message_type, qos);
@@ -641,7 +662,7 @@ void PerformanceBridgeManager::create_pubsub_bridge_if_needed(
   }
 }
 
-void PerformanceBridgeManager::remove_invalid_requests(
+void BridgeManager::remove_invalid_requests(
   const std::string & topic_name, RequestMap & request_map)
 {
   for (auto req_it = request_map.begin(); req_it != request_map.end();) {

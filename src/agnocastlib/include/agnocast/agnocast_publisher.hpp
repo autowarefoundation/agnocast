@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
@@ -74,7 +73,8 @@ enum class PublisherRole : uint8_t {
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
-// shared with all Agnocast publishers, such as kernel registration and message queue management.
+// shared with all Agnocast publishers, such as kernel registration, GID generation, and
+// bridge registration.
 class PublisherBase
 {
   void generate_gid();
@@ -83,9 +83,11 @@ protected:
   topic_local_id_t id_ = -1;
   std::string topic_name_;
   rmw_gid_t gid_;
+  // The depth is a placeholder: rclcpp::QoS has no default constructor.
+  rclcpp::QoS actual_qos_{1};
 
   template <typename NodeT>
-  rclcpp::QoS init_base(
+  void init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
     const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
@@ -108,6 +110,13 @@ public:
   const rmw_gid_t & get_gid() const { return gid_; }
 
   /**
+   * @brief Return the per-topic id the kernel module assigned to this publisher.
+   * @return Publisher id.
+   */
+  AGNOCAST_PUBLIC
+  topic_local_id_t get_id() const { return id_; }
+
+  /**
    * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).
    * @return Total subscriber count.
    */
@@ -123,6 +132,18 @@ public:
   {
     return get_intra_subscription_count_core(topic_name_);
   }
+
+  /**
+   * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
+   *
+   * Unlike `rclcpp::PublisherBase::get_actual_qos()`, the value is not RMW-resolved:
+   * there is no DDS entity to query, so `SystemDefault` and the policies Agnocast ignores are
+   * reported as requested.
+   *
+   * @return Effective QoS of this publisher.
+   */
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return actual_qos_; }
 };
 
 /**
@@ -137,7 +158,7 @@ template <typename MessageT>
 class Publisher : public PublisherBase
 {
   template <typename NodeT>
-  rclcpp::QoS constructor_impl(
+  void constructor_impl(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options, const PublisherRole role)
   {
@@ -149,7 +170,7 @@ class Publisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
-    return this->init_base(node, topic_name, type_name, qos, options, role);
+    this->init_base(node, topic_name, type_name, qos, options, role);
   }
 
 public:
@@ -159,13 +180,13 @@ public:
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options, const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(
         node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-      topic_name_.c_str(), actual_qos.depth());
+      topic_name_.c_str(), actual_qos_.depth());
   }
 
   Publisher(
@@ -173,12 +194,12 @@ public:
     const PublisherOptions & options = PublisherOptions{},
     const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
-      actual_qos.depth());
+      actual_qos_.depth());
   }
 
   /**

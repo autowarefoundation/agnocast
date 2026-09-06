@@ -92,6 +92,25 @@ def _write_config(cfg):
         yaml.safe_dump(cfg, f)
 
 
+def _read_irq_affinity_cpus(irq):
+    """Live /proc/irq/<N>/smp_affinity_list as a CPU set, mirroring the node's
+    parse_manageable_cpu_list (CPUs at or above the configured count dropped).
+    None when unreadable."""
+    try:
+        with open(f'/proc/irq/{irq}/smp_affinity_list') as f:
+            raw = f.read().strip()
+        cpus = set()
+        for token in raw.split(','):
+            if '-' in token:
+                first, last = token.split('-')
+                cpus.update(range(int(first), int(last) + 1))
+            else:
+                cpus.add(int(token))
+        return {c for c in cpus if c < os.cpu_count()}
+    except (OSError, ValueError):
+        return None
+
+
 def _call_reapply(timeout_sec=10.0):
     """Call the reapply_config service synchronously and return the response."""
     rclpy.init()
@@ -192,7 +211,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             process=thread_configurator,
         )
 
-    def test_reapply_after_priority_change(self, proc_output, thread_configurator):
+    def test_reapply_after_nice_change(self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received CallbackGroupInfo',
             timeout=20.0,
@@ -208,7 +227,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         # SCHED_OTHER + positive nice value: lowering priority needs no
         # CAP_SYS_NICE, which is not guaranteed in CI sandboxes.
         first['policy'] = 'SCHED_OTHER'
-        first['priority'] = 10
+        first['nice'] = 10
         first.setdefault('affinity', [])
         _write_config(cfg)
 
@@ -253,7 +272,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             'id': 'fictitious_unannounced_cbg',
             'domain_id': 0,
             'policy': 'SCHED_OTHER',
-            'priority': 0,
+            'nice': 0,
             'affinity': [],
         }
         cfg.setdefault('callback_groups', []).append(added_entry)
@@ -298,7 +317,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         ):
             self.assertNotIn(removed_key, list(arr))
 
-    def test_reapply_non_ros_thread_priority_change(self, proc_output, thread_configurator):
+    def test_reapply_non_ros_thread_nice_change(self, proc_output, thread_configurator):
         proc_output.assertWaitFor(
             'Received NonRosThreadInfo',
             timeout=20.0,
@@ -315,7 +334,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
                 'prerun did not produce test_non_ros_worker non_ros_thread entry'
             )
         target['policy'] = 'SCHED_OTHER'
-        target['priority'] = 10
+        target['nice'] = 10
         target.setdefault('affinity', [])
         _write_config(cfg)
 
@@ -342,7 +361,7 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
             'id': '/fictitious_node/*',
             'domain_id': 0,
             'policy': 'SCHED_OTHER',
-            'priority': 0,
+            'nice': 0,
             'affinity': [],
         }
         cfg.setdefault('callback_groups', []).append(added_entry)
@@ -377,6 +396,118 @@ class TestThreadConfiguratorReapply(unittest.TestCase):
         response = _call_reapply()
         self.assertFalse(response.success)
         self.assertIn('Unknown scheduling policy', response.error_message)
+
+    def test_template_contains_kernel_threads_and_irqs_sections(
+            self, proc_output, thread_configurator):
+        cfg = _read_config()
+        self.assertIn('kernel_threads', cfg)
+        self.assertIn('irqs', cfg)
+        # In CI pid namespaces host kthreads are invisible, so kernel_threads
+        # may legitimately be empty; entries that do exist must be fully
+        # formed, with observed values (never YAML null) as the initial ones.
+        for entry in cfg['kernel_threads'] or []:
+            for key in ('comm', 'policy', 'affinity'):
+                self.assertIn(key, entry)
+                self.assertIsNotNone(entry[key])
+            # The emitter writes the policy-appropriate tunable: nice for CFS
+            # policies, priority for RT or UNMANAGEABLE policies.
+            if entry['policy'] in ('SCHED_OTHER', 'SCHED_BATCH', 'SCHED_IDLE'):
+                self.assertIn('nice', entry)
+                self.assertIsNotNone(entry['nice'])
+            else:
+                self.assertIn('priority', entry)
+                self.assertIsNotNone(entry['priority'])
+            self.assertFalse(entry['comm'].startswith('kworker/'))
+        for entry in cfg['irqs'] or []:
+            for key in ('irq', 'name', 'affinity'):
+                self.assertIn(key, entry)
+                self.assertIsNotNone(entry[key])
+
+    def test_startup_logs_kernel_irq_summary(self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Kernel threads and IRQs configured:',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+    def test_reapply_reports_unknown_kernel_thread_as_skipped(
+            self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+        cfg = _read_config()
+        added_entry = {
+            'comm': 'fictitious_kthread',
+            # SCHED_OTHER + positive nice mirrors the CI-safe pattern above;
+            # no syscall happens anyway for a comm with no live match.
+            'policy': 'SCHED_OTHER',
+            'nice': 10,
+            'affinity': None,
+        }
+        if not cfg.get('kernel_threads'):
+            cfg['kernel_threads'] = []
+        cfg['kernel_threads'].append(added_entry)
+        _write_config(cfg)
+
+        response = _call_reapply()
+        self.assertTrue(
+            response.success,
+            f'reapply rejected unexpectedly: error_message={response.error_message!r}',
+        )
+        self.assertIn('fictitious_kthread', list(response.skipped_kernel_threads))
+        for arr in (response.applied_kernel_threads, response.failed_kernel_threads):
+            for key in list(arr):
+                self.assertFalse(key.startswith('fictitious_kthread:'))
+
+    def test_reapply_reports_in_sync_irq_as_applied(
+            self, proc_output, thread_configurator):
+        proc_output.assertWaitFor(
+            'Received CallbackGroupInfo',
+            timeout=20.0,
+            process=thread_configurator,
+        )
+
+        cfg = _read_config()
+        target = next(
+            (e for e in (cfg.get('irqs') or [])
+             if isinstance(e.get('affinity'), list)),
+            None,
+        )
+        if target is None:
+            self.skipTest('no IRQ with a readable affinity list in the template')
+        irq = target['irq']
+
+        # Compare-before-set precedes the irqbalance gate, so an entry whose
+        # live affinity still equals the template value must be reported as
+        # applied without any write (no privileges needed in CI, irqbalance
+        # running or not). Sample the live value on both sides of the call and
+        # skip when it moved mid-call, since the expectation is undecidable.
+        before = _read_irq_affinity_cpus(irq)
+        response = _call_reapply()
+        after = _read_irq_affinity_cpus(irq)
+        self.assertTrue(
+            response.success,
+            f'reapply rejected unexpectedly: error_message={response.error_message!r}',
+        )
+        key = str(irq)
+        applied = list(response.applied_irqs)
+        failed = list(response.failed_irqs)
+        self.assertEqual(
+            applied.count(key) + failed.count(key), 1,
+            'each managed IRQ must be reported exactly once',
+        )
+        if before != after:
+            self.skipTest('IRQ affinity changed during the reapply call')
+        if before == set(target['affinity']):
+            self.assertIn(key, applied)
+        else:
+            # A drifted entry needs a real write; whether that lands in
+            # applied or failed depends on privileges and irqbalance, both
+            # owned by the environment.
+            self.skipTest('live affinity no longer matches the template value')
 
 
 @launch_testing.post_shutdown_test()

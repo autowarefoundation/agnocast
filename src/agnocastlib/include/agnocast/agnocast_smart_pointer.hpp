@@ -5,7 +5,6 @@
 #include "agnocast/agnocast_utils.hpp"
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>

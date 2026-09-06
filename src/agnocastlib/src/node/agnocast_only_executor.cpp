@@ -183,6 +183,7 @@ void AgnocastOnlyExecutor::add_callback_group(
     exit(EXIT_FAILURE);
   }
 
+#ifndef TRACETOOLS_DISABLED
   const auto group_type_enum = group_ptr->type();
   const char * group_type_str = (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive)
                                   ? "mutually_exclusive"
@@ -192,6 +193,7 @@ void AgnocastOnlyExecutor::add_callback_group(
     agnocast_add_callback_group, static_cast<const void *>(this),
     static_cast<const void *>(node_ptr.get()), static_cast<const void *>(group_ptr.get()),
     group_type_str);
+#endif
 
   EpollUpdateDispatcher::get_instance().request_update(epoll_update_tracker_.id());
 }
@@ -287,6 +289,7 @@ void AgnocastOnlyExecutor::add_callback_groups_from_nodes_associated_to_executor
           !group_ptr->get_associated_with_executor_atomic().exchange(true)) {
           weak_groups_to_nodes_associated_with_executor_.insert({group_ptr, node});
 
+#ifndef TRACETOOLS_DISABLED
           const auto group_type_enum = group_ptr->type();
           const char * group_type_str =
             (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "mutually_exclusive"
@@ -296,6 +299,7 @@ void AgnocastOnlyExecutor::add_callback_groups_from_nodes_associated_to_executor
             agnocast_add_callback_group, static_cast<const void *>(this),
             static_cast<const void *>(node.get()), static_cast<const void *>(group_ptr.get()),
             group_type_str);
+#endif
         }
       });
     }
@@ -324,6 +328,7 @@ void AgnocastOnlyExecutor::add_node(
         !group_ptr->get_associated_with_executor_atomic().exchange(true)) {
         weak_groups_to_nodes_associated_with_executor_.insert({group_ptr, node_ptr});
 
+#ifndef TRACETOOLS_DISABLED
         const auto group_type_enum = group_ptr->type();
         const char * group_type_str =
           (group_type_enum == rclcpp::CallbackGroupType::MutuallyExclusive) ? "mutually_exclusive"
@@ -333,6 +338,7 @@ void AgnocastOnlyExecutor::add_node(
           agnocast_add_callback_group, static_cast<const void *>(this),
           static_cast<const void *>(node_ptr.get()), static_cast<const void *>(group_ptr.get()),
           group_type_str);
+#endif
       }
     });
   weak_nodes_.push_back(node_ptr);

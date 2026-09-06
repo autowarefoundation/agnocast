@@ -2,6 +2,15 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.0 (2026-09-01)
+------------------
+* feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)
+* fix(sample_application): store callback groups as class members (`#1530 <https://github.com/tier4/agnocast/issues/1530>`_)
+* feat(agnocastlib): add AsyncParametersClient to Node (`#1510 <https://github.com/tier4/agnocast/issues/1510>`_)
+* fix(agnocast_sample_application): graceful shutdown on service wait interruption (`#1439 <https://github.com/tier4/agnocast/issues/1439>`_)
+* feat(agnocastlib): add `agnocast::GenericPublisher` (`#1395 <https://github.com/tier4/agnocast/issues/1395>`_)
+* feat(agnocastlib): add `agnocast::GenericSubscription` (`#1393 <https://github.com/tier4/agnocast/issues/1393>`_)
+
 2.3.5 (2026-06-09)
 ------------------
 * feat: per-IPC-namespace discovery daemon + AgnocastDaemonState msgs (shared base) (`#1350 <https://github.com/autowarefoundation/agnocast/issues/1350>`_)

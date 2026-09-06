@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agnocastlib</name>
-  <version>2.3.5</version>
+  <version>2.4.0</version>
   <description>
     True Zero Copy Communication Middleware for Unsized ROS 2 Message Types.
   </description>
@@ -31,6 +31,8 @@
   <depend>rmw</depend>
   <depend>rosgraph_msgs</depend>
   <depend>rosidl_typesupport_introspection_cpp</depend>
+  <!-- service_msgs does not exist before Iron. -->
+  <depend condition="$ROS_DISTRO &gt;= iron">service_msgs</depend>
   <depend>tracetools</depend>
 
   <depend>agnocast_cie_config_msgs</depend>
@@ -48,9 +50,8 @@
   <!-- Uncomment when agnocast_heaphook is released from PPA -->
   <!-- <exec_depend>agnocast_heaphook</exec_depend> -->
 
-  <!-- initialize_agnocast() forks+execs the auto-forked discovery agent
-       (`ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent`), so the package must be
-       present at runtime. Runtime-only, so it does not affect build order. -->
+  <!-- initialize_agnocast() forks+execs `agnocast_discovery_agent`, so the package must be present
+       at runtime. Runtime-only, so it does not affect build order. -->
   <exec_depend>ros2agnocast_discovery_agent</exec_depend>
 
   <test_depend>ament_cmake_gmock</test_depend>

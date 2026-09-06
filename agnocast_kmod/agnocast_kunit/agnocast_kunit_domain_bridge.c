@@ -6,8 +6,6 @@
 
 #include <kunit/test.h>
 #include <linux/delay.h>
-#include <linux/mm.h>
-#include <linux/string.h>
 
 static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 
@@ -15,6 +13,13 @@ static const char * TOPIC_NAME = "/kunit_test_domain_bridge_topic";
 // RN_DST in the other.
 static const char * RN_SRC = "/kunit_test_domain_bridge_rename_src";
 static const char * RN_DST = "/kunit_test_domain_bridge_rename_dst";
+
+// A prefix rule bridges every name under PFX, pairing each with the identical name in the other
+// domain. PFX_A / PFX_B stand for two callers' response topics; OUTSIDE lies beyond the prefix.
+static const char * PFX = "/kunit_test_domain_bridge_prefix_";
+static const char * PFX_A = "/kunit_test_domain_bridge_prefix_clientA";
+static const char * PFX_B = "/kunit_test_domain_bridge_prefix_clientB";
+static const char * OUTSIDE = "/kunit_test_domain_bridge_outside";
 
 #define KUNIT_PUB_SHM_BUF_SIZE 4
 
@@ -24,7 +29,10 @@ static uint64_t setup_process_in_domain(
 {
   union ioctl_add_process_args args;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &args), 0);
+    test,
+    agnocast_ioctl_add_process(
+      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &args),
+    0);
   return args.ret_addr;
 }
 
@@ -63,9 +71,9 @@ static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
   return add_subscriber_named(test, pid, TOPIC_NAME);
 }
 
-// The helpers above pass -1, which the fake maps to its unobserved slot: the subscriber is still
-// collected and signaled on publish, but no assertion can see it. Cases that assert on delivery
-// need a real fd to observe instead.
+// The helpers above pass -1, which the fake maps to its unobserved slot: the subscriber still
+// enters the publishers' notify lists and is signaled on publish, but no assertion can see it.
+// Cases that assert on delivery need a real fd to observe instead.
 static topic_local_id_t add_subscriber_named_with_eventfd(
   struct kunit * test, const pid_t pid, const char * topic_name, const int eventfd)
 {
@@ -103,6 +111,24 @@ void test_case_add_domain_bridge_normal(struct kunit * test)
   KUNIT_EXPECT_EQ(test, domain_b, 2);
   KUNIT_EXPECT_TRUE(test, a_to_b);
   KUNIT_EXPECT_FALSE(test, b_to_a);
+}
+
+// Declaring from the higher domain first is the only way to reach the b_to_a orientation.
+void test_case_add_domain_bridge_reverse_first_declaration(struct kunit * test)
+{
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+
+  uint32_t domain_a = 0, domain_b = 0;
+  bool a_to_b = false, b_to_a = false;
+  KUNIT_ASSERT_TRUE(
+    test, agnocast_get_domain_rule(
+            TOPIC_NAME, current->nsproxy->ipc_ns, 1, &domain_a, &domain_b, &a_to_b, &b_to_a));
+  KUNIT_EXPECT_EQ(test, domain_a, 1);
+  KUNIT_EXPECT_EQ(test, domain_b, 2);
+  KUNIT_EXPECT_FALSE(test, a_to_b);
+  KUNIT_EXPECT_TRUE(test, b_to_a);
 }
 
 void test_case_add_domain_bridge_same_domain_rejected(struct kunit * test)
@@ -218,6 +244,99 @@ void test_case_domain_bridge_direction_respected(struct kunit * test)
 
   // The domain-1 subscriber must not be woken by a domain-2 publication (no 2 -> 1).
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 0);
+}
+
+// Enabling a direction once endpoints exist cannot be made safe here: they were registered while
+// it was denied, so neither their notify lists nor their shm mappings account for it.
+void test_case_domain_bridge_late_reverse_direction_rejected(struct kunit * test)
+{
+  // Arrange: 1 -> 2 declared, then both endpoints join.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  setup_process_in_domain(test, current->tgid, 2);
+  add_publisher_for(test, current->tgid);
+  setup_process_in_domain(test, 1001, 1);
+  add_subscriber_for(test, 1001);
+
+  // Act
+  const int ret =
+    agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, -EBUSY);
+}
+
+// Declaring 2 -> 1 as well makes the higher-to-lower direction deliver, which no other case
+// asserts: cross_domain_enumeration publishes the 1 -> 2 way round.
+void test_case_domain_bridge_bidirectional_delivers(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+
+  // publish resolves the wrapper by the caller's domain, so the caller and the publisher are
+  // both in domain 2.
+  agnocast_kunit_eventfd_reset();
+  const uint64_t msg_addr = setup_process_in_domain(test, current->tgid, 2);
+  const topic_local_id_t pub_id = add_publisher_for(test, current->tgid);
+
+  setup_process_in_domain(test, 1001, 1);
+  const int eventfd = 0;
+  add_subscriber_named_with_eventfd(test, 1001, TOPIC_NAME, eventfd);
+
+  // Act
+  union ioctl_publish_msg_args publish_args;
+  const int ret = agnocast_ioctl_publish_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, pub_id, msg_addr, &publish_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  // Assert: same arrangement direction_respected leaves unsignaled; here 2 -> 1 is declared.
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
+// Re-running the registration tool with an unchanged config must keep working once nodes are up.
+void test_case_domain_bridge_redeclaration_is_idempotent(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  setup_process_in_domain(test, current->tgid, 1);
+  add_publisher_for(test, current->tgid);
+
+  // Act: the same direction again, so nothing new is enabled.
+  const int ret =
+    agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+}
+
+// Same promise for a bidirectional config, where the re-declared direction is the one stored as
+// b_to_a rather than a_to_b.
+void test_case_domain_bridge_reverse_redeclaration_is_idempotent(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns),
+    0);
+  setup_process_in_domain(test, current->tgid, 1);
+  add_publisher_for(test, current->tgid);
+
+  // Act
+  const int ret =
+    agnocast_ioctl_add_domain_bridge(TOPIC_NAME, TOPIC_NAME, 2, 1, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
 }
 
 void test_case_domain_bridge_partial_remove_keeps_struct(struct kunit * test)
@@ -446,50 +565,116 @@ void test_case_domain_bridge_rename_multi_publisher(struct kunit * test)
   // Woken exactly once, regardless of the other publishers sharing the struct.
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
 }
-
-// A renamed subscriber opens its notification MQ under the canonical (domain_a) name, so the
-// exit-cleanup record the daemon later unlinks must carry that same canonical name -- not the
-// subscriber's own per-domain name -- otherwise a crashed renamed subscriber's MQ leaks.
-void test_case_domain_bridge_rename_exit_cleanup_uses_canonical_name(struct kunit * test)
+void test_case_domain_bridge_prefix_groups_wrappers(struct kunit * test)
 {
+  // Arrange
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_domain_bridge(RN_SRC, RN_DST, 1, 2, current->nsproxy->ipc_ns), 0);
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+  setup_process_in_domain(test, 1000, 1);
+  setup_process_in_domain(test, 1001, 2);
 
-  setup_process_in_domain(test, current->tgid, 1);
-  add_publisher_named(test, current->tgid, RN_SRC);
+  // Act: a name the rule never mentioned, in each of the two bridged domains.
+  add_publisher_named(test, 1000, PFX_A);
+  add_subscriber_named(test, 1001, PFX_A);
 
-  const pid_t subscriber_pid = 1001;
-  setup_process_in_domain(test, subscriber_pid, 2);
-  const topic_local_id_t sub_id = add_subscriber_named(test, subscriber_pid, RN_DST);
+  // Assert: both cells share one topic_struct.
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(PFX_A, current->nsproxy->ipc_ns, 1), 2);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(PFX_A, current->nsproxy->ipc_ns, 2), 2);
+}
 
-  agnocast_enqueue_exit_pid(subscriber_pid);
-  msleep(20);  // let exit_worker_thread record the subscription MQ
+void test_case_domain_bridge_prefix_leaves_other_topics_alone(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+  setup_process_in_domain(test, 1000, 1);
+  setup_process_in_domain(test, 1001, 2);
 
-  struct ioctl_get_exit_process_args get_exit_args;
-  const uint32_t buf_size = 4;
-  struct exit_subscription_mq_info * mq_info_buf =
-    kvcalloc(buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
-  KUNIT_ASSERT_NOT_NULL(test, mq_info_buf);
+  // Act
+  add_publisher_named(test, 1000, OUTSIDE);
+  add_subscriber_named(test, 1001, OUTSIDE);
 
-  memset(&get_exit_args, 0, sizeof(get_exit_args));
-  pid_t global_pid = -1;
-  KUNIT_EXPECT_EQ(
-    test,
-    agnocast_ioctl_get_exit_process(
-      current->nsproxy->ipc_ns, &get_exit_args, mq_info_buf, buf_size, &global_pid),
-    0);
+  // Assert: outside the prefix, so each domain keeps its own topic_struct.
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(OUTSIDE, current->nsproxy->ipc_ns, 1), 1);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(OUTSIDE, current->nsproxy->ipc_ns, 2), 1);
+}
 
-  KUNIT_EXPECT_EQ(test, get_exit_args.ret_pid, subscriber_pid);
-  KUNIT_EXPECT_EQ(test, (int)get_exit_args.ret_subscription_mq_info_num, 1);
-  // domain_a is the lower domain (1), so the daemon must unlink the MQ under the canonical name
-  // RN_SRC -- the name the renamed subscriber opened it under -- not its own name RN_DST.
-  KUNIT_EXPECT_STREQ(test, mq_info_buf[0].topic_name, RN_SRC);
-  KUNIT_EXPECT_EQ(test, mq_info_buf[0].subscriber_id, sub_id);
+// This is what keeps one caller's responses out of another's: each response topic gets its own
+// struct, so a refcnt of 2 rather than 4 is the assertion that matters.
+void test_case_domain_bridge_prefix_pairs_each_name_separately(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+  setup_process_in_domain(test, 1000, 1);
+  setup_process_in_domain(test, 1001, 2);
 
-  bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    current->nsproxy->ipc_ns, global_pid, get_exit_args.ret_subscription_mq_info_num,
-    &daemon_should_exit);
+  // Act: two names under the one prefix.
+  add_publisher_named(test, 1000, PFX_A);
+  add_publisher_named(test, 1000, PFX_B);
+  add_subscriber_named(test, 1001, PFX_A);
+  add_subscriber_named(test, 1001, PFX_B);
 
-  kvfree(mq_info_buf);
+  // Assert
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(PFX_A, current->nsproxy->ipc_ns, 1), 2);
+  KUNIT_EXPECT_EQ(test, agnocast_topic_wrapper_refcnt(PFX_B, current->nsproxy->ipc_ns, 1), 2);
+}
+
+void test_case_domain_bridge_prefix_cross_domain_delivery(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  agnocast_kunit_eventfd_reset();
+  const uint64_t msg_addr = setup_process_in_domain(test, current->tgid, 1);
+  const topic_local_id_t pub_id = add_publisher_named(test, current->tgid, PFX_A);
+  setup_process_in_domain(test, 1001, 2);
+  const int eventfd = 0;
+  add_subscriber_named_with_eventfd(test, 1001, PFX_A, eventfd);
+
+  // Act
+  union ioctl_publish_msg_args publish_args;
+  const int ret =
+    agnocast_ioctl_publish_msg(PFX_A, current->nsproxy->ipc_ns, pub_id, msg_addr, &publish_args);
+
+  // Assert
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
+void test_case_domain_bridge_prefix_direction_respected(struct kunit * test)
+{
+  // Arrange: only 1 -> 2 is declared, and the publisher sits in domain 2.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  agnocast_kunit_eventfd_reset();
+  const uint64_t msg_addr = setup_process_in_domain(test, current->tgid, 2);
+  const topic_local_id_t pub_id = add_publisher_named(test, current->tgid, PFX_A);
+  setup_process_in_domain(test, 1001, 1);
+  const int eventfd = 0;
+  add_subscriber_named_with_eventfd(test, 1001, PFX_A, eventfd);
+
+  // Act
+  union ioctl_publish_msg_args publish_args;
+  const int ret =
+    agnocast_ioctl_publish_msg(PFX_A, current->nsproxy->ipc_ns, pub_id, msg_addr, &publish_args);
+
+  // Assert: no 2 -> 1, so the domain-1 subscriber is not woken.
+  KUNIT_ASSERT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 0);
+}
+
+void test_case_domain_bridge_exact_under_prefix_rejected(struct kunit * test)
+{
+  // Arrange
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
+
+  // Act
+  const int ret = agnocast_ioctl_add_domain_bridge(PFX_A, PFX_A, 1, 2, current->nsproxy->ipc_ns);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, -EBUSY);
 }

@@ -11,72 +11,48 @@
 namespace agnocast_cie_thread_configurator
 {
 
+namespace
+{
+
+UniqueFd fd_or_throw(int fd, const char * what)
+{
+  if (fd < 0) {
+    throw std::system_error(errno, std::generic_category(), what);
+  }
+  return UniqueFd(fd);
+}
+
+void add_to_epoll(int epfd, int fd, const char * what)
+{
+  epoll_event ev{};
+  ev.events = EPOLLIN;
+  ev.data.fd = fd;
+  if (::epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    throw std::system_error(errno, std::generic_category(), what);
+  }
+}
+
+}  // namespace
+
+// The fd members own what has been acquired so far, so a throw from any step
+// closes it on unwind.
 NonRosThreadInfoListener::NonRosThreadInfoListener(Callback callback, rclcpp::Logger logger)
 : callback_(std::move(callback)), logger_(std::move(logger))
 {
-  listener_fd_ = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if (listener_fd_ < 0) {
-    throw std::system_error(errno, std::generic_category(), "socket");
-  }
+  listener_fd_ = fd_or_throw(::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0), "socket");
 
   sockaddr_un addr{};
-  socklen_t addr_len = setup_non_ros_thread_info_sockaddr(addr);
-  if (::bind(listener_fd_, reinterpret_cast<sockaddr *>(&addr), addr_len) < 0) {
-    const int saved = errno;
-    ::close(listener_fd_);
-    listener_fd_ = -1;
-    throw std::system_error(saved, std::generic_category(), "bind");
+  const socklen_t addr_len = setup_non_ros_thread_info_sockaddr(addr);
+  if (::bind(listener_fd_.get(), reinterpret_cast<sockaddr *>(&addr), addr_len) < 0) {
+    throw std::system_error(errno, std::generic_category(), "bind");
   }
 
-  stop_eventfd_ = ::eventfd(0, EFD_CLOEXEC);
-  if (stop_eventfd_ < 0) {
-    const int saved = errno;
-    ::close(listener_fd_);
-    listener_fd_ = -1;
-    throw std::system_error(saved, std::generic_category(), "eventfd");
-  }
+  stop_eventfd_ = fd_or_throw(::eventfd(0, EFD_CLOEXEC), "eventfd");
+  epfd_ = fd_or_throw(::epoll_create1(EPOLL_CLOEXEC), "epoll_create1");
+  add_to_epoll(epfd_.get(), listener_fd_.get(), "epoll_ctl listener");
+  add_to_epoll(epfd_.get(), stop_eventfd_.get(), "epoll_ctl eventfd");
 
-  epfd_ = ::epoll_create1(EPOLL_CLOEXEC);
-  if (epfd_ < 0) {
-    const int saved = errno;
-    ::close(listener_fd_);
-    ::close(stop_eventfd_);
-    listener_fd_ = stop_eventfd_ = -1;
-    throw std::system_error(saved, std::generic_category(), "epoll_create1");
-  }
-
-  epoll_event ev{};
-  ev.events = EPOLLIN;
-  ev.data.fd = listener_fd_;
-  if (::epoll_ctl(epfd_, EPOLL_CTL_ADD, listener_fd_, &ev) < 0) {
-    const int saved = errno;
-    ::close(epfd_);
-    ::close(listener_fd_);
-    ::close(stop_eventfd_);
-    epfd_ = listener_fd_ = stop_eventfd_ = -1;
-    throw std::system_error(saved, std::generic_category(), "epoll_ctl listener");
-  }
-
-  ev.events = EPOLLIN;
-  ev.data.fd = stop_eventfd_;
-  if (::epoll_ctl(epfd_, EPOLL_CTL_ADD, stop_eventfd_, &ev) < 0) {
-    const int saved = errno;
-    ::close(epfd_);
-    ::close(listener_fd_);
-    ::close(stop_eventfd_);
-    epfd_ = listener_fd_ = stop_eventfd_ = -1;
-    throw std::system_error(saved, std::generic_category(), "epoll_ctl eventfd");
-  }
-
-  try {
-    thread_ = std::thread(&NonRosThreadInfoListener::run, this);
-  } catch (...) {
-    ::close(epfd_);
-    ::close(listener_fd_);
-    ::close(stop_eventfd_);
-    epfd_ = listener_fd_ = stop_eventfd_ = -1;
-    throw;
-  }
+  thread_ = std::thread(&NonRosThreadInfoListener::run, this);
 }
 
 NonRosThreadInfoListener::~NonRosThreadInfoListener() noexcept
@@ -90,9 +66,9 @@ void NonRosThreadInfoListener::stop() noexcept
   if (!stopped_.compare_exchange_strong(expected, true)) {
     return;
   }
-  if (stop_eventfd_ >= 0) {
+  if (stop_eventfd_) {
     uint64_t one = 1;
-    [[maybe_unused]] ssize_t w = ::write(stop_eventfd_, &one, sizeof(one));
+    [[maybe_unused]] ssize_t w = ::write(stop_eventfd_.get(), &one, sizeof(one));
   }
   if (thread_.joinable()) {
     try {
@@ -102,18 +78,9 @@ void NonRosThreadInfoListener::stop() noexcept
       // propagate exceptions, so we treat join failure as best-effort.
     }
   }
-  if (epfd_ >= 0) {
-    ::close(epfd_);
-    epfd_ = -1;
-  }
-  if (listener_fd_ >= 0) {
-    ::close(listener_fd_);
-    listener_fd_ = -1;
-  }
-  if (stop_eventfd_ >= 0) {
-    ::close(stop_eventfd_);
-    stop_eventfd_ = -1;
-  }
+  epfd_.reset();
+  listener_fd_.reset();
+  stop_eventfd_.reset();
 }
 
 void NonRosThreadInfoListener::run()
@@ -123,7 +90,7 @@ void NonRosThreadInfoListener::run()
   epoll_event events[k_max_events];
 
   while (true) {
-    int n_ev = ::epoll_wait(epfd_, events, k_max_events, -1);
+    int n_ev = ::epoll_wait(epfd_.get(), events, k_max_events, -1);
     if (n_ev < 0) {
       if (errno == EINTR) {
         continue;
@@ -138,11 +105,11 @@ void NonRosThreadInfoListener::run()
 
     bool exit_loop = false;
     for (int i = 0; i < n_ev; ++i) {
-      if (events[i].data.fd == stop_eventfd_) {
+      if (events[i].data.fd == stop_eventfd_.get()) {
         exit_loop = true;
         break;
       }
-      if (events[i].data.fd != listener_fd_) {
+      if (events[i].data.fd != listener_fd_.get()) {
         continue;
       }
       // EPOLLERR/EPOLLHUP on the listener fd is unrecoverable. Without this
@@ -161,7 +128,7 @@ void NonRosThreadInfoListener::run()
       // exceeds the buffer (Linux UNIX-DGRAM since 3.4), so we can detect
       // and drop oversized datagrams instead of silently feeding truncated
       // bytes to decode_non_ros_thread_info().
-      ssize_t n = ::recv(listener_fd_, buf.data(), buf.size(), MSG_TRUNC);
+      ssize_t n = ::recv(listener_fd_.get(), buf.data(), buf.size(), MSG_TRUNC);
       if (n < 0) {
         if (errno == EINTR) {
           continue;

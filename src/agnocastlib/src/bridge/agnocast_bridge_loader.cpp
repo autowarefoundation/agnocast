@@ -1,4 +1,4 @@
-#include "agnocast/bridge/performance/agnocast_performance_bridge_loader.hpp"
+#include "agnocast/bridge/agnocast_bridge_loader.hpp"
 
 #include "agnocast/agnocast_client.hpp"
 #include "agnocast/agnocast_service.hpp"
@@ -66,11 +66,11 @@ std::function<bool(const ipc_shared_ptr<void> &, const std::shared_ptr<void> &)>
 
 }  // namespace
 
-PerformanceBridgeLoader::PerformanceBridgeLoader(const rclcpp::Logger & logger) : logger_(logger)
+BridgeLoader::BridgeLoader(const rclcpp::Logger & logger) : logger_(logger)
 {
 }
 
-PerformanceBridgeLoader::~PerformanceBridgeLoader()
+BridgeLoader::~BridgeLoader()
 {
   for (auto & pair : loaded_libraries_) {
     if (pair.second != nullptr) {
@@ -80,7 +80,7 @@ PerformanceBridgeLoader::~PerformanceBridgeLoader()
   loaded_libraries_.clear();
 }
 
-PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
+PubsubBridgeResult BridgeLoader::create_r2a_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
@@ -97,7 +97,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge(
   return factory(std::move(node), topic_name, qos);
 }
 
-PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
+PubsubBridgeResult BridgeLoader::create_a2r_pubsub_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
   const rclcpp::QoS & qos)
 {
@@ -114,7 +114,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge(
   return factory(std::move(node), topic_name, qos);
 }
 
-ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge(
+ServiceBridgeEntity BridgeLoader::create_r2a_service_bridge(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
   const rclcpp::QoS & qos)
 {
@@ -131,7 +131,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge(
   return factory(std::move(node), service_name, qos);
 }
 
-ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge(
+ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const std::string & service_type,
   const rclcpp::QoS & qos)
 {
@@ -148,14 +148,14 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge(
   return factory(std::move(node), service_name, qos);
 }
 
-std::string PerformanceBridgeLoader::convert_type_to_snake_case(const std::string & message_type)
+std::string BridgeLoader::convert_type_to_snake_case(const std::string & message_type)
 {
   std::string result = message_type;
   std::replace(result.begin(), result.end(), '/', '_');
   return result;
 }
 
-std::vector<std::string> PerformanceBridgeLoader::generate_library_paths()
+std::vector<std::string> BridgeLoader::generate_library_paths()
 {
   std::vector<std::string> paths;
   const std::string lib_name = "libagnocast_bridge_plugins.so";
@@ -189,7 +189,7 @@ std::vector<std::string> PerformanceBridgeLoader::generate_library_paths()
   return paths;
 }
 
-void * PerformanceBridgeLoader::load_library_from_paths(
+void * BridgeLoader::load_library_from_paths(
   const std::vector<std::string> & paths, std::string & last_error)
 {
   last_error.clear();
@@ -220,7 +220,7 @@ void * PerformanceBridgeLoader::load_library_from_paths(
   return nullptr;
 }
 
-void * PerformanceBridgeLoader::get_bridge_factory_symbol(
+void * BridgeLoader::get_bridge_factory_symbol(
   const std::string & type_name, const std::string & symbol_name_prefix, bool is_service)
 {
   const char * type_label = is_service ? "service" : "message";
@@ -258,7 +258,7 @@ void * PerformanceBridgeLoader::get_bridge_factory_symbol(
   return symbol;
 }
 
-PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_generic(
+PubsubBridgeResult BridgeLoader::create_r2a_pubsub_bridge_generic(
   const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
   const std::string & message_type, const rclcpp::QoS & qos)
 {
@@ -293,13 +293,13 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_r2a_pubsub_bridge_
 #endif
     opts);
 
-  PerformancePubsubBridgeResult result;
+  PubsubBridgeResult result;
   result.entity_handle = sub;
   result.callback_group = cb_group;
   return result;
 }
 
-PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_generic(
+PubsubBridgeResult BridgeLoader::create_a2r_pubsub_bridge_generic(
   const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
   const std::string & message_type, const rclcpp::QoS & qos)
 {
@@ -325,7 +325,7 @@ PerformancePubsubBridgeResult PerformanceBridgeLoader::create_a2r_pubsub_bridge_
   return {agno_sub, cb_group};
 }
 
-ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
+ServiceBridgeEntity BridgeLoader::create_r2a_service_bridge_generic(
   const rclcpp::Node::SharedPtr & node, const std::string & service_name,
   const std::string & service_type, const rclcpp::QoS & qos)
 {
@@ -338,7 +338,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
   auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
 
   auto agno_client = std::make_shared<agnocast::GenericClient>(
-    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::AgnocastOnly);
+    node.get(), service_name, service_type, qos, client_cb_group, ClientRole::BridgeInternal);
 
   auto ros_srv = agnocast::vendor_rclcpp::GenericService::create_generic_service(
     node.get(), service_name, service_type,
@@ -374,7 +374,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_r2a_service_bridge_generic(
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
-ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
+ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
   const rclcpp::Node::SharedPtr & node, const std::string & service_name,
   const std::string & service_type, const rclcpp::QoS & qos)
 {
@@ -401,7 +401,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
         ros_client->async_send_request(
           ros_req_ptr,
           [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
-           &response_copier](const agnocast::vendor_rclcpp::GenericClient::SharedFuture & future) {
+           response_copier](const agnocast::vendor_rclcpp::GenericClient::SharedFuture & future) {
             const auto & ros_res = future.get();
             auto agno_res = service_handle->borrow_loaned_response(agno_req);
 
@@ -427,7 +427,7 @@ ServiceBridgeEntity PerformanceBridgeLoader::create_a2r_service_bridge_generic(
           service_handle->get_service_name(), e.what());
       }
     },
-    qos, srv_cbg, agnocast::ServiceRole::AgnocastOnly);
+    qos, srv_cbg, agnocast::ServiceRole::BridgeInternal);
 
   return {agno_srv, srv_cbg, client_cbg};
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)

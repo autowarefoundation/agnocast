@@ -15,10 +15,16 @@
     KUNIT_CASE(test_case_publish_msg_signals_all_subscribers),                                \
     KUNIT_CASE(test_case_publish_msg_does_not_signal_take_sub),                               \
     KUNIT_CASE(test_case_publish_msg_signals_large_fanout),                                   \
+    KUNIT_CASE(test_case_publish_msg_signals_subscribers_registered_before_publisher),        \
     KUNIT_CASE(test_case_publish_msg_signals_once_per_publish),                               \
+    KUNIT_CASE(test_case_publish_msg_stops_signaling_removed_subscriber),                     \
+    KUNIT_CASE(test_case_publish_msg_stops_signaling_exited_subscriber),                      \
     KUNIT_CASE(test_case_publish_msg_address_below_mempool),                                  \
     KUNIT_CASE(test_case_publish_msg_address_above_mempool),                                  \
-    KUNIT_CASE(test_case_publish_msg_no_process)
+    KUNIT_CASE(test_case_publish_msg_no_process),                                             \
+    KUNIT_CASE(test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified),         \
+    KUNIT_CASE(test_case_publish_msg_bridge_publisher_does_not_notify_other_domain),          \
+    KUNIT_CASE(test_case_publish_msg_bridge_subscriber_in_own_domain_notified)
 
 void test_case_publish_msg_no_topic(struct kunit * test);
 void test_case_publish_msg_no_publisher(struct kunit * test);
@@ -33,7 +39,13 @@ void test_case_ignore_local_diff_pid_enabled(struct kunit * test);
 void test_case_publish_msg_signals_all_subscribers(struct kunit * test);
 void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test);
 void test_case_publish_msg_signals_large_fanout(struct kunit * test);
+void test_case_publish_msg_signals_subscribers_registered_before_publisher(struct kunit * test);
 void test_case_publish_msg_signals_once_per_publish(struct kunit * test);
+void test_case_publish_msg_stops_signaling_removed_subscriber(struct kunit * test);
+void test_case_publish_msg_stops_signaling_exited_subscriber(struct kunit * test);
 void test_case_publish_msg_address_below_mempool(struct kunit * test);
 void test_case_publish_msg_address_above_mempool(struct kunit * test);
 void test_case_publish_msg_no_process(struct kunit * test);
+void test_case_publish_msg_bridge_subscriber_in_other_domain_not_notified(struct kunit * test);
+void test_case_publish_msg_bridge_publisher_does_not_notify_other_domain(struct kunit * test);
+void test_case_publish_msg_bridge_subscriber_in_own_domain_notified(struct kunit * test);

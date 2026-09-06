@@ -51,24 +51,6 @@ private:
 
 }  // namespace
 
-TEST(AgnocastUtilsTest, create_mq_name_normal)
-{
-  EXPECT_EQ(agnocast::create_mq_name_for_agnocast_publish("/dummy", 0), "/agnocast@dummy@0");
-}
-
-TEST(AgnocastUtilsTest, create_mq_name_slash_included)
-{
-  EXPECT_EQ(
-    agnocast::create_mq_name_for_agnocast_publish("/dummy/dummy", 0), "/agnocast@dummy_dummy@0");
-}
-
-TEST(AgnocastUtilsTest, create_mq_name_invalid_topic)
-{
-  EXPECT_EXIT(
-    agnocast::create_mq_name_for_agnocast_publish("dummy", 0),
-    ::testing::ExitedWithCode(EXIT_FAILURE), "");
-}
-
 TEST(AgnocastUtilsTest, validate_ld_preload_normal)
 {
   setenv("LD_PRELOAD", "libagnocast_heaphook.so:", 1);
@@ -252,4 +234,11 @@ TEST(AgnocastUtilsTest, validate_subscription_qos_liveliness_lease_duration_warn
     rclcpp::QoS(10).liveliness_lease_duration(rclcpp::Duration(1, 0)));
   EXPECT_EQ(captured_warn_count, 1);
   EXPECT_NE(captured_log.find("liveliness_lease_duration"), std::string::npos) << captured_log;
+}
+
+TEST(AgnocastUtilsTest, create_service_response_topic_name_appends_client_identity)
+{
+  EXPECT_EQ(
+    agnocast::create_service_response_topic_name("/srv/add", "/client_node", 7),
+    "/AGNOCAST_SRV_RESPONSE/srv/add_SEP_/client_node_SEP_7");
 }

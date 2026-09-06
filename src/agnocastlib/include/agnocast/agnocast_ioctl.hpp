@@ -23,8 +23,8 @@ namespace agnocast
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define NODE_NAME_BUFFER_SIZE 256
+#define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -51,10 +51,32 @@ struct ioctl_get_version_args
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
+};
+#pragma GCC diagnostic pop
+
+// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
+#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
+
+// Mirrors enum process_role in the kernel module.
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    uint32_t role;       // enum process_role
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -62,7 +84,7 @@ union ioctl_add_process_args {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
 };
@@ -192,6 +214,9 @@ union ioctl_get_subscriber_num_args {
     uint32_t ret_other_process_subscriber_num;
     uint32_t ret_same_process_subscriber_num;
     uint32_t ret_ros2_subscriber_num;
+    // Subscribers in the domain a bridge rule pairs this one with, counted only where the rule
+    // delivers this way round. Disjoint from the own-domain counts above.
+    uint32_t ret_other_domain_subscriber_num;
     bool ret_a2r_bridge_exist;
     bool ret_r2a_bridge_exist;
   };
@@ -212,21 +237,10 @@ union ioctl_get_publisher_num_args {
 };
 #pragma GCC diagnostic pop
 
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct topic_info_ret
@@ -342,6 +356,15 @@ struct ioctl_set_ros2_publisher_num_args
   uint32_t ros2_publisher_num;
 };
 
+// Decided atomically by the kmod, which keys the singleton on the caller's IPC namespace and
+// domain, and its liveness on the calling PID: the caller must be the process that becomes the
+// agent.
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_owned_by_caller;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -351,7 +374,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -366,5 +389,7 @@ struct ioctl_set_ros2_publisher_num_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 
 }  // namespace agnocast

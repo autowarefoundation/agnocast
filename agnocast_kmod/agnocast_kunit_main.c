@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast.h"
 #include "agnocast_kunit/agnocast_kunit_add_bridge.h"
+#include "agnocast_kunit/agnocast_kunit_add_domain_bridge_prefix.h"
 #include "agnocast_kunit/agnocast_kunit_add_process.h"
 #include "agnocast_kunit/agnocast_kunit_add_publisher.h"
 #include "agnocast_kunit/agnocast_kunit_add_subscriber.h"
@@ -10,6 +11,8 @@
 #include "agnocast_kunit/agnocast_kunit_do_exit.h"
 #include "agnocast_kunit/agnocast_kunit_domain_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_exit_free_data.h"
+#include "agnocast_kunit/agnocast_kunit_get_exit_process.h"
+#include "agnocast_kunit/agnocast_kunit_get_node_names.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_publisher_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_publisher_num.h"
@@ -55,16 +58,19 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_ADD_BRIDGE,
   TEST_CASES_REMOVE_BRIDGE,
   TEST_CASES_DOMAIN_BRIDGE,
+  TEST_CASES_ADD_DOMAIN_BRIDGE_PREFIX,
   TEST_CASES_SET_ROS2_SUBSCRIBER_NUM,
   TEST_CASES_SET_ROS2_PUBLISHER_NUM,
   TEST_CASES_DO_EXIT,
   TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS,
+  TEST_CASES_GET_NODE_NAMES,
   TEST_CASES_GET_NODE_PUBLISHER_TOPICS,
   TEST_CASES_GET_TOPIC_SUBSCRIBER_INFO,
   TEST_CASES_GET_TOPIC_PUBLISHER_INFO,
   TEST_CASES_GET_VERSION,
   TEST_CASES_INIT_MEMORY_ALLOCATOR,
   TEST_CASES_EXIT_FREE_DATA,
+  TEST_CASES_GET_EXIT_PROCESS,
   {},
 };
 

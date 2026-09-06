@@ -99,6 +99,10 @@ static struct topic_struct * find_grouped_topic_struct(
     return NULL;
   }
 
+  // A prefix rule's stored names are the prefix, not a topic name; it pairs this cell with the
+  // identical name in the partner domain.
+  if (rule->is_prefix) partner_name = topic_name;
+
   struct topic_wrapper * partner = find_topic(partner_name, ipc_ns, partner_domain);
   return partner ? partner->topic : NULL;
 }
@@ -106,10 +110,17 @@ static struct topic_struct * find_grouped_topic_struct(
 // Whether a publication in pub_domain may be delivered to a subscriber in
 // sub_domain within this topic_struct. Same domain is always allowed; crossing
 // domains requires a rule permitting that direction (from_domain -> to_domain).
+//
+// A bridge endpoint is excluded from crossing at all: it stands for one domain's ROS 2 side, and
+// relaying between domains is the external domain_bridge's job. A rule that reached one would
+// duplicate what that node already carries.
 static bool domain_delivery_allowed(
-  const struct topic_struct * topic, uint32_t pub_domain, uint32_t sub_domain)
+  const struct topic_struct * topic, const uint32_t pub_domain, const bool pub_is_bridge,
+  const uint32_t sub_domain, const bool sub_is_bridge)
 {
   if (pub_domain == sub_domain) return true;
+
+  if (pub_is_bridge || sub_is_bridge) return false;
 
   const struct domain_bridge_rule * rule = topic->rule;
   if (!rule) return false;
@@ -204,12 +215,119 @@ static struct subscriber_info * find_subscriber_info(
   return NULL;
 }
 
+// Take subs are excluded, so they cannot inflate every publisher's array.
+static uint32_t notifiable_subscriber_num(const struct topic_wrapper * wrapper)
+{
+  uint32_t num = 0;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->notify_ctx) num++;
+  }
+  return num;
+}
+
+// Caller holds global_htables_rwsem (write), so the swap below cannot race a publish: those hold
+// the read side for their whole duration. The current list is carried across, so that a caller who
+// fails partway through reserving has invalidated no one's list and owes no undo.
+static int reserve_notify_ctxs(struct publisher_info * pub_info, const uint32_t needed)
+{
+  if (needed <= pub_info->notify_capacity) return 0;
+
+  uint32_t new_capacity =
+    pub_info->notify_capacity ? pub_info->notify_capacity * 2 : NOTIFY_CTXS_MIN_CAPACITY;
+  if (new_capacity > MAX_SUBSCRIBER_NUM) new_capacity = MAX_SUBSCRIBER_NUM;
+  // Last, so that the cap above can never leave the list short of what the fill needs.
+  if (new_capacity < needed) new_capacity = needed;
+
+  struct eventfd_ctx ** new_ctxs = kvmalloc_array(new_capacity, sizeof(*new_ctxs), GFP_KERNEL);
+  if (!new_ctxs) return -ENOMEM;
+
+  if (pub_info->notify_ctxs)
+    memcpy(new_ctxs, pub_info->notify_ctxs, pub_info->notify_num * sizeof(*new_ctxs));
+  kvfree(pub_info->notify_ctxs);
+  pub_info->notify_ctxs = new_ctxs;
+  pub_info->notify_capacity = new_capacity;
+  return 0;
+}
+
+// The fallible half of a rebuild, split out so callers can do it before the change they are about
+// to make, while backing out is still free.
+static int reserve_all_notify_ctxs(struct topic_wrapper * wrapper, const uint32_t needed)
+{
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    int ret = reserve_notify_ctxs(pub_info, needed);
+    if (ret < 0) return ret;
+  }
+  return 0;
+}
+
+// None of the filters below depends on the message, so evaluating them here leaves publish with
+// nothing to do but signal. Infallible: the caller reserved the capacity.
+static void rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher_info * pub_info)
+{
+  uint32_t notify_num = 0;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    // NULL exactly for take subs, which poll instead of being woken.
+    if (!sub_info->notify_ctx) continue;
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+          sub_info->is_bridge))
+      continue;
+    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+
+    if (WARN_ON_ONCE(notify_num == pub_info->notify_capacity)) break;
+    pub_info->notify_ctxs[notify_num++] = sub_info->notify_ctx;
+  }
+  pub_info->notify_num = notify_num;
+}
+
+// Caller holds global_htables_rwsem (write). Infallible, so it can run once a change is already
+// visible: only a join needs to grow a list, and it reserves upfront.
+static void rebuild_all_notify_lists(struct topic_wrapper * wrapper)
+{
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    rebuild_notify_list(wrapper, pub_info);
+  }
+}
+
+void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper)
+{
+  rebuild_all_notify_lists(wrapper);
+}
+
+void agnocast_unlink_subscriber_info(
+  struct topic_wrapper * wrapper, struct subscriber_info * sub_info)
+{
+  const bool was_notifiable = sub_info->notify_ctx;
+  hash_del(&sub_info->node);
+
+  // Take subs are in no list, so rebuilding for one would land on the same result. Otherwise this
+  // must precede the release below, so that no list is left pointing at a freed context.
+  if (was_notifiable) rebuild_all_notify_lists(wrapper);
+
+  free_subscriber_info(sub_info);
+}
+
 static int insert_subscriber_info(
   struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
   const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
   struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
 {
+  // rebuild_notify_list() skips take subs by testing notify_ctx alone, so the two must agree.
+  WARN_ON_ONCE(is_take_sub != (notify_ctx == NULL));
+
   int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
     dev_warn(
@@ -242,6 +360,18 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
+  // Last failure point: reserving while nothing is committed yet is what lets the rebuild below be
+  // infallible, and leaves the id counters untouched on failure.
+  if (notify_ctx) {
+    int reserve_ret = reserve_all_notify_ctxs(wrapper, notifiable_subscriber_num(wrapper) + 1);
+    if (reserve_ret < 0) {
+      kfree(node_name_copy);
+      kfree(*new_info);
+      // The caller releases notify_ctx on the error path, so it must not be released here.
+      return reserve_ret;
+    }
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
@@ -265,6 +395,8 @@ static int insert_subscriber_info(
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->sub_info_htable, &(*new_info)->node, hash_val);
+
+  if (notify_ctx) rebuild_all_notify_lists(wrapper);
 
   if (!is_parameter_service_topic(wrapper->key)) {
     dev_info(
@@ -357,7 +489,20 @@ static int insert_publisher_info(
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
   (*new_info)->is_bridge = is_bridge;
+  (*new_info)->notify_ctxs = NULL;
+  (*new_info)->notify_num = 0;
+  (*new_info)->notify_capacity = 0;
   INIT_HLIST_NODE(&(*new_info)->node);
+
+  // Before hash_add, so a failure needs no more undo than the free below: the fill reads only the
+  // subscriber table and the fields set above, so the publisher need not be linked yet.
+  int ret = reserve_notify_ctxs(*new_info, notifiable_subscriber_num(wrapper));
+  if (ret < 0) {
+    free_publisher_info(*new_info);
+    return ret;
+  }
+  rebuild_notify_list(wrapper, *new_info);
+
   uint32_t hash_val = hash_min(new_id, PUB_INFO_HASH_BITS);
   hash_add(wrapper->topic->pub_info_htable, &(*new_info)->node, hash_val);
 
@@ -391,20 +536,29 @@ static int insert_publisher_info(
 
 // Add subscriber reference to entry (set boolean flag to true).
 // Called when subscriber first receives/takes the message.
-static int add_subscriber_reference(struct entry_node * en, const topic_local_id_t id)
+//
+// Returns -EALREADY if this subscriber already held a reference.
+// Pass allow_existing=true when that is an expected outcome (a repeated take of the same entry)
+// to suppress the warning. The test and the set are deliberately one atomic operation
+// rather than a test_bit followed by a conditional set:
+// agnocast_ioctl_release_message_entry_reference holds only the topic read lock, so it can clear
+// this bit at any point and a separate test would already be stale by the time the set ran.
+static int add_subscriber_reference(
+  struct entry_node * en, const topic_local_id_t id, const bool allow_existing)
 {
   if (id < 0 || id >= MAX_TOPIC_LOCAL_ID) {
     pr_err("subscriber id %d out of range [0, %d). (%s)\n", id, MAX_TOPIC_LOCAL_ID, __func__);
     return -EINVAL;
   }
 
-  // Already referenced by this subscriber - unexpected
   if (test_and_set_bit(id, en->referencing_subscribers)) {
-    dev_warn(
-      agnocast_device,
-      "subscriber id=%d already holds a reference for entry_id=%lld. "
-      "(%s)\n",
-      id, en->entry_id, __func__);
+    if (!allow_existing) {
+      dev_warn(
+        agnocast_device,
+        "subscriber id=%d already holds a reference for entry_id=%lld. "
+        "(%s)\n",
+        id, en->entry_id, __func__);
+    }
     return -EALREADY;
   }
   return 0;
@@ -432,9 +586,10 @@ static struct entry_node * find_message_entry(
 }
 
 // Forward declaration
-static int get_process_num(const struct ipc_namespace * ipc_ns);
-static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
-static int get_alive_process_num_in_domain(
+static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns);
+static int get_process_num_in_domain_except_unlink_daemon(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+static int get_alive_process_num_in_domain_except_unlink_daemon(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
 
 // Release subscriber reference from message entry (set boolean flag to false).
@@ -546,7 +701,7 @@ static int insert_message_entry(
 }
 
 static int set_publisher_shm_info(
-  const struct topic_wrapper * wrapper, const pid_t subscriber_pid,
+  const struct topic_wrapper * wrapper, const pid_t subscriber_pid, const bool sub_is_bridge,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
   uint32_t * ret_pub_shm_num)
 {
@@ -561,7 +716,9 @@ static int set_publisher_shm_info(
 
     // A subscriber only reads from publishers that deliver to it; a one-way
     // bridge rule can exclude opposite-domain publishers, so skip mapping them.
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, wrapper->domain_id)) {
+    if (!domain_delivery_allowed(
+          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, wrapper->domain_id,
+          sub_is_bridge)) {
       continue;
     }
 
@@ -627,11 +784,10 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A performance bridge manager is per-(ipc_ns, domain): its MQ name carries the
-// domain suffix, so each domain needs its own manager. Gate on the domain too,
+// A bridge manager is per-(ipc_ns, domain): its UDS address carries
+// the domain suffix, so each domain needs its own manager. Gate on the domain too,
 // otherwise a manager in one domain would suppress spawning in another.
-static bool has_alive_performance_bridge_manager(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   struct process_info * proc_info;
   int bkt;
@@ -639,7 +795,23 @@ static bool has_alive_performance_bridge_manager(
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->is_performance_bridge_manager && !proc_info->exited) {
+      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
+// abruptly still reads as alive until the worker drains its pid, so a process registering in that
+// window is not told to spawn a replacement.
+static bool has_alive_unlink_daemon(const struct ipc_namespace * ipc_ns)
+{
+  struct process_info * proc_info;
+  int bkt;
+  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
       return true;
     }
   }
@@ -647,10 +819,28 @@ static bool has_alive_performance_bridge_manager(
 }
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
 {
   int ret = 0;
+
+  if (
+    role != PROCESS_ROLE_APPLICATION && role != PROCESS_ROLE_BRIDGE_MANAGER &&
+    role != PROCESS_ROLE_UNLINK_DAEMON) {
+    dev_warn(
+      agnocast_device, "Process (pid=%d) has an unknown role (%u). (%s)\n", pid, (uint32_t)role,
+      __func__);
+    return -EINVAL;
+  }
+
+  // AGNOCAST_DOMAIN_ID_NONE marks the daemon as belonging to no domain, so no other process may
+  // hold it. The daemon's own domain_id is assigned below regardless of what it sends.
+  if (role != PROCESS_ROLE_UNLINK_DAEMON && domain_id == AGNOCAST_DOMAIN_ID_NONE) {
+    dev_warn(
+      agnocast_device, "Process (pid=%d) cannot use the reserved domain_id (%u). (%s)\n", pid,
+      domain_id, __func__);
+    return -EINVAL;
+  }
 
   down_write(&global_htables_rwsem);
 
@@ -659,12 +849,16 @@ int agnocast_ioctl_add_process(
     ret = -EINVAL;
     goto unlock;
   }
-  ioctl_ret->ret_unlink_daemon_exist = (get_process_num(ipc_ns) > 0);
-  ioctl_ret->ret_performance_bridge_daemon_exist =
-    has_alive_performance_bridge_manager(ipc_ns, domain_id);
+  ioctl_ret->ret_unlink_daemon_exist = has_alive_unlink_daemon(ipc_ns);
+  ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
-  if (is_performance_bridge_manager && ioctl_ret->ret_performance_bridge_daemon_exist) {
+  // Deciding under the write lock add_process already holds is what stops two daemons starting
+  // at once from both registering.
+  if (role == PROCESS_ROLE_BRIDGE_MANAGER && ioctl_ret->ret_bridge_daemon_exist) {
+    goto unlock;
+  }
+  if (role == PROCESS_ROLE_UNLINK_DAEMON && ioctl_ret->ret_unlink_daemon_exist) {
     goto unlock;
   }
 
@@ -675,9 +869,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->exited = false;
-  new_proc_info->is_performance_bridge_manager = is_performance_bridge_manager;
-  INIT_LIST_HEAD(&new_proc_info->exit_subscription_list);
-  new_proc_info->exit_subscription_count = 0;
+  new_proc_info->role = role;
   new_proc_info->global_pid = pid;
 #ifndef KUNIT_BUILD
   new_proc_info->local_pid = convert_pid_to_local(pid);
@@ -693,7 +885,8 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->ipc_ns = ipc_ns;
-  new_proc_info->domain_id = domain_id;
+  new_proc_info->domain_id =
+    (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
 
   INIT_HLIST_NODE(&new_proc_info->node);
   uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
@@ -916,18 +1109,6 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  // The subscriber count bounds how many contexts the loop below can collect. Allocated before
-  // anything is published so that a failure here cannot leave a published entry reported as an
-  // error.
-  const int sub_num = agnocast_get_size_sub_info_htable(wrapper);
-  if (sub_num > 0) {
-    notify_ctxs = kmalloc_array(sub_num, sizeof(*notify_ctxs), GFP_KERNEL);
-    if (!notify_ctxs) {
-      ret = -ENOMEM;
-      goto unlock_all;
-    }
-  }
-
   ret = insert_message_entry(wrapper, pub_info, msg_virtual_address, ioctl_ret);
   if (ret < 0) {
     goto unlock_all;
@@ -938,52 +1119,55 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->is_take_sub) continue;
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id))
-      continue;
-    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
-    if (!sub_info->notify_ctx) continue;
-
-    notify_ctxs[notify_num++] = sub_info->notify_ctx;
-  }
+  notify_ctxs = pub_info->notify_ctxs;
+  notify_num = pub_info->notify_num;
 
 unlock_all:
   up_write(&wrapper->topic->rwsem);
 
   // Signal outside topic_rwsem: RECEIVE_MSG and TAKE_MSG take it for write, so holding it here
-  // would block the very subscribers being woken. The contexts stay valid because every path that
-  // releases one takes global_htables_rwsem for write, and it is held here for read.
+  // would block the very subscribers being woken. The list and the contexts both stay valid
+  // because a context is released only once every list has stopped pointing at it, and both that
+  // and any rebuild happen under global_htables_rwsem (write), which is held here for read.
   for (uint32_t i = 0; i < notify_num; i++) {
     agnocast_eventfd_signal(notify_ctxs[i]);
   }
-  kfree(notify_ctxs);
 
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
 }
 
-// Find the first entry with entry_id >= target_entry_id
-static struct rb_node * find_first_entry_ge(struct rb_root * root, const int64_t target_entry_id)
+// Whether `sub_info` may be handed `en`: 1 when it may, 0 when the entry has to be skipped,
+// -ENODATA when the entry's publisher is no longer in the topic.
+// Caller holds global_htables_rwsem (read), which keeps pub_info and proc_info alive, and
+// wrapper->topic->rwsem (read), which keeps `en` alive.
+static int is_entry_deliverable(
+  const struct topic_wrapper * wrapper, const struct subscriber_info * sub_info,
+  const struct entry_node * en)
 {
-  struct rb_node ** curr = &(root->rb_node);
-  struct rb_node * candidate = NULL;
-
-  while (*curr) {
-    const struct entry_node * en = container_of(*curr, struct entry_node, node);
-    if (en->entry_id >= target_entry_id) {
-      candidate = *curr;
-      curr = &((*curr)->rb_left);
-    } else {
-      curr = &((*curr)->rb_right);
-    }
+  const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
+  if (!pub_info) {
+    dev_warn(
+      agnocast_device,
+      "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
+      "topic(topic_name=%s). (%s)\n",
+      en->publisher_id, en->entry_id, wrapper->key, __func__);
+    return -ENODATA;
   }
 
-  return candidate;
+  const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+  if (!proc_info || proc_info->exited) {
+    return 0;
+  }
+
+  if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
+    return 0;
+  }
+
+  return domain_delivery_allowed(
+    wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+    sub_info->is_bridge);
 }
 
 static int receive_msg_core(
@@ -998,49 +1182,51 @@ static int receive_msg_core(
     return 0;
   }
 
-  const struct entry_node * newest_en = container_of(newest_node, struct entry_node, node);
-  const int64_t newest_entry_id = newest_en->entry_id;
+  if (sub_info->qos_depth == 0) {
+    return 0;
+  }
 
-  // Calculate start_entry_id = max(newest - qos_depth + 1, latest_received_entry_id + 1)
-  const int64_t latest_received_entry_id = sub_info->latest_received_entry_id;
-  const int64_t qos_start = newest_entry_id - (int64_t)sub_info->qos_depth + 1;
-  const int64_t start_entry_id =
-    (qos_start > latest_received_entry_id) ? qos_start : (latest_received_entry_id + 1);
+  // node ends up on the qos_depth-th newest entry the subscriber can be handed, on its oldest
+  // unreceived deliverable entry when fewer than qos_depth of them are, and NULL when none are.
+  const int64_t oldest_wanted_entry_id = sub_info->latest_received_entry_id + 1;
+  struct rb_node * node = NULL;
+  uint32_t deliverable_num = 0;
+  for (struct rb_node * back = newest_node; back; back = rb_prev(back)) {
+    const struct entry_node * en = container_of(back, struct entry_node, node);
+    if (en->entry_id < oldest_wanted_entry_id) {
+      break;
+    }
+    int ret = is_entry_deliverable(wrapper, sub_info, en);
+    if (ret < 0) {
+      return ret;
+    }
+    if (ret == 0) {
+      continue;
+    }
 
-  struct rb_node * node = find_first_entry_ge(&wrapper->topic->entries, start_entry_id);
+    node = back;
+    if (++deliverable_num >= sub_info->qos_depth) {
+      break;
+    }
+  }
 
   for (; node; node = rb_next(node)) {
     struct entry_node * en = container_of(node, struct entry_node, node);
 
     if (ioctl_ret->ret_entry_num == MAX_RECEIVE_NUM) {
-      ioctl_ret->ret_call_again = true;
+      ioctl_ret->ret_call_again = ioctl_ret->ret_entry_num < deliverable_num;
       break;
     }
 
-    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
-    if (!pub_info) {
-      dev_warn(
-        agnocast_device,
-        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
-        "topic(topic_name=%s). (%s)\n",
-        en->publisher_id, en->entry_id, wrapper->key, __func__);
-      return -ENODATA;
+    int ret = is_entry_deliverable(wrapper, sub_info, en);
+    if (ret < 0) {
+      return ret;
     }
-
-    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
+    if (ret == 0) {
       continue;
     }
 
-    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
-      continue;
-    }
-
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
-      continue;
-    }
-
-    int ret = add_subscriber_reference(en, subscriber_id);
+    ret = add_subscriber_reference(en, subscriber_id, false);
     if (ret < 0) {
       return ret;
     }
@@ -1073,8 +1259,37 @@ int agnocast_ioctl_receive_msg(
     goto unlock_only_global;
   }
 
-  // Use write lock because we modify sub_info fields (latest_received_entry_id, need_mmap_update)
-  down_write(&wrapper->topic->rwsem);
+  // The receive path needs only a read lock.
+  // That lets subscriber processes on one topic receive concurrently
+  // rather than serializing behind an exclusive lock.
+  // The concurrency unit is processes, not subscribers: agnocastlib holds a process-global
+  // `mmap_mtx` across the ioctl, so subscribers sharing a process serialize there regardless.
+  //
+  // Everything this path touches is either guarded by a lock held here, or self-synchronized:
+  //
+  // 1. Entries rbtree: two classes of writer mutate it, and both are excluded here.
+  //      - Publish (insert_message_entry, release_msgs_to_meet_depth) takes topic->rwsem WRITE,
+  //        which a read lock excludes.
+  //      - Subscriber/publisher removal, process-exit cleanup and module unload take
+  //        global_htables_rwsem WRITE. Those never take topic->rwsem at all: global write is what
+  //        excludes them. Holding global read is therefore what keeps this very lock alive.
+  //    Both locks stay held until the function finishes, so no writer can change the tree during
+  //    traversal.
+  //
+  // 2. Per-subscriber fields (latest_received_entry_id, need_mmap_update) live in disjoint
+  //    sub_info structs, so concurrent receivers of different subscribers write different memory.
+  //
+  //    Two receives for the *same* subscriber are the case to worry about, and agnocastlib can
+  //    produce them: a Reentrant callback group on a multi-threaded executor runs one
+  //    subscription's callback on several threads at once. What makes that safe is that
+  //    agnocastlib holds the process-global mmap_mtx around every receive/take ioctl, so the
+  //    kernel never sees two overlap. Were two to overlap, both would read the same
+  //    latest_received_entry_id and walk the same entries, and the loser of the test_and_set_bit
+  //    on the first of them would fail the ioctl with -EALREADY, which agnocastlib treats as fatal.
+  //
+  // 3. The reference bitmap update here is a single atomic test_and_set_bit. (bitmap_empty and
+  //    bitmap_zero elsewhere are NOT atomic; every one of their callers holds a write lock.)
+  down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
@@ -1099,7 +1314,8 @@ int agnocast_ioctl_receive_msg(
   }
 
   ret = set_publisher_shm_info(
-    wrapper, sub_info->pid, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+    wrapper, sub_info->pid, sub_info->is_bridge, pub_shm_infos, pub_shm_infos_size,
+    &ioctl_ret->ret_pub_shm_num);
   if (ret < 0) {
     goto unlock_all;
   }
@@ -1107,7 +1323,7 @@ int agnocast_ioctl_receive_msg(
   sub_info->need_mmap_update = false;
 
 unlock_all:
-  up_write(&wrapper->topic->rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1130,8 +1346,8 @@ int agnocast_ioctl_take_msg(
     goto unlock_only_global;
   }
 
-  // Use write lock because we modify sub_info fields (latest_received_entry_id, need_mmap_update)
-  down_write(&wrapper->topic->rwsem);
+  // See the comment above `down_read(&wrapper->topic->rwsem)` in agnocast_ioctl_receive_msg().
+  down_read(&wrapper->topic->rwsem);
 
   struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info) {
@@ -1161,27 +1377,12 @@ int agnocast_ioctl_take_msg(
       break;  // Never take any messages that are older than the most recently received
     }
 
-    const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
-    if (!pub_info) {
-      dev_warn(
-        agnocast_device,
-        "Unreachable: corresponding publisher(id=%d) not found for entry(id=%lld) in "
-        "topic(topic_name=%s). (%s)\n",
-        en->publisher_id, en->entry_id, topic_name, __func__);
-      ret = -ENODATA;
+    const int deliverable = is_entry_deliverable(wrapper, sub_info, en);
+    if (deliverable < 0) {
+      ret = deliverable;
       goto unlock_all;
     }
-
-    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
-      continue;
-    }
-
-    if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
-      continue;
-    }
-
-    if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+    if (deliverable == 0) {
       continue;
     }
 
@@ -1190,19 +1391,14 @@ int agnocast_ioctl_take_msg(
   }
 
   if (candidate_en) {
-    // When allow_same_message is true and the subscriber already holds a reference,
-    // skip adding a duplicate reference.
-    bool already_referenced = false;
-    if (allow_same_message) {
-      already_referenced = test_bit(subscriber_id, candidate_en->referencing_subscribers);
+    // Claim the reference. test_and_set_bit reports -EALREADY when this subscriber already holds
+    // one, which allow_same_message makes an expected outcome rather than a failure: the existing
+    // reference is reused instead of a second being taken.
+    ret = add_subscriber_reference(candidate_en, subscriber_id, allow_same_message);
+    if (ret < 0 && !(allow_same_message && ret == -EALREADY)) {
+      goto unlock_all;
     }
-
-    if (!already_referenced) {
-      ret = add_subscriber_reference(candidate_en, subscriber_id);
-      if (ret < 0) {
-        goto unlock_all;
-      }
-    }
+    ret = 0;
 
     ioctl_ret->ret_addr = candidate_en->msg_virtual_address;
     ioctl_ret->ret_entry_id = candidate_en->entry_id;
@@ -1217,7 +1413,8 @@ int agnocast_ioctl_take_msg(
   }
 
   ret = set_publisher_shm_info(
-    wrapper, sub_info->pid, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+    wrapper, sub_info->pid, sub_info->is_bridge, pub_shm_infos, pub_shm_infos_size,
+    &ioctl_ret->ret_pub_shm_num);
   if (ret < 0) {
     goto unlock_all;
   }
@@ -1225,7 +1422,7 @@ int agnocast_ioctl_take_msg(
   sub_info->need_mmap_update = false;
 
 unlock_all:
-  up_write(&wrapper->topic->rwsem);
+  up_read(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -1242,6 +1439,7 @@ int agnocast_ioctl_get_subscriber_num(
   ioctl_ret->ret_other_process_subscriber_num = 0;
   ioctl_ret->ret_same_process_subscriber_num = 0;
   ioctl_ret->ret_ros2_subscriber_num = 0;
+  ioctl_ret->ret_other_domain_subscriber_num = 0;
   ioctl_ret->ret_a2r_bridge_exist = false;
   ioctl_ret->ret_r2a_bridge_exist = false;
 
@@ -1258,16 +1456,23 @@ int agnocast_ioctl_get_subscriber_num(
 
   uint32_t inter_count = 0;
   uint32_t intra_count = 0;
+  uint32_t other_domain_count = 0;
 
-  // Match ROS 2's get_subscription_count: report only same-domain subscribers.
-  // A bridge rule still delivers cross-domain (see the publish/receive paths),
-  // but a publisher does not count subscribers in another domain. Ungrouped
-  // topics hold only one domain, so this is a no-op for them.
+  // Match ROS 2's get_subscription_count: the same/other-process counts report only same-domain
+  // subscribers. A bridge rule still delivers cross-domain (see the publish/receive paths), but a
+  // publisher does not count subscribers in another domain. Ungrouped topics hold only one domain,
+  // so this is a no-op for them.
   struct subscriber_info * sub_info;
   int bkt_sub;
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub, sub_info, node)
   {
     if (sub_info->domain_id != wrapper->domain_id) {
+      // The ioctl names a topic, not a publisher, so the asking side is assumed not to be a
+      // bridge. A bridge publisher asking would be over-counted: nothing it publishes crosses.
+      if (domain_delivery_allowed(
+            wrapper->topic, wrapper->domain_id, false, sub_info->domain_id, sub_info->is_bridge)) {
+        other_domain_count++;
+      }
       continue;
     }
     if (sub_info->is_bridge) {
@@ -1292,6 +1497,7 @@ int agnocast_ioctl_get_subscriber_num(
 
   ioctl_ret->ret_other_process_subscriber_num = inter_count;
   ioctl_ret->ret_same_process_subscriber_num = intra_count;
+  ioctl_ret->ret_other_domain_subscriber_num = other_domain_count;
   ioctl_ret->ret_ros2_subscriber_num = wrapper->topic->ros2_subscriber_num;
 
   up_read(&wrapper->topic->rwsem);
@@ -1398,30 +1604,20 @@ int agnocast_ioctl_get_publisher_num(
 }
 
 // Two-phase ioctl for exit process cleanup:
-//   Phase 1 (agnocast_ioctl_get_exit_process): read-only copy of subscription entries to kernel
-//   buffer.
-//   Phase 2 (agnocast_commit_exit_process): delete entries and free proc_info.
+//   Phase 1 (agnocast_ioctl_get_exit_process): report the exited pid, leaving proc_info in place.
+//   Phase 2 (agnocast_commit_exit_process): free proc_info.
 //
-// The primary motivation for the two-phase split is to avoid holding the global write lock during
-// copy_to_user, which can trigger page faults with potentially unbounded latency. Since the write
-// lock blocks all publish/receive operations across every topic, a page fault during copy_to_user
-// would stall the entire data plane. By releasing the lock between phases, the dispatch handler
-// performs copy_to_user without any lock held.
-//
-// As a secondary benefit, Phase 2 runs only after the critical copies (ret_pid and
-// ret_subscription_mq_info_num) succeed, so subscription entries are never permanently lost.
-// ret_daemon_should_exit is patched via a separate copy_to_user after Phase 2; if that final copy
-// fails, the daemon merely stays alive one extra poll cycle — no resource leak.
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size, pid_t * out_global_pid)
+// Splitting the two lets the dispatch handler copy ret_pid out with no lock held, and only commit
+// once that copy succeeded: a failed copy returns -EFAULT before Phase 2, so the entry is not
+// dropped kernel-side.
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret)
 {
   ioctl_ret->ret_pid = -1;
-  ioctl_ret->ret_subscription_mq_info_num = 0;
   ioctl_ret->ret_daemon_should_exit = false;
-  *out_global_pid = -1;
+  pid_t global_pid = -1;
 
-  down_write(&global_htables_rwsem);
+  down_read(&global_htables_rwsem);
 
   struct process_info * proc_info;
   int bkt;
@@ -1431,55 +1627,17 @@ int agnocast_ioctl_get_exit_process(
       continue;
     }
 
-    // If there are subscription entries but no buffer to receive them, discard the entries
-    // and warn. The subscription MQs will leak, but shm/bridge cleanup can still proceed and
-    // the daemon won't hang indefinitely.
-    if (
-      !list_empty(&proc_info->exit_subscription_list) &&
-      (mq_info_buf == NULL || mq_info_buf_size == 0)) {
-      dev_warn(
-        agnocast_device,
-        "No MQ info buffer provided for pid=%d with %u subscription entries; "
-        "subscription MQs will leak. (%s)\n",
-        proc_info->global_pid, proc_info->exit_subscription_count, __func__);
-      agnocast_free_exit_subscription_list(proc_info);
-    }
-
     ioctl_ret->ret_pid = proc_info->local_pid;
-    *out_global_pid = proc_info->global_pid;
-
-    // Read-only copy of subscription info to kernel buffer. Entries are NOT deleted here;
-    // deletion is deferred to agnocast_commit_exit_process() after copy_to_user succeeds.
-    uint32_t count = 0;
-    if (mq_info_buf != NULL && mq_info_buf_size > 0) {
-      struct exit_subscription_entry * entry;
-      list_for_each_entry(entry, &proc_info->exit_subscription_list, list)
-      {
-        // cppcheck-suppress unsignedLessThanZero ; mq_info_buf_size > 0 is guaranteed by the guard
-        // above
-        if (count >= mq_info_buf_size) {
-          dev_warn(
-            agnocast_device,
-            "mq_info_buf is full, remaining entries kept for next poll. "
-            "(%s)\n",
-            __func__);
-          break;
-        }
-        strscpy(mq_info_buf[count].topic_name, entry->topic_name, TOPIC_NAME_BUFFER_SIZE);
-        mq_info_buf[count].subscriber_id = entry->subscriber_id;
-        count++;
-      }
-    }
-    ioctl_ret->ret_subscription_mq_info_num = count;
+    global_pid = proc_info->global_pid;
     break;
   }
 
-  up_write(&global_htables_rwsem);
-  return 0;
+  up_read(&global_htables_rwsem);
+  return global_pid;
 }
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
   bool * ret_daemon_should_exit)
 {
   down_write(&global_htables_rwsem);
@@ -1487,30 +1645,24 @@ void agnocast_commit_exit_process(
   if (global_pid >= 0) {
     struct process_info * proc_info = agnocast_find_process_info(global_pid);
     if (proc_info) {
-      // Delete the first committed_count entries (matching the read-only copy order).
-      uint32_t deleted = 0;
-      struct exit_subscription_entry * entry;
-      struct exit_subscription_entry * tmp_entry;
-      list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
-      {
-        // cppcheck-suppress unsignedLessThanZero ; both are uint32_t, committed_count == 0
-        // correctly skips the loop
-        if (deleted >= committed_count) break;
-        list_del(&entry->list);
-        kfree(entry);
-        proc_info->exit_subscription_count--;
-        deleted++;
-      }
-
-      // Free proc_info only when all subscription entries have been consumed.
-      if (list_empty(&proc_info->exit_subscription_list)) {
-        hash_del_rcu(&proc_info->node);
-        kfree_rcu(proc_info, rcu_head);
-      }
+      hash_del_rcu(&proc_info->node);
+      kfree_rcu(proc_info, rcu_head);
     }
   }
 
-  *ret_daemon_should_exit = (get_process_num(ipc_ns) == 0);
+  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ipc_ns) == 0);
+
+  // Deregistering only on death would leave a window where a starting process is told a daemon
+  // exists and skips spawning its replacement. Restricted to the idle poll because that is the
+  // only call whose flag poll_for_unlink() acts on; the drain loop discards the rest.
+  if (*ret_daemon_should_exit && global_pid < 0 && caller_pid >= 0) {
+    struct process_info * caller_info = agnocast_find_process_info(caller_pid);
+    if (caller_info && caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+      hash_del_rcu(&caller_info->node);
+      kfree_rcu(caller_info, rcu_head);
+      free_memory(caller_pid);
+    }
+  }
 
   up_write(&global_htables_rwsem);
 }
@@ -1571,6 +1723,140 @@ int agnocast_ioctl_get_topic_list(
 
 unlock:
   up_read(&global_htables_rwsem);
+  return ret;
+}
+
+// Nothing may sleep under global_htables_rwsem: it is writer-preferring, so a sleeping reader
+// stalls every publish behind a waiting endpoint add/remove. Hence the scratch preallocated
+// below, and the copy_to_user left to get_node_names_cmd.
+
+#define NODE_NAME_SLOT_BITS 11
+#define NODE_NAME_SLOT_NUM (1u << NODE_NAME_SLOT_BITS)
+// add_unique_node's probe loop has no bound: it terminates only because a free slot always exists.
+static_assert(NODE_NAME_SLOT_NUM >= 2 * MAX_NODE_NUM, "node name slots must outnumber the names");
+
+struct collected_node
+{
+  uint32_t name_index;
+  pid_t pid;
+};
+
+struct node_name_collector
+{
+  struct collected_node * slots;
+  char * buf;
+  uint32_t capacity;
+  uint32_t num;
+};
+
+static char * node_name_at(const struct node_name_collector * col, const uint32_t index)
+{
+  return col->buf + (size_t)index * NODE_NAME_BUFFER_SIZE;
+}
+
+// The dedup key is (pid, name), not the name alone, so that same-named nodes in different
+// processes stay distinct as rclcpp reports them. Two in one process still collapse, which rclcpp
+// does not: the kmod has no node identity finer than the process.
+static int add_unique_node(struct node_name_collector * col, const char * name, const pid_t pid)
+{
+  const size_t len = strlen(name) + 1;
+  uint32_t idx = full_name_hash(NULL, name, len - 1) & (NODE_NAME_SLOT_NUM - 1);
+
+  while (col->slots[idx].pid != 0) {
+    const struct collected_node * slot = &col->slots[idx];
+    if (slot->pid == pid && strcmp(node_name_at(col, slot->name_index), name) == 0) {
+      return 0;  // already collected
+    }
+    idx = (idx + 1) & (NODE_NAME_SLOT_NUM - 1);
+  }
+
+  if (col->num >= col->capacity) return -ENOBUFS;
+
+  memcpy(node_name_at(col, col->num), name, len);
+  col->slots[idx].name_index = col->num;
+  col->slots[idx].pid = pid;
+  col->num++;
+  return 0;
+}
+
+// A publisher_info outlives its process while a subscriber still references its entries.
+// Caller holds global_htables_rwsem.
+static bool owner_is_alive(const pid_t pid)
+{
+  const struct process_info * proc_info = agnocast_find_process_info(pid);
+  return proc_info && !proc_info->exited;
+}
+
+// Collects the nodes owning an endpoint of one topic. Caller holds global_htables_rwsem.
+static int collect_node_names_of_topic(
+  struct topic_wrapper * wrapper, const uint32_t domain_id, struct node_name_collector * col)
+{
+  int ret = 0;
+
+  down_read(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != domain_id || pub_info->is_bridge) continue;
+    if (!owner_is_alive(pub_info->pid)) continue;
+
+    ret = add_unique_node(col, pub_info->node_name, pub_info->pid);
+    if (ret) goto unlock;
+  }
+
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != domain_id || sub_info->is_bridge) continue;
+    if (!owner_is_alive(sub_info->pid)) continue;
+
+    ret = add_unique_node(col, sub_info->node_name, sub_info->pid);
+    if (ret) goto unlock;
+  }
+
+unlock:
+  up_read(&wrapper->topic->rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num)
+{
+  int ret = 0;
+  struct node_name_collector col = {.buf = buf, .capacity = buf_node_num};
+
+  // Beyond MAX_NODE_NUM the dedup table could fill and add_unique_node's probe loop would not
+  // terminate.
+  if (buf_node_num > MAX_NODE_NUM) return -EINVAL;
+
+  col.slots = kvcalloc(NODE_NAME_SLOT_NUM, sizeof(*col.slots), GFP_KERNEL);
+  if (!col.slots) return -ENOMEM;
+
+  down_read(&global_htables_rwsem);
+
+  const uint32_t domain_id = get_process_domain_id(pid);
+
+  struct topic_wrapper * wrapper;
+  int bkt_topic;
+  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
+  {
+    if (!ipc_eq(ipc_ns, wrapper->ipc_ns) || wrapper->domain_id != domain_id) {
+      continue;
+    }
+
+    ret = collect_node_names_of_topic(wrapper, domain_id, &col);
+    if (ret) goto unlock;
+  }
+
+  *ret_node_num = col.num;
+
+unlock:
+  up_read(&global_htables_rwsem);
+  kvfree(col.slots);
   return ret;
 }
 
@@ -1974,8 +2260,7 @@ int agnocast_ioctl_remove_subscriber(
     goto unlock;
   }
 
-  hash_del(&sub_info->node);
-  free_subscriber_info(sub_info);
+  agnocast_unlink_subscriber_info(wrapper, sub_info);
 
   if (!is_parameter_service_topic(topic_name)) {
     dev_info(
@@ -2197,6 +2482,8 @@ unlock:
 
 // A rule is keyed by cell = (name, domain). Rules are few (one per bridged topic
 // pair), so a full scan is cheaper than maintaining a dual-name hash.
+// Registration keeps prefix and exact rules disjoint, so a cell has at most one match and the
+// first one found can be returned.
 static struct domain_bridge_rule * find_domain_rule(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
 {
@@ -2205,6 +2492,12 @@ static struct domain_bridge_rule * find_domain_rule(
   hash_for_each(domain_rule_htable, bkt, rule, node)
   {
     if (ipc_ns != rule->ipc_ns) continue;
+    if (domain_id != rule->domain_a && domain_id != rule->domain_b) continue;
+    if (rule->is_prefix) {
+      // Both names equal the prefix, so which side matched does not matter.
+      if (strncmp(rule->topic_name_a, topic_name, strlen(rule->topic_name_a)) == 0) return rule;
+      continue;
+    }
     if (
       (domain_id == rule->domain_a && strcmp(rule->topic_name_a, topic_name) == 0) ||
       (domain_id == rule->domain_b && strcmp(rule->topic_name_b, topic_name) == 0)) {
@@ -2214,79 +2507,256 @@ static struct domain_bridge_rule * find_domain_rule(
   return NULL;
 }
 
-int agnocast_ioctl_add_domain_bridge(
+// The caller holds global_htables_rwsem for write and has verified, over everything the new rule
+// would cover -- two cells for an exact rule, every name under the prefix for a prefix rule --
+// that no domain_bridge_rule overlaps it and that no endpoint has joined it.
+static int insert_domain_rule(
   const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
-  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+  const uint32_t to_domain, const bool is_prefix, const struct ipc_namespace * ipc_ns)
 {
-  int ret = 0;
-
-  if (from_domain == to_domain) return -EINVAL;
-
   // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
   // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
   // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
   // domain_delivery_allowed.
   const bool from_is_a = from_domain < to_domain;
-  const uint32_t domain_a = from_is_a ? from_domain : to_domain;
-  const uint32_t domain_b = from_is_a ? to_domain : from_domain;
   const char * name_a = from_is_a ? topic_name_from : topic_name_to;
   const char * name_b = from_is_a ? topic_name_to : topic_name_from;
 
-  down_write(&global_htables_rwsem);
-
-  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
-  // exactly two cells. r_a == r_b (non-NULL) means an existing rule already pairs exactly
-  // these two cells -- a re-declaration or the reverse direction, so just OR in the
-  // direction. Any other overlap (a cell already paired with a different cell) is a
-  // fan-out and is rejected. This is the one place that enforces one pair per cell.
-  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
-  struct domain_bridge_rule * r_a = find_domain_rule(name_a, ipc_ns, domain_a);
-  struct domain_bridge_rule * r_b = find_domain_rule(name_b, ipc_ns, domain_b);
-  if (r_a || r_b) {
-    if (r_a == r_b) {
-      r_a->a_to_b |= from_is_a;
-      r_a->b_to_a |= !from_is_a;
-    } else {
-      ret = -EBUSY;
-    }
-    goto unlock;
-  }
-
-  // Grouping merges the two domains' id and entry_id spaces, which is only safe
-  // before either side has allocated any; reject if an endpoint already joined.
-  if (find_topic(name_a, ipc_ns, domain_a) || find_topic(name_b, ipc_ns, domain_b)) {
-    ret = -EBUSY;
-    goto unlock;
-  }
-
   struct domain_bridge_rule * rule = kmalloc(sizeof(*rule), GFP_KERNEL);
-  if (!rule) {
-    ret = -ENOMEM;
-    goto unlock;
-  }
+  if (!rule) return -ENOMEM;
+
   rule->topic_name_a = kstrdup(name_a, GFP_KERNEL);
   rule->topic_name_b = kstrdup(name_b, GFP_KERNEL);
   if (!rule->topic_name_a || !rule->topic_name_b) {
     kfree(rule->topic_name_a);
     kfree(rule->topic_name_b);
     kfree(rule);
-    ret = -ENOMEM;
-    goto unlock;
+    return -ENOMEM;
   }
   rule->ipc_ns = ipc_ns;
-  rule->domain_a = domain_a;
-  rule->domain_b = domain_b;
+  rule->domain_a = from_is_a ? from_domain : to_domain;
+  rule->domain_b = from_is_a ? to_domain : from_domain;
   rule->a_to_b = from_is_a;
   rule->b_to_a = !from_is_a;
+  rule->is_prefix = is_prefix;
   INIT_HLIST_NODE(&rule->node);
   // find_domain_rule scans every bucket, so the hash key is only for even distribution.
   hash_add(domain_rule_htable, &rule->node, full_name_hash(NULL, name_a, strlen(name_a)));
 
   dev_info(
-    agnocast_device, "Domain bridge rule added (%s@%u -> %s@%u).\n", topic_name_from, from_domain,
-    topic_name_to, to_domain);
+    agnocast_device, "Domain bridge %srule added (%s@%u -> %s@%u).\n", is_prefix ? "prefix " : "",
+    topic_name_from, from_domain, topic_name_to, to_domain);
+  return 0;
+}
 
-unlock:
+// The caller holds global_htables_rwsem for write.
+static int add_domain_rule(
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+{
+  // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
+  // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
+  // these two cells -- a re-declaration or the reverse direction. Any other overlap (a cell
+  // already paired with a different cell) is a fan-out and is rejected. This is the one place
+  // that enforces one pair per cell.
+  // TODO: support >2 domains per topic by storing a domain group instead of a fixed pair.
+  struct domain_bridge_rule * r_from = find_domain_rule(topic_name_from, ipc_ns, from_domain);
+  struct domain_bridge_rule * r_to = find_domain_rule(topic_name_to, ipc_ns, to_domain);
+  if (r_from || r_to) {
+    if (r_from != r_to) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: a cell is already paired with another "
+        "cell. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // Only a prefix rule can pair a name nobody declared. Taking it as a re-declaration would let
+    // one exact declaration turn on a direction for every cell the prefix covers.
+    if (r_from->is_prefix) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: covered by a prefix rule. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // Re-running the registration tool with an unchanged config must succeed even after nodes
+    // started, so a declaration that enables nothing new is simply accepted.
+    const bool from_is_a = from_domain < to_domain;
+    if ((from_is_a && r_from->a_to_b) || (!from_is_a && r_from->b_to_a)) return 0;
+
+    // Endpoints that joined while this direction was denied were left out of their publishers'
+    // notify lists and skipped by set_publisher_shm_info; neither is repaired here.
+    if (
+      find_topic(topic_name_from, ipc_ns, from_domain) ||
+      find_topic(topic_name_to, ipc_ns, to_domain)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge rule (%s@%u -> %s@%u) rejected: it adds a direction after an endpoint "
+        "joined. (%s)\n",
+        topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    if (from_is_a) {
+      r_from->a_to_b = true;
+    } else {
+      r_from->b_to_a = true;
+    }
+    return 0;
+  }
+
+  // Grouping merges the two domains' id and entry_id spaces, which is only safe
+  // before either side has allocated any; reject if an endpoint already joined.
+  if (
+    find_topic(topic_name_from, ipc_ns, from_domain) ||
+    find_topic(topic_name_to, ipc_ns, to_domain)) {
+    dev_warn(
+      agnocast_device,
+      "Domain bridge rule (%s@%u -> %s@%u) rejected: an endpoint has already joined. (%s)\n",
+      topic_name_from, from_domain, topic_name_to, to_domain, __func__);
+    return -EBUSY;
+  }
+
+  return insert_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, false, ipc_ns);
+}
+
+// A prefix rule groups every cell it covers, and grouping merges id spaces, so it must be
+// declared before any of them exist.
+static bool any_topic_under_prefix(
+  const char * prefix, const struct ipc_namespace * ipc_ns, const uint32_t from_domain,
+  const uint32_t to_domain)
+{
+  const size_t prefix_len = strlen(prefix);
+  struct topic_wrapper * wrapper;
+  int bkt;
+  hash_for_each(topic_hashtable, bkt, wrapper, node)
+  {
+    if (!ipc_eq(wrapper->ipc_ns, ipc_ns)) continue;
+    if (wrapper->domain_id != from_domain && wrapper->domain_id != to_domain) continue;
+    if (strncmp(wrapper->key, prefix, prefix_len) == 0) return true;
+  }
+  return false;
+}
+
+// Registers a prefix rule, or folds a re-declaration into the identical existing one. Every other
+// overlap is rejected so find_domain_rule never has to choose between two candidates.
+// The caller holds global_htables_rwsem for write.
+static int add_prefix_domain_rule(
+  const char * prefix, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  const size_t prefix_len = strlen(prefix);
+  const uint32_t domain_a = min(from_domain, to_domain);
+  const uint32_t domain_b = max(from_domain, to_domain);
+  struct domain_bridge_rule * same = NULL;
+  struct domain_bridge_rule * rule;
+  int bkt;
+
+  hash_for_each(domain_rule_htable, bkt, rule, node)
+  {
+    if (ipc_ns != rule->ipc_ns) continue;
+
+    if (rule->is_prefix) {
+      const size_t len = strlen(rule->topic_name_a);
+      const bool nests = (len <= prefix_len) ? strncmp(rule->topic_name_a, prefix, len) == 0
+                                             : strncmp(prefix, rule->topic_name_a, prefix_len) == 0;
+      // find_domain_rule filters by domain before testing the name, so two prefix rules can both
+      // match a lookup only if their pairs share a domain; over disjoint pairs nesting is harmless.
+      const bool shares_domain = rule->domain_a == domain_a || rule->domain_a == domain_b ||
+                                 rule->domain_b == domain_a || rule->domain_b == domain_b;
+      if (!nests || !shares_domain) continue;
+
+      if (len == prefix_len) {
+        if (rule->domain_a == domain_a && rule->domain_b == domain_b) {
+          same = rule;
+          continue;
+        }
+        dev_warn(
+          agnocast_device,
+          "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: the prefix is already paired with "
+          "another domain. (%s)\n",
+          prefix, from_domain, prefix, to_domain, __func__);
+        return -EBUSY;
+      }
+
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: it nests with an existing prefix "
+        "rule. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+
+    // An exact rule for a covered name would shadow the prefix, so keep the two disjoint.
+    if (
+      ((rule->domain_a == domain_a || rule->domain_a == domain_b) &&
+       strncmp(prefix, rule->topic_name_a, prefix_len) == 0) ||
+      ((rule->domain_b == domain_a || rule->domain_b == domain_b) &&
+       strncmp(prefix, rule->topic_name_b, prefix_len) == 0)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: an exact rule already covers a name "
+        "under it. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+  }
+
+  // A re-declaration that enables nothing new must keep working once nodes are up, so only a new
+  // direction needs the guarantee below: endpoints that joined while it was denied were left out
+  // of their publishers' notify lists and skipped by set_publisher_shm_info.
+  if (same) {
+    const bool from_is_a = from_domain < to_domain;
+    if ((from_is_a && same->a_to_b) || (!from_is_a && same->b_to_a)) return 0;
+    if (any_topic_under_prefix(prefix, ipc_ns, from_domain, to_domain)) {
+      dev_warn(
+        agnocast_device,
+        "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: it adds a direction after a covered "
+        "endpoint joined. (%s)\n",
+        prefix, from_domain, prefix, to_domain, __func__);
+      return -EBUSY;
+    }
+    same->a_to_b |= from_is_a;
+    same->b_to_a |= !from_is_a;
+    return 0;
+  }
+
+  if (any_topic_under_prefix(prefix, ipc_ns, from_domain, to_domain)) {
+    dev_warn(
+      agnocast_device,
+      "Domain bridge prefix rule (%s@%u -> %s@%u) rejected: an endpoint under it has already "
+      "joined. (%s)\n",
+      prefix, from_domain, prefix, to_domain, __func__);
+    return -EBUSY;
+  }
+
+  return insert_domain_rule(prefix, prefix, from_domain, to_domain, true, ipc_ns);
+}
+
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name_from, const char * topic_name_to, const uint32_t from_domain,
+  const uint32_t to_domain, const struct ipc_namespace * ipc_ns)
+{
+  if (from_domain == to_domain) return -EINVAL;
+
+  down_write(&global_htables_rwsem);
+  const int ret = add_domain_rule(topic_name_from, topic_name_to, from_domain, to_domain, ipc_ns);
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_add_domain_bridge_prefix(
+  const char * topic_name_prefix, const uint32_t from_domain, const uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns)
+{
+  if (from_domain == to_domain) return -EINVAL;
+  if (topic_name_prefix[0] != '/' || topic_name_prefix[1] == '\0') return -EINVAL;
+
+  down_write(&global_htables_rwsem);
+  const int ret = add_prefix_domain_rule(topic_name_prefix, from_domain, to_domain, ipc_ns);
   up_write(&global_htables_rwsem);
   return ret;
 }
@@ -2343,38 +2813,22 @@ unlock:
   return ret;
 }
 
-static int get_process_num(const struct ipc_namespace * ipc_ns)
+// Counting the unlink daemon would keep it from ever deciding the namespace is done.
+static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns)
 {
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
   hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
   {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns)) {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
       count++;
     }
   }
   return count;
 }
 
-static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Like get_process_num_in_domain() but excludes processes that have exited and are still
-// pending cleanup. The discovery agent tracks live endpoints, so an exited entry that lingers
-// until the unlink daemon drains it must not gate the agent's spawn or self-exit.
-static int get_alive_process_num_in_domain(
+static int get_process_num_in_domain_except_unlink_daemon(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   int count = 0;
@@ -2384,7 +2838,29 @@ static int get_alive_process_num_in_domain(
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      !proc_info->exited) {
+      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// Like get_process_num_in_domain_except_unlink_daemon() but also excludes processes that have
+// exited and are still pending cleanup. The discovery agent tracks live endpoints, so an exited
+// entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
+// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
+// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
+static int get_alive_process_num_in_domain_except_unlink_daemon(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (
+      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
+      !proc_info->exited && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
       count++;
     }
   }
@@ -2396,7 +2872,7 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info) {
-    proc_info->is_performance_bridge_manager = false;
+    proc_info->role = PROCESS_ROLE_APPLICATION;
   }
   up_write(&global_htables_rwsem);
   return 0;
@@ -2430,13 +2906,14 @@ int agnocast_ioctl_discovery_agent_should_exit(
 {
   if (!commit) {
     down_read(&global_htables_rwsem);
-    *ret_should_exit = (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0);
+    *ret_should_exit =
+      (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0);
     up_read(&global_htables_rwsem);
     return 0;
   }
 
   down_write(&global_htables_rwsem);
-  if (get_alive_process_num_in_domain(ipc_ns, domain_id) == 0) {
+  if (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0) {
     agnocast_remove_discovery_agent_by_pid(pid);
     *ret_should_exit = true;
   } else {
@@ -2446,19 +2923,21 @@ int agnocast_ioctl_discovery_agent_should_exit(
   return 0;
 }
 
-// Atomic singleton claim; replaces the userspace flock. The first caller for a (ns, domain) wins
-// and is recorded; a later caller loses (ret_already_exists = true) and must exit.
+// Atomic singleton claim; replaces the userspace flock. Reports whether the caller owns the
+// (ns, domain) slot once the call returns; a caller that does not must exit.
 int agnocast_ioctl_add_discovery_agent(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id,
   struct ioctl_add_discovery_agent_args * ioctl_ret)
 {
   int ret = 0;
-  // Deterministic default so the -ENOMEM path never returns a stale flag to userspace.
-  ioctl_ret->ret_already_exists = false;
+  struct discovery_agent_info * existing;
+  // Not owning it is the safe answer, so every early exit including -ENOMEM leaves this false.
+  ioctl_ret->ret_owned_by_caller = false;
   down_write(&global_htables_rwsem);
 
-  if (agnocast_find_discovery_agent(ipc_ns, domain_id)) {
-    ioctl_ret->ret_already_exists = true;
+  existing = agnocast_find_discovery_agent(ipc_ns, domain_id);
+  if (existing) {
+    ioctl_ret->ret_owned_by_caller = (existing->pid == pid);
     goto unlock;
   }
 
@@ -2472,6 +2951,7 @@ int agnocast_ioctl_add_discovery_agent(
   agent->domain_id = domain_id;
   INIT_HLIST_NODE(&agent->node);
   hash_add_rcu(discovery_agent_htable, &agent->node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS));
+  ioctl_ret->ret_owned_by_caller = true;
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -2494,14 +2974,13 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   struct ioctl_check_and_request_bridge_shutdown_args * ioctl_ret)
 {
   down_write(&global_htables_rwsem);
-  // A performance bridge manager is per (ipc_ns, domain), so it must shut down once its
+  // A bridge manager is per (ipc_ns, domain), so it must shut down once its
   // own domain is empty -- counting the whole namespace would keep it alive while an
-  // unrelated domain is busy. The manager itself is the remaining process (count == 1),
-  // and poll_for_unlink is not registered here, so it is excluded.
-  if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
+  // unrelated domain is busy. The manager itself is the remaining process (count == 1).
+  if (get_process_num_in_domain_except_unlink_daemon(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
-      proc_info->is_performance_bridge_manager = false;
+      proc_info->role = PROCESS_ROLE_APPLICATION;
     }
     ioctl_ret->ret_should_shutdown = true;
   } else {
@@ -2530,10 +3009,9 @@ static long add_process_cmd(union ioctl_add_process_args __user * arg)
 
   union ioctl_add_process_args add_process_args;
   if (copy_from_user(&add_process_args, arg, sizeof(add_process_args))) return -EFAULT;
-  bool is_performance_bridge_manager = add_process_args.is_performance_bridge_manager;
+  enum process_role role = (enum process_role)add_process_args.role;
   uint32_t domain_id = add_process_args.domain_id;
-  ret = agnocast_ioctl_add_process(
-    pid, ipc_ns, is_performance_bridge_manager, domain_id, &add_process_args);
+  ret = agnocast_ioctl_add_process(pid, ipc_ns, role, domain_id, &add_process_args);
   if (ret == 0) {
     if (copy_to_user(arg, &add_process_args, sizeof(add_process_args))) return -EFAULT;
   }
@@ -2765,59 +3243,27 @@ static long get_publisher_num_cmd(union ioctl_get_publisher_num_args __user * ar
 
 static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg)
 {
-  int ret = 0;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
-  struct ioctl_get_exit_process_args get_exit_process_args;
-  if (copy_from_user(&get_exit_process_args, arg, sizeof(get_exit_process_args))) return -EFAULT;
+  struct ioctl_get_exit_process_args get_exit_process_args = {};
 
-  uint32_t mq_buf_size = get_exit_process_args.subscription_mq_info_buffer_size;
-  if (mq_buf_size > MAX_SUBSCRIPTION_NUM_PER_PROCESS) return -EINVAL;
+  const pid_t global_pid = agnocast_ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
 
-  uint64_t mq_buf_addr = get_exit_process_args.subscription_mq_info_buffer_addr;
-  if (mq_buf_size > 0 && mq_buf_addr == 0) return -EINVAL;
-
-  struct exit_subscription_mq_info * mq_info_buf = NULL;
-  if (mq_buf_size > 0) {
-    mq_info_buf = kvcalloc(mq_buf_size, sizeof(*mq_info_buf), GFP_KERNEL);
-    if (!mq_info_buf) return -ENOMEM;
-  }
-
-  pid_t global_pid = -1;
-  agnocast_ioctl_get_exit_process(
-    ipc_ns, &get_exit_process_args, mq_info_buf, mq_buf_size, &global_pid);
-
-  // Copy subscription MQ info to user-space. On failure, entries remain in the kernel
-  // for the next poll (agnocast_commit_exit_process is not called).
-  if (get_exit_process_args.ret_subscription_mq_info_num > 0 && mq_info_buf) {
-    uint32_t copy_count = get_exit_process_args.ret_subscription_mq_info_num;
-    if (copy_to_user(
-          (struct exit_subscription_mq_info __user *)mq_buf_addr, mq_info_buf,
-          copy_count * sizeof(struct exit_subscription_mq_info))) {
-      kvfree(mq_info_buf);
-      return -EFAULT;
-    }
-  }
-  kvfree(mq_info_buf);
-
-  // Copy ret_pid and ret_subscription_mq_info_num to user-space BEFORE commit.
+  // Copy ret_pid to user-space BEFORE commit.
   // ret_daemon_should_exit is not yet known and will be patched after commit.
-  if (copy_to_user(
-        (struct ioctl_get_exit_process_args __user *)arg, &get_exit_process_args,
-        sizeof(get_exit_process_args)))
-    return -EFAULT;
+  if (copy_to_user(arg, &get_exit_process_args, sizeof(get_exit_process_args))) return -EFAULT;
 
-  // Commit: delete copied entries and free proc_info. Safe because user-space already
-  // has ret_pid and ret_subscription_mq_info_num — entries cannot be permanently lost.
+  // Commit: free proc_info. Safe because user-space already has ret_pid.
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(
-    ipc_ns, global_pid, get_exit_process_args.ret_subscription_mq_info_num, &daemon_should_exit);
+  agnocast_commit_exit_process(ipc_ns, global_pid, current->tgid, &daemon_should_exit);
 
-  // Patch ret_daemon_should_exit in user-space. If this fails, the daemon simply stays
-  // alive one extra poll cycle — no resource leak.
-  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit)))
-    return -EFAULT;
-  return ret;
+  // Patch ret_daemon_should_exit. Not fatal: when a pid was returned, its proc_info has already
+  // been committed, so -EFAULT would make the daemon exit while discarding the ret_pid whose shm
+  // needs unlinking; the flag is advisory and re-derived on the next poll.
+  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit))) {
+    dev_warn(agnocast_device, "Failed to report the daemon exit flag. (%s)\n", __func__);
+  }
+  return 0;
 }
 
 static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
@@ -2831,6 +3277,40 @@ static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
   if (ret == 0) {
     if (copy_to_user(arg, &topic_list_args, sizeof(topic_list_args))) return -EFAULT;
   }
+  return ret;
+}
+
+static long get_node_names_cmd(union ioctl_get_node_names_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_get_node_names_args get_node_names_args;
+  if (copy_from_user(&get_node_names_args, arg, sizeof(get_node_names_args))) return -EFAULT;
+
+  const uint32_t buf_node_num =
+    min_t(uint32_t, get_node_names_args.node_name_buffer_size, MAX_NODE_NUM);
+  char __user * user_buf =
+    (char __user *)u64_to_user_ptr(get_node_names_args.node_name_buffer_addr);
+
+  char * buf = kvzalloc((size_t)buf_node_num * NODE_NAME_BUFFER_SIZE, GFP_KERNEL);
+  if (!buf) return -ENOMEM;
+
+  uint32_t node_num = 0;
+  long ret = agnocast_ioctl_get_node_names(ipc_ns, current->tgid, buf, buf_node_num, &node_num);
+  if (ret == 0) {
+    if (copy_to_user(user_buf, buf, (size_t)node_num * NODE_NAME_BUFFER_SIZE)) {
+      ret = -EFAULT;
+    } else {
+      get_node_names_args.ret_node_num = node_num;
+      if (copy_to_user(arg, &get_node_names_args, sizeof(get_node_names_args))) ret = -EFAULT;
+    }
+  } else if (ret == -ENOBUFS) {
+    dev_warn(
+      agnocast_device, "Node count exceeds limit: MAX_NODE_NUM=%d, node_name_buffer_size=%u\n",
+      MAX_NODE_NUM, get_node_names_args.node_name_buffer_size);
+  }
+
+  kvfree(buf);
   return ret;
 }
 
@@ -3032,6 +3512,21 @@ static long add_domain_bridge_cmd(struct ioctl_add_domain_bridge_args __user * a
     ipc_ns);
 }
 
+static long add_domain_bridge_prefix_cmd(struct ioctl_add_domain_bridge_prefix_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_add_domain_bridge_prefix_args prefix_args;
+  if (copy_from_user(&prefix_args, arg, sizeof(prefix_args))) return -EFAULT;
+
+  char prefix_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(prefix_buf, sizeof(prefix_buf), &prefix_args.topic_name_prefix);
+  if (ret) return ret;
+
+  return agnocast_ioctl_add_domain_bridge_prefix(
+    prefix_buf, prefix_args.from_domain, prefix_args.to_domain, ipc_ns);
+}
+
 static long remove_bridge_cmd(struct ioctl_remove_bridge_args __user * arg)
 {
   int ret = 0;
@@ -3176,6 +3671,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_exit_process_cmd((struct ioctl_get_exit_process_args __user *)arg);
     case AGNOCAST_GET_TOPIC_LIST_CMD:
       return get_topic_list_cmd((union ioctl_topic_list_args __user *)arg);
+    case AGNOCAST_GET_NODE_NAMES_CMD:
+      return get_node_names_cmd((union ioctl_get_node_names_args __user *)arg);
     case AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD:
       return get_node_subscriber_topics_cmd((union ioctl_node_info_args __user *)arg);
     case AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD:
@@ -3214,6 +3711,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return add_discovery_agent_cmd((struct ioctl_add_discovery_agent_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
+    case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:
+      return add_domain_bridge_prefix_cmd((struct ioctl_add_domain_bridge_prefix_args __user *)arg);
     default:
       return -EINVAL;
   }
@@ -3266,7 +3765,7 @@ int agnocast_increment_message_entry_rc(
     goto unlock_all;
   }
 
-  ret = add_subscriber_reference(en, pubsub_id);
+  ret = add_subscriber_reference(en, pubsub_id, false);
   if (ret < 0) {
     goto unlock_all;
   }
