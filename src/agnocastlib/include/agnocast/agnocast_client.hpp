@@ -440,6 +440,45 @@ private:
 
   ServiceTsBundle service_ts_bundle_;
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<std::shared_ptr<void>> copy_request_if_contents(const void * payload);
+
+  void publish_request_sent_event(
+    const int64_t seqno, const std::optional<std::shared_ptr<void>> & request);
+#endif
+
+  template <typename Func>
+  int64_t send_request_impl(
+    ipc_shared_ptr<void> && request, ResponseCallInfo && call_info, Func && take_future)
+  {
+    auto generic_request_wrapper =
+      GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+    const int64_t seqno = generic_request_wrapper.seqno();
+
+    {
+      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
+      take_future(
+        seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
+    }
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    const std::optional<std::shared_ptr<void>> sent_request =
+      copy_request_if_contents(generic_request_wrapper.get());
+#endif
+
+    publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
+      GenericRequestWrapper::free(p, this->service_ts_bundle_.request_members);
+    });
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    publish_request_sent_event(seqno, sent_request);
+#endif
+
+    return seqno;
+  }
+
   template <typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const std::string & service_type,
@@ -478,6 +517,12 @@ private:
       seqno2_response_call_info_.erase(it);
       /* --- critical section end --- */
       lock.unlock();
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      event_publisher_->publish_service_event_message(
+        service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED, generic_response_wrapper.get(),
+        response_seqno, get_gid().data);
+#endif
 
       info.promise.set_value(std::move(generic_response_wrapper).take_response());
       if (info.callback.has_value()) {
