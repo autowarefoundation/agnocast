@@ -305,12 +305,14 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   }
 
   std::vector<std::string> mismatches;
+  size_t compared_count = 0;
 
   for (const auto & [key, current_value] : current_hw_info) {
     if (!yaml_hw_info[key]) {
       continue;
     }
 
+    compared_count++;
     std::string yaml_value = yaml_hw_info[key].as<std::string>();
     if (yaml_value != current_value) {
       mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
@@ -323,10 +325,17 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
       error_msg += "  - " + mismatch + "\n";
     }
     throw std::runtime_error(error_msg);
-  } else {
-    RCLCPP_INFO(
-      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
   }
+
+  if (compared_count == 0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "hardware_info has none of the keys reported by lscpu. Skipping hardware validation.");
+    return;
+  }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Hardware validation successful. Configuration matches this system.");
 }
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
