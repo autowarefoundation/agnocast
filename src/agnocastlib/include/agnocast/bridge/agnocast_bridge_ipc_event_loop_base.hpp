@@ -50,6 +50,10 @@ public:
   // Wake up the event loop from another thread.
   void wakeup();
 
+  // Release the abstract UDS address without waiting for destruction. Must be called from the
+  // thread that runs spin_once(), and only once it has stopped spinning.
+  void close_listener();
+
   void set_message_handler(MessageCallback cb);
   void set_signal_handler(SignalCallback cb);
   void set_socket_handler(SocketCallback cb);
@@ -168,6 +172,17 @@ inline void IpcEventLoopBase::wakeup()
   if (w == -1) {
     RCLCPP_WARN(logger_, "write() on wakeup eventfd failed: %s", strerror(errno));
   }
+}
+
+inline void IpcEventLoopBase::close_listener()
+{
+  if (listener_fd_ == -1) {
+    return;
+  }
+  if (close(listener_fd_) == -1) {
+    RCLCPP_WARN(logger_, "Failed to close bridge UDS listener_fd: %s", strerror(errno));
+  }
+  listener_fd_ = -1;
 }
 
 inline void IpcEventLoopBase::handle_signal()
@@ -427,12 +442,7 @@ inline void IpcEventLoopBase::cleanup_resources()
     wakeup_efd_ = -1;
   }
 
-  if (listener_fd_ != -1) {
-    if (close(listener_fd_) == -1) {
-      RCLCPP_WARN(logger_, "Failed to close bridge UDS listener_fd: %s", strerror(errno));
-    }
-    listener_fd_ = -1;
-  }
+  close_listener();
 }
 
 }  // namespace agnocast
