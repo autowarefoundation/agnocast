@@ -20,22 +20,14 @@ std::map<std::string, std::string> get_hardware_info();
 // are whitespace-trimmed.
 std::map<std::string, std::string> parse_lscpu_output(const std::string & output);
 
-// One hardware_info key whose configured value does not match this machine.
-struct HardwareMismatch
-{
-  std::string key;
-  std::string expected;  // value in the YAML
-  std::string actual;    // value on this machine
-};
-
 // Compare the YAML hardware_info section against `current` (typically
 // get_hardware_info()). Keys missing from either side are not compared, since
 // the YAML records only what the user wants pinned and `current` only what
-// lscpu reported on this machine. nullopt when no key was compared at all,
-// either because the YAML has no hardware_info section or because it pins none
-// of the keys in `current`, so the caller can tell "validation skipped" from
+// lscpu reported on this machine. Each mismatch is a formatted
+// "key: expected 'x', got 'y'" line. nullopt when the section pins none of the
+// keys in `current`, so the caller can tell "validation skipped" from
 // "no mismatch".
-std::optional<std::vector<HardwareMismatch>> check_hardware_info(
-  const YAML::Node & yaml, const std::map<std::string, std::string> & current);
+std::optional<std::vector<std::string>> check_hardware_info(
+  const YAML::Node & hw_info, const std::map<std::string, std::string> & current);
 
 }  // namespace agnocast_cie_thread_configurator

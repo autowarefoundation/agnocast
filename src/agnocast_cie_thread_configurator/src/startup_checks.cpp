@@ -78,31 +78,23 @@ std::map<std::string, std::string> parse_lscpu_output(const std::string & output
   return hw_info;
 }
 
-std::optional<std::vector<HardwareMismatch>> check_hardware_info(
-  const YAML::Node & yaml, const std::map<std::string, std::string> & current)
+std::optional<std::vector<std::string>> check_hardware_info(
+  const YAML::Node & hw_info, const std::map<std::string, std::string> & current)
 {
-  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
-  if (!yaml_hw_info) {
-    return std::nullopt;
-  }
-
-  std::vector<HardwareMismatch> mismatches;
-  size_t compared_count = 0;
+  std::optional<std::vector<std::string>> mismatches;
 
   for (const auto & [key, current_value] : current) {
-    if (!yaml_hw_info[key]) {
+    if (!hw_info[key]) {
       continue;
     }
 
-    compared_count++;
-    std::string yaml_value = yaml_hw_info[key].as<std::string>();
-    if (yaml_value != current_value) {
-      mismatches.push_back({key, yaml_value, current_value});
+    if (!mismatches) {
+      mismatches.emplace();
     }
-  }
-
-  if (compared_count == 0) {
-    return std::nullopt;
+    std::string yaml_value = hw_info[key].as<std::string>();
+    if (yaml_value != current_value) {
+      mismatches->push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
+    }
   }
 
   return mismatches;

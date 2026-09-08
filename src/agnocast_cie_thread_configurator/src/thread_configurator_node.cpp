@@ -303,7 +303,7 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   }
 
   const auto mismatches =
-    agnocast_cie_thread_configurator::check_hardware_info(yaml, current_hw_info);
+    agnocast_cie_thread_configurator::check_hardware_info(yaml["hardware_info"], current_hw_info);
   if (!mismatches.has_value()) {
     RCLCPP_WARN(
       this->get_logger(),
@@ -314,8 +314,7 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   if (!mismatches->empty()) {
     std::string error_msg = "Hardware validation failed with the following mismatches:\n";
     for (const auto & mismatch : *mismatches) {
-      error_msg += "  - " + mismatch.key + ": expected '" + mismatch.expected + "', got '" +
-                   mismatch.actual + "'\n";
+      error_msg += "  - " + mismatch + "\n";
     }
     throw std::runtime_error(error_msg);
   }
