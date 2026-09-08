@@ -29,9 +29,7 @@ protected:
   {
     graph_.reset();
     node_.reset();
-    if (agnocast::ok()) {
-      agnocast::shutdown();
-    }
+    agnocast::shutdown();
   }
 
   std::shared_ptr<agnocast::Node> node_;

@@ -13,6 +13,7 @@ Since `rclcpp::Node` is composed of ten modular node interfaces, this document o
 
 - `agnocast::Node` is a node implementation that bypasses the RMW layer entirely (e.g., it does not create a DDS participant)
 - When run as a standalone node (i.e., not loaded into a Component Container), nodes inheriting from `agnocast::Node` must be executed with Agnocast-only executors (i.e., `AgnocastOnlySingleThreadedExecutor`, `AgnocastOnlyMultiThreadedExecutor` or `AgnocastOnlyCallbackIsolatedExecutor`). In contrast, when such nodes are loaded into a Component Container, the container’s Agnocast-compatible executors—`SingleThreadedAgnocastExecutor`, `MultiThreadedAgnocastExecutor`, and `CallbackIsolatedAgnocastExecutor`—can also be used.
+- The converse does not hold: the Agnocast-only executors drive `agnocast::Node` only. They dispatch no RMW callbacks, so an `rclcpp::Node` added to one would never have its subscriptions, timers or services executed. Use the Agnocast-compatible executors for `rclcpp::Node`.
 
 ---
 
@@ -395,7 +396,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | Aspect | agnocast | Notes |
 |--------|----------|-------|
-| Global context required | ✗ (Optional) | Works without agnocast::init() |
+| Global context required | ✗ (Optional) | A process calls exactly one of `agnocast::init()` and `rclcpp::init()`, before any node |
 | NodeOptions support | ✓ | Supports parameter_overrides, context, arguments, etc. |
 | Sub-nodes | ✗ | agnocast does not support sub-nodes |
 | Lifecycle nodes | ✗ | Not applicable |

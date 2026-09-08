@@ -152,6 +152,8 @@ bool sigactions_equal(const struct sigaction & a, const struct sigaction & b)
 class SignalHandlerTest : public ::testing::Test
 {
 protected:
+  void SetUp() override { agnocast::SignalHandler::uninstall(); }
+
   void TearDown() override
   {
     agnocast::SignalHandler::uninstall();
