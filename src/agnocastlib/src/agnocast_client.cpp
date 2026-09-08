@@ -85,61 +85,6 @@ bool wait_for_service_nanoseconds(
   return false;
 }
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-std::optional<std::shared_ptr<void>> GenericClient::copy_request_if_contents(const void * payload)
-{
-  if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
-    return std::nullopt;
-  }
-
-  const auto * request_ts = service_ts_bundle_.service_ts->request_typesupport;
-
-  rclcpp::SerializedMessage serialized;
-  if (rmw_serialize(payload, request_ts, &serialized.get_rcl_serialized_message()) != RMW_RET_OK) {
-    std::visit(
-      [](auto * n) {
-        RCLCPP_ERROR(
-          n->get_logger(),
-          "rmw_serialize() failed; only publishing metadata for this REQUEST_SENT service event");
-      },
-      node_);
-    return std::nullopt;
-  }
-
-  std::shared_ptr<void> copied(
-    ::operator new(service_ts_bundle_.request_members->size_of_), [this](void * p) {
-      this->service_ts_bundle_.request_members->fini_function(p);
-      ::operator delete(p);
-    });
-  service_ts_bundle_.request_members->init_function(
-    copied.get(), rosidl_runtime_cpp::MessageInitialization::SKIP);
-
-  if (
-    rmw_deserialize(&serialized.get_rcl_serialized_message(), request_ts, copied.get()) !=
-    RMW_RET_OK) {
-    std::visit(
-      [](auto * n) {
-        RCLCPP_ERROR(
-          n->get_logger(),
-          "rmw_deserialize() failed; only publishing metadata for this REQUEST_SENT service "
-          "event");
-      },
-      node_);
-    return std::nullopt;
-  }
-
-  return copied;
-}
-
-void GenericClient::publish_request_sent_event(
-  const int64_t seqno, const std::optional<std::shared_ptr<void>> & request)
-{
-  event_publisher_->publish_service_event_message(
-    service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? request->get() : nullptr, seqno,
-    get_gid().data);
-}
-#endif
-
 GenericClient::GenericClient(
   rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
   const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
