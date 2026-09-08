@@ -29,6 +29,9 @@ union ioctl_publish_msg_args publish_core(
   const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);
 uint32_t get_subscription_count_core(const std::string & topic_name);
 uint32_t get_intra_subscription_count_core(const std::string & topic_name);
+// Every subscriber on the topic, matching rcl_count_subscribers rather than the publisher-side
+// split that leaves out the caller's own process.
+uint32_t count_subscribers_core(const std::string & topic_name);
 void increment_borrowed_publisher_num();
 void decrement_borrowed_publisher_num();
 
