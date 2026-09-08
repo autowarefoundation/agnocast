@@ -411,7 +411,25 @@ TEST_F(ServiceIntrospectionTest, DeferredServiceSupportsIntrospection)
 
   // Act
   ASSERT_TRUE(call_service(client, true));
-  const auto events = wait_for_events(4);
+  auto events = wait_for_events(4);
+  sort_events(events);
+
+  // Assert
+  FULL_CHECK_WITH_PAYLOAD;
+}
+
+TEST_F(ServiceIntrospectionTest, GenericClientSupportsIntrospection)
+{
+  // Arrange
+  auto service = create_service(true);
+  auto generic_client = create_generic_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  set_introspection(generic_client, RCL_SERVICE_INTROSPECTION_CONTENTS);
+
+  // Act
+  ASSERT_TRUE(call_service(generic_client, true));
+  auto events = wait_for_events(4);
+  sort_events(events);
 
   // Assert
   FULL_CHECK_WITH_PAYLOAD;
