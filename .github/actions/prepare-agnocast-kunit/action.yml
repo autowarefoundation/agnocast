@@ -1,0 +1,93 @@
+name: Prepare Agnocast KUnit kernel
+description: >
+  Install build deps, cache/clone the pinned Linux source, cache the build dir,
+  and stage the Agnocast sources into the kernel tree. Shared by the kunit and
+  kunit-coverage workflows. The caller must check out the repo first.
+
+inputs:
+  linux-ref:
+    description: Linux git tag to build against.
+    required: true
+  linux-repo:
+    description: Linux git repository URL.
+    required: true
+  build-dir:
+    description: kunit.py build dir (kept outside the source tree).
+    required: true
+  cache-key:
+    description: Exact cache key for the build dir.
+    required: true
+  restore-key:
+    description: restore-keys prefix for the build dir.
+    required: true
+  gcov:
+    description: If 'true', instrument the Agnocast objects for gcov.
+    default: 'false'
+  extra-packages:
+    description: Extra apt packages to install (space-separated).
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install prerequisites
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential flex bison libelf-dev libssl-dev bc python3 \
+          qemu-system-x86 ${{ inputs.extra-packages }}
+
+    # Cache the Linux source tree. Keyed on the ref only — safe for an immutable
+    # tag; add a SHA/date if it ever points at a moving branch.
+    - name: Cache Linux source tree
+      id: linux-src-cache
+      uses: actions/cache@v4
+      with:
+        path: linux
+        key: linux-src-${{ inputs.linux-ref }}
+
+    - name: Shallow clone Linux ${{ inputs.linux-ref }}
+      if: steps.linux-src-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: git clone --depth 1 --branch "${{ inputs.linux-ref }}" "${{ inputs.linux-repo }}" linux
+
+    # Build dir lives outside the source tree so the source cache above doesn't
+    # absorb build artifacts; restore-keys reuses a previous dir for incremental
+    # rebuilds.
+    - name: Cache build dir
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.build-dir }}
+        key: ${{ inputs.cache-key }}
+        restore-keys: ${{ inputs.restore-key }}
+
+    # A restored build dir from a different source checkout can reference paths
+    # the fresh clone lacks; drop it so the build is clean.
+    - name: Drop stale build dir if source was re-cloned
+      if: steps.linux-src-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: rm -rf "${{ inputs.build-dir }}"
+
+    # Layout mirrors agnocast_kmod/ so the tests' "../agnocast.h" includes
+    # resolve; .github/kunit/Kbuild is dropped in as the in-tree Makefile.
+    - name: Stage Agnocast sources into the kernel tree
+      shell: bash
+      run: |
+        set -euo pipefail
+        dst=linux/drivers/agnocast
+        rm -rf "${dst}"
+        mkdir -p "${dst}/agnocast_kunit"
+        cp agnocast_kmod/*.c agnocast_kmod/*.h "${dst}/"
+        cp agnocast_kmod/agnocast_kunit/*.c \
+           agnocast_kmod/agnocast_kunit/*.h \
+           agnocast_kmod/agnocast_kunit/Makefile.inc \
+           "${dst}/agnocast_kunit/"
+        cp .github/kunit/Kbuild "${dst}/Makefile"
+        if [ "${{ inputs.gcov }}" = "true" ]; then
+          echo 'GCOV_PROFILE := y' >> "${dst}/Makefile"
+        fi
+        if ! grep -q 'drivers/agnocast' linux/drivers/Makefile; then
+          echo 'obj-$(CONFIG_KUNIT) += agnocast/' >> linux/drivers/Makefile
+        fi
