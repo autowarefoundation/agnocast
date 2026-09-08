@@ -15,6 +15,7 @@ find_package(yaml-cpp REQUIRED)
 # and the unit tests; not installed.
 add_library(agnocast_thread_configurator_core STATIC
   src/sched_policy.cpp
+  src/startup_checks.cpp
   src/thread_config.cpp
   src/system_scan.cpp
 )
@@ -100,6 +101,11 @@ if(BUILD_TESTING)
     test/test_sched_policy.cpp
   )
   target_link_libraries(test_sched_policy agnocast_thread_configurator_core)
+
+  ament_add_gtest(test_startup_checks
+    test/test_startup_checks.cpp
+  )
+  target_link_libraries(test_startup_checks agnocast_thread_configurator_core)
 
   ament_add_gtest(test_thread_config
     test/test_thread_config.cpp

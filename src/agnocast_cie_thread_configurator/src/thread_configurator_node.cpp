@@ -3,6 +3,7 @@
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -298,13 +299,20 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
   const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
 
+  if (current_hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
+    return;
+  }
+
   std::vector<std::string> mismatches;
+  size_t compared_count = 0;
 
   for (const auto & [key, current_value] : current_hw_info) {
     if (!yaml_hw_info[key]) {
       continue;
     }
 
+    compared_count++;
     std::string yaml_value = yaml_hw_info[key].as<std::string>();
     if (yaml_value != current_value) {
       mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
@@ -317,10 +325,17 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
       error_msg += "  - " + mismatch + "\n";
     }
     throw std::runtime_error(error_msg);
-  } else {
-    RCLCPP_INFO(
-      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
   }
+
+  if (compared_count == 0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "hardware_info has none of the keys reported by lscpu. Skipping hardware validation.");
+    return;
+  }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Hardware validation successful. Configuration matches this system.");
 }
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()

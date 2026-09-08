@@ -2,6 +2,7 @@
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -155,7 +156,10 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Key << "hardware_info";
   out << YAML::Value << YAML::BeginMap;
 
-  auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  const auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  if (hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu; hardware_info will be empty.");
+  }
 
   for (const auto & [key, value] : hw_info) {
     out << YAML::Key << key << YAML::Value << value;
