@@ -803,10 +803,10 @@ TEST_F(TestNodeBase, on_callback_group_created_fires_after_group_is_registered)
 //   - get_local_args() returns the rcl_arguments_t parsed from
 //     NodeOptions::arguments() (non-null even with no arguments).
 //   - get_global_args() returns nullptr when NodeOptions::use_global_arguments
-//     is false, or when it is true but agnocast::init() has not been called.
-//     Only when use_global_arguments is true AND agnocast::init() has been
-//     called does it return a non-null pointer reflecting the global agnocast
-//     context.
+//     is false, and when it is true but neither agnocast::init() nor the node's
+//     rclcpp context holds a command line. With use_global_arguments true it
+//     reflects agnocast::init()'s arguments when there are any, and the node's
+//     rclcpp context's otherwise.
 // =============================================================================
 
 TEST_F(TestNodeBase, get_local_args_is_non_null_for_default_options)
@@ -856,4 +856,67 @@ TEST_F(TestNodeBase, get_global_args_is_non_null_when_g_context_is_initialized)
     EXPECT_NE(nullptr, global_args);
   }
   agnocast::shutdown();
+}
+
+TEST_F(TestNodeBase, global_args_come_from_the_node_rclcpp_context_without_agnocast_init)
+{
+  // Arrange: a component container parses the command line into its rclcpp context instead of
+  // through agnocast::init(). Use a context of this test's own to leave the global default alone.
+  const char * argv[] = {"test_node_base", "--ros-args", "-r", "__ns:=/from_rclcpp"};
+  auto context = std::make_shared<rclcpp::Context>();
+  context->init(static_cast<int>(sizeof(argv) / sizeof(argv[0])), argv);
+  {
+    auto options = node_options_without_parameter_services();
+    options.context(context);
+
+    // Act
+    auto node = std::make_shared<agnocast::Node>("my_node", options);
+
+    // Assert
+    EXPECT_EQ("/from_rclcpp", node->get_namespace());
+  }
+  context->shutdown("test cleanup");
+}
+
+TEST_F(TestNodeBase, global_args_from_the_node_rclcpp_context_need_use_global_arguments)
+{
+  // Arrange
+  const char * argv[] = {"test_node_base", "--ros-args", "-r", "__ns:=/from_rclcpp"};
+  auto context = std::make_shared<rclcpp::Context>();
+  context->init(static_cast<int>(sizeof(argv) / sizeof(argv[0])), argv);
+  {
+    auto options = node_options_without_parameter_services();
+    options.context(context);
+    options.use_global_arguments(false);
+
+    // Act
+    auto node = std::make_shared<agnocast::Node>("my_node", options);
+
+    // Assert
+    EXPECT_EQ("/", node->get_namespace());
+  }
+  context->shutdown("test cleanup");
+}
+
+TEST_F(TestNodeBase, agnocast_init_arguments_win_over_the_node_rclcpp_context)
+{
+  // Arrange: both sources carry a namespace remap. The explicit init() is the stronger statement.
+  const char * context_argv[] = {"test_node_base", "--ros-args", "-r", "__ns:=/from_rclcpp"};
+  auto context = std::make_shared<rclcpp::Context>();
+  context->init(static_cast<int>(sizeof(context_argv) / sizeof(context_argv[0])), context_argv);
+
+  const char * agnocast_argv[] = {"test_node_base", "--ros-args", "-r", "__ns:=/from_agnocast"};
+  agnocast::init(static_cast<int>(sizeof(agnocast_argv) / sizeof(agnocast_argv[0])), agnocast_argv);
+  {
+    auto options = node_options_without_parameter_services();
+    options.context(context);
+
+    // Act
+    auto node = std::make_shared<agnocast::Node>("my_node", options);
+
+    // Assert
+    EXPECT_EQ("/from_agnocast", node->get_namespace());
+  }
+  agnocast::shutdown();
+  context->shutdown("test cleanup");
 }
