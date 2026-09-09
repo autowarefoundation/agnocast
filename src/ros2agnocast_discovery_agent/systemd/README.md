@@ -13,8 +13,8 @@ once a domain has allocated endpoint ids. Registration is therefore a one-time
 boot step, independent of the discovery agent (which is observability-only and
 never registers rules).
 
-`register_domain_bridge` (a console script in this package) reads a ROS 2
-`domain_bridge` YAML and registers each rule:
+`register_domain_bridge` (a console script in this package) reads ROS 2
+`domain_bridge` YAMLs and registers each rule:
 
 ```bash
 ros2 run ros2agnocast_discovery_agent register_domain_bridge
@@ -22,14 +22,28 @@ ros2 run ros2agnocast_discovery_agent register_domain_bridge
 # AGNOCAST_DOMAIN_BRIDGE_CONFIG
 ```
 
-The discovery agent reads the same file, to force the A2R bridge that a topic
+Several configs can be listed, applied in the order given, the way `domain_bridge`
+itself takes several positional arguments: `--config a.yaml b.yaml`, or a
+`:`-separated `AGNOCAST_DOMAIN_BRIDGE_CONFIG`. `topics` accumulate across files,
+while `from_domain` / `to_domain` stay local to the file that sets them — the same
+merge `domain_bridge` performs. Unlike `domain_bridge`, which aborts on the first
+unreadable file, a bad file here is reported and skipped so the rest still apply.
+
+Drop-ins need no environment variable: every `*.yaml` in
+`/etc/agnocast/domain_bridge.d/` is read in name order (`10-base.yaml`,
+`20-lidar.yaml`), after `/etc/agnocast/domain_bridge.yaml` when that exists — the
+layout systemd and sysctl use, but not their precedence: a later file only adds,
+it never overrides an earlier one. Two files that bridge the same topic and domain
+to different places are a configuration error, which the kernel module rejects.
+
+The discovery agent reads the same files, to force the A2R bridge that a topic
 split across both an IPC namespace and a ROS domain needs (without it,
 `domain_bridge` waits for a DDS publisher while the A2R bridge waits for a DDS
 subscriber, and the topic never flows). The agent is `execv`'d from an
 application process, so it only ever sees the default path or an environment
 variable exported to that process — **not** a `--config` argument passed here.
 
-Keep the file at `/etc/agnocast/domain_bridge.yaml`, or export
+Keep the config at `/etc/agnocast/domain_bridge.yaml`, or export
 `AGNOCAST_DOMAIN_BRIDGE_CONFIG` to the applications as well. Registering with
 `--config` alone leaves the rules in the kmod but the forcing off, which the
 agent reports only in its own log.

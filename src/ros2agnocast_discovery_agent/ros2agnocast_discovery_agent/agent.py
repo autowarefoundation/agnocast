@@ -40,8 +40,6 @@ from ros2agnocast_discovery_msgs.msg import (
     AgnocastTopic,
 )
 
-import yaml
-
 from . import bridge_decider
 from . import domain_bridge_config
 from .type_registry import TypeRegistryReader
@@ -299,45 +297,47 @@ def _read_ros_domain_id() -> int:
     return value
 
 
+def _report_unloaded_config(logger, path, error, from_env) -> None:
+    """Report a config that contributed no rules, at the level its cause deserves."""
+    if isinstance(error, FileNotFoundError):
+        if from_env:
+            logger.warn(
+                f'{domain_bridge_config.CONFIG_ENV} lists {path}, which does not '
+                'exist; no cross-domain bridge will be forced for the topics it names')
+        else:
+            logger.info(
+                f'no domain bridge config at {path}; cross-domain bridge forcing '
+                f'is off (set {domain_bridge_config.CONFIG_ENV} to use another path)')
+        return
+    # One bad entry disables the whole file, not just its topic, and domain_bridge refuses the
+    # same file for anything yaml-cpp cannot convert. Hence error level.
+    logger.error(
+        f'cannot load {path} ({error}); cross-domain bridge forcing is off for every topic '
+        'it names, so any of them split across an IPC namespace and a ROS domain will not flow')
+
+
 def _load_domain_rules(logger=None) -> list:
-    """Return the domain bridge rules from the config, or [].
+    """Return the domain bridge rules from the configs, or [].
 
     Every outcome is logged: a silently empty rule list looks exactly like the
     cross-domain deadlock this forcing exists to break. A config that cannot be
     read is reported and skipped rather than fatal, so it never takes the gossip
     publication down.
     """
-    path, from_env = domain_bridge_config.resolve_config_path()
+    paths, from_env = domain_bridge_config.resolve_config_paths()
 
-    try:
-        rules, skipped = domain_bridge_config.load_domain_bridge_rules(path)
-    except FileNotFoundError:
+    rules = []
+    for result in domain_bridge_config.load_domain_bridge_rules(paths):
+        if result.error is not None:
+            if logger is not None:
+                _report_unloaded_config(logger, result.path, result.error, from_env)
+            continue
+        rules.extend(result.rules)
         if logger is not None:
-            if from_env:
+            logger.info(f'{result.path}: {len(result.rules)} domain bridge rule(s) loaded')
+            if result.skipped:
                 logger.warn(
-                    f'{domain_bridge_config.CONFIG_ENV} points at {path}, which does not '
-                    'exist; no cross-domain bridge will be forced')
-            else:
-                logger.info(
-                    f'no domain bridge config at {path}; cross-domain bridge forcing '
-                    f'is off (set {domain_bridge_config.CONFIG_ENV} to use another path)')
-        return []
-    except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
-        # One bad entry disables the whole config, not just its topic, and domain_bridge refuses
-        # the same file for anything yaml-cpp cannot convert. Say so at error level: forcing is
-        # off for every topic, and a topic split across a namespace and a domain then stops
-        # without another trace.
-        if logger is not None:
-            logger.error(
-                f'cannot load {path} ({exc}); cross-domain bridge forcing is off for ALL '
-                'topics, so any topic split across an IPC namespace and a ROS domain will '
-                'not flow')
-        return []
-
-    if logger is not None:
-        logger.info(f'{path}: {len(rules)} domain bridge rule(s) loaded')
-        if skipped:
-            logger.warn(f'{path}: no from_domain/to_domain for {", ".join(skipped)}')
+                    f'{result.path}: no from_domain/to_domain for {", ".join(result.skipped)}')
     return rules
 
 

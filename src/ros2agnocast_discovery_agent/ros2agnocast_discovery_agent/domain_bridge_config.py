@@ -1,11 +1,13 @@
-"""Parse a ROS 2 ``domain_bridge`` YAML into kmod rule tuples.
+"""Parse ROS 2 ``domain_bridge`` YAMLs into kmod rule tuples.
 
-Each rule is ``(from_topic, to_topic, from_domain, to_domain)``. The same YAML
-drives both the external ``domain_bridge`` node (cross-ECU, via DDS) and the kmod
+Each rule is ``(from_topic, to_topic, from_domain, to_domain)``. The same YAMLs
+drive both the external ``domain_bridge`` node (cross-ECU, via DDS) and the kmod
 rule injection that opens same-IPC-namespace zero-copy cross-domain delivery. The
 topic name, its ``remap`` target, and the domain pair matter here; ``type`` and
 other fields are ignored.
 """
+from collections import namedtuple
+import glob
 import os
 
 import yaml
@@ -17,15 +19,42 @@ CONFIG_ENV = 'AGNOCAST_DOMAIN_BRIDGE_CONFIG'
 # an env var set only where the registration tool runs never reaches the agent.
 DEFAULT_CONFIG_PATH = '/etc/agnocast/domain_bridge.yaml'
 
+# Several configs are listed the way PATH lists directories.
+CONFIG_PATH_SEP = ':'
+
 # Domain ids cross the ioctl boundary as ctypes.c_uint32, so an out-of-range
 # value would wrap silently; reject it here instead.
 _UINT32_MAX = 0xFFFFFFFF
 
 
-def resolve_config_path():
-    """Return ``(path, from_env)`` for the config every consumer should read."""
-    path = os.environ.get(CONFIG_ENV)
-    return (path, True) if path else (DEFAULT_CONFIG_PATH, False)
+def default_config_dir():
+    """Return the drop-in directory beside ``DEFAULT_CONFIG_PATH`` (``/etc/agnocast/domain_bridge.d``).
+
+    Derived, not a constant, so moving the default path in a test moves the directory too.
+    """
+    return os.path.splitext(DEFAULT_CONFIG_PATH)[0] + '.d'
+
+
+def _default_config_paths():
+    """Return the configs at the default location: the main file, then its ``.d`` drop-ins.
+
+    The layout systemd and sysctl use for a configuration file and its drop-in directory, but
+    not their precedence: a later file only adds. Two rules that pair one cell differently are
+    a configuration error the kmod rejects, not something an order resolves.
+
+    Names ``DEFAULT_CONFIG_PATH`` when neither exists, so the caller can say where a config
+    would go.
+    """
+    paths = [DEFAULT_CONFIG_PATH] if os.path.isfile(DEFAULT_CONFIG_PATH) else []
+    paths += sorted(glob.glob(os.path.join(default_config_dir(), '*.yaml')))
+    return paths or [DEFAULT_CONFIG_PATH]
+
+
+def resolve_config_paths():
+    """Return ``(paths, from_env)`` for the configs every consumer should read, in order."""
+    listed = os.environ.get(CONFIG_ENV, '')
+    paths = [path for path in listed.split(CONFIG_PATH_SEP) if path]
+    return (paths, True) if paths else (_default_config_paths(), False)
 
 
 def _as_domain_id(value):
@@ -134,7 +163,25 @@ def parse_domain_bridge_config(text):
     return rules, skipped
 
 
-def load_domain_bridge_rules(path):
-    """Read and parse the ``domain_bridge`` YAML at ``path``; return ``(rules, skipped)``."""
-    with open(path, encoding='utf-8') as f:
-        return parse_domain_bridge_config(f.read())
+ConfigResult = namedtuple('ConfigResult', ('path', 'rules', 'skipped', 'error'))
+
+
+def load_domain_bridge_rules(paths):
+    """Read and parse each ``domain_bridge`` YAML in ``paths``; return a ``ConfigResult`` each.
+
+    Rules from separate files accumulate, the way the external node merges several configs:
+    ``topics`` add up, while ``from_domain`` / ``to_domain`` stay local to the file setting them.
+
+    An error is carried in the result rather than raised, so one unreadable config does not
+    take the readable ones with it.
+    """
+    results = []
+    for path in paths:
+        try:
+            with open(path, encoding='utf-8') as f:
+                rules, skipped = parse_domain_bridge_config(f.read())
+        except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
+            results.append(ConfigResult(path, [], [], e))
+            continue
+        results.append(ConfigResult(path, rules, skipped, None))
+    return results

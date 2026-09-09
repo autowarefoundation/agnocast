@@ -565,6 +565,32 @@ def test_load_domain_rules_errors_and_returns_empty_on_a_broken_config(monkeypat
     logger.error.assert_called_once()
 
 
+def test_load_domain_rules_reads_the_default_drop_in_directory(monkeypatch, tmp_path):
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'domain_bridge.yaml'))
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-base.yaml').write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    (drop_in_dir / '20-lidar.yaml').write_text('from_domain: 3\nto_domain: 4\ntopics:\n  /y:\n')
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2), ('/y', '/y', 3, 4)]
+
+
+def test_load_domain_rules_keeps_the_configs_that_load_around_a_broken_one(monkeypatch, tmp_path):
+    broken = tmp_path / 'a.yaml'
+    broken.write_text('topics: [not, a, mapping]\n')
+    good = tmp_path / 'b.yaml'
+    good.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(
+        CONFIG_ENV,
+        f'{broken}{domain_bridge_config.CONFIG_PATH_SEP}{good}')
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    logger.error.assert_called_once()
+
+
 def test_exit_when_idle_enabled_via_env(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['discovery_agent'])  # no CLI flag
     monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
