@@ -70,6 +70,7 @@ jobs:
     - name: Setup ROS 2 environment
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
       run: |
+        sudo rm -f /etc/apt/sources.list.d/google-chrome.list  # unused; upstream index hash mismatches break apt-get update
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends software-properties-common curl gcovr ccache libunwind-dev
 

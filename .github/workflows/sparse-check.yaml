@@ -27,6 +27,7 @@ jobs:
       - name: Install sparse
         if: steps.check_changes.outputs.kmod_changed == 'true'
         run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list  # unused; upstream index hash mismatches break apt-get update
           sudo apt-get update
           sudo apt-get install -y sparse
 
