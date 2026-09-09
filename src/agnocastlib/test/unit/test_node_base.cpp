@@ -5,9 +5,28 @@
 
 #include <gtest/gtest.h>
 
+#include <mutex>
+
+namespace
+{
+void reset_context_for_test()
+{
+  std::lock_guard<std::mutex> lock(agnocast::g_context_mtx);
+  agnocast::g_context = agnocast::Context{};
+}
+}  // namespace
+
 class TestNodeBase : public ::testing::Test
 {
 protected:
+  void SetUp() override { reset_context_for_test(); }
+
+  void TearDown() override
+  {
+    agnocast::shutdown();
+    reset_context_for_test();
+  }
+
   agnocast::Node::SharedPtr node_;
 
   rclcpp::NodeOptions node_options_without_parameter_services() const

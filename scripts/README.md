@@ -60,6 +60,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/test_and_create_report.bash` | Build with coverage flags, run `colcon test`, and generate the HTML coverage report for `agnocastlib`. Temporarily removes apt-installed `agnocast-heaphook` if present and restores it at the end. |
 | `test/run_kunit.bash` | Build and insert `agnocast_kunit.ko`, parse pass/fail from dmesg, and generate the HTML coverage report for the kernel module. Requires a kernel with `CONFIG_KUNIT=y` and `CONFIG_GCOV_KERNEL=y`. |
 | `test/run_requires_kernel_module_tests.bash` | Build `agnocast_e2e_test` and run `colcon test` filtered to the `requires_kernel_module` label. Kernel module must already be loaded. |
+| `test/run_node_in_component_container_test.bash` | Run `test_agnocast_node_in_component_container_launch.py`: load an `agnocast::Node` component into `agnocast_component_container` and check it is constructed and receives messages. |
 | `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping publisher type (agnocast/ros2), QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers. |
 | `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s`, `-c`. |
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |

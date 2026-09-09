@@ -1,7 +1,11 @@
 #include "agnocast/node/agnocast_context.hpp"
+#include "agnocast/node/agnocast_node.hpp"
 #include "agnocast/node/agnocast_only_callback_isolated_executor.hpp"
 #include "agnocast/node/agnocast_only_multi_threaded_executor.hpp"
 #include "agnocast/node/agnocast_only_single_threaded_executor.hpp"
+
+#include <rclcpp/context.hpp>
+#include <rclcpp/node_options.hpp>
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -9,6 +13,8 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <memory>
+#include <stdexcept>
 #include <thread>
 
 namespace
@@ -352,19 +358,15 @@ TEST_F(InitOkShutdownTest, SigintAndSigtermStopAgnocastOnlyCallbackIsolatedExecu
   run_signal_case(SIGTERM);
 }
 
-TEST_F(InitOkShutdownTest, InitAndShutdownAreIdempotent)
+TEST_F(InitOkShutdownTest, ShutdownIsIdempotent)
 {
   // Calling shutdown() before init() should do nothing and not cause any errors.
   agnocast::shutdown();
   EXPECT_FALSE(agnocast::ok())
     << "agnocast::ok() should still be false after shutdown() without init()";
 
-  // Calling init() multiple times should not cause any errors and should keep the context
-  // initialized.
   agnocast::init(0, nullptr);
-  EXPECT_TRUE(agnocast::ok()) << "agnocast::ok() should be true after first init()";
-  agnocast::init(0, nullptr);
-  EXPECT_TRUE(agnocast::ok()) << "agnocast::ok() should still be true after second init()";
+  ASSERT_TRUE(agnocast::ok());
 
   // Calling shutdown() multiple times should not cause any errors and should keep the context
   // shutdown.
@@ -372,4 +374,243 @@ TEST_F(InitOkShutdownTest, InitAndShutdownAreIdempotent)
   EXPECT_FALSE(agnocast::ok()) << "agnocast::ok() should be false after first shutdown()";
   agnocast::shutdown();
   EXPECT_FALSE(agnocast::ok()) << "agnocast::ok() should still be false after second shutdown()";
+}
+
+// init() is not idempotent, unlike shutdown(). rclcpp draws the same line:
+// rclcpp::Context::init() throws ContextAlreadyInitialized while shutdown() returns false.
+TEST_F(InitOkShutdownTest, InitOnAnAlreadyInitializedContextThrows)
+{
+  agnocast::init(0, nullptr);
+  ASSERT_TRUE(agnocast::ok());
+
+  EXPECT_THROW(agnocast::init(0, nullptr), std::runtime_error);
+  EXPECT_TRUE(agnocast::ok()) << "a rejected init() must leave the context as it was";
+}
+
+TEST_F(InitOkShutdownTest, InitAfterAShutdownStartsAFreshCycle)
+{
+  agnocast::init(0, nullptr);
+  agnocast::shutdown();
+  ASSERT_FALSE(agnocast::ok());
+
+  EXPECT_NO_THROW(agnocast::init(0, nullptr));
+  EXPECT_TRUE(agnocast::ok());
+}
+
+// In a container the Agnocast-only executors an agnocast::Node spawns have to come up without
+// agnocast::init().
+TEST_F(InitOkShutdownTest, AgnocastOnlyExecutorInitializesContextWhenInitWasNotCalled)
+{
+  ASSERT_FALSE(agnocast::ok()) << "precondition: agnocast::init() has not been called";
+
+  auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+
+  EXPECT_TRUE(agnocast::ok())
+    << "constructing an Agnocast-only executor should bring the context up by itself";
+
+  std::atomic_bool spin_exited{false};
+  std::thread spin_thread([&]() {
+    executor->spin();
+    spin_exited.store(true);
+  });
+
+  std::this_thread::sleep_for(250ms);
+  EXPECT_FALSE(spin_exited.load()) << "spin() should keep running without an explicit init()";
+
+  agnocast::shutdown();
+  wait_until_or_fail(
+    [&]() { return spin_exited.load(); }, 2s,
+    "executor spin() did not return after agnocast::shutdown().");
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}
+
+// AgnocastOnlyCallbackIsolatedExecutor::spin() builds an agnocast::Node for its client
+// publisher, so reviving the context from one would hang every spin loop waiting for
+// agnocast::ok() to turn false.
+TEST_F(InitOkShutdownTest, LazyInitializationDoesNotReviveShutdownContext)
+{
+  agnocast::init(0, nullptr);
+  ASSERT_TRUE(agnocast::ok());
+
+  agnocast::shutdown();
+  ASSERT_FALSE(agnocast::ok());
+
+  auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+
+  EXPECT_FALSE(agnocast::ok())
+    << "creating an executor after shutdown() must not bring the context back up";
+
+  std::atomic_bool spin_exited{false};
+  std::thread spin_thread([&]() {
+    executor->spin();
+    spin_exited.store(true);
+  });
+
+  wait_until_or_fail(
+    [&]() { return spin_exited.load(); }, 2s, "spin() did not return with a shutdown context.");
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+}
+
+// Honouring an init() that follows a lazy one would mean reconfiguring the rcl logging rclcpp
+// owns. It goes first or not at all.
+TEST_F(InitOkShutdownTest, InitAfterALazyInitializationThrows)
+{
+  auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+  ASSERT_TRUE(agnocast::ok());
+
+  EXPECT_THROW(agnocast::init(0, nullptr), std::runtime_error);
+
+  std::lock_guard<std::mutex> lock(agnocast::g_context_mtx);
+  EXPECT_EQ(nullptr, agnocast::g_context.get_parsed_arguments())
+    << "lazy initialization must not fabricate global arguments";
+}
+
+// A Node has to bring the context up too, not just an Agnocast-only executor: everything hung
+// off a node reads agnocast::ok(), and most of it never constructs such an executor.
+TEST_F(InitOkShutdownTest, NodeInitializesContextWhenInitWasNotCalled)
+{
+  ASSERT_FALSE(agnocast::ok()) << "precondition: agnocast::init() has not been called";
+
+  const auto node = std::make_shared<agnocast::Node>("lazy_init_node");
+
+  EXPECT_TRUE(agnocast::ok()) << "constructing a Node should bring the context up by itself";
+}
+
+// ok() answers whether Agnocast may keep running, which is not the same as whether the context
+// is up: a process that called agnocast::init() owns its own teardown, so the governing rclcpp
+// context going down takes ok() with it and leaves the Agnocast context standing.
+//
+// This and the cases below use a context of their own so that they leave the global default one
+// -- and the signal handlers rclcpp::shutdown() would uninstall with it -- alone.
+TEST_F(InitOkShutdownTest, OkFollowsTheGoverningContextWhileTheAgnocastContextStaysUp)
+{
+  auto rclcpp_context = std::make_shared<rclcpp::Context>();
+  rclcpp_context->init(0, nullptr);
+  agnocast::init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.context(rclcpp_context);
+  const auto node = std::make_shared<agnocast::Node>("hosted_node", options);
+  ASSERT_TRUE(agnocast::ok());
+
+  rclcpp_context->shutdown("test");
+
+  EXPECT_FALSE(agnocast::ok());
+  EXPECT_THROW(agnocast::init(0, nullptr), std::runtime_error)
+    << "the Agnocast context is still up, so init() still rejects";
+}
+
+// A process that never calls agnocast::init() never calls agnocast::shutdown() either, so what
+// it brought up lazily has to come down with the rclcpp context that governs it.
+TEST_F(InitOkShutdownTest, RclcppShutdownTearsDownALazilyInitializedContext)
+{
+  auto rclcpp_context = std::make_shared<rclcpp::Context>();
+  rclcpp_context->init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.context(rclcpp_context);
+  const auto node = std::make_shared<agnocast::Node>("hosted_node", options);
+  ASSERT_TRUE(agnocast::ok());
+
+  rclcpp_context->shutdown("test");
+
+  // init() accepting again is what proves the context came down, not just ok() turning false.
+  EXPECT_NO_THROW(agnocast::init(0, nullptr))
+    << "rclcpp::shutdown() must run the Agnocast teardown, not merely make ok() false";
+}
+
+// A container may build an Agnocast-only executor before its first agnocast::Node, and that
+// executor brings the context up. The node still has to hook the teardown on.
+TEST_F(InitOkShutdownTest, AnExecutorBuiltFirstDoesNotStopTheNodeFromHookingTheTeardownOn)
+{
+  auto rclcpp_context = std::make_shared<rclcpp::Context>();
+  rclcpp_context->init(0, nullptr);
+
+  const auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+  ASSERT_TRUE(agnocast::ok()) << "precondition: the executor brought the context up";
+
+  rclcpp::NodeOptions options;
+  options.context(rclcpp_context);
+  const auto node = std::make_shared<agnocast::Node>("hosted_node", options);
+
+  rclcpp_context->shutdown("test");
+
+  EXPECT_NO_THROW(agnocast::init(0, nullptr))
+    << "rclcpp::shutdown() must run the Agnocast teardown here too";
+}
+
+// The governing context is recorded, not owned.
+TEST_F(InitOkShutdownTest, AdoptingAnRclcppContextDoesNotExtendItsLifetime)
+{
+  auto rclcpp_context = std::make_shared<rclcpp::Context>();
+  rclcpp_context->init(0, nullptr);
+
+  rclcpp::NodeOptions options;
+  options.context(rclcpp_context);
+  const long baseline = rclcpp_context.use_count();
+
+  {
+    const auto node = std::make_shared<agnocast::Node>("hosted_node", options);
+    ASSERT_TRUE(agnocast::ok()) << "precondition: the node brought the Agnocast context up";
+  }
+
+  EXPECT_EQ(baseline, rclcpp_context.use_count()) << "adoption must not add a strong reference";
+}
+
+// shutdown() drops the recorded authority, and nothing may put it back until an explicit init():
+// the next cycle must not be governed by whatever a node built after it was holding.
+TEST_F(InitOkShutdownTest, ANodeBuiltAfterShutdownDoesNotReadoptTheRclcppContext)
+{
+  auto stale = std::make_shared<rclcpp::Context>();
+  stale->init(0, nullptr);
+  rclcpp::NodeOptions stale_options;
+  stale_options.context(stale);
+
+  agnocast::init(0, nullptr);
+  agnocast::shutdown();
+  {
+    const auto late_node = std::make_shared<agnocast::Node>("late_node", stale_options);
+    ASSERT_FALSE(agnocast::ok());
+  }
+
+  agnocast::init(0, nullptr);
+  auto governing = std::make_shared<rclcpp::Context>();
+  governing->init(0, nullptr);
+  rclcpp::NodeOptions options;
+  options.context(governing);
+  const auto node = std::make_shared<agnocast::Node>("hosted_node", options);
+  ASSERT_TRUE(agnocast::ok());
+
+  governing->shutdown("test");
+  EXPECT_FALSE(agnocast::ok())
+    << "the fresh cycle must follow its own node's context, not one picked up after shutdown()";
+}
+
+TEST_F(InitOkShutdownTest, SigintStopsAgnocastOnlyExecutorWhenInitWasNotCalled)
+{
+  ASSERT_FALSE(agnocast::ok()) << "precondition: agnocast::init() has not been called";
+
+  auto executor = std::make_shared<agnocast::AgnocastOnlySingleThreadedExecutor>();
+
+  std::atomic_bool spin_exited{false};
+  std::thread spin_thread([&]() {
+    executor->spin();
+    spin_exited.store(true);
+  });
+  std::this_thread::sleep_for(250ms);
+
+  ASSERT_EQ(kill(getpid(), SIGINT), 0);
+
+  wait_until_or_fail(
+    [&]() { return spin_exited.load(); }, 2s, "executor spin() did not stop after SIGINT.");
+
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
 }

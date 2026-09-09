@@ -50,11 +50,11 @@ struct sigaction SignalHandler::old_sigterm_action_
 {
 };
 
-void SignalHandler::install()
+bool SignalHandler::install()
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (state_ != State::NotInstalled) {
-    return;
+    return false;
   }
 
   eventfds_.clear();
@@ -89,6 +89,7 @@ void SignalHandler::install()
   }
 
   state_ = State::Installed;
+  return true;
 }
 
 void SignalHandler::uninstall()
