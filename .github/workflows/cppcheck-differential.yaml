@@ -24,7 +24,8 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | gpg --dearmor | sudo tee /usr/share/keyrings/ros-archive-keyring.gpg > /dev/null
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://repo.ros2.org/ubuntu/main $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/ros2-latest.list > /dev/null
 
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list  # unused; upstream index hash mismatches break apt-get update
+          # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
+          grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
           sudo apt-get update
           sudo apt-get install -y \
             git \
