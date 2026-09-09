@@ -243,7 +243,7 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     }
   }
 
-  if (report.mismatch) {
+  if (!report.sysctl_guidance.empty()) {
     RCLCPP_ERROR(this->get_logger(), "%s", report.sysctl_guidance.c_str());
   }
 }

@@ -42,10 +42,9 @@ struct RtThrottlingCheck
 
 struct RtThrottlingReport
 {
-  std::vector<RtThrottlingCheck> checks;  // in YAML key order: period_us, runtime_us
-  bool mismatch = false;                  // some check has a readable actual != expected
-  // Non-empty iff mismatch: operator guidance listing every configured key as
-  // an /etc/sysctl.d entry.
+  std::vector<RtThrottlingCheck> checks;  // in fixed order: period_us, runtime_us
+  // Non-empty iff some check has a readable actual != expected: operator
+  // guidance listing every configured key as an /etc/sysctl.d entry.
   std::string sysctl_guidance;
 };
 

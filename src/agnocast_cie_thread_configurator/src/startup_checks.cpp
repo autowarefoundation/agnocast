@@ -111,6 +111,7 @@ RtThrottlingReport check_rt_throttling(
   }
 
   const auto & rt_bw = yaml["rt_throttling"];
+  bool mismatch = false;
 
   for (const char * yaml_key : {"period_us", "runtime_us"}) {
     if (!rt_bw[yaml_key]) {
@@ -121,26 +122,19 @@ RtThrottlingReport check_rt_throttling(
     check.expected = rt_bw[yaml_key].as<int>();
     check.actual = read_sysctl("/proc/sys/kernel/" + check.key);
     if (check.actual.has_value() && *check.actual != check.expected) {
-      report.mismatch = true;
+      mismatch = true;
     }
     report.checks.push_back(std::move(check));
   }
 
-  if (report.mismatch) {
-    std::string message =
+  if (mismatch) {
+    report.sysctl_guidance =
       "rt_throttling values do not match the configuration. "
       "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
-      "(or run 'sudo sysctl --system'):\n";
-
-    if (rt_bw["period_us"]) {
-      message +=
-        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
+      "(or run 'sudo sysctl --system'):";
+    for (const auto & check : report.checks) {
+      report.sysctl_guidance += "\n  kernel." + check.key + " = " + std::to_string(check.expected);
     }
-    if (rt_bw["runtime_us"]) {
-      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
-    }
-
-    report.sysctl_guidance = std::move(message);
   }
 
   return report;

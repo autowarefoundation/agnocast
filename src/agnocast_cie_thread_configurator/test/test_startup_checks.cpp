@@ -128,12 +128,11 @@ TEST(CheckRtThrottling, MissingSectionYieldsEmptyReport)
   FakeSysctl sysctl;
   const auto report = acie::check_rt_throttling(YAML::Load("callback_groups: []"), sysctl.reader());
   EXPECT_TRUE(report.checks.empty());
-  EXPECT_FALSE(report.mismatch);
   EXPECT_TRUE(report.sysctl_guidance.empty());
   EXPECT_TRUE(sysctl.requested.empty());
 }
 
-TEST(CheckRtThrottling, ReadsTheKernelSysctlPathsInYamlKeyOrder)
+TEST(CheckRtThrottling, ReadsTheKernelSysctlPathsInFixedKeyOrder)
 {
   FakeSysctl sysctl;
   sysctl.values[k_period_path] = 1000000;
@@ -149,7 +148,6 @@ TEST(CheckRtThrottling, ReadsTheKernelSysctlPathsInYamlKeyOrder)
   EXPECT_EQ(report.checks[1].key, "sched_rt_runtime_us");
   EXPECT_EQ(report.checks[1].expected, 950000);
   EXPECT_EQ(report.checks[1].actual, 950000);
-  EXPECT_FALSE(report.mismatch);
   EXPECT_TRUE(report.sysctl_guidance.empty());
 }
 
@@ -161,7 +159,6 @@ TEST(CheckRtThrottling, MismatchGuidanceListsEveryConfiguredKey)
   const auto yaml = YAML::Load("rt_throttling:\n  period_us: 1000000\n  runtime_us: 950000\n");
   const auto report = acie::check_rt_throttling(yaml, sysctl.reader());
 
-  EXPECT_TRUE(report.mismatch);
   EXPECT_EQ(
     report.sysctl_guidance,
     "rt_throttling values do not match the configuration. "
@@ -181,7 +178,6 @@ TEST(CheckRtThrottling, ChecksOnlyTheConfiguredKeys)
   EXPECT_EQ(sysctl.requested, (std::vector<std::string>{k_runtime_path}));
   ASSERT_EQ(report.checks.size(), 1u);
   EXPECT_EQ(report.checks[0].key, "sched_rt_runtime_us");
-  EXPECT_TRUE(report.mismatch);
   EXPECT_EQ(
     report.sysctl_guidance,
     "rt_throttling values do not match the configuration. "
@@ -199,6 +195,5 @@ TEST(CheckRtThrottling, UnreadableSysctlIsRecordedButNeverAMismatch)
   ASSERT_EQ(report.checks.size(), 2u);
   EXPECT_FALSE(report.checks[0].actual.has_value());
   EXPECT_FALSE(report.checks[1].actual.has_value());
-  EXPECT_FALSE(report.mismatch);
   EXPECT_TRUE(report.sysctl_guidance.empty());
 }
