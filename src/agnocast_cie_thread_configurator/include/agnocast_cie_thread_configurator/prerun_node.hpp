@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
+#include "agnocast_cie_thread_configurator/announcement_sources.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "yaml-cpp/yaml.h"
 
@@ -27,11 +27,7 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
 
-  std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
-  std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
-    subs_for_each_domain_;
-  std::unique_ptr<agnocast_cie_thread_configurator::NonRosThreadInfoListener>
-    non_ros_thread_listener_;
+  std::unique_ptr<agnocast_cie_thread_configurator::AnnouncementSources> sources_;
 
   // (domain_id, callback_group_id) pairs. Guarded by domain_and_cbg_ids_mutex_
   // during callbacks; dump_yaml_config reads it post-spin without the lock.

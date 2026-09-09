@@ -29,6 +29,7 @@ target_link_libraries(agnocast_thread_configurator_core PUBLIC yaml-cpp)
 add_library(agnocast_thread_configurator SHARED
   src/util.cpp
   src/non_ros_thread_ipc.cpp
+  src/announcement_sources.cpp
 )
 ament_target_dependencies(agnocast_thread_configurator rclcpp agnocast_cie_config_msgs)
 

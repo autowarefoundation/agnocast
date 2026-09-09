@@ -67,45 +67,14 @@ PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node"
     domain_ids.insert(domain_id);
   }
 
-  size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
-
-  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-
-  non_ros_thread_listener_ =
-    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
-      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
-        this->non_ros_thread_callback(std::move(info));
-      },
-      this->get_logger());
-
-  // Create subscription for default domain on this node. Uses the node's default
-  // callback group, mirroring the per-domain extra nodes below.
-  subs_for_each_domain_.push_back(
-    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this,
-       default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(default_domain_id, msg);
-      }));
-
-  // Create nodes and subscriptions for other domain IDs
-  for (size_t domain_id : domain_ids) {
-    if (domain_id == default_domain_id) {
-      continue;
-    }
-
-    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
-    nodes_for_each_domain_.push_back(node);
-
-    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(domain_id, msg);
-      });
-    subs_for_each_domain_.push_back(sub);
-
-    RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
-  }
+  sources_ = std::make_unique<agnocast_cie_thread_configurator::AnnouncementSources>(
+    *this, agnocast_cie_thread_configurator::get_default_domain_id(), domain_ids,
+    [this](size_t domain_id, agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+      this->topic_callback(domain_id, std::move(msg));
+    },
+    [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+      this->non_ros_thread_callback(std::move(info));
+    });
 }
 
 void PrerunNode::topic_callback(
@@ -143,7 +112,7 @@ void PrerunNode::non_ros_thread_callback(agnocast_cie_thread_configurator::NonRo
 
 const std::vector<rclcpp::Node::SharedPtr> & PrerunNode::get_domain_nodes() const
 {
-  return nodes_for_each_domain_;
+  return sources_->domain_nodes();
 }
 
 void PrerunNode::dump_yaml_config(std::filesystem::path path)
@@ -307,7 +276,7 @@ PrerunNode::~PrerunNode()
 
 void PrerunNode::stop() noexcept
 {
-  if (non_ros_thread_listener_) {
-    non_ros_thread_listener_->stop();
+  if (sources_) {
+    sources_->stop();
   }
 }
