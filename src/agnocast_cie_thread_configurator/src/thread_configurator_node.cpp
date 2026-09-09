@@ -268,9 +268,7 @@ ThreadConfiguratorNode::~ThreadConfiguratorNode()
 
 void ThreadConfiguratorNode::stop() noexcept
 {
-  if (sources_) {
-    sources_->stop();
-  }
+  sources_->stop();
 }
 
 void ThreadConfiguratorNode::print_all_unapplied()

@@ -34,8 +34,8 @@ public:
     rclcpp::Node & node, size_t default_domain_id, const std::set<size_t> & domain_ids,
     CallbackGroupCallback on_callback_group, NonRosThreadInfoListener::Callback on_non_ros_thread);
 
-  const std::vector<rclcpp::Node::SharedPtr> & domain_nodes() const;
-  void stop() noexcept;
+  const std::vector<rclcpp::Node::SharedPtr> & domain_nodes() const { return domain_nodes_; }
+  void stop() noexcept { non_ros_thread_listener_.stop(); }
 
 private:
   NonRosThreadInfoListener non_ros_thread_listener_;

@@ -276,7 +276,5 @@ PrerunNode::~PrerunNode()
 
 void PrerunNode::stop() noexcept
 {
-  if (sources_) {
-    sources_->stop();
-  }
+  sources_->stop();
 }
