@@ -15,6 +15,11 @@
 namespace agnocast_cie_thread_configurator
 {
 
+// Topic on which the agnocastlib client publishers announce callback groups
+// to the daemons.
+constexpr const char k_callback_group_info_topic[] =
+  "/agnocast_cie_thread_configurator/callback_group_info";
+
 // Get default domain ID from ROS_DOMAIN_ID environment variable
 size_t get_default_domain_id();
 

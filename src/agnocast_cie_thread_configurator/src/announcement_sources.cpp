@@ -10,14 +10,6 @@
 namespace agnocast_cie_thread_configurator
 {
 
-namespace
-{
-
-constexpr const char * k_callback_group_info_topic =
-  "/agnocast_cie_thread_configurator/callback_group_info";
-
-}  // namespace
-
 AnnouncementSources::AnnouncementSources(
   rclcpp::Node & node, size_t default_domain_id, const std::set<size_t> & domain_ids,
   CallbackGroupCallback on_callback_group, NonRosThreadInfoListener::Callback on_non_ros_thread)
@@ -41,9 +33,8 @@ AnnouncementSources::AnnouncementSources(
     if (domain_id == default_domain_id) {
       continue;
     }
-    auto domain_node = create_node_for_domain(domain_id);
-    subscriptions_.push_back(subscribe(*domain_node, domain_id));
-    domain_nodes_.push_back(std::move(domain_node));
+    domain_nodes_.push_back(create_node_for_domain(domain_id));
+    subscriptions_.push_back(subscribe(*domain_nodes_.back(), domain_id));
     RCLCPP_INFO(node.get_logger(), "Created subscription for domain ID: %zu", domain_id);
   }
 }

@@ -27,8 +27,6 @@ private:
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
 
-  std::unique_ptr<agnocast_cie_thread_configurator::AnnouncementSources> sources_;
-
   // (domain_id, callback_group_id) pairs. Guarded by domain_and_cbg_ids_mutex_
   // during callbacks; dump_yaml_config reads it post-spin without the lock.
   std::set<std::pair<size_t, std::string>> domain_and_cbg_ids_;
@@ -38,4 +36,7 @@ private:
   // main.cpp calls node->stop() (which joins the listener) and after
   // executor->spin() returns, so no mutex is needed.
   std::set<std::string> non_ros_thread_names_;
+  // Declared last so it is destroyed first. The listener thread must be
+  // joined before any state its callback touches goes away.
+  std::unique_ptr<agnocast_cie_thread_configurator::AnnouncementSources> sources_;
 };
