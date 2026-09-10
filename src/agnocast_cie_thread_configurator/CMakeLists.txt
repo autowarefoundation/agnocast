@@ -122,6 +122,11 @@ if(BUILD_TESTING)
   target_include_directories(test_system_scan PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
+
+  ament_add_gtest(test_get_default_domain_id
+    test/test_get_default_domain_id.cpp
+  )
+  target_link_libraries(test_get_default_domain_id agnocast_thread_configurator)
 endif()
 
 ament_package()
