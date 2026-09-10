@@ -24,12 +24,6 @@ def service_name_from_request_topic(topic_name):
         return None
     return topic_name[len(prefix):]
 
-def service_name_from_response_topic(topic_name):
-    prefix = '/AGNOCAST_SRV_RESPONSE'
-    if not topic_name.startswith(prefix):
-        return None
-    return topic_name[len(prefix):].split('_SEP_')[0]
-
 class NodeInfoAgnocastVerb(VerbExtension):
     "Output information about a node including Agnocast"
 
@@ -59,8 +53,6 @@ class NodeInfoAgnocastVerb(VerbExtension):
             def get_agnocast_node_topics(target_node_name):
                 sub_topic_list = []
                 pub_topic_list = []
-                # service_name_from_response_topic strips the _SEP_<id> suffix,
-                # so multiple response topics can collapse to the same service name.
                 server_set = set()
                 client_set = set()
                 # type_name resolved from gossip, keyed by topic name.
@@ -75,13 +67,10 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
                         service_name = service_name_from_request_topic(topic.topic_name)
                         if service_name is not None:
+                            # A server subscribes to the request topic; a client publishes on it.
                             if is_sub:
                                 server_set.add(service_name)
-                            continue
-
-                        service_name = service_name_from_response_topic(topic.topic_name)
-                        if service_name is not None:
-                            if is_sub:
+                            if is_pub:
                                 client_set.add(service_name)
                             continue
 
