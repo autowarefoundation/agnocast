@@ -2,35 +2,25 @@
 #include "agnocast_kunit_get_subscriber_num.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
-char * node_name = "/kunit_test_node";
-uint32_t qos_depth = 10;
-bool qos_is_transient_local = false;
-bool qos_is_reliable = true;
-pid_t subscriber_pid = 1000;
-pid_t publisher_pid = 2000;
-bool is_take_sub = false;
-bool ignore_local_publications = false;
-bool is_bridge = false;
+static const char * node_name = "/kunit_test_node";
+static const uint32_t qos_depth = 10;
+static const bool qos_is_transient_local = false;
+static const bool qos_is_reliable = true;
+static pid_t subscriber_pid = 1000;
+static pid_t publisher_pid = 2000;
+static const bool is_take_sub = false;
+static const bool ignore_local_publications = false;
+static const bool is_bridge = false;
 
 static void setup_one_subscriber_impl(
   struct kunit * test, char * topic_name, const uint32_t domain_id, const bool sub_is_bridge)
 {
   subscriber_pid++;
-
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
-    &add_process_args);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, sub_is_bridge,
-    -1, &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  agnocast_kunit_setup_one_subscriber(
+    test, topic_name, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
+    is_take_sub, ignore_local_publications, sub_is_bridge, -1, domain_id);
 }
 
 static void setup_one_subscriber(struct kunit * test, char * topic_name)
@@ -46,18 +36,9 @@ static void setup_one_subscriber_with_bridge(struct kunit * test, char * topic_n
 static void setup_one_publisher(struct kunit * test, char * topic_name)
 {
   publisher_pid++;
-
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    publisher_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, publisher_pid, qos_depth,
-    qos_is_transient_local, is_bridge, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  agnocast_kunit_setup_one_publisher(
+    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0,
+    NULL);
 }
 
 static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
@@ -67,14 +48,11 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
   union ioctl_add_process_args add_process_args;
   int ret1 = agnocast_ioctl_add_process(
     intra_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, node_name, intra_pid, qos_depth, qos_is_transient_local,
-    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, -1, &add_subscriber_args);
-
   KUNIT_ASSERT_TRUE(test, ret1 == 0 || ret1 == -EEXIST);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+
+  agnocast_kunit_setup_subscriber(
+    test, topic_name, node_name, intra_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
+    is_take_sub, ignore_local_publications, is_bridge, -1);
 }
 
 static void setup_one_subscriber_in_domain(
@@ -94,18 +72,9 @@ static void setup_one_subscriber_in_domain_with_bridge(
 static void setup_current_publisher_in_domain(
   struct kunit * test, char * topic_name, const uint32_t domain_id)
 {
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    current->tgid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
-    &add_process_args);
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    topic_name, current->nsproxy->ipc_ns, node_name, current->tgid, qos_depth,
-    qos_is_transient_local, is_bridge, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  agnocast_kunit_setup_one_publisher(
+    test, topic_name, node_name, current->tgid, qos_depth, qos_is_transient_local, is_bridge,
+    domain_id, NULL);
 }
 
 void test_case_get_subscriber_num_normal(struct kunit * test)

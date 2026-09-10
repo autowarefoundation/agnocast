@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "agnocast_kunit_eventfd.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -16,24 +17,11 @@ static const uint32_t QOS_DEPTH = 1;
 #define IGNORE_LOCAL_PUBLICATIONS false
 #define IS_BRIDGE false
 
-static void setup_one_process(struct kunit * test, const pid_t pid)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
-
 static void setup_one_subscriber(struct kunit * test, const pid_t pid, const int eventfd)
 {
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL,
-    QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, eventfd,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, eventfd);
 }
 
 // Module unload tears topics down with their subscribers still registered, so this is the only
@@ -43,7 +31,7 @@ void test_case_exit_free_data_releases_notify_context(struct kunit * test)
   // Arrange
   agnocast_kunit_eventfd_reset();
   const int subscriber_num = 3;
-  setup_one_process(test, PID_BASE);
+  agnocast_kunit_setup_process(test, PID_BASE, 0);
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
     setup_one_subscriber(test, PID_BASE, eventfd);
   }

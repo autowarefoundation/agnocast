@@ -2,6 +2,7 @@
 #include "agnocast_kunit_release_sub_ref.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -21,19 +22,9 @@ static void setup_one_publisher(
 {
   const pid_t PUBLISHER_PID = 2000;
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    PUBLISHER_PID, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-
-  *ret_addr = add_process_args.ret_addr;
-  *ret_publisher_id = add_publisher_args.ret_id;
+  *ret_publisher_id = agnocast_kunit_setup_one_publisher(
+    test, TOPIC_NAME, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, 0,
+    ret_addr);
 }
 
 void test_case_release_sub_ref_no_topic(struct kunit * test)
