@@ -37,7 +37,6 @@ add_executable(
   thread_configurator_node
   src/main.cpp
   src/thread_configurator_node.cpp
-  src/prerun_node.cpp
 )
 ament_target_dependencies(thread_configurator_node rclcpp agnocast_cie_config_msgs)
 target_link_libraries(thread_configurator_node
