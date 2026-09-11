@@ -37,12 +37,15 @@ uint32_t gpu_slot_size_for(const uint64_t capacity) noexcept
 {
   if (capacity <= kMinSlotSize) return kMinSlotSize;
 
-  // Above 2 GiB the next power of two does not fit in the slot size, so the
-  // capacity stands as asked; a region of that size fails in the backend either
-  // way, and failing there reports the real reason.
-  constexpr uint64_t max_slot_size = std::numeric_limits<uint32_t>::max();
-  if (capacity > max_slot_size) return static_cast<uint32_t>(max_slot_size);
-  if (capacity > (1ULL << 31)) return static_cast<uint32_t>(capacity);
+  // Above 2 GiB the next power of two does not fit in a slot size, so the
+  // capacity stands close to as asked -- but still rounded up to the floor. Slot
+  // k begins at k * slot_size, so an unrounded size would put every slot after
+  // the first at an arbitrary offset and lose the alignment the floor exists
+  // for. A capacity too large to round is refused by the caller, so the rounding
+  // below cannot overflow.
+  if (capacity > (1ULL << 31)) {
+    return static_cast<uint32_t>((capacity + kMinSlotSize - 1) & ~(uint64_t{kMinSlotSize} - 1));
+  }
 
   uint32_t rounded = kMinSlotSize;
   while (rounded < capacity) rounded *= 2;
@@ -62,6 +65,10 @@ GpuSlotPool::GpuSlotPool(
   for (uint32_t i = slot_count; i > 0; i--) {
     free_slots_.push_back(i - 1);
   }
+  // Sized once here, so neither container can reallocate later -- a release can
+  // happen between a borrow and its publish, where an allocation would come out
+  // of the shared-memory mempool.
+  slot_is_out_.assign(slot_count, false);
 }
 
 std::unique_ptr<GpuSlotPool> GpuSlotPool::create(
@@ -94,11 +101,18 @@ GpuSlotPool::~GpuSlotPool()
 
   // Every slot free means nothing refers to this region: the kmod released each
   // entry, which is what let the publisher delete the message holding the slot.
-  // With a slot still out the region has to stay, and the kmod keeps it until
-  // the publisher's entries drain.
   if (is_idle()) {
     GpuRegionRegistry::instance().destroy(topic_name_, publisher_id_, region_id_);
+    return;
   }
+
+  // A slot is still out, so the kmod must keep the region for whatever is still
+  // in flight -- but this process will never write it again, and the messages
+  // holding those slots may never be deleted at all: the kmod reports released
+  // addresses only from publish(), so anything QoS was still retaining at
+  // teardown is never handed back. Waiting for idleness would therefore pin this
+  // mapping, and a share of device memory, for the life of the process.
+  GpuRegionRegistry::instance().unmap_local(region_id_);
 }
 
 bool GpuSlotPool::is_idle() const
@@ -115,6 +129,7 @@ bool GpuSlotPool::acquire(const uint64_t capacity, uint32_t & out_slot_index)
   if (free_slots_.empty()) return false;
   out_slot_index = free_slots_.back();
   free_slots_.pop_back();
+  slot_is_out_[out_slot_index] = true;
   return true;
 }
 
@@ -122,17 +137,18 @@ void GpuSlotPool::release(const uint32_t slot_index)
 {
   const std::lock_guard<std::mutex> lock(mutex_);
 
-  // Bounded rather than trusted. The index comes from a handle in shared memory,
-  // and free_slots_ is reserved for exactly slot_count entries: growing past
-  // that would both hand one slot out twice and, because a release can happen
-  // between a borrow and its publish, reallocate the vector into the
-  // shared-memory mempool.
-  if (slot_index >= slot_count_ || free_slots_.size() >= slot_count_) {
+  // Bounded on both sides rather than trusted, because the index comes from a
+  // handle in shared memory. Releasing a slot that is not out would hand one
+  // slot to two messages, and would also make is_idle() true while a message
+  // still points into the region, which is the predicate the publisher uses to
+  // decide it may release the region altogether.
+  if (slot_index >= slot_count_ || !slot_is_out_[slot_index]) {
     RCLCPP_ERROR(
       logger, "ignoring the release of GPU slot %u of region %u: not an outstanding slot",
       slot_index, region_id_);
     return;
   }
+  slot_is_out_[slot_index] = false;
   free_slots_.push_back(slot_index);
 }
 

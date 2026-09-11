@@ -205,6 +205,13 @@ find_package(CUDAToolkit QUIET)
 # enable_language cannot do: CMAKE_CUDA_COMPILER does not exist until after it
 # runs, so testing that variable first silently disables these targets.
 include(CheckLanguage)
+# check_language only searches PATH and CUDACXX, while FindCUDAToolkit also
+# honours CUDAToolkit_ROOT -- the usual layout in a CUDA container whose
+# entrypoint has not been sourced. Seed it so the samples are not skipped on a
+# machine that plainly has a compiler.
+if(NOT CMAKE_CUDA_COMPILER AND CUDAToolkit_NVCC_EXECUTABLE)
+  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
+endif()
 check_language(CUDA)
 if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
   # The samples launch kernels, so they are compiled as CUDA.
@@ -226,7 +233,11 @@ if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
     install(TARGETS ${gpu_target} DESTINATION lib/${PROJECT_NAME})
   endforeach()
 else()
-  message(STATUS "agnocast_sample_application: CUDA headers not found; skipping GPU samples.")
+  message(STATUS
+    "agnocast_sample_application: skipping the GPU samples "
+    "(CUDAToolkit_FOUND=${CUDAToolkit_FOUND} "
+    "agnocast_gpu_FOUND=${agnocast_gpu_FOUND} "
+    "CMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}).")
 endif()
 
 ament_package()

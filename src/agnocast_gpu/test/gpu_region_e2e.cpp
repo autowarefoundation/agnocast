@@ -66,21 +66,24 @@ bool gpu_is_available()
 
 // Each process registers with the kernel module itself; no CUDA call happens
 // before the fork, because CUDA does not support forking an initialized context.
-bool open_device_and_register()
+// kSkip when the module is simply not loaded, which the requires_kernel_module
+// label cannot express to a developer running the binary directly; 1 for a real
+// failure to register.
+int open_device_and_register()
 {
   agnocast::agnocast_fd = ::open("/dev/agnocast", O_RDWR);
   if (agnocast::agnocast_fd < 0) {
     std::fprintf(stderr, "open(/dev/agnocast) failed: %s\n", std::strerror(errno));
-    return false;
+    return kSkip;
   }
 
   ioctl_add_process_args args = {};
   args.domain_id = 0;
   if (ioctl(agnocast::agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &args) < 0) {
     std::fprintf(stderr, "ADD_PROCESS failed: %s\n", std::strerror(errno));
-    return false;
+    return 1;
   }
-  return true;
+  return 0;
 }
 
 int run_publisher(int notify_fd)
@@ -95,7 +98,15 @@ int run_publisher(int notify_fd)
     return kSkip;
   }
 
-  if (!open_device_and_register()) return 1;
+  const int device_rc = open_device_and_register();
+  if (device_rc != 0) {
+    if (device_rc == kSkip) {
+      close(notify_fd);
+      int status = 0;
+      wait(&status);
+    }
+    return device_rc;
+  }
 
   ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {kTopic, std::strlen(kTopic)};
@@ -172,7 +183,8 @@ int run_subscriber(int notify_fd)
   if (read(notify_fd, &msg, sizeof(msg)) != sizeof(msg)) return kSkip;
 
   if (!gpu_is_available()) return kSkip;
-  if (!open_device_and_register()) return 1;
+  const int device_rc = open_device_and_register();
+  if (device_rc != 0) return device_rc;
 
   // The kernel module hands a descriptor only to a registered subscriber of the
   // topic running in the calling process, so this is what authorizes the import.

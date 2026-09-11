@@ -246,6 +246,11 @@ public:
   AGNOCAST_PUBLIC
   ipc_shared_ptr<MessageT> borrow_loaned_message()
   {
+    static_assert(
+      !internal::is_gpu_message_v<MessageT>,
+      "a message whose payload lives in GPU memory must be borrowed with the capacity overload: "
+      "without it no slot is reserved and the payload resolves to nothing");
+
     increment_borrowed_publisher_num();
     MessageT * ptr = new MessageT();
     return ipc_shared_ptr<MessageT>(ptr, topic_name_.c_str(), id_);
@@ -278,10 +283,10 @@ public:
       internal::is_gpu_message_v<MessageT>,
       "the capacity overload is for messages whose payload lives in GPU memory");
 
-    if (capacity == 0 || capacity > std::numeric_limits<uint32_t>::max()) {
+    if (capacity == 0 || capacity > internal::kMaxGpuPayloadCapacity) {
       RCLCPP_ERROR(
-        logger, "GPU payload capacity %zu is out of range for topic '%s'", capacity,
-        topic_name_.c_str());
+        logger, "GPU payload capacity %zu is out of range for topic '%s' (max %llu)", capacity,
+        topic_name_.c_str(), static_cast<unsigned long long>(internal::kMaxGpuPayloadCapacity));
       return ipc_shared_ptr<MessageT>();
     }
 
@@ -342,10 +347,25 @@ public:
       region_id = pool->region_id();
     }
 
+    // Everything from here can throw -- the message, its control block and the
+    // handle's topic name all allocate, and inside the borrow window that is the
+    // shared-memory mempool, which returns null when exhausted. Both the slot and
+    // the window are therefore held by guards: a stranded slot is never returned
+    // to its pool, which leaves the region unable to reach the idle state it
+    // needs to be retired or released, and a stranded window sends every later
+    // allocation in the process to the mempool.
+    auto slot_guard = internal::make_scope_guard(
+      [region_id, slot_index] { internal::release_gpu_slot(region_id, slot_index); });
     increment_borrowed_publisher_num();
+    auto window_guard = internal::make_scope_guard([] { decrement_borrowed_publisher_num(); });
+
     MessageT * ptr = new MessageT();
     ptr->data = internal::gpu_array<uint8_t>(region_id, slot_index, capacity, id_);
-    return ipc_shared_ptr<MessageT>(ptr, topic_name_.c_str(), id_);
+    // The handle owns the message from here, and the message owns the slot.
+    ipc_shared_ptr<MessageT> message(ptr, topic_name_.c_str(), id_);
+    window_guard.dismiss();
+    slot_guard.dismiss();
+    return message;
   }
 
   /**

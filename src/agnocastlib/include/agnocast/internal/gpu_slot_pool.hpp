@@ -8,14 +8,58 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace agnocast::internal
 {
 
+// Runs an action unless it is dismissed, so a slot reserved before a step that
+// can throw is returned on the way out. Lives here rather than in a header of
+// its own because the borrow path is its only caller: what has to be undone
+// there -- a slot addressed by index, a counter that opens the shared-memory
+// allocation window -- is not an object with a destructor of its own.
+template <typename Action>
+class ScopeGuard
+{
+public:
+  explicit ScopeGuard(Action action) : action_(std::move(action)) {}
+  ~ScopeGuard()
+  {
+    if (armed_) action_();
+  }
+
+  ScopeGuard(const ScopeGuard &) = delete;
+  ScopeGuard & operator=(const ScopeGuard &) = delete;
+  ScopeGuard(ScopeGuard &&) = delete;
+  ScopeGuard & operator=(ScopeGuard &&) = delete;
+
+  // Called once the step the guard covered has succeeded.
+  void dismiss() noexcept { armed_ = false; }
+
+private:
+  Action action_;
+  bool armed_ = true;
+};
+
+template <typename Action>
+[[nodiscard]] ScopeGuard<Action> make_scope_guard(Action action)
+{
+  return ScopeGuard<Action>(std::move(action));
+}
+
+// The largest payload a slot can be sized for. Above this a slot size could not
+// be rounded up to the alignment below without overflowing, and a region of that
+// size cannot be allocated anyway.
+constexpr uint64_t kMaxGpuPayloadCapacity = 0xFFFFFF00ULL;
+
 // The slot size a region is created with, rounded up from the payload capacity
 // asked for: the next power of two, with a floor of the alignment cudaMalloc
-// guarantees. See the sizing policy in docs/gpu_memory.md.
+// guarantees, above which it rounds to that alignment instead. The result is
+// always >= capacity and always a multiple of the alignment, so slot k, which
+// begins at k * slot_size, is aligned too. Requires
+// capacity <= kMaxGpuPayloadCapacity. See the sizing policy in
+// docs/gpu_memory.md.
 [[nodiscard]] uint32_t gpu_slot_size_for(uint64_t capacity) noexcept;
 
 // Hands out the slots of one region. Publisher-local: a slot is free exactly
@@ -74,6 +118,9 @@ private:
   uint32_t slot_count_;
   mutable std::mutex mutex_;
   std::vector<uint32_t> free_slots_;
+  // Which slots are currently out, so that releasing one that is not can be
+  // refused. Sized at construction and never resized.
+  std::vector<bool> slot_is_out_;
 };
 
 }  // namespace agnocast::internal

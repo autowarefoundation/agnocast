@@ -2552,6 +2552,20 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 // nothing rather than to an unrelated region.
 static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
 
+// Zero is reserved: it means "any" to GET and is refused by REMOVE, so a region
+// that was handed it would be unremovable and would answer every "any" lookup.
+// The counter is 32-bit, so say so rather than assume it never wraps.
+static uint32_t allocate_gpu_region_id(void)
+{
+  uint32_t id;
+
+  do {
+    id = (uint32_t)atomic_inc_return(&next_gpu_region_id);
+  } while (id == 0);
+
+  return id;
+}
+
 // Checks that the handle is the kind the declared mechanism uses. A mismatch
 // would only surface in the importer, which cannot report it back.
 static int validate_gpu_handle(
@@ -2601,6 +2615,8 @@ int agnocast_ioctl_add_gpu_region(
     return -EINVAL;
   }
 
+  if (args->blob_size > 0 && !blob) return -EINVAL;
+
   ret = validate_gpu_handle(args->backend_type, handle_file, args->blob_size);
   if (ret) {
     dev_warn(
@@ -2609,6 +2625,30 @@ int agnocast_ioctl_add_gpu_region(
       topic_name, args->backend_type, __func__);
     return ret;
   }
+
+  // Allocated before the locks are taken. Nothing here depends on what they
+  // protect, and a GFP_KERNEL allocation can enter direct reclaim: doing it
+  // under topic->rwsem would stall every publish and receive on the topic for
+  // the duration of a cold control-plane call.
+  struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
+  if (!region) return -ENOMEM;
+
+  if (args->blob_size > 0) {
+    region->blob = kmemdup(blob, args->blob_size, GFP_KERNEL);
+    if (!region->blob) {
+      kfree(region);
+      return -ENOMEM;
+    }
+  }
+
+  region->backend_type = args->backend_type;
+  region->slot_size = args->slot_size;
+  region->slot_count = args->slot_count;
+  region->mapped_size = args->mapped_size;
+  memcpy(region->device_uuid, args->device_uuid, GPU_DEVICE_UUID_SIZE);
+  region->blob_size = args->blob_size;
+  region->handle_file = handle_file;
+  region->region_id = allocate_gpu_region_id();
 
   down_read(&global_htables_rwsem);
 
@@ -2630,11 +2670,17 @@ int agnocast_ioctl_add_gpu_region(
     goto unlock_all;
   }
 
-  // Only the owning process may register memory under this publisher's name.
-  if (pub_info->pid != pid) {
+  // Only the owning process may register memory under this publisher's name,
+  // and only while it is still that process: a publisher_info outlives a
+  // publisher that exited with messages still referenced, so without the
+  // liveness check a recycled pid could register memory in its name. The same
+  // pairing guards the host data path (see set_publisher_shm_info).
+  const struct process_info * pub_proc = agnocast_find_process_info(pub_info->pid);
+  if (pub_info->pid != pid || !pub_proc || pub_proc->exited) {
     dev_warn(
       agnocast_device,
-      "Process (pid=%d) does not own the publisher (id=%d) of the topic (topic_name=%s). (%s)\n",
+      "Process (pid=%d) does not own the live publisher (id=%d) of the topic (topic_name=%s). "
+      "(%s)\n",
       pid, args->publisher_id, topic_name, __func__);
     ret = -EPERM;
     goto unlock_all;
@@ -2649,30 +2695,6 @@ int agnocast_ioctl_add_gpu_region(
     goto unlock_all;
   }
 
-  struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
-  if (!region) {
-    ret = -ENOMEM;
-    goto unlock_all;
-  }
-
-  if (args->blob_size > 0) {
-    region->blob = kmemdup(blob, args->blob_size, GFP_KERNEL);
-    if (!region->blob) {
-      kfree(region);
-      ret = -ENOMEM;
-      goto unlock_all;
-    }
-  }
-
-  region->backend_type = args->backend_type;
-  region->slot_size = args->slot_size;
-  region->slot_count = args->slot_count;
-  region->mapped_size = args->mapped_size;
-  memcpy(region->device_uuid, args->device_uuid, GPU_DEVICE_UUID_SIZE);
-  region->blob_size = args->blob_size;
-  region->handle_file = handle_file;
-  region->region_id = (uint32_t)atomic_inc_return(&next_gpu_region_id);
-
   list_add_tail(&region->node, &pub_info->gpu_regions);
   pub_info->gpu_region_num++;
   args->ret_region_id = region->region_id;
@@ -2681,6 +2703,12 @@ unlock_all:
   up_write(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
+  if (ret != 0) {
+    // Never committed, so the caller keeps its handle reference and we drop only
+    // what was allocated here.
+    kfree(region->blob);
+    kfree(region);
+  }
   return ret;
 }
 
@@ -2723,6 +2751,22 @@ int agnocast_ioctl_get_gpu_region(
       agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
       publisher_id, topic_name, __func__);
     ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // A subscriber may only reach a publisher that delivers to it. A domain bridge
+  // rule can be one-way, and a grouped topic puts both domains' endpoints in one
+  // table, so without this a subscriber could import device memory belonging to a
+  // publisher whose messages it is never allowed to receive. The host data path
+  // applies the same filter when deciding which mempools to map
+  // (set_publisher_shm_info).
+  if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+    dev_warn(
+      agnocast_device,
+      "Publisher (id=%d, domain=%u) does not deliver to subscriber (id=%d, domain=%u) of the topic "
+      "(topic_name=%s). (%s)\n",
+      publisher_id, pub_info->domain_id, subscriber_id, sub_info->domain_id, topic_name, __func__);
+    ret = -EPERM;
     goto unlock_all;
   }
 
@@ -2795,10 +2839,12 @@ int agnocast_ioctl_remove_gpu_region(
     goto unlock_all;
   }
 
-  if (pub_info->pid != pid) {
+  const struct process_info * pub_proc = agnocast_find_process_info(pub_info->pid);
+  if (pub_info->pid != pid || !pub_proc || pub_proc->exited) {
     dev_warn(
       agnocast_device,
-      "Process (pid=%d) does not own the publisher (id=%d) of the topic (topic_name=%s). (%s)\n",
+      "Process (pid=%d) does not own the live publisher (id=%d) of the topic (topic_name=%s). "
+      "(%s)\n",
       pid, publisher_id, topic_name, __func__);
     ret = -EPERM;
     goto unlock_all;
@@ -3287,15 +3333,34 @@ static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
       kfree(blob);
       return -EBADF;
     }
+    // The module cannot tell a GPU memory handle from any other descriptor, but
+    // it can refuse its own device: holding that file would keep the module
+    // pinned, and it is never a memory handle.
+    const struct inode * handle_inode = file_inode(handle_file);
+    if (S_ISCHR(handle_inode->i_mode) && MAJOR(handle_inode->i_rdev) == major) {
+      fput(handle_file);
+      kfree(blob);
+      return -EINVAL;
+    }
   }
+
+  const topic_local_id_t publisher_id = args.publisher_id;
 
   ret = agnocast_ioctl_add_gpu_region(topic_name_buf, ipc_ns, pid, &args, handle_file, blob);
   if (ret != 0 && handle_file) {
     fput(handle_file);
   }
   kfree(blob);
-  if (ret == 0 && copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
-  return ret;
+  if (ret != 0) return ret;
+
+  if (copy_to_user(arg, &args, sizeof(args))) {
+    // The region is registered but the caller will never learn the id it would
+    // need to remove it, so undo the registration rather than pin device memory
+    // and one of the publisher's region slots for nothing.
+    agnocast_ioctl_remove_gpu_region(topic_name_buf, ipc_ns, pid, publisher_id, args.ret_region_id);
+    return -EFAULT;
+  }
+  return 0;
 }
 
 static long get_gpu_region_cmd(union ioctl_get_gpu_region_args __user * arg)
