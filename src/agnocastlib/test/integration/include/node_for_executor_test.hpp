@@ -4,7 +4,6 @@
 #include <std_msgs/msg/bool.hpp>
 
 #include <atomic>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,7 +18,6 @@ private:
   std::atomic<bool> is_mutually_exclusive_agnocast_{true};
   rclcpp::CallbackGroup::SharedPtr agnocast_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr agnocast_timer_;
-  std::atomic<uint64_t> agnocast_timer_fires_{0};
   std::unique_ptr<std::atomic<bool>[]> agnocast_sub_cbs_called_;
   size_t num_total_agnocast_sub_cbs_ = 0;
   std::string agnocast_topic_name_ = "/dummy_agnocast_topic";
@@ -37,7 +35,6 @@ private:
   std::atomic<bool> is_mutually_exclusive_ros2_{true};
   rclcpp::CallbackGroup::SharedPtr ros2_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr ros2_timer_;
-  std::atomic<uint64_t> ros2_timer_fires_{0};
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ros2_pub_;
   std::vector<rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr> ros2_subs_;
   std::unique_ptr<std::atomic<bool>[]> ros2_sub_cbs_called_;
@@ -59,7 +56,5 @@ public:
   bool is_all_agnocast_sub_cbs_called() const;
   bool is_mutually_exclusive_agnocast() const;
   bool is_mutually_exclusive_ros2() const;
-
-  // Timer fire counts and the indices of callbacks not yet called, for failure messages.
   std::string describe_progress() const;
 };

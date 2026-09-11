@@ -3,8 +3,6 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-#include <sstream>
-
 NodeForExecutorTest::NodeForExecutorTest(
   const size_t num_agnocast_sub_cbs, const size_t num_ros2_sub_cbs,
   const size_t num_agnocast_cbs_to_be_added, const std::chrono::milliseconds pub_period,
@@ -105,7 +103,6 @@ void NodeForExecutorTest::dummy_work(std::chrono::milliseconds exec_time)
 // It stands in for a publisher, signalling each notification eventfd as the kernel does.
 void NodeForExecutorTest::agnocast_timer_cb()
 {
-  agnocast_timer_fires_.fetch_add(1, std::memory_order_relaxed);
   for (int notify_eventfd : notify_eventfds_) {
     const uint64_t one = 1;
     if (write(notify_eventfd, &one, sizeof(one)) == -1 && errno != EAGAIN) {
@@ -134,7 +131,6 @@ void NodeForExecutorTest::agnocast_sub_cb(
 
 void NodeForExecutorTest::ros2_timer_cb()
 {
-  ros2_timer_fires_.fetch_add(1, std::memory_order_relaxed);
   std_msgs::msg::Bool msg;
   msg.data = true;
   ros2_pub_->publish(msg);
@@ -174,23 +170,18 @@ bool NodeForExecutorTest::is_all_agnocast_sub_cbs_called() const
 
 std::string NodeForExecutorTest::describe_progress() const
 {
-  std::ostringstream oss;
-  oss << "agnocast_timer_fires=" << agnocast_timer_fires_.load(std::memory_order_relaxed)
-      << " ros2_timer_fires=" << ros2_timer_fires_.load(std::memory_order_relaxed)
-      << " uncalled_agnocast_sub_cbs=[";
-  for (size_t i = 0; i < num_total_agnocast_sub_cbs_; i++) {
-    if (!agnocast_sub_cbs_called_[i].load(std::memory_order_acquire)) {
-      oss << " " << i;
+  auto uncalled = [](const std::unique_ptr<std::atomic<bool>[]> & called, const size_t num) {
+    std::string indices;
+    for (size_t i = 0; i < num; i++) {
+      if (!called[i].load(std::memory_order_acquire)) {
+        indices += " " + std::to_string(i);
+      }
     }
-  }
-  oss << " ] uncalled_ros2_sub_cbs=[";
-  for (size_t i = 0; i < num_ros2_sub_cbs_; i++) {
-    if (!ros2_sub_cbs_called_[i].load(std::memory_order_acquire)) {
-      oss << " " << i;
-    }
-  }
-  oss << " ]";
-  return oss.str();
+    return indices;
+  };
+  return "uncalled_agnocast_sub_cbs=[" +
+         uncalled(agnocast_sub_cbs_called_, num_total_agnocast_sub_cbs_) +
+         " ] uncalled_ros2_sub_cbs=[" + uncalled(ros2_sub_cbs_called_, num_ros2_sub_cbs_) + " ]";
 }
 
 bool NodeForExecutorTest::is_mutually_exclusive_agnocast() const
