@@ -53,6 +53,11 @@ std::string scalar_or_placeholder(const YAML::Node & node)
   return node.IsScalar() ? node.Scalar() : std::string("<non-scalar>");
 }
 
+std::string entry_pos(const char * section, size_t index)
+{
+  return std::string(section) + " entry #" + std::to_string(index);
+}
+
 constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
@@ -83,6 +88,28 @@ std::optional<T> as_decimal(const YAML::Node & node)
     return std::nullopt;
   }
   return value;
+}
+
+// Missing or null = no entries (pre-existing YAMLs keep working). Anything
+// but a list of mappings is rejected, since a scalar would iterate zero times
+// and silently drop the section, and a list of bare keys would fail with a
+// raw yaml-cpp BadSubscript instead of the entry diagnostic.
+YAML::Node section_entries(const YAML::Node & yaml, const char * name, const char * example_key)
+{
+  const YAML::Node section = yaml[name];
+  if (!section || section.IsNull()) {
+    return YAML::Node(YAML::NodeType::Sequence);
+  }
+  if (!section.IsSequence()) {
+    throw std::runtime_error("'" + std::string(name) + "' must be a list");
+  }
+  for (size_t i = 0; i < section.size(); ++i) {
+    if (!section[i].IsMap()) {
+      throw std::runtime_error(
+        entry_pos(name, i) + " must be a mapping (e.g. '- " + example_key + ": ...')");
+    }
+  }
+  return section;
 }
 
 // The policy's tunable ('nice' for CFS, 'priority' for FIFO/RR) is mandatory
@@ -293,11 +320,8 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
 {
   ParsedConfig config;
 
-  // A missing or null section has no entries, like kernel_threads / irqs.
-  const YAML::Node callback_groups = yaml["callback_groups"];
-  const size_t callback_group_count =
-    (callback_groups && !callback_groups.IsNull()) ? callback_groups.size() : 0;
-  for (size_t i = 0; i < callback_group_count; ++i) {
+  const YAML::Node callback_groups = section_entries(yaml, "callback_groups", "id");
+  for (size_t i = 0; i < callback_groups.size(); ++i) {
     const YAML::Node cg = callback_groups[i];
     CallbackGroupEntry entry;
     entry.id = cg["id"].as<std::string>();
@@ -310,10 +334,8 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     return "domain_id=" + std::to_string(e.domain_id) + ", id=" + e.id;
   });
 
-  const YAML::Node non_ros_threads = yaml["non_ros_threads"];
-  const size_t non_ros_thread_count =
-    (non_ros_threads && !non_ros_threads.IsNull()) ? non_ros_threads.size() : 0;
-  for (size_t i = 0; i < non_ros_thread_count; ++i) {
+  const YAML::Node non_ros_threads = section_entries(yaml, "non_ros_threads", "name");
+  for (size_t i = 0; i < non_ros_threads.size(); ++i) {
     const YAML::Node nrt = non_ros_threads[i];
     NonRosThreadEntry entry;
     entry.name = nrt["name"].as<std::string>();
@@ -324,80 +346,60 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     return "name=" + e.name;
   });
 
-  const YAML::Node kernel_threads = yaml["kernel_threads"];
-  if (kernel_threads && !kernel_threads.IsNull()) {
-    if (!kernel_threads.IsSequence()) {
-      throw std::runtime_error("'kernel_threads' must be a list");
+  const YAML::Node kernel_threads = section_entries(yaml, "kernel_threads", "comm");
+  for (size_t i = 0; i < kernel_threads.size(); ++i) {
+    const YAML::Node kt = kernel_threads[i];
+    KernelThreadEntry entry;
+    const std::string entry_position = entry_pos("kernel_threads", i);
+    if (!kt["comm"] || kt["comm"].IsNull()) {
+      throw std::runtime_error(entry_position + " is missing a non-empty 'comm'");
     }
-    for (size_t i = 0; i < kernel_threads.size(); ++i) {
-      const YAML::Node kt = kernel_threads[i];
-      KernelThreadEntry entry;
-      const std::string entry_pos = "kernel_threads entry #" + std::to_string(i);
-
-      if (!kt.IsMap()) {
-        throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- comm: ...')");
-      }
-      if (!kt["comm"] || kt["comm"].IsNull()) {
-        throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
-      }
-      try {
-        entry.comm = kt["comm"].as<std::string>();
-      } catch (const YAML::Exception &) {
-        throw std::runtime_error(entry_pos + ": 'comm' must be a string");
-      }
-      if (entry.comm.empty()) {
-        throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
-      }
-      if (is_kworker_comm(entry.comm)) {
-        throw std::runtime_error(
-          "kernel_threads entry '" + entry.comm +
-          "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
-          "be matched reliably");
-      }
-      entry.attrs = parse_sched_attrs(kt, EntryContext{"comm=" + entry.comm, /*scanned=*/true});
-      config.kernel_threads.push_back(std::move(entry));
+    try {
+      entry.comm = kt["comm"].as<std::string>();
+    } catch (const YAML::Exception &) {
+      throw std::runtime_error(entry_position + ": 'comm' must be a string");
     }
+    if (entry.comm.empty()) {
+      throw std::runtime_error(entry_position + " is missing a non-empty 'comm'");
+    }
+    if (is_kworker_comm(entry.comm)) {
+      throw std::runtime_error(
+        "kernel_threads entry '" + entry.comm +
+        "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
+        "be matched reliably");
+    }
+    entry.attrs = parse_sched_attrs(kt, EntryContext{"comm=" + entry.comm, /*scanned=*/true});
+    config.kernel_threads.push_back(std::move(entry));
   }
   reject_duplicates(config.kernel_threads, "kernel_thread", [](const KernelThreadEntry & e) {
     return "comm=" + e.comm;
   });
 
-  const YAML::Node irqs = yaml["irqs"];
-  if (irqs && !irqs.IsNull()) {
-    if (!irqs.IsSequence()) {
-      throw std::runtime_error("'irqs' must be a list");
+  const YAML::Node irqs = section_entries(yaml, "irqs", "irq");
+  for (size_t i = 0; i < irqs.size(); ++i) {
+    const YAML::Node iq = irqs[i];
+    IrqEntry entry;
+    const YAML::Node irq_node = iq["irq"];
+    if (!irq_node || irq_node.IsNull()) {
+      throw std::runtime_error(entry_pos("irqs", i) + " is missing a non-negative integer 'irq'");
     }
-    for (size_t i = 0; i < irqs.size(); ++i) {
-      const YAML::Node iq = irqs[i];
-      IrqEntry entry;
-      const std::string entry_pos = "irqs entry #" + std::to_string(i);
-
-      if (!iq.IsMap()) {
-        throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- irq: ...')");
-      }
-      const YAML::Node irq_node = iq["irq"];
-      if (!irq_node || irq_node.IsNull()) {
-        throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
-      }
-      const auto irq = as_decimal<int>(irq_node);
-      if (!irq || *irq < 0) {
-        throw std::runtime_error(
-          entry_pos + ": 'irq' must be a non-negative decimal integer, got '" +
-          scalar_or_placeholder(irq_node) + "'");
-      }
-      entry.irq = *irq;
-      const std::string desc = "irq=" + std::to_string(entry.irq);
-
-      if (iq["name"] && !iq["name"].IsNull()) {
-        try {
-          entry.name = iq["name"].as<std::string>();
-        } catch (const YAML::Exception &) {
-          throw std::runtime_error("'name' must be a string for " + desc);
-        }
-      }
-      entry.affinity = parse_affinity(iq, EntryContext{desc, /*scanned=*/true});
-      config.irqs.push_back(std::move(entry));
+    const auto irq = as_decimal<int>(irq_node);
+    if (!irq || *irq < 0) {
+      throw std::runtime_error(
+        entry_pos("irqs", i) + ": 'irq' must be a non-negative decimal integer, got '" +
+        scalar_or_placeholder(irq_node) + "'");
     }
+    entry.irq = *irq;
+    const std::string desc = "irq=" + std::to_string(entry.irq);
+    if (iq["name"] && !iq["name"].IsNull()) {
+      try {
+        entry.name = iq["name"].as<std::string>();
+      } catch (const YAML::Exception &) {
+        throw std::runtime_error("'name' must be a string for " + desc);
+      }
+    }
+    entry.affinity = parse_affinity(iq, EntryContext{desc, /*scanned=*/true});
+    config.irqs.push_back(std::move(entry));
   }
   reject_duplicates(
     config.irqs, "irq", [](const IrqEntry & e) { return "irq=" + std::to_string(e.irq); });
