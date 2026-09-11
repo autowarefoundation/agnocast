@@ -29,11 +29,15 @@ struct GpuRegionRef
 
 // Every region this process has mapped, keyed by the id the kmod assigned it.
 //
-// A mapping lives until the process exits, or until the publisher owning the
-// region destroys it -- which it may do only once nothing refers to the region.
-// Addresses are never handed out past the lock for that reason: `resolve` does
-// the lookup and the bounds check together, so a region cannot be unmapped
-// between them.
+// A mapping lives as long as anything in this process can still refer to it.
+// For a region this process created, that is until its slot pool is destroyed
+// with no slot outstanding. An imported one lives until the kmod no longer knows
+// the publisher that exported it: while this process holds a received message,
+// it holds a reference on that message's kmod entry, so the publisher cannot
+// have been forgotten; once it has been, no handle to any of its messages exists
+// here and none can appear, because region ids are never reused. Without that
+// reclamation a subscriber would accumulate a mapping -- and a driver reference
+// on the memory behind it -- for every region of every publisher it ever saw.
 class GpuRegionRegistry
 {
 public:
@@ -42,11 +46,13 @@ public:
   [[nodiscard]] bool is_mapped(uint32_t region_id) const;
 
   // nullptr when the region is not mapped here, or the slot does not hold
-  // `bytes`.
+  // `bytes`. Hot path: called for every access to a message's payload.
   [[nodiscard]] void * resolve(uint32_t region_id, uint32_t slot_index, uint64_t bytes) const;
 
   // Subscriber side. Idempotent: returns immediately when the region the
-  // message refers to is already mapped.
+  // message refers to is already mapped. Also the point at which imported
+  // regions nothing can refer to any more are released, so that growth in one
+  // publisher's regions pays for reclaiming a departed publisher's.
   [[nodiscard]] bool ensure_mapped(const GpuRegionRef & ref);
 
   // Publisher side. Allocates the region and hands its liveness reference to the

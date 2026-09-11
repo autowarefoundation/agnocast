@@ -130,6 +130,23 @@ region a message was written into — and it knows it from a fact it already has
 every message that used the region has been destroyed, which for a published message means the
 module released its entry, which in turn means every subscriber had dropped its reference.
 
+## A subscriber reclaims a departed publisher's regions
+
+The mapping a subscriber makes on first receipt is the other half of the lifetime question. Keeping
+it is what makes every later frame free, but keeping it *forever* would mean a subscriber accumulates
+a mapping — and, because an imported handle holds its own driver reference, a share of device memory
+that can never be freed — for every region of every publisher it has ever seen. A publisher
+restarting under a supervisor is enough to grow that without bound.
+
+A subscriber can release an imported region once the module no longer knows the publisher that
+exported it. That is exactly the right moment, and it follows from the same entry accounting: while
+this process holds a received message it holds a reference on that message's entry, so the
+publisher's registration cannot have been dropped; once it has been, no handle to any of its
+messages exists here, and none can appear later because region ids are never reused. Reclamation is
+therefore done when a new region is imported — growth in one publisher's regions pays for reclaiming
+a departed one's — which leaves at most one stale generation mapped in a process that never imports
+again.
+
 ## The stream belongs to the submission, not to the message
 
 GPU work is submitted through a call that owns the stream and passes it to the caller's callable, so
@@ -180,3 +197,5 @@ its region. Both are bounded — once per process and once per publisher.
 - **A publisher's own mapping is released only when the region is.** A region still holding a
   message outlives its publisher's teardown, by design; its address space is reclaimed at process
   exit.
+- **A GPU topic has no ROS type name.** Nothing keyed on one can see it, so both ends warn once at
+  construction rather than leaving a topic that silently never reaches ROS 2.

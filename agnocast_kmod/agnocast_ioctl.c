@@ -2594,6 +2594,13 @@ int agnocast_ioctl_add_gpu_region(
     return -EINVAL;
   }
 
+  if (args->blob_size > MAX_GPU_HANDLE_BLOB_SIZE) {
+    dev_warn(
+      agnocast_device, "Exported descriptor is too large (topic_name=%s, blob_size=%u). (%s)\n",
+      topic_name, args->blob_size, __func__);
+    return -EINVAL;
+  }
+
   ret = validate_gpu_handle(args->backend_type, handle_file, args->blob_size);
   if (ret) {
     dev_warn(

@@ -191,6 +191,16 @@ class Publisher : public PublisherBase
     std::string type_name;
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
+    } else if constexpr (internal::is_gpu_message_v<MessageT>) {
+      // A GPU message type is not a generated ROS type, so it has no name to
+      // register and everything keyed on one skips it. Said out loud because the
+      // symptom otherwise is a topic that simply never reaches ROS 2.
+      RCLCPP_WARN_ONCE(
+        logger,
+        "topic '%s' carries a GPU message type, which has no ROS type name: it will not appear "
+        "with a type in 'ros2 topic info_agnocast' and the Agnocast-ROS 2 bridge cannot carry it. "
+        "Only Agnocast subscribers on the same GPU will receive it.",
+        topic_name.c_str());
     }
 
     return this->init_base(node, topic_name, type_name, qos, options, role);
