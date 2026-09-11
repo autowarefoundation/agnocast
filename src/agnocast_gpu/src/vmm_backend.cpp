@@ -91,9 +91,9 @@ bool VmmBackend::ensure_context() const
   std::memcpy(device_uuid_.data(), uuid.bytes, device_uuid_.size());
 
   // Retain the primary context rather than create one, so message buffers are
-  // addressable by the user's runtime-API kernels. The retain is held for the
-  // life of the process; note it does not protect against cudaDeviceReset(),
-  // which destroys the context's resources whether or not it has been retained.
+  // addressable by the user's runtime-API kernels. Held for the life of the
+  // process; note it does not protect against cudaDeviceReset(), which destroys
+  // the context's resources whether or not it has been retained.
   r = cuda->cuDevicePrimaryCtxRetain(&context_, device_);
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
@@ -163,7 +163,8 @@ size_t VmmBackend::query_granularity() const
 }
 
 bool VmmBackend::map_and_grant(
-  CUmemGenericAllocationHandle handle, size_t size, size_t granularity, void ** out_base) const
+  CUmemGenericAllocationHandle handle, size_t size, size_t granularity,
+  CUmemAccess_flags access_flags, void ** out_base) const
 {
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
 
@@ -184,11 +185,12 @@ bool VmmBackend::map_and_grant(
     return false;
   }
 
-  // Access is granted per process; the exporter's grant does not carry over.
+  // Access is granted per process; the exporter's grant does not carry over,
+  // which is what lets an importer be given less than the exporter has.
   CUmemAccessDesc access = {};
   access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   access.location.id = static_cast<int>(device_);
-  access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  access.flags = access_flags;
 
   r = cuda->cuMemSetAccess(ptr, size, &access, 1);
   if (r != CUDA_SUCCESS) {
@@ -220,7 +222,7 @@ MappedGpuRegion VmmBackend::create_region(uint32_t slot_size, uint32_t slot_coun
   if (granularity == 0) return MappedGpuRegion{};
 
   // The region is rounded, not each slot, so peers compute slot offsets without
-  // knowing the granularity and the rounding waste is one granule per region.
+  // knowing the granularity and the waste is one granule per region.
   const size_t total =
     round_up(static_cast<size_t>(slot_size) * static_cast<size_t>(slot_count), granularity);
 
@@ -235,8 +237,9 @@ MappedGpuRegion VmmBackend::create_region(uint32_t slot_size, uint32_t slot_coun
     return MappedGpuRegion{};
   }
 
+  // The publisher writes the payload, so its own mapping is writable.
   void * base = nullptr;
-  if (!map_and_grant(handle, total, granularity, &base)) {
+  if (!map_and_grant(handle, total, granularity, CU_MEM_ACCESS_FLAGS_PROT_READWRITE, &base)) {
     cuda->cuMemRelease(handle);
     return MappedGpuRegion{};
   }
@@ -311,13 +314,12 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
   const ScopedContext ctx(cuda, context_);
   if (!ctx.ok()) return MappedGpuRegion{};
 
-  // The descriptor is borrowed, not surrendered: the caller's UniqueFd closes it.
-  // NVIDIA documents no ownership rule for this API -- the wording about the
-  // driver taking the descriptor belongs to cudaImportExternalMemory, which is a
-  // different mechanism -- so it was measured instead. On driver 610.43.02 the
-  // import duplicates no descriptor, leaves ours open, and the allocation stays
-  // usable after we close it, meaning the driver's reference is on the memory
-  // object and is released by the importer's own cuMemRelease.
+  // The descriptor is borrowed, not surrendered: the caller's UniqueFd closes
+  // it. NVIDIA documents no ownership rule for this API (the wording about the
+  // driver taking the descriptor belongs to cudaImportExternalMemory, a
+  // different mechanism), so it was measured: on driver 610.43.02 the import
+  // duplicates no descriptor, leaves ours open, and the allocation stays usable
+  // after we close it.
   CUmemGenericAllocationHandle handle = 0;
   const CUresult r = cuda->cuMemImportFromShareableHandle(
     &handle, reinterpret_cast<void *>(static_cast<uintptr_t>(vmm->fd.get())),
@@ -334,8 +336,10 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
     return MappedGpuRegion{};
   }
 
+  // Read-only: an importer is a subscriber, and a message it receives is const.
   void * base = nullptr;
-  if (!map_and_grant(handle, exported.geometry.mapped_size, granularity, &base)) {
+  if (!map_and_grant(
+        handle, exported.geometry.mapped_size, granularity, CU_MEM_ACCESS_FLAGS_PROT_READ, &base)) {
     cuda->cuMemRelease(handle);
     return MappedGpuRegion{};
   }

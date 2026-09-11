@@ -2,14 +2,11 @@
 
 // Message types whose bulk payload lives in GPU device memory.
 //
-// Each mirrors a sensor_msgs type and shadows its `data` member. The ROS type's
-// `data` is a std::vector<uint8_t> holding host bytes; here it is a handle to a
-// slot of a shared device region, so the payload never enters host memory and is
-// never copied between processes. Every other field keeps its ROS meaning and
-// travels through Agnocast's host shared memory as usual.
-//
-// `data.get()` yields a device pointer valid in the calling process, which is
-// the shape cuda_blackboard users already write against.
+// Each mirrors a sensor_msgs type and shadows its `data` member: the ROS type's
+// is a std::vector<uint8_t> of host bytes, this one is a handle to a slot of a
+// shared device region. Every other field keeps its ROS meaning and travels
+// through host shared memory as usual. `data.get()` yields a device pointer
+// valid in the calling process.
 
 #include "agnocast/internal/gpu_message.hpp"
 

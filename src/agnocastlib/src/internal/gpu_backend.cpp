@@ -15,7 +15,7 @@ namespace agnocast::internal
 namespace
 {
 
-// The registries below are leaked deliberately. A user's static-duration object
+// The registries below are leaked deliberately: a user's static-duration object
 // holding a GPU publisher is destroyed in an order this library does not
 // control, so teardown can reach them after namespace-scope statics are gone.
 
@@ -32,11 +32,10 @@ GpuMemoryBackendSelector & backend_selector()
   return *selector;
 }
 
-// agnocast_gpu is loaded, not linked. A node that reaches GPU memory only
-// through agnocastlib's API references none of its symbols, so --as-needed
-// would drop the DT_NEEDED entry and its registering constructor would never
-// run. RTLD_NODELETE because regions dispatch into the library from their
-// destructors, which can run after anything that might unload it.
+// Loaded, not linked: a node that reaches GPU memory only through agnocastlib's
+// API references none of agnocast_gpu's symbols, so --as-needed would drop the
+// DT_NEEDED entry and its registering constructor would never run. RTLD_NODELETE
+// because regions dispatch into the library from their destructors.
 void ensure_backend_loaded()
 {
   static const bool loaded = [] {

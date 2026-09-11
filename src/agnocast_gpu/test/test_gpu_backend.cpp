@@ -1,6 +1,7 @@
 #include "agnocast/internal/gpu_backend.hpp"
 #include "vmm_backend.hpp"
 
+#include <cuda_runtime.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -8,6 +9,7 @@
 #include <array>
 #include <optional>
 #include <utility>
+#include <vector>
 
 using agnocast::internal::GpuMemoryBackendType;
 using agnocast::internal::GpuRegionExport;
@@ -19,6 +21,8 @@ using agnocast::internal::VmmExportHandle;
 
 namespace
 {
+
+constexpr size_t kPayload = 4096;
 
 int make_test_fd()
 {
@@ -188,6 +192,50 @@ TEST(VmmBackendGpuTest, CreateExportImportRoundTrip)
   ASSERT_TRUE(imported.valid());
   EXPECT_EQ(imported.geometry().mapped_size, region.geometry().mapped_size);
   EXPECT_EQ(imported.geometry().slot_count, slot_count);
+}
+
+// An importer is granted read access only, so this checks the grant is both
+// accepted by the driver and sufficient: the bytes the exporter wrote must be
+// readable through the imported mapping. A write through it is deliberately not
+// tested, since a device-side access violation poisons the context for the rest
+// of the run.
+TEST(VmmBackendGpuTest, ImportedMappingReadsWhatTheExporterWrote)
+{
+  auto * backend = gpu_backend_or_skip();
+  if (backend == nullptr) GTEST_SKIP() << "no VMM-capable GPU";
+
+  constexpr uint32_t kSlotSize = 1U << 20;
+  const MappedGpuRegion region = backend->create_region(kSlotSize, 2);
+  ASSERT_TRUE(region.valid());
+
+  std::vector<uint8_t> pattern(kPayload);
+  for (size_t i = 0; i < pattern.size(); i++) pattern[i] = static_cast<uint8_t>(i % 251);
+  ASSERT_EQ(
+    cudaMemcpy(region.slot_address(1, kPayload), pattern.data(), kPayload, cudaMemcpyHostToDevice),
+    cudaSuccess);
+
+  const auto exported = backend->export_for(region, 0);
+  ASSERT_TRUE(exported.has_value());
+  const MappedGpuRegion imported = backend->import_region(*exported);
+  ASSERT_TRUE(imported.valid());
+
+  // A distinct mapping of the same memory, so the addresses differ but the bytes
+  // do not.
+  EXPECT_NE(imported.slot_address(1, kPayload), region.slot_address(1, kPayload));
+
+  std::vector<uint8_t> readback(kPayload, 0);
+  ASSERT_EQ(
+    cudaMemcpy(
+      readback.data(), imported.slot_address(1, kPayload), kPayload, cudaMemcpyDeviceToHost),
+    cudaSuccess);
+  EXPECT_EQ(readback, pattern);
+
+  // The offset is honoured: a slot the exporter did not write must not match.
+  std::vector<uint8_t> other(kPayload, 0);
+  ASSERT_EQ(
+    cudaMemcpy(other.data(), imported.slot_address(0, kPayload), kPayload, cudaMemcpyDeviceToHost),
+    cudaSuccess);
+  EXPECT_NE(other, pattern);
 }
 
 TEST(VmmBackendGpuTest, SlotAddressRejectsOutOfRangeIndex)
