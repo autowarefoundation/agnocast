@@ -1,5 +1,6 @@
 #include "agnocast/internal/gpu_slot_pool.hpp"
 
+#include "agnocast/agnocast_utils.hpp"
 #include "agnocast/internal/gpu_message.hpp"
 
 #include <limits>
@@ -120,6 +121,18 @@ bool GpuSlotPool::acquire(const uint64_t capacity, uint32_t & out_slot_index)
 void GpuSlotPool::release(const uint32_t slot_index)
 {
   const std::lock_guard<std::mutex> lock(mutex_);
+
+  // Bounded rather than trusted. The index comes from a handle in shared memory,
+  // and free_slots_ is reserved for exactly slot_count entries: growing past
+  // that would both hand one slot out twice and, because a release can happen
+  // between a borrow and its publish, reallocate the vector into the
+  // shared-memory mempool.
+  if (slot_index >= slot_count_ || free_slots_.size() >= slot_count_) {
+    RCLCPP_ERROR(
+      logger, "ignoring the release of GPU slot %u of region %u: not an outstanding slot",
+      slot_index, region_id_);
+    return;
+  }
   free_slots_.push_back(slot_index);
 }
 
