@@ -51,20 +51,26 @@ if(BUILD_TESTING)
 
   # Exercises the cross-process path, so it needs both the kernel module and a
   # GPU. Labelled so the default run excludes it, matching how agnocastlib
-  # separates tests that cannot run unattended.
+  # separates tests that cannot run unattended. The label covers the module; the
+  # GPU it cannot, so the test reports a skip when there is no backend and
+  # SKIP_RETURN_CODE keeps that out of the failure count.
   add_executable(gpu_region_e2e test/gpu_region_e2e.cpp)
   target_include_directories(gpu_region_e2e PRIVATE src ${CUDAToolkit_INCLUDE_DIRS})
   target_link_libraries(gpu_region_e2e agnocast_gpu CUDA::cudart)
   ament_target_dependencies(gpu_region_e2e agnocastlib rclcpp)
   add_test(NAME gpu_region_e2e COMMAND gpu_region_e2e)
-  set_tests_properties(gpu_region_e2e PROPERTIES LABELS "requires_kernel_module")
+  set_tests_properties(gpu_region_e2e PROPERTIES
+    LABELS "requires_kernel_module"
+    SKIP_RETURN_CODE 77)
 
   # No GPU required: these cover descriptor ownership, slot arithmetic and the
   # library-constructor registration, all of which must work on a machine with
   # no driver.
+  # cudart only for the read-back that proves an imported mapping is usable; the
+  # GPU-free cases above it still run where there is no device.
   ament_add_gmock(test_agnocast_gpu test/test_gpu_backend.cpp)
   target_include_directories(test_agnocast_gpu PRIVATE src ${CUDAToolkit_INCLUDE_DIRS})
-  target_link_libraries(test_agnocast_gpu agnocast_gpu)
+  target_link_libraries(test_agnocast_gpu agnocast_gpu CUDA::cudart)
   ament_target_dependencies(test_agnocast_gpu agnocastlib rclcpp)
 endif()
 

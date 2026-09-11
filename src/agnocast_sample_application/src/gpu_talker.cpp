@@ -1,8 +1,6 @@
-// Publishes point clouds whose payload lives in GPU device memory.
-//
-// Borrowing a message reserves its payload, dispatch() owns the stream the
-// kernel runs on, and the payload is shared with every subscriber on the same
-// GPU without a copy.
+// Publishes point clouds whose payload lives in GPU device memory: the borrow
+// reserves a slot, a kernel fills it, and every subscriber on the same GPU reads
+// it without a copy.
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/gpu/dispatch.hpp"
@@ -57,6 +55,13 @@ private:
   void publish_cloud()
   {
     auto cloud = publisher_->borrow_loaned_message(kCapacity);
+    // The capacity overload can fail -- no region could be allocated, or every
+    // slot is still in flight -- and returns an empty handle, which has no
+    // message to dereference. borrow_loaned_message() has already logged why.
+    if (!cloud) {
+      RCLCPP_WARN(get_logger(), "no GPU message available; dropping cloud %ld", seq_);
+      return;
+    }
 
     cloud->header.frame_id = "lidar_" + std::to_string(getpid());
     cloud->height = 1;
@@ -68,9 +73,9 @@ private:
     const auto seq = static_cast<uint8_t>(seq_ % 251);
 
     // The device buffers start null and are allocated on the dispatch stream,
-    // so no synchronous allocation happens inside the callback.
-    // Dropping the borrow returns its slot, so a failed fill costs one frame
-    // rather than publishing whatever the slot held before.
+    // so no synchronous allocation happens inside the callback. Dropping the
+    // borrow returns its slot, so a failed fill costs one frame rather than
+    // publishing whatever the slot held before.
     const bool filled = dispatch(
       uploads(transform_, parameters_, 4, TransferOptions::kAllocateDeviceAsync),
       uploads(calibration_, parameters_ + 4, 4, TransferOptions::kAllocateDeviceAsync),
@@ -98,6 +103,12 @@ int main(int argc, char ** argv)
   agnocast::AgnocastOnlySingleThreadedExecutor executor;
   auto node = std::make_shared<GpuTalker>();
   executor.add_node(node);
+  // Primes this thread's CUDA resources before the first borrow. Everything
+  // allocated between borrow_loaned_message() and publish() comes from the
+  // shared-memory mempool, so CUDA's one-time host allocations would land there
+  // and stay; an empty dispatch on the thread that runs the callbacks moves
+  // them onto the normal heap. See docs/gpu_memory.md.
+  dispatch([](cudaStream_t) {});
   executor.spin();
   return 0;
 }

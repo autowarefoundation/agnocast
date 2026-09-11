@@ -64,8 +64,11 @@ private:
 
   [[nodiscard]] bool has_attribute(CUdevice_attribute attr, int number, const char * name) const;
   [[nodiscard]] size_t query_granularity() const;
+  // `access_flags` is what separates the exporter's mapping from an importer's:
+  // the publisher writes its payload, a subscriber only reads it.
   [[nodiscard]] bool map_and_grant(
-    CUmemGenericAllocationHandle handle, size_t size, size_t granularity, void ** out_base) const;
+    CUmemGenericAllocationHandle handle, size_t size, size_t granularity, CUmemAccess_flags access,
+    void ** out_base) const;
 
   mutable std::mutex mtx_;
   mutable bool context_ready_ = false;

@@ -79,10 +79,8 @@ struct process_info
 
 extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 
-// One of a publisher's GPU device-memory regions. The kernel module stores the
-// export verbatim and does not interpret it; its role is to hold the region's
-// liveness reference so the memory outlives the publishing process, and to hand
-// each importer its own descriptor for the same open file.
+// One of a publisher's GPU device-memory regions, stored verbatim and never
+// interpreted here. See docs/gpu_memory.md.
 struct gpu_region_info
 {
   uint32_t region_id;
@@ -92,7 +90,7 @@ struct gpu_region_info
   uint64_t mapped_size;
   uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
   // The reference that keeps the allocation alive. NULL for mechanisms whose
-  // handle is not a file descriptor.
+  // handle is a blob rather than a file descriptor.
   struct file * handle_file;
   uint8_t * blob;
   uint32_t blob_size;
@@ -118,10 +116,10 @@ struct publisher_info
   struct hlist_node node;
 };
 
-// Unlinks a publisher_info and releases everything it owns. Used by every
-// teardown path so that resources added to publisher_info -- notably the GPU
-// region's file reference -- cannot be released in some paths and leaked in
-// others.
+// Unlinks a publisher_info and releases everything it owns, including each GPU
+// region's file reference. Every teardown path must go through this rather than
+// freeing the struct itself, or a resource added to publisher_info ends up
+// released on some paths and leaked on others.
 void agnocast_free_publisher_info(struct publisher_info * pub_info);
 
 struct subscriber_info

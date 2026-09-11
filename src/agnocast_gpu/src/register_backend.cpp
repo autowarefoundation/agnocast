@@ -9,8 +9,8 @@ namespace
 
 agnocast::internal::GpuMemoryBackend * select_backend()
 {
-  // Leaked: ~GpuRegion dispatches through this object, and a region held by a
-  // static-duration object outlives library static destruction.
+  // Leaked: a region dispatches through this object from its destructor, which
+  // can run after library static destruction.
   static auto * vmm = new VmmBackend();  // NOLINT(cppcoreguidelines-owning-memory)
   return vmm->is_supported() ? vmm : nullptr;
 }

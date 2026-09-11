@@ -1,10 +1,8 @@
 // A pipeline stage: reads a cloud from GPU memory, writes a filtered one, and
 // publishes it. Nothing returns to host memory in between.
 //
-// The single dispatch declares both reads() and writes(), which is the case that
-// decides where the stream comes from: one kernel touches the input and the
-// output, so a per-message stream would force a choice between the input's and
-// the output's, and neither is right. dispatch() owns it instead.
+// One kernel touches both the input and the output, so both are declared in a
+// single dispatch, which owns the stream they share.
 
 #include "agnocast/agnocast.hpp"
 #include "agnocast/gpu/dispatch.hpp"
@@ -57,6 +55,14 @@ private:
   {
     const size_t bytes = agnocast::gpu::gpu_data_size(*in);
     auto out = publisher_->borrow_loaned_message(bytes);
+    // The capacity overload can fail -- no region could be allocated, or every
+    // slot is still in flight -- and returns an empty handle, which has no
+    // message to dereference. borrow_loaned_message() has already logged why.
+    if (!out) {
+      RCLCPP_WARN(
+        get_logger(), "no GPU message available; dropping %s", in->header.frame_id.c_str());
+      return;
+    }
 
     out->header.frame_id = in->header.frame_id + "_filtered";
     out->height = in->height;
@@ -101,6 +107,12 @@ int main(int argc, char ** argv)
   agnocast::AgnocastOnlySingleThreadedExecutor executor;
   auto node = std::make_shared<GpuListenTalker>();
   executor.add_node(node);
+  // Primes this thread's CUDA resources before the first borrow. Everything
+  // allocated between borrow_loaned_message() and publish() comes from the
+  // shared-memory mempool, so CUDA's one-time host allocations would land there
+  // and stay; an empty dispatch on the thread that runs the callbacks moves
+  // them onto the normal heap. See docs/gpu_memory.md.
+  dispatch([](cudaStream_t) {});
   executor.spin();
   return 0;
 }

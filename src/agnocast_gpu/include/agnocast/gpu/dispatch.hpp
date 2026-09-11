@@ -1,24 +1,9 @@
 #pragma once
 
-// The submission API for GPU work on Agnocast messages.
-//
-// Agnocast owns the stream and passes it to the caller's lambda, so a message
-// and the work touching it cannot be associated with different streams. Designs
-// that take the stream through a publisher or a message allow writing on one
-// stream and publishing against another, sending out unfinished data.
-//
-// dispatch() returns only after the submitted work has completed. That is what
-// keeps the host-side invariant that a message is finished when its reference
-// count reaches zero: on the GPU a read is asynchronous, so a callback that
-// merely launched a kernel would return with the device still reading. Waiting
-// costs this node its own GPU time, a quantity its schedulability analysis
-// already accounts for, and adds no coupling to other nodes.
-//
-// Transfers are declared rather than written inside the lambda so the library
-// owns them: it can check that host buffers are page-locked, and it can time
-// transfers separately from kernels. Only the "upload first, download last"
-// shape is expressible; interleaved copies belong in the lambda, where they
-// count as GPU work.
+// The submission API for GPU work on Agnocast messages: dispatch() owns the
+// stream, blocks until the work completes, and takes transfers as declarations
+// rather than letting the caller write them inside its callable. Why it is
+// shaped that way is in docs/gpu_memory.md.
 
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
@@ -144,8 +129,8 @@ struct is_declaration<Download> : std::true_type
 {
 };
 
-// Logged rather than returned only, because a CUDA failure on this path means
-// the message a node is about to publish holds whatever was there before.
+// Logged as well as returned, because a CUDA failure here means the message a
+// node is about to publish holds whatever was in the slot before.
 inline bool check(cudaError_t status, const char * what)
 {
   if (status == cudaSuccess) return true;
@@ -166,9 +151,8 @@ inline cudaStream_t stream()
   return s;
 }
 
-// Blocking rather than spinning: until admission control bounds how many threads
-// may wait at once, spinning costs one core per concurrent dispatch and frees a
-// GPU window no one is queued for.
+// Blocking rather than spinning: spinning would cost a core per concurrent
+// dispatch, and nothing is queued for the GPU window it would free.
 inline cudaEvent_t completion_event()
 {
   static thread_local cudaEvent_t e = nullptr;
@@ -190,9 +174,8 @@ inline void gate_release()
 {
 }
 
-// Pageable host memory makes cudaMemcpyAsync behave synchronously, which would
-// put an unexpected host block inside the GPU window and corrupt any measurement
-// of it. A convention can be violated silently; this cannot.
+// Pageable host memory makes cudaMemcpyAsync behave synchronously, putting an
+// unexpected host block inside the GPU window.
 inline bool host_buffer_is_pinned(const void * host_ptr)
 {
   cudaPointerAttributes attributes = {};
@@ -203,29 +186,38 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
   return attributes.type == cudaMemoryTypeHost;
 }
 
-// A declared message must be mapped before the work can address it. Doing it
-// here is what makes reads()/writes() load-bearing rather than documentation:
-// the first frame from an unseen publisher establishes the mapping, and every
-// later one resolves against it. The publisher's own region is already mapped,
-// so this is a lookup for it.
-// Returns whether the work may run. A message whose region could not be mapped
-// resolves to a null device pointer, so launching anyway would fault the device
-// or, worse, publish untouched memory.
+// Maps the region the message refers to, if this process has not mapped it yet:
+// the first frame from a given publisher establishes the mapping and every later
+// one resolves against it. For the publisher's own region this is a lookup.
+//
+// This is the one part of a dispatch that allocates host memory in the driver,
+// so it lands in the shared-memory mempool when a node borrows before
+// dispatching; see docs/gpu_memory.md for why it is left here.
 template <typename T>
-bool prepare(const Reads<T> & declaration, cudaStream_t)
+bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
 {
-  const auto & message = *declaration.message;
   if (!message) return true;
 
   const std::string topic_name = message.get_topic_name();
+  // The subscriber id is this handle's own endpoint: the kmod checks it against
+  // the calling process before handing out a descriptor.
   const agnocast::internal::GpuRegionRef ref{
-    topic_name, message->data.publisher_id(), 0, message->data.region_id()};
+    topic_name, message->data.publisher_id(), message.get_pubsub_id(), message->data.region_id()};
   if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
     RCLCPP_ERROR(
       agnocast::logger, "could not map the GPU region of topic '%s'", topic_name.c_str());
     return false;
   }
   return message->data.get() != nullptr;
+}
+
+// Returns whether the work may run. A message whose region could not be mapped
+// resolves to a null device pointer, so launching anyway would fault the device
+// or, worse, publish untouched memory.
+template <typename T>
+bool prepare(const Reads<T> & declaration, cudaStream_t)
+{
+  return ensure_message_mapped(*declaration.message);
 }
 
 template <typename T>

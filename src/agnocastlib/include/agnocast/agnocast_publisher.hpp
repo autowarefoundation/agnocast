@@ -90,14 +90,35 @@ class PublisherBase
 protected:
   topic_local_id_t id_ = -1;
   uint32_t qos_depth_ = 1;
-  // Grown on demand rather than fixed, so a borrow never fails for want of a
-  // slot. The first is created on the first GPU borrow.
+  // Grown on demand rather than fixed. The first is created on the first GPU
+  // borrow.
   mutable std::mutex gpu_pools_mtx_;
   std::vector<std::unique_ptr<internal::GpuSlotPool>> gpu_pools_;
 
   // One slot per message that may be in flight, plus one being filled. KeepAll
   // reports a depth of 0, which would size a region for a single message.
   uint32_t gpu_slot_count() const { return std::max(qos_depth_, 1U) + 1; }
+
+  // Drops a region that holds no message and is too small for `capacity`, to
+  // make room under MAX_GPU_REGION_NUM_PER_PUBLISHER. The smallest such region
+  // goes, since its device memory buys the least. Caller holds gpu_pools_mtx_.
+  void retire_idle_gpu_pool(const size_t capacity)
+  {
+    auto victim = gpu_pools_.end();
+    for (auto it = gpu_pools_.begin(); it != gpu_pools_.end(); ++it) {
+      if ((*it)->slot_size() >= capacity || !(*it)->is_idle()) continue;
+      if (victim == gpu_pools_.end() || (*it)->slot_size() < (*victim)->slot_size()) {
+        victim = it;
+      }
+    }
+    if (victim == gpu_pools_.end()) return;
+
+    RCLCPP_INFO(
+      logger,
+      "releasing an unused %u byte GPU region of topic '%s' to make room for a %zu byte payload",
+      (*victim)->slot_size(), topic_name_.c_str(), capacity);
+    gpu_pools_.erase(victim);  // the pool's destructor releases the region
+  }
   std::string topic_name_;
   // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
   // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
@@ -224,17 +245,22 @@ public:
    * @brief Borrow a message whose payload lives in GPU device memory.
    * @param capacity Payload size in bytes.
    * @return A message whose `data` already refers to a reserved slot, or an
-   * empty pointer when no region could be provided.
+   * empty pointer when no region could be provided. **Unlike the no-argument
+   * overload this can fail, and dereferencing the result without checking it is
+   * a null dereference.**
    *
-   * A region is allocated on the first borrow and sized from the publisher's QoS
-   * depth, since "messages in flight simultaneously" is what depth already
-   * expresses. Later borrows only reserve a slot, so in steady state no GPU
+   * Reserves a slot in one of this publisher's GPU regions and records the
+   * region id and slot index in the message, which is how a subscriber finds the
+   * payload. A region is allocated on the first borrow, sized from the QoS
+   * depth; later borrows only reserve a slot, so in steady state no GPU
    * allocation happens on the message path. When no existing region can serve
-   * the request -- every slot is in flight, or `capacity` outgrew the slots a
+   * the request -- every slot in flight, or a capacity larger than the slots a
    * region was sized for -- another region is allocated rather than the borrow
-   * failing. That costs latency on the one publish that hits it, but never data.
-   * A message names its own region and a subscriber maps an unseen one on first
-   * receipt, so additional regions need no coordination.
+   * failing, which costs latency on that one publish but never data.
+   *
+   * It fails only when the region cap is reached and every region too small for
+   * the payload still has a message in it. See docs/gpu_memory.md for the
+   * sizing and growth policy.
    */
   ipc_shared_ptr<MessageT> borrow_loaned_message(const size_t capacity)
   {
@@ -270,10 +296,34 @@ public:
             "the QoS depth, or keep the payload size stable, to avoid the allocation.",
             topic_name_.c_str(), capacity);
         }
-        auto grown = internal::GpuSlotPool::create(
-          topic_name_, id_, static_cast<uint32_t>(capacity), gpu_slot_count());
+
+        uint32_t largest_slot = 0;
+        for (const auto & existing : gpu_pools_) {
+          largest_slot = std::max(largest_slot, existing->slot_size());
+        }
+
+        if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
+          retire_idle_gpu_pool(capacity);
+        }
+
+        auto grown = internal::GpuSlotPool::create(topic_name_, id_, capacity, gpu_slot_count());
         if (grown == nullptr || !grown->acquire(capacity, slot_index)) {
-          RCLCPP_ERROR(logger, "no GPU region for topic '%s'", topic_name_.c_str());
+          // Distinguished because the two have different remedies.
+          if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
+            RCLCPP_ERROR(
+              logger,
+              "no GPU region for topic '%s': a %zu byte payload needs a new region, this publisher "
+              "already holds the maximum of %d (largest slot %u bytes), and every region too small "
+              "for it still holds a message. Retry once subscribers have released them, or keep "
+              "the payload size stable so fewer regions are needed.",
+              topic_name_.c_str(), capacity, MAX_GPU_REGION_NUM_PER_PUBLISHER, largest_slot);
+          } else {
+            RCLCPP_ERROR(
+              logger,
+              "no GPU region for topic '%s': allocating one for a %zu byte payload failed (%zu "
+              "region(s) held). See the GPU backend errors above for the cause.",
+              topic_name_.c_str(), capacity, gpu_pools_.size());
+          }
           return ipc_shared_ptr<MessageT>();
         }
         pool = grown.get();
@@ -323,8 +373,8 @@ public:
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
       // Deleting the message returns its GPU slot along with its host payload:
-      // the kernel module released this entry, so every subscriber has dropped
-      // its reference and the slot is free by the same fact.
+      // the kmod released this entry, so every subscriber has dropped its
+      // reference and the slot is free by the same fact.
       delete release_ptr;
     }
 

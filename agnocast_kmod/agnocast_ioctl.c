@@ -2057,9 +2057,7 @@ int agnocast_ioctl_remove_publisher(
   }
 
   if (pub_info->entries_num == 0) {
-    hash_del(&pub_info->node);
-    kfree(pub_info->node_name);
-    kfree(pub_info);
+    agnocast_free_publisher_info(pub_info);
 
     if (!is_parameter_service_topic(topic_name)) {
       dev_info(
@@ -2550,12 +2548,39 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   return ret;
 }
 
-// Region ids are never reused, so a stale id in a message resolves to nothing
-// rather than to a different region.
+// Monotonic: ids are never reused, so a stale id in a message resolves to
+// nothing rather than to an unrelated region.
 static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
 
+// Checks that the handle is the kind the declared mechanism uses. A mismatch
+// would only surface in the importer, which cannot report it back.
+static int validate_gpu_handle(
+  const uint32_t backend_type, const struct file * handle_file, const uint32_t blob_size)
+{
+  // A descriptor and nothing else for VMM; a blob and nothing else for NvSciBuf.
+  if (backend_type == AGNOCAST_GPU_BACKEND_VMM) {
+    return (handle_file && blob_size == 0) ? 0 : -EINVAL;
+  }
+  if (backend_type == AGNOCAST_GPU_BACKEND_NVSCIBUF) {
+    return (!handle_file && blob_size > 0) ? 0 : -EINVAL;
+  }
+  return -EINVAL;
+}
+
+// `wanted_region_id` is the id read out of a message, or 0 for "any".
+static struct gpu_region_info * find_gpu_region(
+  struct publisher_info * pub_info, const uint32_t wanted_region_id)
+{
+  struct gpu_region_info * candidate;
+  list_for_each_entry(candidate, &pub_info->gpu_regions, node)
+  {
+    if (wanted_region_id == 0 || candidate->region_id == wanted_region_id) return candidate;
+  }
+  return NULL;
+}
+
 int agnocast_ioctl_add_gpu_region(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   union ioctl_add_gpu_region_args * args, struct file * handle_file, const uint8_t * blob)
 {
   int ret = 0;
@@ -2567,6 +2592,15 @@ int agnocast_ioctl_add_gpu_region(
       agnocast_device, "Region geometry does not fit its mapping (topic_name=%s). (%s)\n",
       topic_name, __func__);
     return -EINVAL;
+  }
+
+  ret = validate_gpu_handle(args->backend_type, handle_file, args->blob_size);
+  if (ret) {
+    dev_warn(
+      agnocast_device,
+      "Handle does not match the declared GPU mechanism (topic_name=%s, backend_type=%u). (%s)\n",
+      topic_name, args->backend_type, __func__);
+    return ret;
   }
 
   down_read(&global_htables_rwsem);
@@ -2586,6 +2620,16 @@ int agnocast_ioctl_add_gpu_region(
       agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
       args->publisher_id, topic_name, __func__);
     ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // Only the owning process may register memory under this publisher's name.
+  if (pub_info->pid != pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) does not own the publisher (id=%d) of the topic (topic_name=%s). (%s)\n",
+      pid, args->publisher_id, topic_name, __func__);
+    ret = -EPERM;
     goto unlock_all;
   }
 
@@ -2634,13 +2678,12 @@ unlock_only_global:
 }
 
 int agnocast_ioctl_get_gpu_region(
-  const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
-  const topic_local_id_t subscriber_id, const uint32_t wanted_region_id, uint8_t * blob_buf,
-  uint32_t blob_buf_size, union ioctl_get_gpu_region_args * ioctl_ret,
-  struct file ** out_handle_file)
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
+  const uint32_t wanted_region_id, uint8_t * blob_buf, uint32_t blob_buf_size,
+  union ioctl_get_gpu_region_args * ioctl_ret, struct file ** out_handle_file)
 {
   int ret = 0;
-  (void)subscriber_id;
 
   *out_handle_file = NULL;
 
@@ -2655,7 +2698,19 @@ int agnocast_ioctl_get_gpu_region(
 
   down_read(&wrapper->topic->rwsem);
 
-  const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  // The caller must be a subscriber of this topic, in the process it claims to
+  // be; see the trust boundary in docs/gpu_memory.md.
+  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
+  if (!sub_info || sub_info->pid != pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) is not the subscriber (id=%d) of the topic (topic_name=%s). (%s)\n", pid,
+      subscriber_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
   if (!pub_info) {
     dev_dbg(
       agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
@@ -2664,17 +2719,7 @@ int agnocast_ioctl_get_gpu_region(
     goto unlock_all;
   }
 
-  // region_id 0 means "any", which is what a caller that has not yet seen a
-  // message uses; otherwise the message names the region it was written into.
-  const struct gpu_region_info * region = NULL;
-  const struct gpu_region_info * candidate;
-  list_for_each_entry(candidate, &pub_info->gpu_regions, node)
-  {
-    if (wanted_region_id == 0 || candidate->region_id == wanted_region_id) {
-      region = candidate;
-      break;
-    }
-  }
+  const struct gpu_region_info * region = find_gpu_region(pub_info, wanted_region_id);
   if (!region) {
     dev_dbg(
       agnocast_device, "Publisher (id=%d) has no GPU region %u. (%s)\n", publisher_id,
@@ -2708,6 +2753,72 @@ int agnocast_ioctl_get_gpu_region(
 
 unlock_all:
   up_read(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_remove_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, const uint32_t region_id)
+{
+  int ret = 0;
+
+  // "Any" has no meaning here: removing a region the caller did not name would
+  // release memory it is still writing into.
+  if (region_id == 0) return -EINVAL;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_write(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  if (pub_info->pid != pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) does not own the publisher (id=%d) of the topic (topic_name=%s). (%s)\n",
+      pid, publisher_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  struct gpu_region_info * region = find_gpu_region(pub_info, region_id);
+  if (!region) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) has no GPU region %u. (%s)\n", publisher_id, region_id,
+      __func__);
+    ret = -ENOENT;
+    goto unlock_all;
+  }
+
+  list_del(&region->node);
+  pub_info->gpu_region_num--;
+  // A subscriber that already imported the region holds its own reference and
+  // reads on; one that has not will now fail to, which is why the caller must
+  // know the region is unreferenced.
+  if (region->handle_file) {
+    fput(region->handle_file);
+  }
+  kfree(region->blob);
+  kfree(region);
+
+unlock_all:
+  up_write(&wrapper->topic->rwsem);
 unlock_only_global:
   up_read(&global_htables_rwsem);
   return ret;
@@ -3142,6 +3253,7 @@ static long remove_subscriber_cmd(struct ioctl_remove_subscriber_args __user * a
 
 static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
 {
+  const pid_t pid = current->tgid;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
   union ioctl_add_gpu_region_args args;
@@ -3170,7 +3282,7 @@ static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
     }
   }
 
-  ret = agnocast_ioctl_add_gpu_region(topic_name_buf, ipc_ns, &args, handle_file, blob);
+  ret = agnocast_ioctl_add_gpu_region(topic_name_buf, ipc_ns, pid, &args, handle_file, blob);
   if (ret != 0 && handle_file) {
     fput(handle_file);
   }
@@ -3181,6 +3293,7 @@ static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
 
 static long get_gpu_region_cmd(union ioctl_get_gpu_region_args __user * arg)
 {
+  const pid_t pid = current->tgid;
   const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
 
   union ioctl_get_gpu_region_args args;
@@ -3205,7 +3318,7 @@ static long get_gpu_region_cmd(union ioctl_get_gpu_region_args __user * arg)
 
   struct file * handle_file = NULL;
   ret = agnocast_ioctl_get_gpu_region(
-    topic_name_buf, ipc_ns, publisher_id, subscriber_id, wanted_region_id, blob_buf,
+    topic_name_buf, ipc_ns, pid, publisher_id, subscriber_id, wanted_region_id, blob_buf,
     blob_buffer_size, &args, &handle_file);
   if (ret != 0) goto free_blob;
 
@@ -3246,6 +3359,22 @@ put_file:
 free_blob:
   kfree(blob_buf);
   return ret;
+}
+
+static long remove_gpu_region_cmd(struct ioctl_remove_gpu_region_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_remove_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_remove_gpu_region(
+    topic_name_buf, ipc_ns, pid, args.publisher_id, args.region_id);
 }
 
 static long remove_publisher_cmd(struct ioctl_remove_publisher_args __user * arg)
@@ -3492,6 +3621,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return add_gpu_region_cmd((union ioctl_add_gpu_region_args __user *)arg);
     case AGNOCAST_GET_GPU_REGION_CMD:
       return get_gpu_region_cmd((union ioctl_get_gpu_region_args __user *)arg);
+    case AGNOCAST_REMOVE_GPU_REGION_CMD:
+      return remove_gpu_region_cmd((struct ioctl_remove_gpu_region_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     default:

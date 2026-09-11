@@ -31,8 +31,8 @@ std::unordered_map<uint32_t, MappedGpuRegion> & table()
   return *regions;
 }
 
-// The kmod holds the region's liveness reference, so the export is produced once
-// here rather than per subscriber.
+// One export serves every subscriber, because the kmod holds the reference and
+// hands out a descriptor for the same open file per importer.
 uint32_t create_via_kmod(
   GpuMemoryBackend & backend, const std::string_view topic_name,
   const topic_local_id_t publisher_id, MappedGpuRegion & region)
@@ -115,11 +115,21 @@ GpuRegionRegistry & GpuRegionRegistry::instance()
   return *registry;
 }
 
-const MappedGpuRegion * GpuRegionRegistry::find(const uint32_t region_id) const
+bool GpuRegionRegistry::is_mapped(const uint32_t region_id) const
 {
   const std::lock_guard<std::mutex> lock(table_mutex());
+  return table().count(region_id) != 0;
+}
+
+void * GpuRegionRegistry::resolve(
+  const uint32_t region_id, const uint32_t slot_index, const uint64_t bytes) const
+{
+  // Under the lock rather than through a borrowed region pointer: a publisher
+  // may destroy a region it has emptied, and an address computed from a pointer
+  // the lock no longer covers could outlive the mapping.
+  const std::lock_guard<std::mutex> lock(table_mutex());
   const auto it = table().find(region_id);
-  return (it == table().end()) ? nullptr : &it->second;
+  return (it == table().end()) ? nullptr : it->second.slot_address(slot_index, bytes);
 }
 
 uint32_t GpuRegionRegistry::create(
@@ -142,7 +152,7 @@ uint32_t GpuRegionRegistry::create(
 
 bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
 {
-  if (ref.region_id != 0 && find(ref.region_id) != nullptr) return true;
+  if (ref.region_id != 0 && is_mapped(ref.region_id)) return true;
 
   GpuMemoryBackend * backend = get_gpu_memory_backend();
   if (backend == nullptr) return false;
@@ -157,12 +167,40 @@ bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
   return true;
 }
 
+void GpuRegionRegistry::destroy(
+  const std::string_view topic_name, const topic_local_id_t publisher_id, const uint32_t region_id)
+{
+  if (region_id == 0) return;
+
+  // The kmod first: once it has dropped its reference no further importer can
+  // reach the region, so unmapping afterwards cannot race an import. A failure
+  // is reported and then ignored, since the mapping is still ours to release.
+  struct ioctl_remove_gpu_region_args args = {};
+  args.topic_name = {topic_name.data(), topic_name.size()};
+  args.publisher_id = publisher_id;
+  args.region_id = region_id;
+  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_GPU_REGION_CMD, &args) < 0) {
+    RCLCPP_ERROR(
+      logger, "AGNOCAST_REMOVE_GPU_REGION_CMD failed for topic '%.*s' region %u: %s",
+      static_cast<int>(topic_name.size()), topic_name.data(), region_id, strerror(errno));
+  }
+
+  MappedGpuRegion released;
+  {
+    const std::lock_guard<std::mutex> lock(table_mutex());
+    const auto it = table().find(region_id);
+    if (it == table().end()) return;
+    released = std::move(it->second);
+    table().erase(it);
+  }
+  // Unmapped outside the lock: releasing a region synchronizes the device, and
+  // resolving a slot of another region should not wait on that.
+}
+
 void * resolve_gpu_slot(
   const uint32_t region_id, const uint32_t slot_index, const uint64_t bytes) noexcept
 {
-  const MappedGpuRegion * region = GpuRegionRegistry::instance().find(region_id);
-  if (region == nullptr) return nullptr;
-  return region->slot_address(slot_index, bytes);
+  return GpuRegionRegistry::instance().resolve(region_id, slot_index, bytes);
 }
 
 }  // namespace agnocast::internal

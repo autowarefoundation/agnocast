@@ -1,16 +1,19 @@
 // End-to-end check of the cross-process path: a publisher allocates a region and
 // hands its liveness reference to the kernel module, which installs a descriptor
-// for it into a separate process, which maps it and reads what the publisher
-// wrote through the values the message carries alone.
+// into a separate process, which maps it and reads what the publisher wrote
+// using only the region id and slot index carried in the message.
 //
 // This is the only coverage for descriptor installation, which depends on the
 // calling process's file table and so cannot be reached from KUnit.
 //
 // Requires the agnocast kernel module and a GPU; see the requires_kernel_module
-// label in CMakeLists.txt.
+// label in CMakeLists.txt. Where either is missing the test reports itself
+// skipped (kSkip) rather than failed: the label keeps it out of a default run,
+// but a machine with the module loaded need not have a GPU.
 
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/internal/gpu_backend.hpp"
 #include "agnocast/internal/gpu_message.hpp"
 #include "agnocast/internal/gpu_slot_pool.hpp"
 
@@ -29,9 +32,13 @@
 // lookup or each use declares a new incomplete type.
 using agnocast::ioctl_add_process_args;
 using agnocast::ioctl_add_publisher_args;
+using agnocast::ioctl_add_subscriber_args;
 
 namespace
 {
+
+// ctest's SKIP_RETURN_CODE, so a machine without a GPU reports a skip.
+constexpr int kSkip = 77;
 
 constexpr const char * kTopic = "/gpu_region_e2e";
 constexpr const char * kNode = "/gpu_region_e2e_node";
@@ -40,8 +47,8 @@ constexpr uint32_t kSlotCount = 4;
 constexpr size_t kPayload = 4096;
 
 // Stands in for the part of a message that reaches the subscriber through
-// Agnocast's host shared memory. It carries no device address, because none
-// would be meaningful in another process.
+// Agnocast's host shared memory: the region id and slot index, and no device
+// address.
 struct Message
 {
   agnocast::topic_local_id_t publisher_id;
@@ -49,6 +56,13 @@ struct Message
   uint32_t slot_index;
   uint64_t count;
 };
+
+// Probed in each process after the fork, for the same reason: this is the first
+// call that touches the driver.
+bool gpu_is_available()
+{
+  return agnocast::internal::get_gpu_memory_backend() != nullptr;
+}
 
 // Each process registers with the kernel module itself; no CUDA call happens
 // before the fork, because CUDA does not support forking an initialized context.
@@ -71,6 +85,16 @@ bool open_device_and_register()
 
 int run_publisher(int notify_fd)
 {
+  if (!gpu_is_available()) {
+    std::fprintf(stderr, "no GPU memory backend on this machine\n");
+    // Closing the pipe lets the subscriber stop waiting for a message that is
+    // never coming, so it exits and can be reaped.
+    close(notify_fd);
+    int status = 0;
+    wait(&status);
+    return kSkip;
+  }
+
   if (!open_device_and_register()) return 1;
 
   ioctl_add_publisher_args pub_args = {};
@@ -107,7 +131,9 @@ int run_publisher(int notify_fd)
     }
     if (pool->available() != kSlotCount - 1) return 1;
 
-    const agnocast::internal::gpu_array<uint8_t> data(
+    // Non-const: get() on a const handle yields a const pointer, because a
+    // subscriber's mapping of the region is read-only.
+    agnocast::internal::gpu_array<uint8_t> data(
       pool->region_id(), slot_index, kPayload, publisher_id);
 
     std::vector<uint8_t> pattern(kPayload);
@@ -142,21 +168,36 @@ int run_publisher(int notify_fd)
 int run_subscriber(int notify_fd)
 {
   Message msg = {};
-  if (read(notify_fd, &msg, sizeof(msg)) != sizeof(msg)) return 1;
+  // A short read means the publisher skipped or died before publishing.
+  if (read(notify_fd, &msg, sizeof(msg)) != sizeof(msg)) return kSkip;
 
+  if (!gpu_is_available()) return kSkip;
   if (!open_device_and_register()) return 1;
+
+  // The kernel module hands a descriptor only to a registered subscriber of the
+  // topic running in the calling process, so this is what authorizes the import.
+  ioctl_add_subscriber_args sub_args = {};
+  sub_args.topic_name = {kTopic, std::strlen(kTopic)};
+  sub_args.node_name = {kNode, std::strlen(kNode)};
+  sub_args.qos_depth = kSlotCount;
+  sub_args.qos_is_reliable = true;
+  if (ioctl(agnocast::agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &sub_args) < 0) {
+    std::fprintf(stderr, "ADD_SUBSCRIBER failed: %s\n", std::strerror(errno));
+    return 1;
+  }
+  const agnocast::topic_local_id_t subscriber_id = sub_args.ret_id;
 
   // Mapping a publisher's region is a one-off on first receipt, as it would be
   // for a previously unseen publisher on a live topic.
   const agnocast::internal::GpuRegionRef ref{
-    kTopic, msg.publisher_id, /*subscriber_id=*/0, msg.region_id};
+    kTopic, msg.publisher_id, subscriber_id, msg.region_id};
   if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
     std::fprintf(stderr, "ensure_mapped failed\n");
     return 1;
   }
 
-  // Resolves to a device address from the values the message carries plus this
-  // process's own region table -- no knowledge of topic or publisher.
+  // Resolves to a device address from the message's two numbers plus this
+  // process's own region table.
   const agnocast::internal::gpu_array<uint8_t> data(
     msg.region_id, msg.slot_index, msg.count, msg.publisher_id);
   if (data.get() == nullptr) {
@@ -219,6 +260,6 @@ int main()
 
   close(fds[0]);
   const int rc = run_publisher(fds[1]);
-  std::printf("%s\n", rc == 0 ? "PASS" : "FAIL");
+  std::printf("%s\n", rc == 0 ? "PASS" : (rc == kSkip ? "SKIP" : "FAIL"));
   return rc;
 }
