@@ -42,7 +42,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `run_no_rclcpp_client.bash` | `no_rclcpp_client.launch.xml` |
 | `run_no_rclcpp_server.bash` | `no_rclcpp_server.launch.xml` |
 | `run_sim_time_timer.bash` | `sim_time_timer.launch.xml` (simulation time) |
-| `run_gpu_pubsub.bash` | `gpu_pubsub.launch.xml` (payloads in GPU device memory; needs a CUDA GPU — see [`docs/gpu_memory.md`](../docs/gpu_memory.md)) |
+| `run_gpu_pubsub.bash` | `gpu_pubsub.launch.xml` (payloads in GPU device memory; needs a CUDA GPU — see [`docs/gpu_ipc.md`](../docs/gpu_ipc.md)) |
 
 ## Developer-facing
 

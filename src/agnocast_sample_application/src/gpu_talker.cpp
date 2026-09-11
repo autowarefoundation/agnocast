@@ -107,7 +107,7 @@ int main(int argc, char ** argv)
   // allocated between borrow_loaned_message() and publish() comes from the
   // shared-memory mempool, so CUDA's one-time host allocations would land there
   // and stay; an empty dispatch on the thread that runs the callbacks moves
-  // them onto the normal heap. See docs/gpu_memory.md.
+  // them onto the normal heap. See docs/gpu_ipc.md.
   dispatch([](cudaStream_t) {});
   executor.spin();
   return 0;

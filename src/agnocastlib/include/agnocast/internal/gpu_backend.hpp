@@ -17,12 +17,12 @@ namespace agnocast::internal
 
 // How a region's memory was allocated and made importable by another process.
 // These values cross the userspace-kernel ABI, so never renumber or reuse one.
-// docs/gpu_memory.md covers which mechanisms qualify and why CUDA IPC does not.
+// docs/gpu_ipc.md covers which mechanisms qualify and why CUDA IPC does not.
 enum class GpuMemoryBackendType : uint32_t {
   Unknown = 0,
   // Shared as a POSIX file descriptor. Discrete GPU and SoC.
   Vmm = 1,
-  // Shared as an endpoint-bound descriptor. Reserved: see docs/gpu_memory.md for
+  // Shared as an endpoint-bound descriptor. Reserved: see docs/gpu_ipc.md for
   // why this ABI cannot serve it as it stands.
   NvSciBuf = 2,
 };

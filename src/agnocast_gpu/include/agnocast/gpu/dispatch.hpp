@@ -3,7 +3,7 @@
 // The submission API for GPU work on Agnocast messages: dispatch() owns the
 // stream, blocks until the work completes, and takes transfers as declarations
 // rather than letting the caller write them inside its callable. Why it is
-// shaped that way is in docs/gpu_memory.md.
+// shaped that way is in docs/gpu_ipc.md.
 
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
@@ -233,7 +233,7 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
 //
 // This is the one part of a dispatch that allocates host memory in the driver,
 // so it lands in the shared-memory mempool when a node borrows before
-// dispatching; see docs/gpu_memory.md for why it is left here.
+// dispatching; see docs/gpu_ipc.md for why it is left here.
 template <typename T>
 bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
 {

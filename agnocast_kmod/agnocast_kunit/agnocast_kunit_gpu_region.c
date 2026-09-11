@@ -484,7 +484,7 @@ void test_case_gpu_region_get_publisher_not_found(struct kunit * test)
 }
 
 // Knowing a topic name and a publisher id must not be enough to be handed a
-// descriptor; see the trust boundary in docs/gpu_memory.md.
+// descriptor; see the trust boundary in docs/gpu_ipc.md.
 void test_case_gpu_region_get_rejects_an_unauthorized_caller(struct kunit * test)
 {
   const topic_local_id_t publisher_id = setup_publisher(test);
