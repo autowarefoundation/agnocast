@@ -44,6 +44,45 @@ void decrement_borrowed_publisher_num();
 extern int agnocast_fd;
 extern "C" uint32_t agnocast_get_borrowed_publisher_num();
 
+// Defined in agnocast_publisher.cpp. Declared here with the same TLS model as
+// the definition on purpose: a global-dynamic reference from another
+// translation unit would resolve through __tls_get_addr, which can allocate,
+// which is the recursion the definition's comment warns about.
+extern __attribute__((tls_model("initial-exec"))) thread_local uint32_t borrowed_publisher_num;
+
+namespace internal
+{
+
+// Suspends this thread's borrow window for as long as it is alive, so that
+// allocations made meanwhile come from the process heap instead of the
+// shared-memory mempool.
+//
+// The window exists so that a message's payload lands in shared memory. But
+// anything else allocated while it is open lands there too, and the GPU driver
+// allocates host memory of its own on paths the library has to call from inside
+// it -- creating a stream, importing a region. Left alone, that bookkeeping
+// becomes a permanent resident of the segment every subscriber maps.
+//
+// Only code that allocates nothing belonging to the message may be wrapped:
+// suspending the window around a step that does would put part of a message in
+// this process's heap, where a peer resolving it would find nothing. That rules
+// out wrapping user callbacks, and makes this an internal tool rather than an
+// API.
+class SuspendedBorrowWindow
+{
+public:
+  SuspendedBorrowWindow() : saved_(borrowed_publisher_num) { borrowed_publisher_num = 0; }
+  ~SuspendedBorrowWindow() { borrowed_publisher_num = saved_; }
+
+  SuspendedBorrowWindow(const SuspendedBorrowWindow &) = delete;
+  SuspendedBorrowWindow & operator=(const SuspendedBorrowWindow &) = delete;
+
+private:
+  uint32_t saved_;
+};
+
+}  // namespace internal
+
 /**
  * @brief Options for configuring an Agnocast publisher.
  */

@@ -107,12 +107,6 @@ int main(int argc, char ** argv)
   agnocast::AgnocastOnlySingleThreadedExecutor executor;
   auto node = std::make_shared<GpuListenTalker>();
   executor.add_node(node);
-  // Primes this thread's CUDA resources before the first borrow. Everything
-  // allocated between borrow_loaned_message() and publish() comes from the
-  // shared-memory mempool, so CUDA's one-time host allocations would land there
-  // and stay; an empty dispatch on the thread that runs the callbacks moves
-  // them onto the normal heap. See docs/gpu_ipc.md.
-  dispatch([](cudaStream_t) {});
   executor.spin();
   return 0;
 }
