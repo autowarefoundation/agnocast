@@ -23,6 +23,16 @@ namespace agnocast::internal
 // These values cross the userspace-kernel ABI so an importer can reject a
 // mechanism it cannot handle. The kmod stores them without interpretation and
 // takes no part in deciding what a machine supports. Never renumber or reuse.
+//
+// CUDA IPC is deliberately absent. Both mechanisms below give the allocation a
+// lifetime that outlives its creator -- a VMM allocation is held by a file
+// descriptor, an NvSciBuf object by its own reference count -- so a publisher
+// can crash without invalidating the mappings its subscribers are reading. A
+// CUDA IPC handle is an opaque token with no backing kernel object, so nothing
+// can hold a reference on the allocation's behalf; the memory is freed when the
+// exporter dies and subscribers are left with dangling device pointers.
+// Restoring that guarantee would take a dedicated process owning every
+// allocation: another component to supervise, and a new single point of failure.
 enum class GpuMemoryBackendType : uint32_t {
   Unknown = 0,
   // Shared as a POSIX file descriptor. Discrete GPU and SoC.
@@ -32,16 +42,6 @@ enum class GpuMemoryBackendType : uint32_t {
   // exists alongside Vmm on SoCs that support both.
   NvSciBuf = 2,
 };
-
-// CUDA IPC is deliberately absent. Both mechanisms above give the allocation a
-// lifetime that outlives its creator -- a VMM allocation is held by a file
-// descriptor, an NvSciBuf object by its own reference count -- so a publisher
-// can crash without invalidating the mappings its subscribers are reading. A
-// CUDA IPC handle is an opaque token with no backing kernel object, so nothing
-// can hold a reference on the allocation's behalf; the memory is freed when the
-// exporter dies and subscribers are left with dangling device pointers.
-// Restoring that guarantee would take a dedicated process owning every
-// allocation: another component to supervise, and a new single point of failure.
 
 // The descriptor references the whole allocation, not one slot, so leaking it
 // retains the entire region until process exit.
@@ -77,8 +77,10 @@ private:
   int fd_ = -1;
 };
 
-// The shape of a region, and the only place its invariants are stated. Both
-// sides of the process boundary check against these.
+// The specification of a region: how large it is, how it is divided into slots,
+// and which device it lives on. Description only -- the exporter fills it in, it
+// travels through the kmod, and it means the same thing in every process that
+// maps the region. MappedGpuRegion below is what actually holds one.
 struct GpuRegionGeometry
 {
   uint32_t slot_size = 0;
@@ -90,25 +92,19 @@ struct GpuRegionGeometry
   // A UUID, not an ordinal. Ordinals are process-relative, so two processes
   // with different CUDA_VISIBLE_DEVICES both see an ordinal 0 that is a
   // different physical device. On a MIG-partitioned GPU this is the compute
-  // instance's UUID, since instances cannot import each other's memory.
+  // instance's UUID.
   std::array<uint8_t, 16> device_uuid{};
-
-  [[nodiscard]] bool is_consistent() const noexcept
-  {
-    return slot_size != 0 && slot_count != 0 &&
-           static_cast<uint64_t>(slot_size) * slot_count <= mapped_size;
-  }
-
-  [[nodiscard]] bool contains(uint32_t slot_index, uint64_t bytes) const noexcept
-  {
-    return slot_index < slot_count && bytes <= slot_size;
-  }
-
-  [[nodiscard]] uint64_t offset_of(uint32_t slot_index) const noexcept
-  {
-    return static_cast<uint64_t>(slot_index) * slot_size;
-  }
 };
+
+// A geometry arrives from another process, so every import path checks it before
+// the region is mapped. Slot addressing bounds an index against slot_count
+// alone, which only keeps addresses inside the mapping once the slots are known
+// to fit there.
+[[nodiscard]] inline bool is_consistent(const GpuRegionGeometry & geometry) noexcept
+{
+  return geometry.slot_size != 0 && geometry.slot_count != 0 &&
+         static_cast<uint64_t>(geometry.slot_size) * geometry.slot_count <= geometry.mapped_size;
+}
 
 struct VmmExportHandle
 {
@@ -120,8 +116,6 @@ struct NvSciBufExportHandle
   std::vector<uint8_t> descriptor;
 };
 
-// Naming each alternative keeps the meaning of the payload explicit at the type
-// level rather than leaving a bare descriptor or byte buffer to convention.
 using GpuRegionExportHandle = std::variant<std::monostate, VmmExportHandle, NvSciBufExportHandle>;
 
 // What crosses the process boundary: everything a peer needs to map the region.
@@ -134,7 +128,10 @@ struct GpuRegionExport
 
 class GpuMemoryBackend;
 
-// What stays in this process: the mapping, and its owner. Move-only, because a
+// The owner of a region in this process: it holds the mapping and releases it on
+// destruction. Where GpuRegionGeometry only describes a region, this is the
+// handle the region is used and managed through -- the publisher gets one from
+// create_region, each subscriber one from import_region. Move-only, because a
 // mapping cannot be released twice.
 class MappedGpuRegion
 {
@@ -171,8 +168,10 @@ public:
   // from another process, so it is checked here rather than trusted.
   [[nodiscard]] void * slot_address(uint32_t slot_index, uint64_t bytes) const noexcept
   {
-    if (base_ == nullptr || !geometry_.contains(slot_index, bytes)) return nullptr;
-    return static_cast<uint8_t *>(base_) + geometry_.offset_of(slot_index);
+    if (base_ == nullptr || slot_index >= geometry_.slot_count || bytes > geometry_.slot_size) {
+      return nullptr;
+    }
+    return static_cast<uint8_t *>(base_) + static_cast<uint64_t>(slot_index) * geometry_.slot_size;
   }
 
   void reset() noexcept;
@@ -206,8 +205,12 @@ public:
   // returned region's geometry. Failure yields an invalid region.
   [[nodiscard]] virtual MappedGpuRegion create_region(uint32_t slot_size, uint32_t slot_count) = 0;
 
-  // Per-subscriber because NvSciBuf export descriptors are bound to a
-  // destination endpoint. Backends without that restriction ignore the id.
+  // Produces everything a peer needs to map the region. subscriber_id names the
+  // peer the export is meant for, because an export is not always reusable
+  // across destinations: an NvSciBuf descriptor is reconciled against the
+  // importing endpoint, so the bytes one subscriber receives mean nothing to
+  // another. A VMM shareable descriptor carries no such binding, so VmmBackend
+  // ignores the argument and a single export serves every subscriber.
   [[nodiscard]] virtual std::optional<GpuRegionExport> export_for(
     const MappedGpuRegion & region, topic_local_id_t subscriber_id) = 0;
 
