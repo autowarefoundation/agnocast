@@ -9,7 +9,8 @@
 #   ./scripts/setup_thread_configurator.bash
 #
 # This script automates:
-#   1. Granting CAP_SYS_NICE to the thread_configurator_node binary.
+#   1. Granting CAP_SYS_NICE (scheduling syscalls) and CAP_DAC_OVERRIDE (writes
+#      to root-owned /proc/irq/<N>/smp_affinity_list) to thread_configurator_node.
 #   2. Registering required library paths in /etc/ld.so.conf.d/agnocast-cie.conf.
 
 set -euo pipefail
@@ -62,7 +63,7 @@ fi
 
 # --- Step 1: Grant capabilities --------------------------------------------
 
-echo "[1/2] Grant CAP_SYS_NICE to thread_configurator_node"
+echo "[1/2] Grant CAP_SYS_NICE and CAP_DAC_OVERRIDE to thread_configurator_node"
 
 bin_path=$(readlink -f "${thread_configurator_prefix}/lib/agnocast_cie_thread_configurator/thread_configurator_node")
 
@@ -71,12 +72,15 @@ if [ ! -f "$bin_path" ]; then
 	exit 1
 fi
 
+# getcap prints caps in numeric order: "cap_dac_override,cap_sys_nice=eip".
+# An install by an older script version carries only cap_sys_nice and must not
+# match here, or it would never be upgraded to the combined set.
 current_caps=$(getcap "$bin_path" 2>/dev/null || true)
-if echo "$current_caps" | grep -q "cap_sys_nice=eip"; then
+if echo "$current_caps" | grep -q "cap_dac_override,cap_sys_nice=eip"; then
 	echo "  Already set ($current_caps). Skipping."
 else
 	echo "  Target: $bin_path"
-	sudo setcap cap_sys_nice=eip "$bin_path"
+	sudo setcap "cap_sys_nice,cap_dac_override=eip" "$bin_path"
 	echo "  Done: $(getcap "$bin_path")"
 fi
 

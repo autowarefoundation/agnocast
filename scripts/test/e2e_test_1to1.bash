@@ -31,7 +31,6 @@ usage() {
     echo "  -s, --single       Run only one test case using current config file"
     echo "  -c, --continue     Continue running tests even if one fails"
     echo "  -p, --parallel N   Run tests in parallel with N workers (default: 1 = sequential)"
-    echo "                     NOTE: Requires AGNOCAST_BRIDGE_MODE=off (or 0)."
     exit 0
 }
 
@@ -76,12 +75,6 @@ if [[ "$LOWER_BRIDGE_MODE" =~ ^(0|off)$ ]]; then
     BRIDGE_OFF=true
 else
     BRIDGE_OFF=false
-fi
-
-if [ "$PARALLEL" -gt 1 ] && [ "$BRIDGE_OFF" != true ]; then
-    echo "Error: -p/--parallel requires AGNOCAST_BRIDGE_MODE=off (or 0)." >&2
-    echo "       Either set AGNOCAST_BRIDGE_MODE=off, or run sequentially without -p." >&2
-    exit 1
 fi
 
 # Topic name prefix (can be overridden via E2E_TOPIC_PREFIX)
@@ -137,6 +130,22 @@ generate_test_id() {
     echo "${pub_type}_${launch_order}_pub_depth${pub_qos_depth}_${pub_tl}_sub_depth${sub_qos_depth}_${sub_tl}_${sub_type}"
 }
 
+# When bridge is OFF, only test Agnocast publisher
+if [ "$BRIDGE_OFF" = true ]; then
+    USE_AGNOCAST_PUB=(true)
+else
+    USE_AGNOCAST_PUB=(true false)
+fi
+
+LAUNCH_PUB_BEFORE_SUB=(true false)
+PUB_QOS_DEPTH=(1 10)
+PUB_TRANSIENT_LOCAL=(true false)
+SUB_QOS_DEPTH=(1 10)
+SUB_TRANSIENT_LOCAL=(true false)
+USE_TAKE_SUB=(true false)
+
+TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
+
 FAILURE_COUNT=0
 if [ "$RUN_SINGLE" = true ]; then
     show_config
@@ -147,22 +156,6 @@ if [ "$RUN_SINGLE" = true ]; then
     fi
 elif [ "$PARALLEL" -gt 1 ]; then
     # ===== Parallel execution mode =====
-    # When bridge is OFF, only test Agnocast publisher
-    if [ "$BRIDGE_OFF" = true ]; then
-        USE_AGNOCAST_PUB=(true)
-    else
-        USE_AGNOCAST_PUB=(true false)
-    fi
-
-    LAUNCH_PUB_BEFORE_SUB=(true false)
-    PUB_QOS_DEPTH=(1 10)
-    PUB_TRANSIENT_LOCAL=(true false)
-    SUB_QOS_DEPTH=(1 10)
-    SUB_TRANSIENT_LOCAL=(true false)
-    USE_TAKE_SUB=(true false)
-
-    TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
-
     LOG_DIR="/tmp/e2e_1to1_logs"
     rm -rf "$LOG_DIR"
     mkdir -p "$LOG_DIR"
@@ -303,22 +296,7 @@ WORKER_EOF
     fi
 else
     # ===== Sequential execution mode (original behavior) =====
-    # When bridge is OFF, only test Agnocast publisher
-    if [ "$BRIDGE_OFF" = true ]; then
-        USE_AGNOCAST_PUB=(true)
-    else
-        USE_AGNOCAST_PUB=(true false)
-    fi
-
-    LAUNCH_PUB_BEFORE_SUB=(true false)
-    PUB_QOS_DEPTH=(1 10)
-    PUB_TRANSIENT_LOCAL=(true false)
-    SUB_QOS_DEPTH=(1 10)
-    SUB_TRANSIENT_LOCAL=(true false)
-    USE_TAKE_SUB=(true false)
-
     COUNT=0
-    TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
 
     for use_agnocast_pub in ${USE_AGNOCAST_PUB[@]}; do
         for launch_pub_before_sub in ${LAUNCH_PUB_BEFORE_SUB[@]}; do

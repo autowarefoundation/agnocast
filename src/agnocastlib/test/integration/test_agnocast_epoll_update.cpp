@@ -118,18 +118,32 @@ protected:
       node, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME), period,
       [&flag_to_set]() { flag_to_set = true; }, cbg);
   }
+
+  static constexpr bool is_callback_isolated_executor()
+  {
+    return std::is_same_v<ExecutorType, agnocast::CallbackIsolatedAgnocastExecutor> ||
+           std::is_same_v<ExecutorType, agnocast::AgnocastOnlyCallbackIsolatedExecutor>;
+  }
+
+  // The callback-isolated executors pick a child executor per callback group from a snapshot of
+  // the group's agnocast entities taken when the group is first spawned, and never revisit it.
+  // Tests that create the timer after the group has been spawned therefore cannot pass on these
+  // executors yet. See issue #1263.
+  //
+  // NOTE: This only reports whether the test should be skipped. GTEST_SKIP() must be invoked
+  // directly in the test body, because it expands to a `return` that only exits the immediately
+  // enclosing function; calling it from a helper would skip nothing and let the test body run on.
+  static bool should_skip_entity_added_after_spawn() { return is_callback_isolated_executor(); }
 };
+
+#define SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN                                                  \
+  "callback-isolated executor classifies a group before the later-created timer exists; see " \
+  "issue #1263"
 
 using ExecutorTypes = ::testing::Types<
   agnocast::SingleThreadedAgnocastExecutor, agnocast::MultiThreadedAgnocastExecutor,
-  // CallbackIsolatedAgnocastExecutor is commented out because this test fails
-  // when the Agnocast callback is created after associating CallbackGroup
-  // with the executor.
-  // See issue #1263 for details:
-  // https://github.com/autowarefoundation/agnocast/issues/1263
-  // TODO(ruth561): Fix the issue and re-enable this executor in the test suite.
-  // agnocast::CallbackIsolatedAgnocastExecutor,
-  agnocast::AgnocastOnlySingleThreadedExecutor, agnocast::AgnocastOnlyMultiThreadedExecutor
+  agnocast::CallbackIsolatedAgnocastExecutor, agnocast::AgnocastOnlySingleThreadedExecutor,
+  agnocast::AgnocastOnlyMultiThreadedExecutor
   // AgnocastOnlyCallbackIsolatedExecutor is commented out because it
   // unexpectedly terminates when adding CallbackGroup via add_callback_group.
   // TODO(ruth561): Fix the issue and re-enable this executor in the test suite.
@@ -188,6 +202,9 @@ TYPED_TEST(EpollUpdateTest, CbgTimerSpinAdd)
 
 TYPED_TEST(EpollUpdateTest, CbgSpinAddTimer)
 {
+  if (this->should_skip_entity_added_after_spawn()) {
+    GTEST_SKIP() << SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN;
+  }
   std::atomic_bool callback_started{false};
   auto node = this->create_test_node();
 
@@ -206,6 +223,9 @@ TYPED_TEST(EpollUpdateTest, CbgSpinAddTimer)
 
 TYPED_TEST(EpollUpdateTest, SpinAddCbgTimer)
 {
+  if (this->should_skip_entity_added_after_spawn()) {
+    GTEST_SKIP() << SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN;
+  }
   std::atomic_bool callback_started{false};
   auto node = this->create_test_node();
 
@@ -226,6 +246,9 @@ TYPED_TEST(EpollUpdateTest, SpinAddCbgTimer)
 // Spin -> Timer.
 TYPED_TEST(EpollUpdateTest, CbgAddSpinTimer)
 {
+  if (this->should_skip_entity_added_after_spawn()) {
+    GTEST_SKIP() << SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN;
+  }
   std::atomic_bool callback_started{false};
   auto node = this->create_test_node();
 
@@ -279,6 +302,9 @@ TYPED_TEST(EpollUpdateTest, AddSpinCbgTimer)
 
 TYPED_TEST(EpollUpdateTest, SpinCbgAddTimer)
 {
+  if (this->should_skip_entity_added_after_spawn()) {
+    GTEST_SKIP() << SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN;
+  }
   std::atomic_bool callback_started{false};
   auto node = this->create_test_node();
 
@@ -354,6 +380,9 @@ TYPED_TEST(EpollUpdateTest, SpinCbgTimerAddcbg)
 
 TYPED_TEST(EpollUpdateTest, SpinCbgAddcbgTimer)
 {
+  if (this->should_skip_entity_added_after_spawn()) {
+    GTEST_SKIP() << SKIP_REASON_ENTITY_ADDED_AFTER_SPAWN;
+  }
   std::atomic_bool callback_started{false};
   auto node = this->create_test_node();
 

@@ -87,11 +87,6 @@ if [ "$LOWER_BRIDGE_MODE" != "off" ] && [ "$LOWER_BRIDGE_MODE" != "0" ]; then
     fi
 
     sleep 1
-    # Verify stale bridge manager mqueue does not remain.
-    if [ -e "/dev/mqueue/agnocast_bridge_manager@-1" ]; then
-        echo "ERROR: stale mqueue exists: /dev/mqueue/agnocast_bridge_manager@-1" | sudo tee /dev/kmsg
-        exit 1
-    fi
 fi
 
 # Run test

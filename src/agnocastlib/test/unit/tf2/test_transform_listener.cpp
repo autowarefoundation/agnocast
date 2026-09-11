@@ -19,7 +19,6 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace
@@ -51,28 +50,18 @@ void release_subscriber_reference(const std::string &, const topic_local_id_t, c
 {
 }
 
-mqd_t open_mq_for_subscription(
-  const std::string &, const topic_local_id_t, std::pair<mqd_t, std::string> & mq_subscription)
-{
-  mq_subscription = std::make_pair(static_cast<mqd_t>(-1), std::string{});
-  return -1;
-}
-
-void remove_mq(const std::pair<mqd_t, std::string> &)
+void close_notify_eventfd(int)
 {
 }
 
-union ioctl_add_subscriber_args SubscriptionBase::initialize(
-  const rclcpp::QoS & qos, const bool, const bool, const bool, const std::string &,
+void SubscriptionBase::initialize(
+  const rclcpp::QoS & qos, const bool, const bool, SubscriptionRole, const std::string &,
   const std::string &)
 {
   initialize_subscriber_call_count++;
   initialized_topic_names.push_back(topic_name_);
   initialized_qos_values.push_back(qos);
-  union ioctl_add_subscriber_args args {
-  };
-  args.ret_id = 0;
-  return args;
+  id_ = 0;
 }
 
 BridgeMode get_bridge_mode()

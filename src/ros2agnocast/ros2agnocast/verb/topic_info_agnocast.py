@@ -133,7 +133,7 @@ class TopicInfoAgnocastVerb(VerbExtension):
 
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
             pub_endpoints, sub_endpoints = topic_endpoints(snapshots, topic_name)
 
             def to_info_ret(ep):

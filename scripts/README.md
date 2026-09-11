@@ -13,7 +13,7 @@ All scripts are intended to be invoked from the repository root unless noted oth
 | Script | Purpose |
 |---|---|
 | `dds_config.bash` | Apply CycloneDDS runtime settings (`net.core.rmem_max`, loopback multicast) required for Agnocast over CycloneDDS. Guarded by `/tmp/cycloneDDS_configured` so it runs only once per boot. |
-| `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
+| `setup_thread_configurator.bash` | Grant `CAP_SYS_NICE` and `CAP_DAC_OVERRIDE` (for writing `/proc/irq/<N>/smp_affinity_list`) to `thread_configurator_node` and register library paths in `/etc/ld.so.conf.d/agnocast-cie.conf`. Required for Callback Isolated Executor. See the [integration guide](https://autowarefoundation.github.io/agnocast_doc/callback-isolated-executor/integration-guide/#step-2-set-up-the-thread-configurator). |
 | `switch_kmod.bash` | Swap the host's `agnocast-kmod-v<ver>` to another version. For container-based setups where only the host-side kmod needs replacing; the kmod and in-container heaphook must share the same ioctl ABI version. |
 
 ### sample_application/
@@ -37,7 +37,7 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 |---|---|
 | `run_no_rclcpp_talker.bash` | `no_rclcpp_talker.launch.xml` |
 | `run_no_rclcpp_listener.bash` | `no_rclcpp_listener.launch.xml` |
-| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (polling-style subscription) |
+| `run_no_rclcpp_take_listener.bash` | `no_rclcpp_take_listener.launch.xml` (take-style subscription) |
 | `run_no_rclcpp_pubsub.bash` | `no_rclcpp_pubsub.launch.xml` |
 | `run_no_rclcpp_client.bash` | `no_rclcpp_client.launch.xml` |
 | `run_no_rclcpp_server.bash` | `no_rclcpp_server.launch.xml` |
@@ -63,10 +63,10 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping publisher type (agnocast/ros2), QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers. |
 | `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s`, `-c`. |
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |
-| `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM / mqueue loads. |
+| `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM loads. |
 | `test/test_rmmod_refcount.bash` | Verify `rmmod agnocast` is refused while `/dev/agnocast` is open and succeeds once the fd is closed. |
 | `test/switch_kmod.bats` | [bats](https://github.com/bats-core/bats-core) test suite for `switch_kmod.bash` (9 cases). **Destructive** — swaps installed `agnocast-kmod-v*` packages and load/unloads the module. Requires `apt install bats` and a prior run of `switch_kmod_canonical_setup.bash`. Run: `sudo bats scripts/test/switch_kmod.bats`. |
-| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.3.5}` and caches the `.deb` for teardown recovery. |
+| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.4.0}` and caches the `.deb` for teardown recovery. |
 
 ### releases/ — maintainer-only
 

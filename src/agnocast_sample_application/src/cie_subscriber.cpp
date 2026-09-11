@@ -6,6 +6,9 @@ using std::placeholders::_1;
 
 class CieSubscriber : public rclcpp::Node
 {
+  rclcpp::CallbackGroup::SharedPtr group1_;
+  rclcpp::CallbackGroup::SharedPtr group2_;
+
   agnocast::Subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_dynamic_;
   agnocast::Subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr
     sub_dynamic2_;
@@ -16,14 +19,11 @@ class CieSubscriber : public rclcpp::Node
 public:
   explicit CieSubscriber(const rclcpp::NodeOptions & options) : Node("minimal_subscriber", options)
   {
-    rclcpp::CallbackGroup::SharedPtr group1 =
-      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
-    rclcpp::CallbackGroup::SharedPtr group2 =
-      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    group1_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    group2_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     agnocast::SubscriptionOptions agnocast_options;
-    agnocast_options.callback_group = group1;
+    agnocast_options.callback_group = group1_;
     sub_dynamic_ = agnocast::create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       this, "/my_topic", 1,
       [](const agnocast::ipc_shared_ptr<agnocast_sample_interfaces::msg::DynamicSizeArray> &
@@ -35,7 +35,7 @@ public:
       agnocast_options);
 
     rclcpp::SubscriptionOptions ros_options;
-    ros_options.callback_group = group1;
+    ros_options.callback_group = group1_;
     sub_ros_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       "/ros_topic", 1,
       [](const agnocast_sample_interfaces::msg::DynamicSizeArray::SharedPtr message) {
@@ -46,7 +46,7 @@ public:
       ros_options);
 
     rclcpp::SubscriptionOptions ros_options2;
-    ros_options2.callback_group = group2;
+    ros_options2.callback_group = group2_;
     sub_ros2_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       "/ros_other_topic", 1,
       [](const agnocast_sample_interfaces::msg::DynamicSizeArray::SharedPtr message) {

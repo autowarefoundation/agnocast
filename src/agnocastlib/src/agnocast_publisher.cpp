@@ -3,6 +3,7 @@
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "rclcpp/detail/qos_parameters.hpp"
 
 #include <rclcpp/typesupport_helpers.hpp>
 #include <rosidl_runtime_cpp/message_initialization.hpp>
@@ -12,7 +13,6 @@
 #include <rmw/serialized_message.h>
 #include <sys/types.h>
 
-#include <array>
 #include <new>
 
 namespace agnocast
@@ -80,20 +80,12 @@ topic_local_id_t initialize_publisher(
 
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle /* for CARET */, const std::string & topic_name,
-  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs)
+  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address)
 {
-  std::array<topic_local_id_t, MAX_SUBSCRIBER_NUM> subscriber_ids_buffer{};
-
   union ioctl_publish_msg_args publish_msg_args = {};
   publish_msg_args.topic_name = {topic_name.c_str(), topic_name.size()};
   publish_msg_args.publisher_id = publisher_id;
   publish_msg_args.msg_virtual_address = msg_virtual_address;
-  // The kernel writes subscriber IDs directly to this buffer via copy_to_user,
-  // unlike ret_* fields which are copied back through the union.
-  publish_msg_args.subscriber_ids_buffer_addr =
-    reinterpret_cast<uint64_t>(subscriber_ids_buffer.data());
-  publish_msg_args.subscriber_ids_buffer_size = MAX_SUBSCRIBER_NUM;
 
   if (ioctl(agnocast_fd, AGNOCAST_PUBLISH_MSG_CMD, &publish_msg_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_PUBLISH_MSG_CMD failed: %s", strerror(errno));
@@ -102,63 +94,6 @@ union ioctl_publish_msg_args publish_core(
   }
 
   TRACEPOINT(agnocast_publish, publisher_handle, publish_msg_args.ret_entry_id);
-
-  for (uint32_t i = 0; i < publish_msg_args.ret_subscriber_num; i++) {
-    const topic_local_id_t subscriber_id = subscriber_ids_buffer[i];
-    mqd_t mq = 0;
-    if (opened_mqs.find(subscriber_id) != opened_mqs.end()) {
-      std::tuple<mqd_t, bool> & t = opened_mqs[subscriber_id];
-      mq = std::get<0>(t);
-      // The boolean in the tuple indicates whether the mq is used in this publication round.
-      // An unused mq means that its corresponding subscribers have exited, so we close such mqs
-      // later.
-      std::get<1>(t) = true;
-    } else {
-      const std::string mq_name = create_mq_name_for_agnocast_publish(topic_name, subscriber_id);
-      mq = mq_open(mq_name.c_str(), O_WRONLY | O_NONBLOCK);
-      if (mq == -1) {
-        // Right after a subscriber is added, its message queue has not been created yet. Therefore,
-        // the `mq_open` call above might fail. In that case, we just continue.
-        RCLCPP_DEBUG_STREAM(
-          logger, "mq_open failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
-                                               << ", mq_name='" << mq_name
-                                               << "'): " << strerror(errno));
-        continue;
-      }
-      opened_mqs.insert({subscriber_id, {mq, true}});
-    }
-
-    struct MqMsgAgnocast mq_msg = {};
-    // Although the size of the struct is 1, we deliberately send a zero-length message
-    if (mq_send(mq, reinterpret_cast<char *>(&mq_msg), 0 /*msg_len*/, 0) == -1) {
-      // If it returns EAGAIN, it means mq_send has already been executed, but the subscriber
-      // hasn't received it yet. Thus, there's no need to send it again since the notification has
-      // already been sent.
-      if (errno != EAGAIN) {
-        RCLCPP_ERROR_STREAM(
-          logger, "mq_send failed for topic '" << topic_name << "' (subscriber_id=" << subscriber_id
-                                               << "): " << strerror(errno));
-      }
-    }
-  }
-
-  // Close mqs that are no longer needed and update `opened_mqs`
-  for (auto it = opened_mqs.begin(); it != opened_mqs.end();) {
-    bool & keep = std::get<1>(it->second);
-    if (!keep) {
-      mqd_t mq = std::get<0>(it->second);
-      if (mq_close(mq) == -1) {
-        RCLCPP_ERROR_STREAM(
-          logger, "mq_close failed for topic '" << topic_name << "' (subscriber_id=" << it->first
-                                                << "): " << strerror(errno));
-      }
-      it = opened_mqs.erase(it);
-    } else {
-      // Update the value for the next publication round
-      keep = false;
-      ++it;
-    }
-  }
 
   return publish_msg_args;
 }
@@ -201,6 +136,55 @@ uint32_t get_intra_subscription_count_core(const std::string & topic_name)
   return get_subscriber_count_args.ret_same_process_subscriber_num;
 }
 
+template <typename NodeT>
+void PublisherBase::init_base(
+  NodeT * node, const std::string & topic_name, const std::string & type_name,
+  const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role)
+{
+  if (options.do_always_ros2_publish) {
+    RCLCPP_ERROR(
+      logger,
+      "The 'do_always_ros2_publish' option is deprecated. "
+      "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
+  }
+
+  topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
+
+  auto node_parameters = node->get_node_parameters_interface();
+  actual_qos_ = !options.qos_overriding_options.get_policy_kinds().empty()
+                  ? rclcpp::detail::declare_qos_parameters(
+                      options.qos_overriding_options, node_parameters, topic_name_, qos,
+                      rclcpp::detail::PublisherQosParametersTraits{})
+                  : qos;
+
+  validate_publisher_qos(actual_qos_);
+
+  const bool is_bridge = (role == PublisherRole::BridgeInternal);
+  const std::string node_name = node->get_fully_qualified_name();
+  id_ = initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  generate_gid();
+
+  if (role == PublisherRole::Default) {
+    if (!type_name.empty()) {
+      register_pubsub_bridge_by_type_name(
+        topic_name_, id_, type_name, BridgeDirection::AGNOCAST_TO_ROS2);
+    } else {
+      RCLCPP_ERROR(
+        logger,
+        "A2R bridge registration is skipped because the type_name is empty (topic: '%s'). "
+        "Please make sure to specify the valid message type in normal use case.",
+        topic_name_.c_str());
+    }
+  }
+}
+
+template void PublisherBase::init_base<rclcpp::Node>(
+  rclcpp::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
+  const PublisherOptions &, PublisherRole);
+template void PublisherBase::init_base<agnocast::Node>(
+  agnocast::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
+  const PublisherOptions &, PublisherRole);
+
 void PublisherBase::generate_gid()
 {
   constexpr size_t kPidOffset = 2;
@@ -232,17 +216,6 @@ void PublisherBase::generate_gid()
 
 PublisherBase::~PublisherBase()
 {
-  {
-    std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-    for (auto & [_, t] : opened_mqs_) {
-      mqd_t mq = std::get<0>(t);
-      if (mq_close(mq) == -1) {
-        RCLCPP_ERROR_STREAM(
-          logger, "mq_close failed for topic '" << topic_name_ << "': " << strerror(errno));
-      }
-    }
-  }
-
   if (id_ >= 0) {
     // NOTE: When a publisher is destroyed, subscribers should unmap its memory, but this is not yet
     // implemented. Since multiple publishers in the same process share a mempool, process-level
@@ -259,10 +232,38 @@ PublisherBase::~PublisherBase()
   }
 }
 
-template <typename NodeT>
-rclcpp::QoS GenericPublisher::constructor_impl(
-  NodeT * node, const std::string & topic_name, const std::string & topic_type,
+TypeErasedPublisher::TypeErasedPublisher(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
+{
+  this->init_base(node, topic_name, topic_type, qos, options, role);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
+    topic_name_.c_str(), actual_qos_.depth());
+}
+
+TypeErasedPublisher::TypeErasedPublisher(
+  agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, const agnocast::PublisherOptions & options, const PublisherRole role)
+{
+  this->init_base(node, topic_name, topic_type, qos, options, role);
+
+  TRACEPOINT(
+    agnocast_publisher_init, static_cast<const void *>(this),
+    static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
+    actual_qos_.depth());
+}
+
+ipc_shared_ptr<void> TypeErasedPublisher::borrow_loaned_message(size_t size)
+{
+  increment_borrowed_publisher_num();
+  void * ptr = ::operator new(size);
+  return ipc_shared_ptr<void>(ptr, topic_name_, id_);
+}
+
+void GenericPublisher::load_type_support(const std::string & topic_type)
 {
   // The typesupport functions may throw exceptions if the shared libraries
   // fail to load or an invalid message type name is provided. These
@@ -285,41 +286,22 @@ rclcpp::QoS GenericPublisher::constructor_impl(
 #endif
   members_ = static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(
     introspection_handle->data);
-
-  const bool is_bridge = (role == PublisherRole::BridgeInternal);
-  const rclcpp::QoS actual_qos =
-    this->init_base(node, topic_name, topic_type, qos, options, is_bridge);
-
-  if (role == PublisherRole::Default) {
-    register_pubsub_bridge_by_type_name(
-      topic_name_, id_, topic_type, BridgeDirection::AGNOCAST_TO_ROS2);
-  }
-
-  return actual_qos;
 }
 
 GenericPublisher::GenericPublisher(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
+: TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
-  const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
-
-  TRACEPOINT(
-    agnocast_publisher_init, static_cast<const void *>(this),
-    static_cast<const void *>(node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-    topic_name_.c_str(), actual_qos.depth());
+  load_type_support(topic_type);
 }
 
 GenericPublisher::GenericPublisher(
   agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
   const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role)
+: TypeErasedPublisher(node, topic_name, topic_type, qos, options, role)
 {
-  const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, topic_type, qos, options, role);
-
-  TRACEPOINT(
-    agnocast_publisher_init, static_cast<const void *>(this),
-    static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
-    actual_qos.depth());
+  load_type_support(topic_type);
 }
 
 void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
@@ -338,8 +320,8 @@ void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
     return;
   }
 
-  increment_borrowed_publisher_num();
-  void * ptr = ::operator new(members_->size_of_);
+  ipc_shared_ptr<void> message = borrow_loaned_message(members_->size_of_);
+  void * ptr = message.get();
 
   // Invoke the constructor of the message type at ptr.
   // Type-specific initialization is unnecessary because the message object
@@ -350,34 +332,20 @@ void GenericPublisher::publish(const rclcpp::SerializedMessage & serialized_msg)
   const rmw_ret_t ret =
     rmw_deserialize(&serialized_msg.get_rcl_serialized_message(), type_support_handle_, ptr);
 
-  decrement_borrowed_publisher_num();
+  auto deleter = [this](void * release_ptr) {
+    members_->fini_function(release_ptr);
+    ::operator delete(release_ptr);
+  };
 
   if (ret != RMW_RET_OK) {
-    members_->fini_function(ptr);
-    ::operator delete(ptr);
+    cancel_message(std::move(message), deleter);
     RCLCPP_ERROR(
       logger, "rmw_deserialize failed in GenericPublisher (rmw_ret=%d); dropping message",
       static_cast<int>(ret));
     return;
   }
 
-  const auto va = reinterpret_cast<uint64_t>(ptr);
-  union ioctl_publish_msg_args publish_msg_args {
-  };
-  {
-    std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-    publish_msg_args = publish_core(this, topic_name_, id_, va, opened_mqs_);
-  }
-
-  // Release entries that all subscribers have finished reading.
-  // Only the addresses previously passed to the kernel by this publisher are returned here.
-  // Therefore, the message type is guaranteed to match members_ and it's safe to call
-  // fini_function on the pointer.
-  for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
-    void * rptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);
-    members_->fini_function(rptr);
-    ::operator delete(rptr);
-  }
+  TypeErasedPublisher::publish(std::move(message), deleter);
 }
 
 }  // namespace agnocast

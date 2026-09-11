@@ -8,6 +8,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <type_traits>
 
@@ -43,8 +44,6 @@ public:
   AGNOCAST_PUBLIC
   std::chrono::nanoseconds time_until_trigger();
 
-  void set_timer_info(std::weak_ptr<TimerInfo> timer_info) { timer_info_ = timer_info; }
-
   /** @brief Update the timer's period.
    *
    * Aligned with `rcl_timer_exchange_period`: the already-scheduled next firing keeps its
@@ -59,6 +58,28 @@ public:
    *  @return True if the clock is steady. */
   AGNOCAST_PUBLIC
   virtual bool is_steady() const = 0;
+
+  /**
+   * @brief Sets a callback to be invoked each time the timer is reset.
+   *
+   * This function aligns with `rclcpp::set_on_reset_callback`. For extended
+   * details regarding best practices (e.g., keeping the callback non-blocking),
+   * please refer to the rclcpp documentation.
+   *
+   * This function is thread-safe. Calling it again will override any previously
+   * set callback.
+   *
+   * @param callback The functor to be called at reset. It receives the number of
+   * times the timer has been reset as an argument.
+   * @throw std::invalid_argument If the provided callback is not callable.
+   */
+  AGNOCAST_PUBLIC
+  void set_on_reset_callback(std::function<void(size_t)> callback);
+
+  /** @brief Clear the callback registered for reset timer.
+   */
+  AGNOCAST_PUBLIC
+  void clear_on_reset_callback();
 
   /** @brief Get the clock associated with this timer.
    *  @return Shared pointer to the clock. */
@@ -76,6 +97,16 @@ protected:
   uint32_t timer_id_;
   std::weak_ptr<TimerInfo> timer_info_;
   std::atomic<bool> canceled_;
+  std::function<void(size_t)> on_reset_callback_{nullptr};
+  size_t reset_counter_{0};
+  mutable std::recursive_mutex callback_mutex_;
+
+  // Preconditions:
+  // - callback_mutex_ must be held by the caller
+  // - on_reset_callback_ must be non-null
+  void trigger_on_reset_callback(size_t reset_count);
+
+  friend void set_timer_info(TimerBase & timer, std::weak_ptr<TimerInfo> timer_info);
 };
 
 /**

@@ -9,6 +9,6 @@
        (`agnocast_discovery_agent_<host8hex>_<ipc_ns_inode>`). Setting
        `name=` here would remap and break the per-NS uniqueness. -->
   <node pkg="ros2agnocast_discovery_agent"
-        exec="discovery_agent"
+        exec="agnocast_discovery_agent"
         output="screen"/>
 </launch>

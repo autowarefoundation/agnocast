@@ -15,14 +15,16 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
 void test_case_get_node_pub_topics_exact_match(struct kunit * test)
 {
   union ioctl_add_publisher_args add_pub_args;
-  union ioctl_node_info_args node_info_args = {0};
+  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  uint32_t topic_num = UINT_MAX;
   int ret;
 
   setup_process(test, PID);
@@ -32,18 +34,18 @@ void test_case_get_node_pub_topics_exact_match(struct kunit * test)
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  // copy_to_user inside ioctl_get_node_publisher_topics returns -EFAULT in KUnit (kernel thread)
-  // context, but reaching it confirms that the node name match was found.
-  node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
-  ret =
-    agnocast_ioctl_get_node_publisher_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
-  KUNIT_EXPECT_TRUE(test, ret == -EFAULT || (ret == 0 && node_info_args.ret_topic_num == 1));
+  ret = agnocast_ioctl_get_node_publisher_topics(
+    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, topic_num, 1);
+  KUNIT_EXPECT_STREQ(test, buf[0], TOPIC_NAME);
 }
 
 void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
 {
   union ioctl_add_publisher_args add_pub_args;
-  union ioctl_node_info_args node_info_args = {0};
+  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  uint32_t topic_num = UINT_MAX;
   int ret;
 
   setup_process(test, PID);
@@ -53,19 +55,18 @@ void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  node_info_args.topic_name_buffer_size = MAX_TOPIC_NUM;
-  ret =
-    agnocast_ioctl_get_node_publisher_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
+  ret = agnocast_ioctl_get_node_publisher_topics(
+    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ_MSG(
-    test, node_info_args.ret_topic_num, (uint32_t)0,
-    "Prefix of node name should not match (strcmp, not strncmp)");
+    test, topic_num, (uint32_t)0, "Prefix of node name should not match (strcmp, not strncmp)");
 }
 
 void test_case_get_node_pub_topics_buffer_size_exceeded(struct kunit * test)
 {
   union ioctl_add_publisher_args add_pub_args;
-  union ioctl_node_info_args node_info_args = {0};
+  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  uint32_t topic_num = UINT_MAX;
   int ret;
 
   setup_process(test, PID);
@@ -75,9 +76,8 @@ void test_case_get_node_pub_topics_buffer_size_exceeded(struct kunit * test)
     &add_pub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  // Set topic_name_buffer_size to 0 so the buffer cannot hold any entry.
-  node_info_args.topic_name_buffer_size = 0;
-  ret =
-    agnocast_ioctl_get_node_publisher_topics(current->nsproxy->ipc_ns, NODE_NAME, &node_info_args);
+  ret = agnocast_ioctl_get_node_publisher_topics(
+    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, 0, &topic_num);
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
+  KUNIT_EXPECT_EQ(test, topic_num, UINT_MAX);
 }

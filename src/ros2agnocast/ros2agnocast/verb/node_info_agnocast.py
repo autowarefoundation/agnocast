@@ -1,3 +1,5 @@
+import sys
+
 from ros2cli.node.strategy import NodeStrategy
 from ros2node.api import (
     get_action_client_info, get_action_server_info, get_node_names,
@@ -22,12 +24,6 @@ def service_name_from_request_topic(topic_name):
         return None
     return topic_name[len(prefix):]
 
-def service_name_from_response_topic(topic_name):
-    prefix = '/AGNOCAST_SRV_RESPONSE'
-    if not topic_name.startswith(prefix):
-        return None
-    return topic_name[len(prefix):].split('_SEP_')[0]
-
 class NodeInfoAgnocastVerb(VerbExtension):
     "Output information about a node including Agnocast"
 
@@ -44,7 +40,7 @@ class NodeInfoAgnocastVerb(VerbExtension):
         with NodeStrategy(None) as node:
             snapshots, used_fallback = collect_announcements_with_fallback(
                 node, timeout_sec=args.gossip_timeout)
-            warn_if_using_fallback(node, used_fallback, args.gossip_timeout)
+            warn_if_using_fallback(node, used_fallback, args.gossip_timeout, snapshots)
             bridge_roles = collect_bridge_roles(snapshots)
 
             def get_agnocast_label(topic_name, ros2_sub_topics, ros2_pub_topics):
@@ -57,8 +53,6 @@ class NodeInfoAgnocastVerb(VerbExtension):
             def get_agnocast_node_topics(target_node_name):
                 sub_topic_list = []
                 pub_topic_list = []
-                # service_name_from_response_topic strips the _SEP_<id> suffix,
-                # so multiple response topics can collapse to the same service name.
                 server_set = set()
                 client_set = set()
                 # type_name resolved from gossip, keyed by topic name.
@@ -73,13 +67,10 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
                         service_name = service_name_from_request_topic(topic.topic_name)
                         if service_name is not None:
+                            # A server subscribes to the request topic; a client publishes on it.
                             if is_sub:
                                 server_set.add(service_name)
-                            continue
-
-                        service_name = service_name_from_response_topic(topic.topic_name)
-                        if service_name is not None:
-                            if is_sub:
+                            if is_pub:
                                 client_set.add(service_name)
                             continue
 
@@ -112,8 +103,24 @@ class NodeInfoAgnocastVerb(VerbExtension):
             # Get Agnocast node info from gossip (every NS / ECU on the domain).
             agnocast_subscribers, agnocast_publishers, agnocast_servers, agnocast_clients, gossip_topic_types = get_agnocast_node_topics(node_name)
 
-            # Get ros2 all node names
-            ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=True)
+            # Get ros2 all node names.
+            # The RMW layer can raise (e.g. "empty node name returned by the RMW
+            # layer" when a participant without a valid node name is present in the
+            # DDS graph). Don't let that abort the whole command: the per-node graph
+            # queries below still work, so we can classify the target node directly
+            # even without the full enumeration.
+            ros2_enumeration_ok = True
+            try:
+                ros2_node_name_list = get_node_names(node=node, include_hidden_nodes=True)
+            except Exception as e:
+                print(
+                    f'WARNING: failed to enumerate ROS 2 nodes ({e}); classifying '
+                    'the target node directly. A participant with an empty node '
+                    'name may be present in the DDS graph; try '
+                    '`ros2 daemon stop && ros2 daemon start`.',
+                    file=sys.stderr)
+                ros2_node_name_list = []
+                ros2_enumeration_ok = False
             ros2_node_names = {n.full_name for n in ros2_node_name_list}
 
             ########################################################################
@@ -128,7 +135,10 @@ class NodeInfoAgnocastVerb(VerbExtension):
 
             # Determine node class
             # 1. ros2 node
-            if node_name in ros2_node_names:
+            #    If enumeration failed we can't trust the membership set, so fall
+            #    through to the per-node queries (which don't hit the empty-name
+            #    path) and let them decide.
+            if node_name in ros2_node_names or not ros2_enumeration_ok:
                 subscribers = get_subscriber_info(node=node, remote_node_name=node_name)
                 publishers = get_publisher_info(node=node, remote_node_name=node_name)
                 service_servers = get_service_server_info(node=node, remote_node_name=node_name)

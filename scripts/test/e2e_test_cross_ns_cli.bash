@@ -8,7 +8,7 @@
 # requires sudo unshare); instead it runs the daemon and the CLI in the
 # same namespace and checks that:
 #
-#   * Each verb accepts `--gossip-timeout`.
+#   * Each verb accepts its discovery wait flag.
 #   * Each verb finishes without raising when the daemon is publishing.
 #   * Local Agnocast endpoints surface in the CLI output.
 #
@@ -64,7 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 yellow "Starting agnocast_discovery_agent and talker..."
-ros2 run ros2agnocast_discovery_agent discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
+ros2 run ros2agnocast_discovery_agent agnocast_discovery_agent > "$LOG_DIR/agent.log" 2>&1 &
 sleep "$DAEMON_WARMUP_SEC"
 ros2 launch agnocast_sample_application talker.launch.xml > "$LOG_DIR/talker.log" 2>&1 &
 sleep "$TALKER_WARMUP_SEC"
@@ -85,7 +85,7 @@ fail() {
 }
 
 # ----- topic list_agnocast -----
-out=$(ros2 topic list_agnocast --gossip-timeout "$GOSSIP_TIMEOUT" 2>&1) \
+out=$(ros2 topic list_agnocast --spin-time "$GOSSIP_TIMEOUT" 2>&1) \
     || fail "topic list_agnocast exited non-zero" "$out"
 grep -q -- "/my_topic" <<<"$out" \
     || fail "topic list_agnocast did not include /my_topic" "$out"

@@ -5,18 +5,35 @@ helpers directly with a mock ctypes library.
 """
 
 import ctypes
+import sys
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from rclpy.executors import ExternalShutdownException
+
+from ros2agnocast_discovery_agent import domain_bridge_config
 from ros2agnocast_discovery_agent.agent import (
+    DiscoveryAgent,
+    EXIT_WHEN_IDLE_ENV,
+    EXIT_WHEN_IDLE_FLAG,
+    IdleExitTracker,
     NODE_NAME_BUFFER_SIZE,
     TopicInfoRet,
+    _exit_when_idle_enabled,
     _ioctl_to_endpoint,
+    _load_domain_rules,
     _read_host_uuid,
     read_local_topics,
 )
+from ros2agnocast_discovery_agent.bridge_decider import (
+    BridgeRequest,
+    DIRECTION_AGNOCAST_TO_ROS2,
+)
+from ros2agnocast_discovery_agent.domain_bridge_config import CONFIG_ENV
+from ros2agnocast_discovery_msgs.msg import AgnocastDaemonState
 
 
 def _make_info(node_name: str, qos_depth: int = 10,
@@ -72,9 +89,14 @@ def test_ioctl_to_endpoint_fills_pid_from_registry():
     assert ep.pid == 4242
 
 
-def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
-    """Build a ctypes-flavoured mock that returns the given topic data."""
+def _make_mock_lib(topic_to_endpoints: dict, topic_domains: dict | None = None) -> MagicMock:
+    """Build a ctypes-flavoured mock that returns the given topic data.
+
+    ``topic_domains`` optionally maps a topic name to its domain_id (default 0);
+    the mock fills the wrapper-owned domain array returned via the out-pointer.
+    """
     lib = MagicMock()
+    topic_domains = topic_domains or {}
 
     topic_names = list(topic_to_endpoints.keys())
 
@@ -86,15 +108,24 @@ def _make_mock_lib(topic_to_endpoints: dict) -> MagicMock:
     char_pp = (ctypes.POINTER(ctypes.c_char) * len(name_storage))(
         *(ctypes.cast(b, ctypes.POINTER(ctypes.c_char)) for b in name_storage))
 
-    def get_topics(count_ptr):
+    # Keep the domain arrays alive for the duration of the call (the wrapper would
+    # own this memory; here the mock does).
+    domain_storage = []
+
+    def get_topics(count_ptr, domain_ids_out):
         count_ptr._obj.value = len(topic_names)
+        arr = (ctypes.c_uint32 * len(topic_names))(
+            *(topic_domains.get(name, 0) for name in topic_names))
+        domain_storage.append(arr)
+        domain_ids_out[0] = ctypes.cast(arr, ctypes.POINTER(ctypes.c_uint32))
         return char_pp
 
     lib.get_agnocast_topics = MagicMock(side_effect=get_topics)
     lib.free_agnocast_topics = MagicMock()
+    lib.free_agnocast_topic_domains = MagicMock()
 
     def make_endpoints_getter(direction):
-        def getter(topic_name_b, count_ptr):
+        def getter(topic_name_b, count_ptr, domain_id):
             name = topic_name_b.decode('utf-8')
             infos = topic_to_endpoints.get(name, {}).get(direction, [])
             count_ptr._obj.value = len(infos)
@@ -134,6 +165,35 @@ def test_read_local_topics_combines_pub_and_sub():
     assert topic.publishers[0].qos_depth == 3
     assert len(topic.subscribers) == 1
     assert topic.subscribers[0].node_name == '/listener_node'
+
+
+def test_read_local_topics_stamps_domain_id():
+    """The real domain_id from the ioctl is stamped onto the gossip topic."""
+    pub_info = _make_info('/talker_node')
+    lib = _make_mock_lib(
+        {'/chatter': {'pub': [pub_info], 'sub': []}},
+        topic_domains={'/chatter': 7})
+
+    topics = read_local_topics(lib)
+    assert len(topics) == 1
+    assert topics[0].domain_id == 7
+    # The per-topic domain is forwarded to the endpoint queries.
+    _name, _count, domain_arg = lib.get_agnocast_pub_nodes.call_args.args
+    assert domain_arg == 7
+
+
+def test_read_local_topics_filters_by_own_domain():
+    """A per-(NS, domain) agent reports only its own domain's topics."""
+    lib = _make_mock_lib(
+        {
+            '/chatter': {'pub': [_make_info('/talker_d1')], 'sub': []},
+            '/mrm': {'pub': [_make_info('/talker_d3')], 'sub': []},
+        },
+        topic_domains={'/chatter': 1, '/mrm': 3})
+
+    topics = read_local_topics(lib, own_domain_id=1)
+    assert [t.topic_name for t in topics] == ['/chatter']
+    assert topics[0].domain_id == 1
 
 
 def test_read_local_topics_resolves_type_from_registry():
@@ -208,20 +268,8 @@ def test_read_host_uuid_returns_uuid_string():
 
 
 # ---------------------------------------------------------------------------
-# Singleton lock
+# Singleton claim (kmod-arbitrated) + idle-exit gate
 # ---------------------------------------------------------------------------
-
-
-def test_singleton_lock_path_honors_tmpfs_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42, 3) == str(tmp_path / 'agnocast_discovery_agent_42_d3.lock')
-
-
-def test_singleton_lock_path_defaults_to_dev_shm(monkeypatch):
-    monkeypatch.delenv('AGNOCAST_TMPFS_DIR', raising=False)
-    from ros2agnocast_discovery_agent.agent import _singleton_lock_path
-    assert _singleton_lock_path(42, 0) == '/dev/shm/agnocast_discovery_agent_42_d0.lock'
 
 
 def test_read_ros_domain_id_parses_env(monkeypatch):
@@ -234,84 +282,362 @@ def test_read_ros_domain_id_parses_env(monkeypatch):
     assert _read_ros_domain_id() == 0
     monkeypatch.setenv('ROS_DOMAIN_ID', 'abc')  # unparsable -> default 0
     assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', '-5')  # negative would wrap in uint32 -> default 0
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', str(2 ** 32))  # above uint32 max -> default 0
+    assert _read_ros_domain_id() == 0
+    monkeypatch.setenv('ROS_DOMAIN_ID', str(2 ** 32 - 1))  # uint32 max -> accepted as-is
+    assert _read_ros_domain_id() == 2 ** 32 - 1
 
 
-def test_acquire_singleton_lock_succeeds_when_free(monkeypatch, tmp_path):
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    attempt = _try_acquire_singleton_lock(123, 0)
-    assert attempt.status == LockStatus.ACQUIRED
-    attempt.file.close()
+class _FakeSingletonLib:
+    """Stand-in for the ioctl wrapper: agnocast_discovery_agent_register returns a set code."""
+
+    def __init__(self, register_ret):
+        self._register_ret = register_ret
+        self.register_calls = []
+
+    def agnocast_discovery_agent_register(self, domain_id):
+        self.register_calls.append(domain_id)
+        return self._register_ret
 
 
-def test_acquire_singleton_lock_blocks_second_attempt(monkeypatch, tmp_path):
-    """A second acquire in the same (NS, domain) reports HELD while the first is alive."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    first = _try_acquire_singleton_lock(456, 0)
-    assert first.status == LockStatus.ACQUIRED
-    assert _try_acquire_singleton_lock(456, 0).status == LockStatus.HELD
-    first.file.close()
-    # After releasing, a new acquire succeeds.
-    third = _try_acquire_singleton_lock(456, 0)
-    assert third.status == LockStatus.ACQUIRED
-    third.file.close()
+def test_main_exits_cleanly_when_claim_is_lost(monkeypatch):
+    """A duplicate (register -> 1) returns 0 promptly, before any DDS / rclpy bring-up.
 
-
-def test_acquire_singleton_lock_independent_per_ipc_ns(monkeypatch, tmp_path):
-    """Different IPC NS inodes get independent locks."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    lock_a = _try_acquire_singleton_lock(111, 0)
-    lock_b = _try_acquire_singleton_lock(222, 0)
-    assert lock_a.status == LockStatus.ACQUIRED
-    assert lock_b.status == LockStatus.ACQUIRED
-    lock_a.file.close()
-    lock_b.file.close()
-
-
-def test_acquire_singleton_lock_independent_per_domain(monkeypatch, tmp_path):
-    """Same IPC NS but different ROS_DOMAIN_ID get independent locks, so two
-    launches sharing a namespace in different domains each run their own agent."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    lock_d1 = _try_acquire_singleton_lock(111, 1)
-    lock_d3 = _try_acquire_singleton_lock(111, 3)
-    assert lock_d1.status == LockStatus.ACQUIRED
-    assert lock_d3.status == LockStatus.ACQUIRED
-    lock_d1.file.close()
-    lock_d3.file.close()
-
-
-def test_acquire_singleton_lock_reports_error_on_unwritable_dir(monkeypatch):
-    """When the lock-file directory is not writable we report ERROR (distinct
-    from HELD) so the caller can surface a non-zero exit code."""
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', '/nonexistent_path_for_agnocast_test')
-    from ros2agnocast_discovery_agent.agent import LockStatus, _try_acquire_singleton_lock
-    assert _try_acquire_singleton_lock(789, 0).status == LockStatus.ERROR
-
-
-def test_main_exits_promptly_when_another_agent_holds_the_lock(monkeypatch, tmp_path):
-    """A duplicate (lock already held) returns 0 promptly instead of idling.
-
-    Runs main() in a thread so a regression to the old ``signal.pause()``
-    (which would block forever here) is caught as a non-returning thread
-    rather than hanging the whole test run. main() returns before any DDS /
-    ioctl bring-up, so this needs neither the kmod nor rclpy.
+    Runs main() in a thread so a regression to a blocking wait is caught as a non-returning
+    thread rather than hanging the run: a lost claim means another agent owns this (ns, domain),
+    so main must return 0 without spinning.
     """
-    monkeypatch.setenv('AGNOCAST_TMPFS_DIR', str(tmp_path))
-    from ros2agnocast_discovery_agent.agent import (
-        LockStatus, _read_ipc_ns_inode, _read_ros_domain_id,
-        _try_acquire_singleton_lock, main)
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
 
-    holder = _try_acquire_singleton_lock(_read_ipc_ns_inode(), _read_ros_domain_id())
-    assert holder.status == LockStatus.ACQUIRED
-    try:
-        result = {}
-        t = threading.Thread(target=lambda: result.__setitem__('rc', main(argv=[])))
-        t.start()
-        t.join(timeout=5.0)
-        assert not t.is_alive(), 'main() did not return (regressed to signal.pause()?)'
-        assert result['rc'] == 0
-    finally:
-        holder.file.close()
+    result = {}
+    t = threading.Thread(target=lambda: result.__setitem__('rc', agent.main(argv=[])))
+    t.start()
+    t.join(timeout=5.0)
+    assert not t.is_alive(), 'main() did not return on a lost claim (blocked instead of exiting?)'
+    assert result['rc'] == 0
+    assert fake.register_calls  # it actually attempted the claim
+
+
+def test_main_returns_error_when_claim_ioctl_fails(monkeypatch):
+    """A register ioctl error (-1) propagates as a non-zero exit, not a silent 0."""
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=-1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
+    assert agent.main(argv=[]) == 1
+
+
+def test_main_deprecated_alias_warns_and_delegates(monkeypatch, capsys):
+    """The old `discovery_agent` name still runs the agent, but says it is deprecated."""
+    from ros2agnocast_discovery_agent import agent
+    fake = _FakeSingletonLib(register_ret=-1)
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: fake)
+    assert agent.main_deprecated_alias(argv=[]) == 1
+    assert 'deprecated' in capsys.readouterr().err
+
+
+def test_main_returns_error_when_wrapper_unavailable(monkeypatch):
+    """A missing library or symbol (version skew) exits 1 cleanly, not with a traceback."""
+    from ros2agnocast_discovery_agent import agent
+
+    def _raise_oserror():
+        raise OSError('libagnocast_ioctl_wrapper.so: cannot open shared object file')
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', _raise_oserror)
+    assert agent.main(argv=[]) == 1
+
+    # spec=[] makes any attribute access (the missing symbol) raise AttributeError.
+    monkeypatch.setattr(agent, '_load_ioctl_wrapper', lambda: MagicMock(spec=[]))
+    assert agent.main(argv=[]) == 1
+
+
+def _idle_gate_self(should_exit_ret, commit_ret):
+    """Build a duck-typed DiscoveryAgent for exercising _maybe_exit_when_idle without rclpy/kmod.
+
+    threshold=1 makes the idle tracker fire on the first idle tick, so one call reaches the gate.
+    """
+    lib = MagicMock()
+    lib.agnocast_discovery_agent_should_exit.return_value = should_exit_ret
+    lib.agnocast_discovery_agent_commit_exit.return_value = commit_ret
+    return SimpleNamespace(
+        _lib=lib, _domain_id=0, _ipc_ns_inode=1,
+        _idle_tracker=IdleExitTracker(threshold=1), get_logger=lambda: MagicMock())
+
+
+def test_idle_exit_commits_then_exits_when_domain_stays_empty():
+    """Grace period elapsed and the kmod commit succeeds -> the agent exits."""
+    fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=1)
+    with pytest.raises(ExternalShutdownException):
+        DiscoveryAgent._maybe_exit_when_idle(fake_self)
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_called_once_with(0)
+
+
+def test_idle_exit_vetoed_keeps_running_when_process_races_in():
+    """The commit is vetoed (a process started during the grace period) -> keep running."""
+    fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=0)
+    DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_called_once_with(0)
+
+
+def test_idle_exit_never_commits_on_query_error():
+    """A should_exit error counts as not-idle: the gate is never reached, so we never exit."""
+    fake_self = _idle_gate_self(should_exit_ret=-1, commit_ret=1)
+    DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_not_called()
+
+
+# --- idle-exit (opt-in auto-fork cleanup) -----------------------------------
+
+def test_idle_exit_tracker_fires_after_threshold():
+    tracker = IdleExitTracker(threshold=3)
+    assert tracker.update(True) is False
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True  # third consecutive idle tick
+
+
+def test_idle_exit_tracker_resets_on_activity():
+    tracker = IdleExitTracker(threshold=3)
+    tracker.update(True)
+    tracker.update(True)
+    assert tracker.update(False) is False  # a busy tick resets the count
+    assert tracker.update(True) is False   # counting restarts from zero
+    assert tracker.update(True) is False
+    assert tracker.update(True) is True
+
+
+def test_idle_exit_tracker_threshold_floor():
+    # A non-positive threshold is clamped to 1, so a single idle tick fires.
+    assert IdleExitTracker(threshold=0).update(True) is True
+
+
+def test_dispatch_issues_domain_rule_bridges_without_any_remote_agent(monkeypatch):
+    """The cross-domain path has no gossip peer, so it must not be gated on one."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    forced = BridgeRequest('/x', 'T', DIRECTION_AGNOCAST_TO_ROS2, 10, False, True, domain_id=1)
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges', lambda state, rules, **kw: [forced])
+    sent = []
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: sent.extend(reqs))
+
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
+        _unforced_reasons={}, _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert sent == [forced]
+
+
+def test_dispatch_passes_the_loaded_rules_through_to_the_decider(monkeypatch):
+    """The rules read from the config must reach the decider, not an empty list."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    seen = []
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges',
+        lambda state, rules, **kw: seen.append(rules) or [])
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
+
+    rules = [('/x', '/x', 1, 2)]
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=rules, _ipc_ns_inode=7, _unforced_reasons={},
+        _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert seen == [rules]
+
+
+def test_dispatch_hands_the_decider_everything_it_needs(monkeypatch):
+    """Without the domain it cannot tell a foreign rule from an unresolved one; without the logger
+    and the shared dict, the reporting is dead or repeats every tick."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    seen = {}
+    monkeypatch.setattr(
+        bd, 'decide_domain_rule_bridges',
+        lambda state, rules, **kw: seen.update(kw) or [])
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: None)
+
+    logger = MagicMock()
+    reasons = {}
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[('/x', '/x', 1, 2)], _ipc_ns_inode=7,
+        _unforced_reasons=reasons, _domain_id=4, get_logger=lambda: logger)
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert seen.get('domain_id') == 4
+    assert seen.get('logger') is logger
+    # The same dict across ticks, not a copy: the tick count lives in it.
+    assert seen.get('reported') is reasons
+
+
+def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):
+    """Removing the remote-state early return must not turn every idle tick into a datagram."""
+    from ros2agnocast_discovery_agent import bridge_decider as bd
+    monkeypatch.setattr(bd, 'decide_domain_rule_bridges', lambda state, rules, **kw: [])
+    sent = []
+    monkeypatch.setattr(bd, 'dispatch_requests', lambda reqs, ns, logger=None: sent.append(reqs))
+
+    fake_self = SimpleNamespace(
+        _remote_states={}, _domain_rules=[], _ipc_ns_inode=7, _unforced_reasons={},
+        _domain_id=1, get_logger=lambda: MagicMock())
+    DiscoveryAgent._dispatch_bridge_requests(fake_self, AgnocastDaemonState())
+
+    assert sent == []
+
+
+@pytest.fixture(autouse=True)
+def _default_config_in_tmp(monkeypatch, tmp_path):
+    """Keep the default path, and the drop-in directory beside it, out of /etc."""
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'domain_bridge.yaml'))
+
+
+def test_load_domain_rules_returns_empty_when_no_config_exists(monkeypatch, tmp_path):
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'absent.yaml'))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.info.assert_called_once()
+    logger.warn.assert_not_called()
+
+
+def test_load_domain_rules_falls_back_to_the_default_path(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(config))
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2)]
+
+
+def test_load_domain_rules_warns_when_the_configured_path_is_absent(monkeypatch, tmp_path):
+    """An env var pointing at nothing is a misconfiguration; a missing default is not."""
+    monkeypatch.setenv(CONFIG_ENV, str(tmp_path / 'absent.yaml'))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.warn.assert_called_once()
+
+
+def test_load_domain_rules_logs_what_it_loaded(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    _load_domain_rules(logger)
+
+    logger.info.assert_called_once()
+    assert str(config) in logger.info.call_args[0][0]
+
+
+def test_load_domain_rules_parses_the_configured_yaml(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text(
+        'from_domain: 1\n'
+        'to_domain: 2\n'
+        'topics:\n'
+        '  /x:\n'
+        '    type: std_msgs/msg/Int32\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2)]
+
+
+def test_load_domain_rules_warns_about_topics_without_a_domain_pair(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text(
+        'topics:\n'
+        '  /x:\n'
+        '    from_domain: 1\n'
+        '    to_domain: 2\n'
+        '  /y:\n'
+        '    type: std_msgs/msg/Int32\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    assert '/y' in logger.warn.call_args[0][0]
+
+
+def test_load_domain_rules_errors_and_returns_empty_on_a_broken_config(monkeypatch, tmp_path):
+    config = tmp_path / 'domain_bridge.yaml'
+    config.write_text('topics: [not, a, mapping]\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == []
+    logger.error.assert_called_once()
+
+
+def test_load_domain_rules_reads_the_default_drop_in_directory(monkeypatch, tmp_path):
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'domain_bridge.yaml'))
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-base.yaml').write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    (drop_in_dir / '20-lidar.yaml').write_text('from_domain: 3\nto_domain: 4\ntopics:\n  /y:\n')
+
+    assert _load_domain_rules() == [('/x', '/x', 1, 2), ('/y', '/y', 3, 4)]
+
+
+def test_load_domain_rules_warns_that_the_env_var_shadows_the_drop_ins(monkeypatch, tmp_path):
+    config = tmp_path / 'listed.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-base.yaml').write_text('from_domain: 3\nto_domain: 4\ntopics:\n  /y:\n')
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    warning = logger.warn.call_args[0][0]
+    assert domain_bridge_config.SHADOWED_DROP_INS_NOTICE in warning
+    assert str(drop_in_dir / '10-base.yaml') in warning
+
+
+def test_load_domain_rules_is_quiet_when_the_drop_in_directory_is_empty(monkeypatch, tmp_path):
+    config = tmp_path / 'listed.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    (tmp_path / 'domain_bridge.d').mkdir()
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    logger.warn.assert_not_called()
+
+
+def test_load_domain_rules_keeps_the_configs_that_load_around_a_broken_one(monkeypatch, tmp_path):
+    broken = tmp_path / 'a.yaml'
+    broken.write_text('topics: [not, a, mapping]\n')
+    good = tmp_path / 'b.yaml'
+    good.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(
+        CONFIG_ENV,
+        f'{broken}{domain_bridge_config.CONFIG_PATH_SEP}{good}')
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    logger.error.assert_called_once()
+
+
+def test_exit_when_idle_enabled_via_env(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent'])  # no CLI flag
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    assert _exit_when_idle_enabled() is False
+    for truthy in ('1', 'true', 'TRUE', 'yes'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, truthy)
+        assert _exit_when_idle_enabled() is True
+    for falsy in ('0', 'false', '', 'no'):
+        monkeypatch.setenv(EXIT_WHEN_IDLE_ENV, falsy)
+        assert _exit_when_idle_enabled() is False
+
+
+def test_exit_when_idle_enabled_via_cli_flag(monkeypatch):
+    # The auto-fork passes the flag as an argv literal (no env set in the child).
+    monkeypatch.delenv(EXIT_WHEN_IDLE_ENV, raising=False)
+    monkeypatch.setattr(sys, 'argv', ['discovery_agent', EXIT_WHEN_IDLE_FLAG])
+    assert _exit_when_idle_enabled() is True

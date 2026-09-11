@@ -221,6 +221,21 @@ TEST_F(GenericSubscriptionLifecycleTest, destructor_unregisters_callback_info)
     << "GenericSubscription destructor must erase its entry from id2_callback_info";
 }
 
+TEST_F(GenericSubscriptionLifecycleTest, get_topic_name_returns_configured_topic)
+{
+  const std::string topic = "/test_generic_sub_get_topic_name";
+  const std::string type = "std_msgs/msg/String";
+  rclcpp::QoS qos{1};
+
+  auto cbg = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  agnocast::SubscriptionOptions sub_opts;
+  sub_opts.callback_group = cbg;
+  auto sub = agnocast::create_generic_subscription(
+    node_.get(), topic, type, qos, [](std::shared_ptr<rclcpp::SerializedMessage>) {}, sub_opts);
+
+  EXPECT_STREQ(sub->get_topic_name(), topic.c_str());
+}
+
 TEST_F(GenericSubscriptionLifecycleTest, invalid_type_name_throws_and_does_not_register)
 {
   const std::string topic = "/test_generic_sub_invalid_type";

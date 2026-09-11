@@ -8,8 +8,10 @@ struct device * agnocast_device;
 DECLARE_RWSEM(global_htables_rwsem);
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
+DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
+DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
 
 DEFINE_SPINLOCK(pid_queue_lock);
 pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
@@ -22,45 +24,34 @@ int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
-static void pre_handler_subscriber_exit(
-  struct topic_wrapper * wrapper, const pid_t pid, struct process_info * proc_info)
+static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
 {
+  // Unlinked as a batch so the notify lists are rebuilt once instead of once per subscriber, which
+  // would repeat the same work and land on the same result.
+  HLIST_HEAD(leaving);
   struct subscriber_info * sub_info;
   int bkt_sub_info;
   struct hlist_node * tmp_sub_info;
-  hash_for_each_safe(wrapper->topic.sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
+  hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub_info, tmp_sub_info, sub_info, node)
   {
     if (sub_info->pid != pid) continue;
 
+    hash_del(&sub_info->node);
+    hlist_add_head(&sub_info->node, &leaving);
+  }
+
+  if (hlist_empty(&leaving)) return;
+
+  // Before the frees below, so that no list is left pointing at a released context.
+  agnocast_rebuild_notify_lists(wrapper);
+
+  struct hlist_node * tmp_leaving;
+  hlist_for_each_entry_safe(sub_info, tmp_leaving, &leaving, node)
+  {
     const topic_local_id_t subscriber_id = sub_info->id;
 
-    // Save subscription info for daemon cleanup before deleting the subscriber
-    if (proc_info->exit_subscription_count >= MAX_SUBSCRIPTION_NUM_PER_PROCESS) {
-      dev_warn(
-        agnocast_device,
-        "exit_subscription_list is full for pid=%d, subscription MQ may leak. "
-        "(%s)\n",
-        pid, __func__);
-    } else {
-      struct exit_subscription_entry * exit_entry =
-        kmalloc(sizeof(struct exit_subscription_entry), GFP_KERNEL);
-      if (exit_entry) {
-        strscpy(exit_entry->topic_name, wrapper->key, TOPIC_NAME_BUFFER_SIZE);
-        exit_entry->subscriber_id = subscriber_id;
-        list_add_tail(&exit_entry->list, &proc_info->exit_subscription_list);
-        proc_info->exit_subscription_count++;
-      } else {
-        dev_warn(
-          agnocast_device,
-          "kmalloc failed for exit_subscription_entry, subscription MQ may leak. "
-          "(%s)\n",
-          __func__);
-      }
-    }
-
-    hash_del(&sub_info->node);
-    kfree(sub_info->node_name);
-    kfree(sub_info);
+    hlist_del(&sub_info->node);
+    free_subscriber_info(sub_info);
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
@@ -69,7 +60,7 @@ static void pre_handler_subscriber_exit(
       continue;
     }
 
-    struct rb_root * root = &wrapper->topic.entries;
+    struct rb_root * root = &wrapper->topic->entries;
     struct rb_node * node = rb_first(root);
     while (node) {
       struct entry_node * en = rb_entry(node, struct entry_node, node);
@@ -83,7 +74,7 @@ static void pre_handler_subscriber_exit(
       bool publisher_exited = false;
       struct publisher_info * pub_info;
       uint32_t hash_val = hash_min(en->publisher_id, PUB_INFO_HASH_BITS);
-      hash_for_each_possible(wrapper->topic.pub_info_htable, pub_info, node, hash_val)
+      hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
           const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
@@ -100,8 +91,7 @@ static void pre_handler_subscriber_exit(
       pub_info->entries_num--;
       if (pub_info->entries_num == 0) {
         hash_del(&pub_info->node);
-        kfree(pub_info->node_name);
-        kfree(pub_info);
+        free_publisher_info(pub_info);
       }
     }
   }
@@ -112,7 +102,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
   struct publisher_info * pub_info;
   int bkt_pub_info;
   struct hlist_node * tmp_pub_info;
-  hash_for_each_safe(wrapper->topic.pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
+  hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub_info, tmp_pub_info, pub_info, node)
   {
     if (pub_info->pid != pid) continue;
 
@@ -120,7 +110,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
     // Publisher-side handles do not participate in reference counting, so we don't need
     // to remove publisher references. Just clean up entries that have no subscriber references.
-    struct rb_root * root = &wrapper->topic.entries;
+    struct rb_root * root = &wrapper->topic->entries;
     struct rb_node * node = rb_first(root);
     while (node) {
       struct entry_node * en = rb_entry(node, struct entry_node, node);
@@ -136,8 +126,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
-      kfree(pub_info->node_name);
-      kfree(pub_info);
+      free_publisher_info(pub_info);
     }
   }
 }
@@ -147,7 +136,7 @@ int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper)
   int count = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
-  hash_for_each(wrapper->topic.sub_info_htable, bkt_sub_info, sub_info, node)
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     count++;
   }
@@ -159,11 +148,67 @@ int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper)
   int count = 0;
   struct publisher_info * pub_info;
   int bkt_pub_info;
-  hash_for_each(wrapper->topic.pub_info_htable, bkt_pub_info, pub_info, node)
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     count++;
   }
   return count;
+}
+
+bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
+{
+  struct publisher_info * pub_info;
+  struct subscriber_info * sub_info;
+  int bkt;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
+  {
+    if (pub_info->domain_id == wrapper->domain_id) return true;
+  }
+  hash_for_each(wrapper->topic->sub_info_htable, bkt, sub_info, node)
+  {
+    if (sub_info->domain_id == wrapper->domain_id) return true;
+  }
+  return false;
+}
+
+void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
+{
+  hash_del(&wrapper->node);
+  kfree(wrapper->key);
+
+  // Grouped domains share one topic_struct, so it (and everything it owns) is
+  // torn down only when the last referencing wrapper is released. This is the
+  // single place that frees the shared rbtree and pub/sub tables.
+  if (--wrapper->topic->wrapper_refcnt == 0) {
+    struct rb_node * node = rb_first(&wrapper->topic->entries);
+    while (node) {
+      struct entry_node * en = rb_entry(node, struct entry_node, node);
+      node = rb_next(node);
+      rb_erase(&en->node, &wrapper->topic->entries);
+      kfree(en);
+    }
+
+    struct publisher_info * pub_info;
+    int bkt_pub;
+    struct hlist_node * tmp_pub;
+    hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub, tmp_pub, pub_info, node)
+    {
+      hash_del(&pub_info->node);
+      free_publisher_info(pub_info);
+    }
+
+    struct subscriber_info * sub_info;
+    int bkt_sub;
+    struct hlist_node * tmp_sub;
+    hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub, tmp_sub, sub_info, node)
+    {
+      hash_del(&sub_info->node);
+      free_subscriber_info(sub_info);
+    }
+
+    kfree(wrapper->topic);
+  }
+  kfree(wrapper);
 }
 
 bool agnocast_is_referenced(struct entry_node * en)
@@ -185,21 +230,9 @@ struct process_info * agnocast_find_process_info(const pid_t pid)
   return NULL;
 }
 
-void agnocast_free_exit_subscription_list(struct process_info * proc_info)
-{
-  struct exit_subscription_entry * entry;
-  struct exit_subscription_entry * tmp_entry;
-  list_for_each_entry_safe(entry, tmp_entry, &proc_info->exit_subscription_list, list)
-  {
-    list_del(&entry->list);
-    kfree(entry);
-  }
-  proc_info->exit_subscription_count = 0;
-}
-
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
 {
-  rb_erase(&en->node, &wrapper->topic.entries);
+  rb_erase(&en->node, &wrapper->topic->entries);
   kfree(en);
 }
 
@@ -246,10 +279,27 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
-// RCU-protected check: returns true if pid is registered in agnocast.
+// Caller holds global_htables_rwsem (write).
+void agnocast_remove_discovery_agent_by_pid(const pid_t pid)
+{
+  struct discovery_agent_info * agent;
+  struct hlist_node * tmp;
+  hash_for_each_possible_safe(
+    discovery_agent_htable, agent, tmp, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
+  {
+    if (agent->pid == pid) {
+      hash_del_rcu(&agent->node);
+      kfree_rcu(agent, rcu_head);
+      return;
+    }
+  }
+}
+
+// RCU-protected check: returns true if pid is a registered agnocast process or discovery agent.
 bool is_agnocast_pid(const pid_t pid)
 {
   struct process_info * proc_info;
+  struct discovery_agent_info * agent;
   bool found = false;
   rcu_read_lock();
   hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
@@ -257,6 +307,16 @@ bool is_agnocast_pid(const pid_t pid)
     if (proc_info->global_pid == pid) {
       found = true;
       break;
+    }
+  }
+  if (!found) {
+    hash_for_each_possible_rcu(
+      discovery_agent_htable, agent, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
+    {
+      if (agent->pid == pid) {
+        found = true;
+        break;
+      }
     }
   }
   rcu_read_unlock();
@@ -268,6 +328,10 @@ bool is_agnocast_pid(const pid_t pid)
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
   down_write(&global_htables_rwsem);
+
+  // The discovery agent is tracked outside proc_info and has no proc_info entry, so drain it
+  // here before the proc_info lookup (which would otherwise return early for the agent's pid).
+  agnocast_remove_discovery_agent_by_pid(pid);
 
   // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
   // have changed between then and now (e.g., the process was already cleaned up by a prior call).
@@ -285,8 +349,14 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     return;
   }
 
-  // This proc_info will be removed from proc_info_htable later by the unlink daemon.
-  proc_info->exited = true;
+  // No daemon can drain the daemon's own entry, so for this role registered means alive.
+  if (proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
+  } else {
+    // This proc_info will be removed from proc_info_htable later by the unlink daemon.
+    proc_info->exited = true;
+  }
 
   free_memory(pid);
 
@@ -298,15 +368,11 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
-    pre_handler_subscriber_exit(wrapper, pid, proc_info);
+    pre_handler_subscriber_exit(wrapper, pid);
 
-    // Check if we can release the topic_wrapper
-    if (
-      agnocast_get_size_pub_info_htable(wrapper) == 0 &&
-      agnocast_get_size_sub_info_htable(wrapper) == 0) {
-      hash_del(&wrapper->node);
-      kfree(wrapper->key);
-      kfree(wrapper);
+    // Release this wrapper once its own domain has no endpoints left.
+    if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
+      agnocast_release_topic_wrapper(wrapper);
     }
   }
 

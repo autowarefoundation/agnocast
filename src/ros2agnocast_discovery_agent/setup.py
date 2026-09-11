@@ -4,16 +4,20 @@ package_name = 'ros2agnocast_discovery_agent'
 
 setup(
     name=package_name,
-    version='2.3.5',
+    version='2.4.0',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/discovery_agent.launch.xml']),
-        ('lib/' + package_name, ['scripts/discovery_agent']),
+        ('share/' + package_name + '/systemd',
+            ['systemd/agnocast-domain-bridge.service.example', 'systemd/README.md']),
+        ('lib/' + package_name,
+            ['scripts/agnocast_discovery_agent', 'scripts/discovery_agent',
+             'scripts/register_domain_bridge']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
     extras_require={'test': ['pytest']},
     maintainer='Keita Morisaki, Takahiro Ishikawa-Aso, Koichi Imai, Takumi Jin',
@@ -26,7 +30,11 @@ setup(
     license='Apache License 2.0',
     entry_points={
         'console_scripts': [
-            'discovery_agent = ros2agnocast_discovery_agent.agent:main',
+            'agnocast_discovery_agent = ros2agnocast_discovery_agent.agent:main',
+            # Deprecated alias of the above; remove in a release that may break users.
+            'discovery_agent = ros2agnocast_discovery_agent.agent:main_deprecated_alias',
+            'register_domain_bridge = '
+            'ros2agnocast_discovery_agent.register_domain_bridge:main',
         ],
     },
 )

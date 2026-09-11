@@ -2,6 +2,7 @@
 #pragma once
 
 #include <linux/ipc_namespace.h>
+#include <linux/limits.h>
 #include <linux/types.h>
 
 #define MAX_PUBLISHER_NUM 1024   // Maximum number of publishers per topic
@@ -14,6 +15,7 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
+#define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
@@ -35,17 +37,37 @@ struct ioctl_get_version_args
   char ret_version[VERSION_BUFFER_LEN];
 };
 
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
+};
+
+// The unlink daemon has no domain of its own.
+#define AGNOCAST_DOMAIN_ID_NONE U32_MAX
+
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    uint32_t role;       // enum process_role
+    uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
   {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
+    bool ret_discovery_agent_exist;
   };
 };
 
@@ -60,6 +82,7 @@ union ioctl_add_subscriber_args {
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    int32_t eventfd;  // eventfd created by userspace, passed to the kernel for publish notification
   };
   struct
   {
@@ -116,16 +139,10 @@ union ioctl_publish_msg_args {
     struct name_info topic_name;
     topic_local_id_t publisher_id;
     uint64_t msg_virtual_address;
-    // Unlike ret_* fields which are returned via the union copy, subscriber IDs are written
-    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
-    // remains valid until the ioctl returns.
-    uint64_t subscriber_ids_buffer_addr;
-    uint32_t subscriber_ids_buffer_size;
   };
   struct
   {
     int64_t ret_entry_id;
-    uint32_t ret_subscriber_num;
     uint32_t ret_released_num;
     uint64_t ret_released_addrs[MAX_RELEASE_NUM];
   };
@@ -158,6 +175,9 @@ union ioctl_get_subscriber_num_args {
     uint32_t ret_other_process_subscriber_num;
     uint32_t ret_same_process_subscriber_num;
     uint32_t ret_ros2_subscriber_num;
+    // Subscribers in the domain a bridge rule pairs this one with, counted only where the rule
+    // delivers this way round. Disjoint from the own-domain counts above.
+    uint32_t ret_other_domain_subscriber_num;
     bool ret_a2r_bridge_exist;
     bool ret_r2a_bridge_exist;
   };
@@ -174,28 +194,10 @@ union ioctl_get_publisher_num_args {
   };
 };
 
-/* Max subscription MQ info entries buffered per process during exit cleanup.
- * MAX_SUBSCRIBER_NUM is per topic, but a single process can subscribe across multiple topics.
- * These entries live in kernel memory from process exit until the daemon polls them (typically
- * ~1s). If the daemon is dead, they persist until module unload — but that scenario already leaves
- * larger resources (shm, mempool) orphaned, so the extra ~69KB/process here is negligible. */
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
-
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -265,6 +267,35 @@ struct ioctl_check_and_request_bridge_shutdown_args
   bool ret_should_shutdown;
 };
 
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_discovery_agent_should_exit_args
+{
+  uint32_t domain_id;
+  // false: read-only idle poll (userspace counts consecutive idle polls before exiting).
+  // true: atomic exit gate -- deregister iff the domain is truly empty, serialized against
+  // add_process so a process racing in vetoes the exit instead of being orphaned.
+  bool commit;
+  bool ret_should_exit;
+};
+
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_owned_by_caller;  // false: someone else owns this (ns, domain); caller must exit
+};
+
+// The caller's IPC namespace and pid come from `current` in the kmod, so they are
+// not passed here; only the domain is (the kernel cannot infer a ROS_DOMAIN_ID).
+struct ioctl_discovery_agent_exists_args
+{
+  uint32_t domain_id;
+  bool
+    ret_exists;  // whether an agent is registered for this (ns, domain); read-only liveness query
+};
+
 struct ioctl_set_ros2_subscriber_num_args
 {
   struct name_info topic_name;
@@ -277,6 +308,25 @@ struct ioctl_set_ros2_publisher_num_args
   uint32_t ros2_publisher_num;
 };
 
+struct ioctl_add_domain_bridge_args
+{
+  // topic_name_from / topic_name_to may differ (rename); equal for a plain bridge.
+  struct name_info topic_name_from;
+  struct name_info topic_name_to;
+  uint32_t from_domain;
+  uint32_t to_domain;
+};
+
+// Bridges every topic whose name starts with topic_name_prefix, pairing it with the identical
+// name in the other domain. For topic families whose full names appear only at runtime and so
+// cannot be listed in a config -- an Agnocast service's per-client response topics.
+struct ioctl_add_domain_bridge_prefix_args
+{
+  struct name_info topic_name_prefix;
+  uint32_t from_domain;
+  uint32_t to_domain;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -286,7 +336,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -300,16 +350,29 @@ struct ioctl_set_ros2_publisher_num_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#define AGNOCAST_ADD_DOMAIN_BRIDGE_CMD _IOW(0xA6, 28, struct ioctl_add_domain_bridge_args)
+#define AGNOCAST_DISCOVERY_AGENT_SHOULD_EXIT_CMD \
+  _IOWR(0xA6, 29, struct ioctl_discovery_agent_should_exit_args)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD \
+  _IOWR(0xA6, 31, struct ioctl_discovery_agent_exists_args)
+#define AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD \
+  _IOW(0xA6, 32, struct ioctl_add_domain_bridge_prefix_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 
 // ================================================
 // ros2cli ioctls
 
-#define MAX_TOPIC_NUM 1024
+#define MAX_TOPIC_NUM 2048
 
 union ioctl_topic_list_args {
   struct
   {
     uint64_t topic_name_buffer_addr;
+    // Parallel array of uint32 domain_ids, one per returned topic name. The same
+    // topic name can appear in multiple domains, so the caller pairs name[i] with
+    // domain_id[i] to disambiguate. Pass 0 to skip domain output.
+    uint64_t domain_id_buffer_addr;
     uint32_t topic_name_buffer_size;
   };
   uint32_t ret_topic_num;
@@ -340,6 +403,9 @@ union ioctl_topic_info_args {
     struct name_info topic_name;
     uint64_t topic_info_ret_buffer_addr;
     uint32_t topic_info_ret_buffer_size;
+    // Which domain's endpoints to return. A topic name can exist in multiple
+    // domains; the caller selects one (paired with get_topic_list output).
+    uint32_t domain_id;
   };
   uint32_t ret_topic_info_ret_num;
 };
@@ -371,7 +437,7 @@ int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
   const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
   const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, union ioctl_add_subscriber_args * ioctl_ret);
+  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
@@ -389,8 +455,7 @@ int agnocast_ioctl_receive_msg(
 
 int agnocast_ioctl_publish_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address, topic_local_id_t * subscriber_ids_out,
-  uint32_t subscriber_ids_buffer_size, union ioctl_publish_msg_args * ioctl_ret);
+  const uint64_t msg_virtual_address, union ioctl_publish_msg_args * ioctl_ret);
 
 int agnocast_ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
@@ -399,8 +464,8 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_performance_bridge_manager,
-  union ioctl_add_process_args * ioctl_ret);
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
+  const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
@@ -411,7 +476,12 @@ int agnocast_ioctl_get_publisher_num(
   union ioctl_get_publisher_num_args * ioctl_ret);
 
 int agnocast_ioctl_get_topic_list(
-  const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
+  const struct ipc_namespace * ipc_ns, char * topic_name_buf, uint32_t * domain_id_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
+
+int agnocast_ioctl_get_node_names(
+  const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
+  uint32_t * ret_node_num);
 
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
@@ -434,6 +504,14 @@ int agnocast_ioctl_add_bridge(
 int agnocast_ioctl_remove_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns);
 
+int agnocast_ioctl_add_domain_bridge(
+  const char * topic_name_from, const char * topic_name_to, uint32_t from_domain,
+  uint32_t to_domain, const struct ipc_namespace * ipc_ns);
+
+int agnocast_ioctl_add_domain_bridge_prefix(
+  const char * topic_name_prefix, uint32_t from_domain, uint32_t to_domain,
+  const struct ipc_namespace * ipc_ns);
+
 int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret);
 
 int agnocast_ioctl_get_topic_subscriber_info(
@@ -445,12 +523,12 @@ int agnocast_ioctl_get_topic_publisher_info(
   union ioctl_topic_info_args * topic_info_args);
 
 int agnocast_ioctl_get_node_subscriber_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_get_node_publisher_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_check_and_request_bridge_shutdown(
   const pid_t pid, const struct ipc_namespace * ipc_ns,
@@ -464,13 +542,23 @@ int agnocast_ioctl_set_ros2_publisher_num(
 
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid);
 
-int agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret,
-  struct exit_subscription_mq_info * mq_info_buf, uint32_t mq_info_buf_size,
-  pid_t * out_global_pid);
+int agnocast_ioctl_discovery_agent_should_exit(
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id, const bool commit,
+  bool * ret_should_exit);
+
+int agnocast_ioctl_add_discovery_agent(
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const uint32_t domain_id,
+  struct ioctl_add_discovery_agent_args * ioctl_ret);
+
+int agnocast_ioctl_discovery_agent_exists(
+  const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
+
+// Returns the exited process's global pid, or -1 if the namespace has none.
+pid_t agnocast_ioctl_get_exit_process(
+  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, uint32_t committed_count,
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
   bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
@@ -486,6 +574,7 @@ int agnocast_increment_message_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,
   const int64_t entry_id);
 int agnocast_get_alive_proc_num(void);
+int agnocast_get_discovery_agent_num(void);
 bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
 int64_t agnocast_get_latest_received_entry_id(
@@ -506,4 +595,11 @@ int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns);
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns);
+bool agnocast_get_domain_rule(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain,
+  uint32_t * domain_a, uint32_t * domain_b, bool * a_to_b, bool * b_to_a);
+// Returns the shared topic_struct's wrapper refcount for the wrapper in domain_id,
+// or 0 if no such wrapper exists. Used to observe domain-bridge grouping.
+int agnocast_topic_wrapper_refcnt(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id);
 #endif

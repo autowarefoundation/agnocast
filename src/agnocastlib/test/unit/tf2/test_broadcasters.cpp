@@ -80,8 +80,7 @@ topic_local_id_t initialize_publisher(
 
 union ioctl_publish_msg_args publish_core(
   const void *, const std::string & topic_name, const topic_local_id_t,
-  const uint64_t msg_virtual_address,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> &)
+  const uint64_t msg_virtual_address)
 {
   publish_core_call_count++;
   last_published_topic_name = topic_name;

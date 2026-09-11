@@ -9,6 +9,7 @@ using std::placeholders::_1;
 
 class MinimalGenericSubscriber : public rclcpp::Node
 {
+  rclcpp::CallbackGroup::SharedPtr group_;
   agnocast::GenericSubscription::SharedPtr sub_;
 
   void callback(std::shared_ptr<rclcpp::SerializedMessage> serialized_msg)
@@ -24,10 +25,9 @@ public:
   explicit MinimalGenericSubscriber(const rclcpp::NodeOptions & options)
   : Node("minimal_generic_subscriber", options)
   {
-    rclcpp::CallbackGroup::SharedPtr group =
-      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions agnocast_options;
-    agnocast_options.callback_group = group;
+    agnocast_options.callback_group = group_;
 
     sub_ = agnocast::create_generic_subscription(
       this, "/my_topic", "agnocast_sample_interfaces/msg/DynamicSizeArray", 1,

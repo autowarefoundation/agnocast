@@ -45,9 +45,9 @@ In current logic, this cannot be resolved.
 This is a bit excessive, such as
 
 ```bash
-: error: variable name 'mq' is too short, expected at least 3 characters [readability-identifier-length,-warnings-as-errors]
-  mqd_t mq = mq_open(mq_name.c_str(), O_CREAT | O_RDONLY, 0666, &attr);
-        ^
+: error: parameter name 'id' is too short, expected at least 3 characters [readability-identifier-length,-warnings-as-errors]
+  const std::string & topic_name, topic_local_id_t id, const std::string & message_type,
+                                                   ^
 ```
 
 ## TODO

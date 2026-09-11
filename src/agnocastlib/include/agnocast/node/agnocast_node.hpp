@@ -6,10 +6,12 @@
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_timer_info.hpp"
+#include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
 #include "agnocast/node/node_interfaces/node_clock.hpp"
+#include "agnocast/node/node_interfaces/node_graph.hpp"
 #include "agnocast/node/node_interfaces/node_logging.hpp"
 #include "agnocast/node/node_interfaces/node_parameters.hpp"
 #include "agnocast/node/node_interfaces/node_services.hpp"
@@ -127,6 +129,13 @@ public:
   rclcpp::node_interfaces::NodeClockInterface::SharedPtr get_node_clock_interface()
   {
     return node_clock_;
+  }
+
+  // Non-const to align with rclcpp::Node API
+  // cppcheck-suppress functionConst
+  rclcpp::node_interfaces::NodeGraphInterface::SharedPtr get_node_graph_interface()
+  {
+    return node_graph_;
   }
 
   // Non-const to align with rclcpp::Node API
@@ -397,20 +406,42 @@ public:
   AGNOCAST_PUBLIC
   rclcpp::Time now() const { return node_clock_->get_clock()->now(); }
 
+  /// Return the fully qualified names of the nodes in this IPC namespace and ROS_DOMAIN_ID.
+  ///
+  /// Reports the agnocast nodes that own an endpoint, plus this node itself. DDS is not consulted,
+  /// so a ROS 2 node without an agnocast endpoint is not reported. See
+  /// docs/agnocast_node_interface_comparison.md.
+  /// @return Node names, with a name shared by several nodes repeated once per node.
+  AGNOCAST_PUBLIC
+  std::vector<std::string> get_node_names() const { return node_graph_->get_node_names(); }
+
   /// Return the number of publishers on a topic.
+  ///
+  /// Counts the agnocast publishers in the same domain, plus the ROS 2 publishers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the publishers the application set up.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
   /// @return Publisher count.
   AGNOCAST_PUBLIC
   size_t count_publishers(const std::string & topic_name) const
   {
-    return get_publisher_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_publishers(topic_name);
   }
 
   /// Return the number of subscribers on a topic.
-  /// @return Subscriber count.
+  ///
+  /// Counts the agnocast subscribers in the same domain, plus the ROS 2 subscribers reported by a
+  /// bridge when one is running. Endpoints that a bridge created itself are excluded, so the
+  /// result reflects the subscribers the application set up.
+  ///
+  /// Agnocast subscribers living in the calling process are not counted, because the underlying
+  /// query answers how many other processes receive a published message.
+  /// @param topic_name Topic name. A relative name is resolved against this node's namespace.
+  /// @return Subscriber count, excluding agnocast subscribers in the calling process.
   AGNOCAST_PUBLIC
   size_t count_subscribers(const std::string & topic_name) const
   {
-    return get_subscription_count_core(node_topics_->resolve_topic_name(topic_name));
+    return node_graph_->count_subscribers(topic_name);
   }
 
   /// Create a publisher (QoS overload).
@@ -481,6 +512,37 @@ public:
       options);
   }
 
+  /// Create a take-subscription (QoS overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param qos Quality of service profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return std::make_shared<TakeSubscription<MessageT>>(this, topic_name, qos, std::move(options));
+  }
+
+  /// Create a take-subscription (queue-size overload).
+  /// @tparam MessageT ROS message type.
+  /// @param topic_name Topic name.
+  /// @param queue_size History depth for the QoS profile.
+  /// @param options Subscription options.
+  /// @return Shared pointer to the created take-subscription.
+  AGNOCAST_PUBLIC
+  template <typename MessageT>
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+    const std::string & topic_name, size_t queue_size,
+    agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+  {
+    return create_take_subscription<MessageT>(
+      topic_name, rclcpp::QoS(rclcpp::KeepLast(queue_size)), std::move(options));
+  }
+
   /// Create a polling subscription (history-depth overload).
   /// @tparam MessageT ROS message type.
   /// @param topic_name Topic name.
@@ -488,6 +550,10 @@ public:
   /// @return Shared pointer to the created polling subscription.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const size_t qos_history_depth)
   {
@@ -502,6 +568,10 @@ public:
   /// @return Shared pointer to the created polling subscription.
   AGNOCAST_PUBLIC
   template <typename MessageT>
+  [[deprecated(
+    "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed "
+    "from agnocast. Obtain a polling subscriber from the wrapper, or use "
+    "agnocast::create_take_subscription().")]]
   typename agnocast::PollingSubscriber<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos)
   {
@@ -536,8 +606,8 @@ public:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
+    [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+    const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
     auto timer = std::make_shared<WallTimer<CallbackT>>(timer_id, period_ns, std::move(callback));
 
@@ -546,7 +616,7 @@ public:
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
       static_cast<const void *>(node_base_.get()), callback_addr,
-      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
+      static_cast<const void *>(group.get()), callback_symbol.c_str(), period_ns.count());
 
     return timer;
   }
@@ -633,8 +703,8 @@ private:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
+    [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+    const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
     auto timer = std::make_shared<GenericTimer<CallbackT>>(
       timer_id, period_ns, clock, std::forward<CallbackT>(callback));
@@ -644,7 +714,7 @@ private:
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
       static_cast<const void *>(node_base_.get()), callback_addr,
-      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
+      static_cast<const void *>(group.get()), callback_symbol.c_str(), period_ns.count());
 
     return timer;
   }
@@ -654,6 +724,7 @@ private:
 
   node_interfaces::NodeBase::SharedPtr node_base_;
   rclcpp::Logger logger_;
+  node_interfaces::NodeGraph::SharedPtr node_graph_;
   node_interfaces::NodeTopics::SharedPtr node_topics_;
   node_interfaces::NodeServices::SharedPtr node_services_;
   node_interfaces::NodeParameters::SharedPtr node_parameters_;

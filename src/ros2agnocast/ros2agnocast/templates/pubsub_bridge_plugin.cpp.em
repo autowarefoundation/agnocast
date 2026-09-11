@@ -14,20 +14,20 @@
 
 #include "@(header_path)"
 
-extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_name)(
+extern "C" PubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
 {
   using MsgT = @(cpp_type);
-  using AgnoPub = agnocast::BasicPublisher<MsgT, agnocast::NoBridgeRegistrationPolicy>;
+  using AgnoPub = agnocast::Publisher<MsgT>;
 
   auto agno_pub = std::make_shared<AgnoPub>(
     node.get(),
     topic_name,
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).transient_local(),
     agnocast::PublisherOptions{},
-    true);
+    agnocast::PublisherRole::BridgeInternal);
 
   return create_r2a_generic_bridge(
     node, topic_name, sub_qos, "@(msg_type)",
@@ -47,7 +47,7 @@ extern "C" PerformancePubsubBridgeResult create_r2a_pubsub_bridge_@(snake_type_n
     });
 }
 
-extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_name)(
+extern "C" PubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_name)(
   rclcpp::Node::SharedPtr node,
   const std::string & topic_name,
   const rclcpp::QoS & sub_qos)
@@ -58,7 +58,10 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
     topic_name, "@(msg_type)",
     rclcpp::QoS(agnocast::DEFAULT_QOS_DEPTH).reliable().transient_local());
 
-  auto cb_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+  // subscription is created, so it is never classified before its subscription exists.
+  auto cb_group =
+    node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto agno_callback = [ros_pub](const agnocast::ipc_shared_ptr<MsgT> msg) {
     static const rclcpp::Serialization<MsgT> serialization;
@@ -79,14 +82,14 @@ extern "C" PerformancePubsubBridgeResult create_a2r_pubsub_bridge_@(snake_type_n
   sub_opts.ignore_local_publications = true;
   sub_opts.callback_group = cb_group;
 
-  using AgnoSub = agnocast::BasicSubscription<MsgT, agnocast::NoBridgeRegistrationPolicy>;
+  using AgnoSub = agnocast::Subscription<MsgT>;
   auto agno_sub = std::make_shared<AgnoSub>(
     node.get(),
     topic_name,
     sub_qos,
     agno_callback,
     sub_opts,
-    true);
+    agnocast::SubscriptionRole::BridgeInternal);
 
   return {agno_sub, cb_group};
 }

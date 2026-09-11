@@ -1,31 +1,18 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <fcntl.h>
-#include <mqueue.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <cstring>
-#include <functional>
-#include <mutex>
-#include <queue>
-#include <thread>
 
 namespace agnocast
 {
@@ -39,8 +26,7 @@ topic_local_id_t initialize_publisher(
   const bool is_bridge, const std::string & type_name);
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
-  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs);
+  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);
 uint32_t get_subscription_count_core(const std::string & topic_name);
 uint32_t get_intra_subscription_count_core(const std::string & topic_name);
 void increment_borrowed_publisher_num();
@@ -87,7 +73,8 @@ enum class PublisherRole : uint8_t {
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
-// shared with all Agnocast publishers, such as kernel registration and message queue management.
+// shared with all Agnocast publishers, such as kernel registration, GID generation, and
+// bridge registration.
 class PublisherBase
 {
   void generate_gid();
@@ -95,40 +82,14 @@ class PublisherBase
 protected:
   topic_local_id_t id_ = -1;
   std::string topic_name_;
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
-  std::mutex opened_mqs_mtx_;
   rmw_gid_t gid_;
+  // The depth is a placeholder: rclcpp::QoS has no default constructor.
+  rclcpp::QoS actual_qos_{1};
 
   template <typename NodeT>
-  rclcpp::QoS init_base(
+  void init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
-    const rclcpp::QoS & qos, const PublisherOptions & options, const bool is_bridge)
-  {
-    if (options.do_always_ros2_publish) {
-      RCLCPP_ERROR(
-        logger,
-        "The 'do_always_ros2_publish' option is deprecated. "
-        "Use the AGNOCAST_BRIDGE_MODE environment variable instead.");
-    }
-
-    topic_name_ = node->get_node_topics_interface()->resolve_topic_name(topic_name);
-
-    auto node_parameters = node->get_node_parameters_interface();
-    const rclcpp::QoS actual_qos =
-      options.qos_overriding_options.get_policy_kinds().size()
-        ? rclcpp::detail::declare_qos_parameters(
-            options.qos_overriding_options, node_parameters, topic_name_, qos,
-            rclcpp::detail::PublisherQosParametersTraits{})
-        : qos;
-
-    validate_publisher_qos(actual_qos);
-
-    const std::string node_name = node->get_fully_qualified_name();
-    id_ = initialize_publisher(topic_name_, node_name, actual_qos, is_bridge, type_name);
-    generate_gid();
-
-    return actual_qos;
-  }
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
 public:
   PublisherBase() = default;
@@ -149,6 +110,13 @@ public:
   const rmw_gid_t & get_gid() const { return gid_; }
 
   /**
+   * @brief Return the per-topic id the kernel module assigned to this publisher.
+   * @return Publisher id.
+   */
+  AGNOCAST_PUBLIC
+  topic_local_id_t get_id() const { return id_; }
+
+  /**
    * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).
    * @return Total subscriber count.
    */
@@ -164,16 +132,35 @@ public:
   {
     return get_intra_subscription_count_core(topic_name_);
   }
+
+  /**
+   * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
+   *
+   * Unlike `rclcpp::PublisherBase::get_actual_qos()`, the value is not RMW-resolved:
+   * there is no DDS entity to query, so `SystemDefault` and the policies Agnocast ignores are
+   * reported as requested.
+   *
+   * @return Effective QoS of this publisher.
+   */
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return actual_qos_; }
 };
 
-// Internal implementation — users should use agnocast::Publisher<MessageT> instead.
-template <typename MessageT, typename BridgeRegistrationPolicy>
-class BasicPublisher : public PublisherBase
+/**
+ * @brief Mirrors `rclcpp::Publisher` semantics: the topic type is supplied as a template
+ * type argument `MessageT`. It allocates a memory region for a message using
+ * borrow_loaned_message() and publishes it via zero-copy IPC using publish().
+ *
+ * @tparam MessageT ROS message type.
+ */
+AGNOCAST_PUBLIC
+template <typename MessageT>
+class Publisher : public PublisherBase
 {
   template <typename NodeT>
-  rclcpp::QoS constructor_impl(
+  void constructor_impl(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options, const bool is_bridge)
+    const PublisherOptions & options, const PublisherRole role)
   {
     // Gated to message types only — service types pulled in by
     // BasicService<ServiceT> have no rosidl message name. The empty string
@@ -183,40 +170,36 @@ class BasicPublisher : public PublisherBase
       type_name = rosidl_generator_traits::name<MessageT>();
     }
 
-    const rclcpp::QoS actual_qos =
-      this->init_base(node, topic_name, type_name, qos, options, is_bridge);
-
-    BridgeRegistrationPolicy::template register_bridge<MessageT>(topic_name_, id_);
-
-    return actual_qos;
+    this->init_base(node, topic_name, type_name, qos, options, role);
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicPublisher<MessageT, BridgeRegistrationPolicy>>;
+  using SharedPtr = std::shared_ptr<Publisher<MessageT>>;
 
-  BasicPublisher(
+  Publisher(
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options, const bool is_bridge = false)
+    const PublisherOptions & options, const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, is_bridge);
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(
         node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-      topic_name_.c_str(), actual_qos.depth());
+      topic_name_.c_str(), actual_qos_.depth());
   }
 
-  BasicPublisher(
+  Publisher(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
-    const PublisherOptions & options = PublisherOptions{})
+    const PublisherOptions & options = PublisherOptions{},
+    const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, false);
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
-      actual_qos.depth());
+      actual_qos_.depth());
   }
 
   /**
@@ -258,15 +241,92 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    union ioctl_publish_msg_args publish_msg_args;
-    {
-      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-      publish_msg_args = publish_core(this, topic_name_, id_, msg_virtual_address, opened_mqs_);
-    }
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
       delete release_ptr;
+    }
+
+    message.reset();
+  }
+};
+
+/**
+ * @brief A type-erased Agnocast publisher.
+ *
+ * There are four differences between this and Publisher:
+ *
+ * 1. borrow_loaned_message() takes a size and returns an ipc_shared_ptr<void> that points to a
+ *    shared memory block of the requested size.
+ * 2. publish() takes a deleter as well as the message. Because the message is type-erased, the
+ *    publisher cannot know how to free it, so the caller must provide a deleter.
+ * 3. If a user decides not to publish a borrowed message, they must call cancel_message() with a
+ *    deleter to free the memory.
+ * 4. The constructor is just a thin wrapper around init_base(). As this class is intended for
+ *    internal use only, flexibility is prioritized.
+ *
+ * NOTE: This is the publisher counterpart of Subscription<void>. This is not implemented as
+ * Publisher<void> because there is a clear semantic difference between a typed and type-erased
+ * publisher as described above.
+ */
+class TypeErasedPublisher : public PublisherBase
+{
+public:
+  using SharedPtr = std::shared_ptr<TypeErasedPublisher>;
+
+  TypeErasedPublisher(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+
+  TypeErasedPublisher(
+    agnocast::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
+
+  ipc_shared_ptr<void> borrow_loaned_message(size_t size);
+
+  template <typename Deleter>
+  void cancel_message(ipc_shared_ptr<void> && message, Deleter && deleter)
+  {
+    if (!message || topic_name_ != message.get_topic_name()) {
+      RCLCPP_ERROR(logger, "Invalid message to cancel.");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    void * delete_ptr = message.get();
+
+    message.invalidate_all_references();
+
+    decrement_borrowed_publisher_num();
+
+    deleter(delete_ptr);
+
+    message.reset();
+  }
+
+  template <typename Deleter>
+  void publish(ipc_shared_ptr<void> && message, Deleter && deleter)
+  {
+    if (!message || topic_name_ != message.get_topic_name()) {
+      RCLCPP_ERROR(logger, "Invalid message to publish.");
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+
+    const uint64_t msg_virtual_address = reinterpret_cast<uint64_t>(message.get());
+
+    message.invalidate_all_references();
+
+    decrement_borrowed_publisher_num();
+
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
+
+    for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
+      void * release_ptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);
+      deleter(release_ptr);
     }
 
     message.reset();
@@ -283,7 +343,7 @@ public:
  * and are deserialized into Agnocast shared memory within the `publish()` call.
  */
 AGNOCAST_PUBLIC
-class GenericPublisher : public PublisherBase
+class GenericPublisher : public TypeErasedPublisher
 {
   // Keeps the dynamically loaded typesupport and introspection shared libraries
   // (.so) alongside their handles for the lifetime of the publisher.
@@ -292,10 +352,7 @@ class GenericPublisher : public PublisherBase
   std::shared_ptr<rcpputils::SharedLibrary> ts_lib_introspection_;
   const rosidl_typesupport_introspection_cpp::MessageMembers * members_{nullptr};
 
-  template <typename NodeT>
-  rclcpp::QoS constructor_impl(
-    NodeT * node, const std::string & topic_name, const std::string & topic_type,
-    const rclcpp::QoS & qos, const PublisherOptions & options, PublisherRole role);
+  void load_type_support(const std::string & topic_type);
 
 public:
   using SharedPtr = std::shared_ptr<GenericPublisher>;
@@ -321,18 +378,5 @@ public:
   AGNOCAST_PUBLIC
   void publish(const rclcpp::SerializedMessage & serialized_msg);
 };
-
-struct AgnocastToRosPubsubRegistrationPolicy;
-
-/**
- * @brief The user-facing Agnocast publisher type.
- * Alias for `BasicPublisher<MessageT>`. Use this type (not BasicPublisher directly) when declaring
- * publisher variables.
- * @tparam MessageT  ROS message type.
- */
-AGNOCAST_PUBLIC
-template <typename MessageT>
-using Publisher =
-  agnocast::BasicPublisher<MessageT, agnocast::AgnocastToRosPubsubRegistrationPolicy>;
 
 }  // namespace agnocast

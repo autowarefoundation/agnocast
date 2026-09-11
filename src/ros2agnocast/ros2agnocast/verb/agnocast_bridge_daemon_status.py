@@ -75,7 +75,7 @@ class BridgeControlSocket:
         """Connect to the socket, receive the JSON payload, and return a typed result.
 
         The daemon sends a JSON payload immediately on connection:
-        ``{"type":"performance","ipc_ns":<int>,"pid":<int>}``
+        ``{"type":"bridge","ipc_ns":<int>,"pid":<int>}``
         """
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         chunks: list[bytes] = []
@@ -116,16 +116,17 @@ _NG_MSG_UNKNOWN_TYPE = (
     'Response contains an unknown bridge type. '
     'Please ensure the CLI and agnocastlib versions are compatible.'
 )
-_NG_MSG_STANDARD_TYPE = (
-    'Response contains a standard bridge type, which is no longer supported. '
+_NG_MSG_LEGACY_TYPE = (
+    'Response contains a legacy bridge type, which is no longer supported. '
     'Please ensure the CLI and agnocastlib versions are compatible.'
 )
+_LEGACY_BRIDGE_TYPES = ('standard', 'performance')
 
 @dataclass
 class _BridgeResult:
     pid: int
     ipc_ns: int
-    bridge_type: str  # 'performance' or 'unknown'
+    bridge_type: str  # 'bridge' or 'unknown'
     is_ok: bool
     ng_message: str = field(default='')
 
@@ -204,17 +205,17 @@ class BridgeDaemonStatusVerb(VerbExtension):
                 continue
 
             bridge_type = recv_result.type
-            if bridge_type == 'standard':
+            if bridge_type in _LEGACY_BRIDGE_TYPES:
                 results.append(_BridgeResult(
                     pid=pid,
                     ipc_ns=ipc_inode,
                     bridge_type='unknown',
                     is_ok=False,
-                    ng_message=_NG_MSG_STANDARD_TYPE,
+                    ng_message=_NG_MSG_LEGACY_TYPE,
                 ))
                 continue
 
-            if bridge_type != 'performance':
+            if bridge_type != 'bridge':
                 results.append(_BridgeResult(
                     pid=pid,
                     ipc_ns=ipc_inode,
