@@ -492,12 +492,39 @@ TEST(ParseCallbackGroups, RequiresPolicy)
     "non_ros_threads:\n  - name: worker\n    nice: 0\n", "'policy' is required for name=worker");
 }
 
+TEST(ParseCallbackGroups, RejectsMissingEmptyOrNonStringId)
+{
+  expect_error(
+    "callback_groups:\n  - policy: SCHED_OTHER\n    nice: 0\n",
+    "callback_groups entry #0 is missing a non-empty 'id'");
+  expect_error(
+    "callback_groups:\n  - id: \"\"\n    policy: SCHED_OTHER\n    nice: 0\n",
+    "callback_groups entry #0 is missing a non-empty 'id'");
+  expect_error(
+    "callback_groups:\n  - id: [a]\n    policy: SCHED_OTHER\n    nice: 0\n",
+    "callback_groups entry #0: 'id' must be a string");
+}
+
 TEST(ParseCallbackGroups, FallsBackToDefaultDomainId)
 {
-  const auto config =
-    parse("callback_groups:\n  - id: my_cbg\n    policy: SCHED_OTHER\n    nice: 0\n");
-  ASSERT_EQ(config.callback_groups.size(), 1u);
-  EXPECT_EQ(config.callback_groups[0].domain_id, kTestDefaultDomain);
+  for (const char * domain_line : {"", "    domain_id: ~\n"}) {
+    const auto config = parse(
+      std::string("callback_groups:\n  - id: my_cbg\n") + domain_line +
+      "    policy: SCHED_OTHER\n    nice: 0\n");
+    ASSERT_EQ(config.callback_groups.size(), 1u);
+    EXPECT_EQ(config.callback_groups[0].domain_id, kTestDefaultDomain);
+  }
+}
+
+TEST(ParseCallbackGroups, RejectsNonDecimalDomainId)
+{
+  for (const char * bad : {"-1", "0x1", "one"}) {
+    expect_error(
+      std::string("callback_groups:\n  - id: my_cbg\n    domain_id: ") + bad +
+        "\n    policy: SCHED_OTHER\n    nice: 0\n",
+      std::string("'domain_id' must be a non-negative decimal integer for id=my_cbg, got '") + bad +
+        "'");
+  }
 }
 
 TEST(ParseCallbackGroups, RejectsDuplicateKey)
@@ -639,6 +666,19 @@ callback_groups:
 }
 
 // ---------- non_ros_threads ----------
+
+TEST(ParseNonRosThreads, RejectsMissingEmptyOrNonStringName)
+{
+  expect_error(
+    "non_ros_threads:\n  - policy: SCHED_OTHER\n    nice: 0\n",
+    "non_ros_threads entry #0 is missing a non-empty 'name'");
+  expect_error(
+    "non_ros_threads:\n  - name: \"\"\n    policy: SCHED_OTHER\n    nice: 0\n",
+    "non_ros_threads entry #0 is missing a non-empty 'name'");
+  expect_error(
+    "non_ros_threads:\n  - name: {a: b}\n    policy: SCHED_OTHER\n    nice: 0\n",
+    "non_ros_threads entry #0: 'name' must be a string");
+}
 
 TEST(ParseNonRosThreads, NamesAreOpaque)
 {
