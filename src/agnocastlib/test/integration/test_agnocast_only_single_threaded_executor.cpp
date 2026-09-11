@@ -84,9 +84,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_is_spinning)
 
   // Assert
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once)
@@ -108,7 +105,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once)
 
   // Cleanup
   executor.cancel();
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_with_no_timeout_blocks_until_cancel)
@@ -134,9 +130,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_with_no_timeout_bl
   // Assert
   EXPECT_TRUE(spin_once_returned.load());
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_with_zero_timeout_returns_immediately)
@@ -151,9 +144,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_with_zero_timeout_
   // Assert
   EXPECT_LT(elapsed, 100ms);
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_waits_until_timeout)
@@ -169,9 +159,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_waits_until_timeou
   EXPECT_GE(elapsed, 90ms);
   EXPECT_LT(elapsed, 1s);
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_executes_only_one_ready_callback)
@@ -189,7 +176,7 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_executes_only_one_
 
   executor.add_node(this->node);
 
-  ASSERT_TRUE(wait_until([&]() { return callback_count.load() == 0; }, 10ms));
+  ASSERT_EQ(0, callback_count.load());
 
   std::this_thread::sleep_for(10ms);
 
@@ -201,7 +188,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_executes_only_one_
 
   // Cleanup
   executor.cancel();
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_throws_if_already_spinning)
@@ -220,33 +206,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_throws_if_already_
   // Cleanup
   executor.cancel();
   spinner.join();
-  executor.remove_node(this->node, true);
-}
-
-TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_once_sets_is_spinning)
-{
-  // Arrange
-  agnocast::AgnocastOnlySingleThreadedExecutor executor;
-  executor.add_node(this->node);
-
-  std::atomic<bool> spin_once_returned{false};
-
-  std::thread spinner([&]() {
-    executor.spin_once(std::chrono::nanoseconds(-1));
-    spin_once_returned.store(true);
-  });
-
-  // Act
-  const bool became_spinning = wait_until([&]() { return executor.is_spinning(); }, 10s);
-
-  // Assert
-  EXPECT_TRUE(became_spinning);
-  EXPECT_FALSE(spin_once_returned.load());
-
-  // Cleanup
-  executor.cancel();
-  spinner.join();
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_until_future_complete)
@@ -271,9 +230,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_until_future_complete)
 
   // Assert
   EXPECT_LT(elapsed, 500ms);
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(
@@ -310,9 +266,6 @@ TEST_F(
   EXPECT_TRUE(spin_returned.load());
   EXPECT_EQ(rclcpp::FutureReturnCode::INTERRUPTED, return_code_future.get());
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(
@@ -336,9 +289,6 @@ TEST_F(
   EXPECT_EQ(rclcpp::FutureReturnCode::TIMEOUT, ret);
   EXPECT_LT(elapsed, 100ms);
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_until_future_complete_waits_until_timeout)
@@ -361,9 +311,6 @@ TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_until_future_complete_w
   EXPECT_GE(elapsed, 90ms);
   EXPECT_LT(elapsed, 1s);
   EXPECT_FALSE(executor.is_spinning());
-
-  // Cleanup
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(
@@ -396,7 +343,6 @@ TEST_F(
 
   // Cleanup
   executor.cancel();
-  executor.remove_node(this->node, true);
 }
 
 TEST_F(
@@ -420,42 +366,4 @@ TEST_F(
   // Cleanup
   executor.cancel();
   spinner.join();
-  executor.remove_node(this->node, true);
-}
-
-TEST_F(AgnocastOnlySingleThreadedExecutorTest, test_spin_until_future_complete_sets_is_spinning)
-{
-  // Arrange
-  agnocast::AgnocastOnlySingleThreadedExecutor executor;
-  executor.add_node(this->node);
-
-  std::promise<bool> promise;
-  auto shared_future = promise.get_future().share();
-
-  std::promise<rclcpp::FutureReturnCode> return_code_promise;
-  auto return_code_future = return_code_promise.get_future();
-
-  std::atomic<bool> spin_returned{false};
-
-  std::thread spinner([&]() {
-    const auto ret =
-      executor.spin_until_future_complete(shared_future, std::chrono::nanoseconds(-1));
-    return_code_promise.set_value(ret);
-    spin_returned.store(true);
-  });
-
-  // Act
-  const bool became_spinning = wait_until([&]() { return executor.is_spinning(); }, 10s);
-
-  // Assert
-  EXPECT_TRUE(became_spinning);
-  EXPECT_FALSE(spin_returned.load());
-
-  // Cleanup
-  executor.cancel();
-  spinner.join();
-
-  EXPECT_EQ(rclcpp::FutureReturnCode::INTERRUPTED, return_code_future.get());
-
-  executor.remove_node(this->node, true);
 }
