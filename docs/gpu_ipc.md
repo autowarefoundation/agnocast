@@ -16,31 +16,14 @@ of code belong next to that code.
 
 ## A message identifies its memory by region and slot
 
-An allocation is divided into equally sized slots. Borrowing a message reserves one slot and records
-two numbers in the message: the id of the region the slot belongs to, and the slot's index.
+An allocation is divided into equally sized slots. Borrowing a message reserves one and records two
+numbers in the message: which region the slot belongs to, and which slot within it. A subscriber
+reads them back, maps that region the first time it sees one from a given publisher, and from then
+on turns every message into an address of its own without asking anyone.
 
-```text
-message in host shared memory        GPU device memory
-+-----------------------------+      +--------------------------------+
-| header, height, width, ...  |      | slot 0 | slot 1 | slot 2 | ... |
-| data: {region_id, slot_index|----->|        |   ^    |        |     |
-|        count, publisher_id} |      |        |   |    |        |     |
-+-----------------------------+      +--------------------------------+
-                                                 |
-        each process maps the region at its own address and
-        computes slot_index * slot_size from its own base
-```
-
-A subscriber reads those two numbers back. The region id says which allocation to map — on the first
-message from a publisher it asks the kernel module for it; afterwards the mapping is already there.
-The slot index gives the offset, which the subscriber adds to *its own* mapping base.
-
-Region ids are unique for the module's lifetime and never reused, so a stale id resolves to nothing
-rather than to an unrelated region. Everything a slot address is computed from arrives from another
-process, so it is bounds-checked on every resolution: a bad index or an oversized payload yields a
-null pointer, never a wild device address. Those checks establish that the numbers agree with each
-other — the module does not, and cannot, compare them against the kernel's own view of the
-allocation.
+Region ids are unique for the module's lifetime and never reused, so a message naming a region that
+has gone resolves to nothing rather than to an unrelated one. The two numbers arrive from another
+process, so they are bounds-checked before they become an address.
 
 ## The kernel module holds the region's lifetime
 
@@ -98,10 +81,8 @@ How an allocation was made and made importable is the only axis the mechanism ty
 Cross-process GPU synchronization stays independent of it: the same memory may be paired with CUDA
 events, NvSciSync, or nothing at all.
 
-CUDA VMM is implemented. NvSciBuf has a place in the ABI but cannot be served by it as it stands,
-because its export descriptors are reconciled against the destination endpoint — one subscriber's
-bytes mean nothing to another — and that needs an export produced per request rather than the single
-export stored at registration.
+CUDA VMM is implemented. NvSciBuf has a reserved place in the type, but the shape of the current
+ABI cannot serve it.
 
 ## A publisher grows rather than fails
 
@@ -110,15 +91,12 @@ than fail a borrow that does not fit, a publisher allocates another region, and 
 whichever region its payload went into. Additional regions need no coordination between processes,
 precisely because a subscriber maps an unseen region on first receipt.
 
-Growth is bounded on three axes — slot sizes bucket, so that a growing payload keeps reusing its
-region; slot count comes from the QoS depth that already expresses how many messages may be in
-flight; and the number of regions one publisher may hold at once is capped. Reaching that cap is not
-terminal: a region holding no message can be released to make room for a differently sized one.
-
-Only the publisher can know a region is empty, because the module never sees which region a message
-was written into. It knows from a fact it already has: every slot free means every message that used
-the region has been destroyed, which for a published message means the module released its entry,
-which in turn means every subscriber had dropped its reference.
+Growth is bounded on three axes: slot sizes bucket, so a growing payload keeps reusing its region;
+slot count comes from the QoS depth that already expresses how many messages may be in flight; and
+the number of regions one publisher holds at once is capped. Reaching that cap is not terminal,
+because a region holding no message can be released to make room for a differently sized one — and
+only the publisher is in a position to know a region is empty, since the module never sees which
+region a message was written into.
 
 ## A subscriber reclaims a departed publisher's regions
 
@@ -127,16 +105,11 @@ subscriber accumulates a mapping — and, since an imported handle holds its own
 share of device memory that can never be freed — for every region of every publisher it has ever
 seen. A publisher restarting under a supervisor is enough to grow that without bound.
 
-A subscriber may release an imported region once two things are true: nothing in this process still
-refers to it, and the module no longer knows the publisher that exported it. The second condition is
-what makes the release final — region ids are never reused, so a publisher the module has forgotten
-can never produce another message naming that region.
-
-The first condition has to be tracked here rather than inferred from the module's entry accounting.
-It is tempting to argue that holding a received message also holds a reference on that message's
-entry, so a publisher with a message still in use cannot have been forgotten — but a subscription's
-teardown drops its entry references while the application may still be holding the messages, so the
-two can come apart.
+So an imported region is released once nothing in this process still refers to it and the module no
+longer knows the publisher that exported it. The second condition is what makes the release final:
+region ids are never reused, so a publisher the module has forgotten can never name that region
+again. The first has to be tracked in the process itself — the module's accounting of messages in
+flight is not a reliable proxy for what this process is still holding.
 
 ## The stream belongs to the submission, not to the message
 
@@ -164,18 +137,16 @@ driver's one-time bookkeeping in the mempool, where it stays for the life of the
 is a leak and none of it is per message, but it is accounted against message memory and is visible
 to every subscriber that maps the segment.
 
-A publishing node avoids the bulk of this by submitting empty work once, outside any window, on each
-thread that will submit. That is only possible for threads the node owns: with a multi-threaded or
-callback-isolated executor the callback threads belong to the library, and there is no hook on which
-to prime them.
+A publishing node avoids the bulk of it by submitting work once outside any window, on each thread
+that will submit — which is only possible for threads the node owns. Where the executor creates its
+own callback threads, there is no hook on which to prime them.
 
 ## Limits this design accepts
 
-- **A publisher and its subscribers must be on the same GPU.** A region is tagged with its device
-  UUID rather than an ordinal, since `CUDA_VISIBLE_DEVICES` makes ordinals process-relative, and an
-  import across devices is refused rather than attempted. On a MIG-partitioned GPU the UUID is the
-  compute instance's, so that boundary is refused too. Within a process the device is bound once, by
-  whichever GPU call comes first.
+- **A publisher and its subscribers must be on the same GPU.** An allocation belongs to a device, so
+  a region carries the identity of the device it was made on and an import across that boundary is
+  refused rather than attempted. A process binds itself to one device the first time it touches the
+  GPU.
 - **A GPU topic does not bridge to ROS 2.** A GPU message type is not a generated ROS type, so it
   registers with no type name and the Agnocast-ROS 2 bridge cannot carry it. Both ends say so once
   at construction rather than leaving a topic that silently never arrives.

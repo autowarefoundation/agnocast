@@ -22,8 +22,11 @@ enum class GpuMemoryBackendType : uint32_t {
   Unknown = 0,
   // Shared as a POSIX file descriptor. Discrete GPU and SoC.
   Vmm = 1,
-  // Shared as an endpoint-bound descriptor. Reserved: see docs/gpu_ipc.md for
-  // why this ABI cannot serve it as it stands.
+  // Shared as an endpoint-bound descriptor. Reserved, not implemented: an
+  // NvSciBuf export is reconciled against the destination endpoint, so the bytes
+  // one subscriber receives mean nothing to another. Serving it needs an export
+  // produced per request, where the kmod stores a single export at registration
+  // and hands the same bytes to every importer.
   NvSciBuf = 2,
 };
 
