@@ -2734,7 +2734,7 @@ int agnocast_ioctl_get_gpu_region(
   down_read(&wrapper->topic->rwsem);
 
   // The caller must be a subscriber of this topic, in the process it claims to
-  // be; see the trust boundary in docs/gpu_memory.md.
+  // be; see the trust boundary in docs/gpu_ipc.md.
   const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info || sub_info->pid != pid) {
     dev_warn(

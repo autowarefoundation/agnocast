@@ -3,7 +3,7 @@
 // What a message carries, and how a process turns it back into a device
 // address. Deliberately free of the backend interface so that including
 // agnocast.hpp does not drag the GPU SPI into every translation unit.
-// docs/gpu_memory.md explains the addressing scheme.
+// docs/gpu_ipc.md explains the addressing scheme.
 
 #include "agnocast/agnocast_ioctl.hpp"
 

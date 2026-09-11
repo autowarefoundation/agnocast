@@ -274,7 +274,7 @@ public:
    * failing, which costs latency on that one publish but never data.
    *
    * It fails only when the region cap is reached and every region too small for
-   * the payload still has a message in it. See docs/gpu_memory.md for the
+   * the payload still has a message in it. See docs/gpu_ipc.md for the
    * sizing and growth policy.
    */
   ipc_shared_ptr<MessageT> borrow_loaned_message(const size_t capacity)

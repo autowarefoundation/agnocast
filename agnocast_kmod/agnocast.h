@@ -403,7 +403,7 @@ union ioctl_topic_info_args {
   uint32_t ret_topic_info_ret_num;
 };
 
-// GPU device-memory region sharing. See docs/gpu_memory.md for the design; the
+// GPU device-memory region sharing. See docs/gpu_ipc.md for the design; the
 // module's part of it is to hold each region's liveness reference and to install
 // a descriptor for it per importer.
 #define GPU_DEVICE_UUID_SIZE 16
@@ -451,7 +451,7 @@ union ioctl_get_gpu_region_args {
     // Who is asking: authorization, not routing. Must name a subscriber of this
     // topic belonging to the calling process. (An endpoint-bound mechanism would
     // also need it to reconcile a descriptor per request; see
-    // docs/gpu_memory.md.)
+    // docs/gpu_ipc.md.)
     topic_local_id_t subscriber_id;
     // The region id read out of the message being resolved, or 0 for "any",
     // which is what a caller that has not seen a message yet asks for.

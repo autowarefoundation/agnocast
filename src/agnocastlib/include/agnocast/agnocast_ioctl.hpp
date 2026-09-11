@@ -374,7 +374,7 @@ struct ioctl_set_ros2_publisher_num_args
   _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
 // GPU device-memory region sharing. Mirrors agnocast_kmod/agnocast.h; the two
 // copies are hand-maintained and the major.minor version gate is what stands
-// between a missed edit and silent memory corruption. See docs/gpu_memory.md
+// between a missed edit and silent memory corruption. See docs/gpu_ipc.md
 // for the design.
 #define GPU_DEVICE_UUID_SIZE 16
 #define MAX_GPU_HANDLE_BLOB_SIZE 4096

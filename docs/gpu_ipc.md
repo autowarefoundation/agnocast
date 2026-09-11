@@ -1,9 +1,16 @@
 # GPU IPC Design
 
-Agnocast's host data plane keeps a message's bytes in shared memory so that no process copies them.
-For a payload a GPU produces or consumes, the same argument applies one level down: a point cloud
-filtered on the device and then read by two more nodes should not travel to host memory and back to
-say so. GPU IPC puts such a payload in shared GPU device memory.
+A GPU payload stays in the allocation the GPU already reads and writes, and no process ever copies
+it. What crosses a process boundary is a short reference to that allocation, carried in the ordinary
+host shared-memory message alongside the ROS fields.
+
+The reference is deliberately *not* a pointer. A device address is meaningful only in the process
+that mapped the allocation, so each process resolves the reference into an address of its own; the
+next section is how.
+
+Which physical memory that allocation lives in does not matter to the design: device memory on a
+discrete GPU, the DRAM the GPU shares with the host on an SoC. What matters is that every process
+can map the same allocation, and that nothing moves or is duplicated in order to share it.
 
 This document is the design rationale for that mechanism. Source comments are kept to what is local
 to the code they sit next to; the reasoning behind the shape of the thing is here.
@@ -75,40 +82,45 @@ It **installs a descriptor per importer**. A subscriber asks for the region whos
 a message, and the module installs a new descriptor for the same open file into the calling process,
 so descriptors never have to be passed between processes over a side channel.
 
-This is why CUDA IPC is not among the supported mechanisms. Both mechanisms that are give the
-allocation a lifetime independent of its creator — a VMM allocation is held by a descriptor, an
-NvSciBuf object by its own reference count. A CUDA IPC handle is an opaque token with no backing
-kernel object, so nothing can hold a reference on the allocation's behalf: the memory is freed when
-the exporter dies and subscribers are left with dangling device pointers. Restoring that guarantee
-would take a dedicated process owning every allocation — another component to supervise, and a new
-single point of failure.
+## Why CUDA IPC is not one of the mechanisms
 
-## Topic membership is the trust boundary
+CUDA IPC (`cudaIpcGetMemHandle`) is the obvious candidate for sharing device memory between
+processes, and it is deliberately absent. The reasoning runs as follows.
 
-The module cannot establish that a registered descriptor is GPU memory at all; no in-kernel
-interface exposes that, and the module deliberately does not interpret an export. What it can do, it
-does:
+**The requirement.** A subscriber may still be reading a payload when the publisher that produced it
+dies — that is precisely what the module's liveness reference is for. So a mechanism qualifies only
+if the allocation can outlive the process that created it.
 
-- A registration must be internally consistent — a mechanism whose handle is a descriptor must
-  bring one and no descriptor blob, and vice versa, and the slots must fit the declared mapping.
-  This is a presence test, not a type test: no in-kernel interface would let the module confirm that
-  a descriptor is GPU memory, so it checks only that it is not its own device, whose file would pin
-  the module.
-- Only the process that owns a publisher may register or remove memory under its name.
-- A descriptor is handed out only to a caller naming a subscriber of that topic which belongs to the
-  calling process. Without that check the module would be a general descriptor-passing channel keyed
-  by topic name, where the host data plane requires a registered subscription before it maps
-  anything.
+**Why the chosen mechanisms qualify.** In both, the allocation is owned by something a third party
+can hold on its behalf: a file descriptor for CUDA VMM, the object's own reference count for
+NvSciBuf. The module holds that, and the memory survives its creator.
 
-So the boundary is membership of the topic, exactly as it already is for the host shared memory a
-subscriber maps. A peer on the topic is trusted; a process that merely knows a topic name is not.
+**Why CUDA IPC cannot.** A CUDA IPC handle is an opaque token, not a reference to a kernel object.
+There is nothing for the module — or anyone else — to hold. The allocation belongs to the exporting
+process and is freed with it, leaving importers holding dangling device pointers.
 
-Imports are mapped read-only, and a subscriber's message handle yields a `const` device pointer to
-match, so a *buggy* subscriber cannot corrupt a payload others are still reading — a write through
-such a mapping faults. It is not a guarantee against a hostile one: the module hands over the
-publisher's own open file unchanged, and an importer holding the imported allocation can grant
-itself write access on its own mapping. "The publisher writes, nobody else does" is enforced within
-the library, not by the kernel.
+**What supporting it would take.** The only way to restore the guarantee is to move ownership out of
+the publisher: a separate long-lived process that performs every `cudaMalloc` and hands the handles
+out, so that the owner never exits while a payload is in use.
+
+**Why that was not worth it.** Such a daemon is a new component to deploy, supervise and
+version-match, and a new single point of failure for every GPU topic. It would also exist for this
+one mechanism alone — the others need nothing of the kind, because the kernel object they are built
+on already provides the lifetime. CUDA IPC is additionally the older interface, superseded by the
+VMM API for exactly this purpose, so the cost would buy a mechanism that is on its way out.
+
+## The trust boundary is the host data plane's
+
+A process that may subscribe to a topic may read that topic's payloads; a process that merely knows
+a topic name may not. That is where Agnocast's host shared memory already draws the line, and GPU
+payloads draw it in the same place — the module authorizes each request against the topic's
+registered endpoints rather than treating a topic name as sufficient.
+
+It is a boundary, not a sandbox, and the reason is worth stating: the module cannot establish that a
+descriptor handed to it is GPU memory at all, because no in-kernel interface would tell it, so it
+does not try. An importer is given read-only access to a payload, but that is the importing
+library's doing rather than something the kernel imposes. Within a topic, peers trust each other
+exactly as much as they already do for host payloads.
 
 ## The mechanism axis is allocation and export only
 

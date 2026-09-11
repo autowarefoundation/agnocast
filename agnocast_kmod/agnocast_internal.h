@@ -80,7 +80,7 @@ struct process_info
 extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 
 // One of a publisher's GPU device-memory regions, stored verbatim and never
-// interpreted here. See docs/gpu_memory.md.
+// interpreted here. See docs/gpu_ipc.md.
 struct gpu_region_info
 {
   uint32_t region_id;

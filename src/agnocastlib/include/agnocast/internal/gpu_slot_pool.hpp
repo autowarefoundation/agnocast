@@ -59,7 +59,7 @@ constexpr uint64_t kMaxGpuPayloadCapacity = 0xFFFFFF00ULL;
 // always >= capacity and always a multiple of the alignment, so slot k, which
 // begins at k * slot_size, is aligned too. Requires
 // capacity <= kMaxGpuPayloadCapacity. See the sizing policy in
-// docs/gpu_memory.md.
+// docs/gpu_ipc.md.
 [[nodiscard]] uint32_t gpu_slot_size_for(uint64_t capacity) noexcept;
 
 // Hands out the slots of one region. Publisher-local: a slot is free exactly
