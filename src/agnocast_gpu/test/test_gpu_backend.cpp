@@ -5,11 +5,14 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <array>
+#include <optional>
 #include <utility>
 
 using agnocast::internal::GpuMemoryBackendType;
 using agnocast::internal::GpuRegionExport;
 using agnocast::internal::GpuRegionGeometry;
+using agnocast::internal::is_consistent;
 using agnocast::internal::MappedGpuRegion;
 using agnocast::internal::UniqueFd;
 using agnocast::internal::VmmExportHandle;
@@ -34,6 +37,28 @@ agnocast::internal::GpuMemoryBackend * gpu_backend_or_skip()
   auto * backend = agnocast::internal::get_gpu_memory_backend();
   return (backend != nullptr && backend->is_supported()) ? backend : nullptr;
 }
+
+// A region whose "mapping" is host memory, so slot addressing can be exercised
+// on a machine with no GPU. Nothing is ever released through this backend.
+class NullBackend : public agnocast::internal::GpuMemoryBackend
+{
+public:
+  [[nodiscard]] GpuMemoryBackendType type() const noexcept override
+  {
+    return GpuMemoryBackendType::Unknown;
+  }
+  [[nodiscard]] bool is_supported() const noexcept override { return false; }
+  [[nodiscard]] MappedGpuRegion create_region(uint32_t, uint32_t) override { return {}; }
+  [[nodiscard]] std::optional<GpuRegionExport> export_for(
+    const MappedGpuRegion &, agnocast::topic_local_id_t) override
+  {
+    return std::nullopt;
+  }
+  [[nodiscard]] MappedGpuRegion import_region(const GpuRegionExport &) override { return {}; }
+
+private:
+  void release_region(void *, const GpuRegionGeometry &, uint64_t) noexcept override {}
+};
 
 }  // namespace
 
@@ -73,25 +98,15 @@ TEST(UniqueFdTest, ReleaseHandsOwnershipToCaller)
   ::close(taken);
 }
 
-// Geometry arrives from another process, so these are the checks that stand
+// Geometry arrives from another process, so this is the check that stands
 // between a corrupt message and an out-of-bounds device address.
 TEST(GpuRegionGeometryTest, RejectsSlotsThatDoNotFitTheMapping)
 {
-  EXPECT_TRUE((GpuRegionGeometry{2048, 4, 8192, {}}).is_consistent());
-  EXPECT_TRUE((GpuRegionGeometry{2048, 4, 16384, {}}).is_consistent());
-  EXPECT_FALSE((GpuRegionGeometry{2048, 4, 8191, {}}).is_consistent());
-  EXPECT_FALSE((GpuRegionGeometry{0, 4, 8192, {}}).is_consistent());
-  EXPECT_FALSE((GpuRegionGeometry{2048, 0, 8192, {}}).is_consistent());
-}
-
-TEST(GpuRegionGeometryTest, BoundsSlotIndexAndPayload)
-{
-  const GpuRegionGeometry geometry{2048, 4, 8192, {}};
-
-  EXPECT_TRUE(geometry.contains(3, 2048));
-  EXPECT_FALSE(geometry.contains(4, 1));
-  EXPECT_FALSE(geometry.contains(0, 2049));
-  EXPECT_EQ(geometry.offset_of(3), 6144u);
+  EXPECT_TRUE(is_consistent(GpuRegionGeometry{2048, 4, 8192, {}}));
+  EXPECT_TRUE(is_consistent(GpuRegionGeometry{2048, 4, 16384, {}}));
+  EXPECT_FALSE(is_consistent(GpuRegionGeometry{2048, 4, 8191, {}}));
+  EXPECT_FALSE(is_consistent(GpuRegionGeometry{0, 4, 8192, {}}));
+  EXPECT_FALSE(is_consistent(GpuRegionGeometry{2048, 0, 8192, {}}));
 }
 
 TEST(GpuRegionExportTest, HandleIsMoveOnlyAndTyped)
@@ -119,6 +134,19 @@ TEST(MappedGpuRegionTest, DefaultConstructedIsInvalidAndReleasesNothing)
   EXPECT_EQ(region.slot_address(0, 0), nullptr);
   region.reset();  // must be safe with no backend attached
   EXPECT_FALSE(region.valid());
+}
+
+// The slot index arrives from another process, so out-of-range indices and
+// oversized payloads must resolve to nothing rather than to a wild address.
+TEST(MappedGpuRegionTest, SlotAddressBoundsIndexAndPayload)
+{
+  NullBackend backend;
+  std::array<uint8_t, 8192> buffer{};
+  const MappedGpuRegion region(backend, buffer.data(), GpuRegionGeometry{2048, 4, 8192, {}}, 0);
+
+  EXPECT_EQ(region.slot_address(3, 2048), buffer.data() + 6144);
+  EXPECT_EQ(region.slot_address(4, 1), nullptr);
+  EXPECT_EQ(region.slot_address(0, 2049), nullptr);
 }
 
 // Must hold without the caller having linked agnocast_gpu: --as-needed drops a

@@ -11,6 +11,7 @@ namespace agnocast::gpu
 using agnocast::internal::GpuMemoryBackendType;
 using agnocast::internal::GpuRegionExport;
 using agnocast::internal::GpuRegionGeometry;
+using agnocast::internal::is_consistent;
 using agnocast::internal::MappedGpuRegion;
 using agnocast::internal::UniqueFd;
 using agnocast::internal::VmmExportHandle;
@@ -290,7 +291,7 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
     return MappedGpuRegion{};
   }
   // Geometry crosses a process boundary, so it is checked rather than trusted.
-  if (!exported.geometry.is_consistent()) {
+  if (!is_consistent(exported.geometry)) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: region geometry does not fit its mapping (%u * %u > %lu)",
       exported.geometry.slot_size, exported.geometry.slot_count, exported.geometry.mapped_size);
