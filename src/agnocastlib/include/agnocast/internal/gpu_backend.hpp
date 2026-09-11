@@ -16,6 +16,11 @@ namespace agnocast::internal
 {
 
 // How a region's memory was allocated and made importable by another process.
+// That is the only axis this type represents: how memory is shared says nothing
+// about how access to it is synchronized, and the same memory may be paired with
+// CUDA events, NvSciSync, or nothing at all. Keeping the two apart is what lets
+// a synchronization mechanism be chosen per topic later without touching this.
+//
 // These values cross the userspace-kernel ABI, so never renumber or reuse one.
 // docs/gpu_ipc.md covers which mechanisms qualify and why CUDA IPC does not.
 enum class GpuMemoryBackendType : uint32_t {

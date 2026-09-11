@@ -1,3 +1,4 @@
+#include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/internal/gpu_backend.hpp"
 #include "agnocast/internal/gpu_message.hpp"
@@ -290,6 +291,11 @@ uint32_t GpuRegionRegistry::create(
   const std::string_view topic_name, const topic_local_id_t publisher_id, const uint32_t slot_size,
   const uint32_t slot_count)
 {
+  // Reached before the borrow window opens in the ordinary case, but a publisher
+  // creating its first region while another borrow is outstanding would
+  // otherwise leave the backend's one-time initialization in the mempool.
+  const SuspendedBorrowWindow suspended;
+
   GpuMemoryBackend * backend = get_gpu_memory_backend();
   if (backend == nullptr) return 0;
 

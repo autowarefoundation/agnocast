@@ -5,6 +5,7 @@
 // rather than letting the caller write them inside its callable. Why it is
 // shaped that way is in docs/gpu_ipc.md.
 
+#include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/internal/gpu_message.hpp"
@@ -12,6 +13,7 @@
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -356,6 +358,16 @@ bool run(Tuple && parts, std::index_sequence<I...>)
     (is_declaration<std::decay_t<std::tuple_element_t<I, std::decay_t<Tuple>>>>::value && ...),
     "every argument before the last must be reads(), writes(), uploads() or downloads()");
 
+  // Everything this function does outside the caller's callable is the library's
+  // own work or the driver's, and none of it belongs to the message, so it is
+  // kept out of the shared-memory mempool: creating this thread's stream and
+  // event, mapping a region on first receipt, the stream-ordered allocator's
+  // pool. Without this the first submission on a thread would leave the driver's
+  // one-time bookkeeping in the segment for the life of the process -- and on an
+  // executor that owns its callback threads there is no earlier moment at which
+  // to do it instead.
+  auto suspended = std::make_unique<agnocast::internal::SuspendedBorrowWindow>();
+
   cudaStream_t s = stream();
   cudaEvent_t done = completion_event();
   if (s == nullptr || done == nullptr) return false;
@@ -386,6 +398,10 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   // as a submission failure.
   static_cast<void>(cudaGetLastError());
 
+  // The callable is the user's, and may well fill in message fields, so it runs
+  // with the window as it found it.
+  suspended.reset();
+
   // The completion guarantee has to survive an exception from the caller's work:
   // returning with a kernel still running would let the message's slot be
   // returned to its pool and handed to another message while the device is still
@@ -399,6 +415,7 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   }
   ok = check(cudaGetLastError(), "work submission") && ok;
 
+  suspended = std::make_unique<agnocast::internal::SuspendedBorrowWindow>();
   ok = check(cudaEventRecord(done, s), "event record") && ok;
   ok = check(cudaEventSynchronize(done), "event synchronize") && ok;
   gate_release();

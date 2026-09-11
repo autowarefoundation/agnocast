@@ -70,8 +70,6 @@ int main(int argc, char ** argv)
   // command line, so the same binary can watch either end of the pipeline.
   auto node = std::make_shared<GpuListener>(argc > 1 ? argv[1] : "/gpu_points");
   executor.add_node(node);
-  // No priming here, unlike the talkers: this node never borrows a message, so
-  // nothing it allocates is ever served from the shared-memory mempool.
   executor.spin();
   return 0;
 }
