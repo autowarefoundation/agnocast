@@ -99,10 +99,12 @@ std::string extract_node_part(const std::string & callback_group_id);
 inline constexpr std::string_view k_unmanageable = "UNMANAGEABLE";
 
 // Parse the four entry sections. A missing or null section yields an empty
-// vector. callback_groups and non_ros_threads require 'policy' and treat
-// UNMANAGEABLE as an ordinary invalid value; callback_groups take an optional
-// 'domain_id' (default_domain_id otherwise). kernel_threads and irqs accept
-// UNMANAGEABLE as unset. Throws std::runtime_error on validation error.
+// vector. Every section shares one attribute parser, so a given entry body
+// is validated identically wherever it appears; the differences are the
+// entry key (id / name / comm / irq), that callback_groups and
+// non_ros_threads require 'policy' and reject UNMANAGEABLE, and that
+// callback_groups take an optional 'domain_id' (default_domain_id otherwise).
+// Throws std::runtime_error on validation error.
 // hardware_info / rt_throttling are validated only at startup, not here.
 ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id);
 
