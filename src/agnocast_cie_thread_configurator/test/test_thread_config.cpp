@@ -72,9 +72,9 @@ non_ros_threads: []
   ASSERT_EQ(cb.size(), 1u);
   EXPECT_EQ(cb[0].thread_str, "my_cbg");
   EXPECT_EQ(cb[0].domain_id, 3u);
-  EXPECT_EQ(cb[0].policy, "SCHED_FIFO");
-  EXPECT_EQ(cb[0].priority, 50);
-  EXPECT_EQ(cb[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_EQ(cb[0].attrs.policy, acie::SchedPolicy::Fifo);
+  EXPECT_EQ(cb[0].attrs.rt_priority, 50);
+  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{0, 1}));
   EXPECT_EQ(cb[0].thread_id, -1);
   EXPECT_FALSE(cb[0].applied);
   EXPECT_FALSE(cb[0].is_wildcard());
@@ -96,8 +96,8 @@ TEST(ParseYaml, ParsesNiceForCfsPolicies)
     std::vector<acie::ThreadConfig> cb, nrt;
     ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt)) << policy;
     ASSERT_EQ(cb.size(), 1u);
-    EXPECT_EQ(cb[0].nice, -10) << policy;
-    EXPECT_EQ(cb[0].priority, 0) << policy;
+    EXPECT_EQ(cb[0].attrs.nice, -10) << policy;
+    EXPECT_EQ(cb[0].attrs.rt_priority, 0) << policy;
   }
 }
 
@@ -122,10 +122,10 @@ non_ros_threads: []
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 2u);
-  EXPECT_EQ(cb[0].nice, -5);
-  EXPECT_EQ(cb[0].priority, 0);
-  EXPECT_EQ(cb[1].priority, 50);
-  EXPECT_EQ(cb[1].nice, 0);
+  EXPECT_EQ(cb[0].attrs.nice, -5);
+  EXPECT_EQ(cb[0].attrs.rt_priority, 0);
+  EXPECT_EQ(cb[1].attrs.rt_priority, 50);
+  EXPECT_EQ(cb[1].attrs.nice, 0);
 }
 
 TEST(ParseYaml, RejectsMissingNiceOnSchedOther)
@@ -290,10 +290,31 @@ non_ros_threads: []
   std::vector<acie::ThreadConfig> cb, nrt;
   acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
   ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].policy, "SCHED_DEADLINE");
-  EXPECT_EQ(cb[0].runtime, 1000000u);
-  EXPECT_EQ(cb[0].period, 5000000u);
-  EXPECT_EQ(cb[0].deadline, 5000000u);
+  EXPECT_EQ(cb[0].attrs.policy, acie::SchedPolicy::Deadline);
+  EXPECT_EQ(cb[0].attrs.deadline.runtime, 1000000u);
+  EXPECT_EQ(cb[0].attrs.deadline.period, 5000000u);
+  EXPECT_EQ(cb[0].attrs.deadline.deadline, 5000000u);
+}
+
+TEST(ParseYaml, AcceptsDeadlineParamsBeyond32Bits)
+{
+  // sched_attr carries nanoseconds in 64-bit fields; a 5 s period exceeds
+  // 2^32 ns.
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: dl_cbg
+    domain_id: 0
+    policy: SCHED_DEADLINE
+    runtime: 1000000000
+    period: 5000000000
+    deadline: 5000000000
+    affinity: []
+non_ros_threads: []
+)YAML");
+  std::vector<acie::ThreadConfig> cb, nrt;
+  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+  ASSERT_EQ(cb.size(), 1u);
+  EXPECT_EQ(cb[0].attrs.deadline.period, 5000000000u);
 }
 
 TEST(ParseYaml, RejectsUnknownPolicyOnCallbackGroup)
@@ -358,8 +379,8 @@ non_ros_threads:
   acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
   ASSERT_EQ(nrt.size(), 1u);
   EXPECT_EQ(nrt[0].thread_str, "worker");
-  EXPECT_EQ(nrt[0].policy, "SCHED_RR");
-  EXPECT_EQ(nrt[0].priority, 30);
+  EXPECT_EQ(nrt[0].attrs.policy, acie::SchedPolicy::Rr);
+  EXPECT_EQ(nrt[0].attrs.rt_priority, 30);
 }
 
 TEST(ParseYaml, ClearsOutputVectorsOnReparse)
@@ -627,9 +648,9 @@ non_ros_threads:
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{0, 1}));
   ASSERT_EQ(nrt.size(), 1u);
-  EXPECT_EQ(nrt[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_EQ(nrt[0].attrs.affinity, (std::vector<int>{0, 1}));
 }
 
 TEST(ParseYaml, TreatsAbsentOrNullAffinityAsUnmanaged)
@@ -650,8 +671,8 @@ non_ros_threads: []
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 2u);
-  EXPECT_TRUE(cb[0].affinity.empty());
-  EXPECT_TRUE(cb[1].affinity.empty());
+  EXPECT_TRUE(cb[0].attrs.affinity.empty());
+  EXPECT_TRUE(cb[1].attrs.affinity.empty());
 }
 
 TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
@@ -697,7 +718,7 @@ TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
   std::vector<acie::ThreadConfig> cb, nrt;
   ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
   ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].affinity, (std::vector<int>{max_cpu}));
+  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{max_cpu}));
 }
 
 TEST(ParseYaml, RejectsScalarAffinity)
@@ -774,10 +795,9 @@ kernel_threads:
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].comm, "agnocast_exit_w");
-  ASSERT_TRUE(result[0].policy.has_value());
-  EXPECT_EQ(*result[0].policy, "SCHED_FIFO");
-  EXPECT_EQ(result[0].priority, 10);
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Fifo);
+  EXPECT_EQ(result[0].attrs.rt_priority, 10);
+  EXPECT_EQ(result[0].attrs.affinity, (std::vector<int>{0, 1}));
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -792,9 +812,8 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  ASSERT_TRUE(result[0].policy.has_value());
-  EXPECT_EQ(*result[0].policy, "SCHED_OTHER");
-  EXPECT_EQ(result[0].nice, -10);
+  EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Other);
+  EXPECT_EQ(result[0].attrs.nice, -10);
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -810,8 +829,8 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_FALSE(result[0].policy.has_value());
-  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].attrs.policy.has_value());
+  EXPECT_TRUE(result[0].attrs.affinity.empty());
   EXPECT_FALSE(result[0].is_managed());
 }
 
@@ -827,8 +846,8 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_FALSE(result[0].policy.has_value());
-  EXPECT_TRUE(result[0].affinity.empty());
+  EXPECT_FALSE(result[0].attrs.policy.has_value());
+  EXPECT_TRUE(result[0].attrs.affinity.empty());
   EXPECT_FALSE(result[0].is_managed());
 }
 
@@ -843,8 +862,8 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_FALSE(result[0].policy.has_value());
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{1}));
+  EXPECT_FALSE(result[0].attrs.policy.has_value());
+  EXPECT_EQ(result[0].attrs.affinity, (std::vector<int>{1}));
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -859,7 +878,7 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_EQ(result[0].affinity, (std::vector<int>{0, 1}));
+  EXPECT_EQ(result[0].attrs.affinity, (std::vector<int>{0, 1}));
 }
 
 TEST(ParseKernelThreads, RejectsScalarAndOutOfRangeAffinity)
@@ -897,8 +916,8 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  ASSERT_TRUE(result[0].policy.has_value());
-  EXPECT_TRUE(result[0].affinity.empty());
+  ASSERT_TRUE(result[0].attrs.policy.has_value());
+  EXPECT_TRUE(result[0].attrs.affinity.empty());
   EXPECT_TRUE(result[0].is_managed());
 }
 
@@ -915,11 +934,26 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  ASSERT_TRUE(result[0].policy.has_value());
-  EXPECT_EQ(*result[0].policy, "SCHED_DEADLINE");
-  EXPECT_EQ(result[0].runtime, 1000000u);
-  EXPECT_EQ(result[0].period, 5000000u);
-  EXPECT_EQ(result[0].deadline, 5000000u);
+  EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Deadline);
+  EXPECT_EQ(result[0].attrs.deadline.runtime, 1000000u);
+  EXPECT_EQ(result[0].attrs.deadline.period, 5000000u);
+  EXPECT_EQ(result[0].attrs.deadline.deadline, 5000000u);
+}
+
+TEST(ParseKernelThreads, AcceptsDeadlineParamsBeyond32Bits)
+{
+  auto y = yaml_from_str(R"YAML(
+kernel_threads:
+  - comm: dl_thread
+    policy: SCHED_DEADLINE
+    runtime: 1000000000
+    period: 5000000000
+    deadline: 5000000000
+    affinity: ~
+)YAML");
+  const auto result = acie::parse_kernel_threads(y);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].attrs.deadline.period, 5000000000u);
 }
 
 TEST(ParseKernelThreads, LowercaseSentinelIsNotRecognized)
@@ -1204,7 +1238,7 @@ kernel_threads:
 )YAML");
   const auto result = acie::parse_kernel_threads(y);
   ASSERT_EQ(result.size(), 1u);
-  EXPECT_EQ(result[0].runtime, 500000u);
+  EXPECT_EQ(result[0].attrs.deadline.runtime, 500000u);
 }
 
 TEST(ParseKernelThreads, RejectsNonListSection)
