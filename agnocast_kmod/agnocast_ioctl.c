@@ -2734,7 +2734,19 @@ int agnocast_ioctl_get_gpu_region(
   down_read(&wrapper->topic->rwsem);
 
   // The caller must be a subscriber of this topic, in the process it claims to
-  // be; see the trust boundary in docs/gpu_ipc.md.
+  // be. A descriptor is the only way to reach a GPU payload -- there is no named
+  // object a bystander can open -- so this check is what stands between a peer
+  // on the topic and any other process on the machine.
+  //
+  // Note that this makes GPU payloads less reachable than host ones, not more: a
+  // publisher's host shared memory is a named object left world-readable, so the
+  // module's bookkeeping there governs delivery and lifetime rather than who may
+  // read. The difference follows from the mechanism rather than from a policy
+  // choice, but it is the GPU side that is the stricter of the two.
+  //
+  // It is a boundary, not a sandbox. The module cannot establish that a
+  // descriptor handed to it is GPU memory at all, and the read-only access an
+  // importer ends up with is imposed by the importing library rather than here.
   const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info || sub_info->pid != pid) {
     dev_warn(

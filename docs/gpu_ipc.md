@@ -93,32 +93,25 @@ processes, but it is deliberately omitted. The rationale is as follows:
   underlying kernel objects handle lifetime natively. Finally, CUDA IPC is a legacy interface being
   actively superseded by the CUDA VMM API for this exact reason.
 
-## Access follows the subscription
-
-A GPU payload is reachable only through the kernel module, which hands a descriptor to a caller
-holding a registered subscription to that topic in the calling process. There is no named object a
-bystander can open.
-
-This is stricter than the host data plane, where a publisher's shared memory is a named object that
-any process on the machine may map read-only. It is not a policy difference so much as a consequence
-of the mechanism—a descriptor has to be installed by someone—but it is worth knowing which of the two
-planes is the weaker one when reasoning about confidentiality.
-
-It remains a boundary rather than a sandbox. The module cannot establish that a descriptor handed to
-it is GPU memory at all, so it does not try; and the read-only access an importer receives is the
-importing library's doing rather than something the kernel imposes.
-
-## Growing rather than failing is the first response
+## A publisher grows for size, never for rate
 
 Sizing an allocation is a guess about a payload size the publisher may not know in advance. Rather
 than fail a borrow that does not fit, a publisher allocates an additional region, and the message
 records which one its payload went into. Additional regions require no coordination between
 processes, precisely because a subscriber maps an unseen region on first receipt.
 
-Growth is bounded, so it is a first response rather than a guarantee: a borrow still fails when the
-publisher already holds as many regions as it may and none of them can be given up. Regions are
-reclaimed where the knowledge to do so exists—only the publisher can tell that a region holds no
-message, since the module never sees which region a message was written into.
+Growth answers that question and no other. A borrow can also find no slot for the opposite reason—a
+region sized for the payload exists, but every one of its slots is still held by a message in
+flight—and allocating there would be a mistake. The slot count comes from the publisher's QoS depth,
+so a full region means the node already has as many messages outstanding as it declared it wanted.
+Growing would silently overrule that number, and would answer a consumer that is not keeping up by
+taking more of a resource the whole machine shares. A full region fails the borrow instead, the way
+a full queue drops.
+
+Growth for size is bounded in turn, because payload sizes can vary without limit while device memory
+cannot. Where a bound has to be enforced, it is enforced where the knowledge sits: only the publisher
+can tell that a region holds no message and may be given up for a differently sized one, since the
+module never sees which region a message was written into.
 
 ## Reclaiming Regions from Departed Publishers
 

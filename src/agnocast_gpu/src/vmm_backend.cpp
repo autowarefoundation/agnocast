@@ -354,6 +354,9 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
   }
 
   // Read-only: an importer is a subscriber, and a message it receives is const.
+  // This is the library's doing, not the kernel's -- the module hands over the
+  // publisher's own open file unchanged -- so it stops a buggy subscriber, not a
+  // determined one, which is the same bargain the host data plane makes.
   void * base = nullptr;
   if (!map_and_grant(
         handle, exported.geometry.mapped_size, granularity, CU_MEM_ACCESS_FLAGS_PROT_READ, &base)) {

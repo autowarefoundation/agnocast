@@ -307,14 +307,13 @@ public:
    * region id and slot index in the message, which is how a subscriber finds the
    * payload. A region is allocated on the first borrow, sized from the QoS
    * depth; later borrows only reserve a slot, so in steady state no GPU
-   * allocation happens on the message path. When no existing region can serve
-   * the request -- every slot in flight, or a capacity larger than the slots a
-   * region was sized for -- another region is allocated rather than the borrow
-   * failing, which costs latency on that one publish but never data.
+   * allocation happens on the message path.
    *
-   * It fails only when the region cap is reached and every region too small for
-   * the payload still has a message in it. See docs/gpu_ipc.md for the
-   * sizing and growth policy.
+   * A capacity larger than every existing slot allocates another region rather
+   * than failing, which costs latency on that one publish but never data. A
+   * capacity that fits, with every such slot still in flight, is the QoS depth
+   * being reached and fails instead -- growing there would overrule the depth
+   * the node asked for. See docs/gpu_ipc.md.
    */
   ipc_shared_ptr<MessageT> borrow_loaned_message(const size_t capacity)
   {
@@ -334,20 +333,40 @@ public:
     {
       const std::lock_guard<std::mutex> lock(gpu_pools_mtx_);
 
+      // Two different things can leave a borrow without a slot, and only one of
+      // them is answered by allocating.
       internal::GpuSlotPool * pool = nullptr;
+      bool a_region_fits_the_payload = false;
       for (const auto & candidate : gpu_pools_) {
+        a_region_fits_the_payload = a_region_fits_the_payload || candidate->slot_size() >= capacity;
         if (candidate->acquire(capacity, slot_index)) {
           pool = candidate.get();
           break;
         }
       }
 
+      // A region sized for this payload exists and every one of its slots is
+      // still out: the publisher has as many messages in flight as its QoS depth
+      // allows, because the depth is what sized the slot count in the first
+      // place. Allocating here would overrule the number the node itself asked
+      // for, and would answer a consumer that is not keeping up by taking more of
+      // a resource the whole machine shares. So this fails, as a full queue does.
+      if (pool == nullptr && a_region_fits_the_payload) {
+        RCLCPP_ERROR(
+          logger,
+          "no free GPU slot for topic '%s': every slot of the regions that fit a %zu byte payload "
+          "is still held by a message in flight. Subscribers are not releasing messages as fast as "
+          "they are published; raise the QoS depth if this rate is expected.",
+          topic_name_.c_str(), capacity);
+        return ipc_shared_ptr<MessageT>();
+      }
+
       if (pool == nullptr) {
         if (!gpu_pools_.empty()) {
           RCLCPP_WARN(
             logger,
-            "no GPU slot for topic '%s' fits a %zu byte payload; allocating another region. Raise "
-            "the QoS depth, or keep the payload size stable, to avoid the allocation.",
+            "no GPU region for topic '%s' has slots large enough for a %zu byte payload; "
+            "allocating another region. Keeping the payload size stable avoids this.",
             topic_name_.c_str(), capacity);
         }
 
@@ -366,11 +385,11 @@ public:
           if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
             RCLCPP_ERROR(
               logger,
-              "no GPU region for topic '%s': a %zu byte payload needs a new region, this publisher "
-              "already holds the maximum of %d (largest slot %u bytes), and every region too small "
-              "for it still holds a message. Retry once subscribers have released them, or keep "
-              "the payload size stable so fewer regions are needed.",
-              topic_name_.c_str(), capacity, MAX_GPU_REGION_NUM_PER_PUBLISHER, largest_slot);
+              "no GPU region for topic '%s': a %zu byte payload is larger than every slot this "
+              "publisher has (largest %u bytes), it already holds the maximum of %d regions, and "
+              "each still holds a message, so none can be retired to make room. Keeping the "
+              "payload size stable needs far fewer regions.",
+              topic_name_.c_str(), capacity, largest_slot, MAX_GPU_REGION_NUM_PER_PUBLISHER);
           } else {
             RCLCPP_ERROR(
               logger,
