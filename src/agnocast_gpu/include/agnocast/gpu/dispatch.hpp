@@ -90,6 +90,15 @@ Writes<T> writes(const agnocast::ipc_shared_ptr<T> & message)
   return Writes<T>{&message};
 }
 
+// A declaration holds the address of the handle, which is safe for the whole of
+// the dispatch() expression it is written in -- including a temporary, which
+// outlives the full expression. Binding one to a temporary and *storing* it is
+// not, so it is refused rather than left to dangle.
+template <typename T>
+Reads<T> reads(agnocast::ipc_shared_ptr<T> &&) = delete;
+template <typename T>
+Writes<T> writes(agnocast::ipc_shared_ptr<T> &&) = delete;
+
 template <typename T>
 Upload uploads(
   T *& device_dst, const T * host_src, size_t count,
@@ -138,12 +147,38 @@ inline bool check(cudaError_t status, const char * what)
   return false;
 }
 
+// Owns a thread's stream and event so they are destroyed when the thread exits.
+// Without this a node that dispatches from short-lived worker threads leaks one
+// of each per thread. Errors are ignored: at thread exit during process teardown
+// the driver may already be gone, and there is nothing to report to.
+struct ThreadCudaObjects
+{
+  cudaStream_t stream = nullptr;
+  cudaEvent_t event = nullptr;
+
+  ThreadCudaObjects() = default;
+  ThreadCudaObjects(const ThreadCudaObjects &) = delete;
+  ThreadCudaObjects & operator=(const ThreadCudaObjects &) = delete;
+
+  ~ThreadCudaObjects()
+  {
+    if (event != nullptr) cudaEventDestroy(event);
+    if (stream != nullptr) cudaStreamDestroy(stream);
+  }
+};
+
+inline ThreadCudaObjects & thread_cuda_objects()
+{
+  static thread_local ThreadCudaObjects objects;
+  return objects;
+}
+
 // One stream per thread. A callback never runs two dispatches at once, and the
 // callback-isolated executor gives each callback its own thread, so this is one
 // stream per callback without the library tracking callbacks itself.
 inline cudaStream_t stream()
 {
-  static thread_local cudaStream_t s = nullptr;
+  cudaStream_t & s = thread_cuda_objects().stream;
   if (
     s == nullptr && !check(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking), "stream create")) {
     s = nullptr;
@@ -155,7 +190,7 @@ inline cudaStream_t stream()
 // dispatch, and nothing is queued for the GPU window it would free.
 inline cudaEvent_t completion_event()
 {
-  static thread_local cudaEvent_t e = nullptr;
+  cudaEvent_t & e = thread_cuda_objects().event;
   if (
     e == nullptr && !check(
                       cudaEventCreateWithFlags(&e, cudaEventDisableTiming | cudaEventBlockingSync),
@@ -178,12 +213,18 @@ inline void gate_release()
 // unexpected host block inside the GPU window.
 inline bool host_buffer_is_pinned(const void * host_ptr)
 {
+  // The caller's pending error, if any, is preserved: this probe runs before the
+  // work and must not consume state the caller is entitled to read.
+  const cudaError_t pending = cudaGetLastError();
   cudaPointerAttributes attributes = {};
-  if (cudaPointerGetAttributes(&attributes, host_ptr) != cudaSuccess) {
-    cudaGetLastError();  // clear, so a later unrelated call is not blamed
-    return false;
+  const cudaError_t probed = cudaPointerGetAttributes(&attributes, host_ptr);
+  if (probed != cudaSuccess) static_cast<void>(cudaGetLastError());
+  if (pending != cudaSuccess) {
+    RCLCPP_WARN_ONCE(
+      agnocast::logger, "a CUDA error was already pending on entry to dispatch(): %s",
+      cudaGetErrorString(pending));
   }
-  return attributes.type == cudaMemoryTypeHost;
+  return probed == cudaSuccess && attributes.type == cudaMemoryTypeHost;
 }
 
 // Maps the region the message refers to, if this process has not mapped it yet:
@@ -198,11 +239,21 @@ bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
 {
   if (!message) return true;
 
+  // The common case -- every frame after the first from a given publisher -- is
+  // settled without naming the topic at all. get_topic_name() returns a string
+  // by value, and inside the borrow window that copy comes from the
+  // shared-memory mempool, so doing it per frame would put an allocation on the
+  // message path for the sake of a lookup that is about to be skipped.
+  const uint32_t region_id = message->data.region_id();
+  if (region_id != 0 && agnocast::internal::GpuRegionRegistry::instance().is_mapped(region_id)) {
+    return message->data.get() != nullptr;
+  }
+
   const std::string topic_name = message.get_topic_name();
   // The subscriber id is this handle's own endpoint: the kmod checks it against
   // the calling process before handing out a descriptor.
   const agnocast::internal::GpuRegionRef ref{
-    topic_name, message->data.publisher_id(), message.get_pubsub_id(), message->data.region_id()};
+    topic_name, message->data.publisher_id(), message.get_pubsub_id(), region_id};
   if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
     RCLCPP_ERROR(
       agnocast::logger, "could not map the GPU region of topic '%s'", topic_name.c_str());
@@ -224,7 +275,17 @@ template <typename T>
 bool prepare(const Writes<T> & declaration, cudaStream_t)
 {
   const auto & message = *declaration.message;
-  return !message || message->data.get() != nullptr;
+  if (!message || message->data.get() != nullptr) return true;
+
+  // Otherwise the work would run against a null device pointer, or be skipped
+  // with no trace: the two ways to get here -- a message borrowed without the
+  // capacity overload, and one whose region is gone -- are both silent
+  // everywhere else.
+  RCLCPP_ERROR(
+    agnocast::logger,
+    "the GPU payload of a message declared with writes() does not resolve: it was not borrowed "
+    "with the capacity overload, or its region is no longer mapped");
+  return false;
 }
 
 // Device buffers are created before the work and on the same stream, so the work
@@ -303,7 +364,33 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   bool ok = true;
   ((ok = issue_upload(std::get<I>(parts), s) && ok), ...);
 
-  std::get<kWork>(parts)(s);
+  if (!ok) {
+    // Running the work anyway would compute over a buffer an upload failed to
+    // fill, and the result would then be published: a caller is invited to
+    // ignore this function's result, so the frame has to be abandoned here
+    // rather than completed with whatever the buffer held.
+    RCLCPP_ERROR(agnocast::logger, "not submitting GPU work: a declared transfer failed");
+    static_cast<void>(cudaStreamSynchronize(s));
+    gate_release();
+    return false;
+  }
+
+  // Whatever error the caller left pending is theirs; taking it as ours would
+  // fail their next good dispatch, and cudaGetLastError() below would report it
+  // as a submission failure.
+  static_cast<void>(cudaGetLastError());
+
+  // The completion guarantee has to survive an exception from the caller's work:
+  // returning with a kernel still running would let the message's slot be
+  // returned to its pool and handed to another message while the device is still
+  // writing it. Synchronize, release the gate, then let the exception continue.
+  try {
+    std::get<kWork>(parts)(s);
+  } catch (...) {
+    static_cast<void>(cudaStreamSynchronize(s));
+    gate_release();
+    throw;
+  }
   ok = check(cudaGetLastError(), "work submission") && ok;
 
   ok = check(cudaEventRecord(done, s), "event record") && ok;

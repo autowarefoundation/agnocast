@@ -59,18 +59,25 @@ private:
   };
 
   // Resolves the driver, device and context once. The helpers below assume it
-  // has succeeded, so every entry point calls it first.
+  // has succeeded, so every entry point that allocates or maps calls it first.
   [[nodiscard]] bool ensure_context() const;
+
+  // Resolves the driver and the device without retaining a context. Split out
+  // because answering "can this machine share GPU memory at all?" needs no
+  // context, and creating one costs over a hundred megabytes that a process
+  // which turns out to be unsupported would then hold for its lifetime.
+  [[nodiscard]] bool ensure_device() const;
 
   [[nodiscard]] bool has_attribute(CUdevice_attribute attr, int number, const char * name) const;
   [[nodiscard]] size_t query_granularity() const;
   // `access_flags` is what separates the exporter's mapping from an importer's:
   // the publisher writes its payload, a subscriber only reads it.
   [[nodiscard]] bool map_and_grant(
-    CUmemGenericAllocationHandle handle, size_t size, size_t granularity, CUmemAccess_flags access,
-    void ** out_base) const;
+    CUmemGenericAllocationHandle handle, size_t size, size_t granularity,
+    CUmemAccess_flags access_flags, void ** out_base) const;
 
   mutable std::mutex mtx_;
+  mutable bool device_ready_ = false;
   mutable bool context_ready_ = false;
   mutable CUcontext context_ = nullptr;
   mutable CUdevice device_ = 0;

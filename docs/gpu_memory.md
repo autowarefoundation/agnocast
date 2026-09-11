@@ -10,9 +10,11 @@ to the code they sit next to; the reasoning behind the shape of the thing is her
 
 | Component | Where |
 |---|---|
-| Region registry, liveness, authorization | `agnocast_kmod/agnocast_ioctl.c` (`*_gpu_region`) |
-| Message handle, region table, slot pool | `src/agnocastlib/include/agnocast/internal/gpu_*.hpp` |
-| Allocation mechanisms (CUDA VMM) | `src/agnocast_gpu/src/vmm_backend.cpp` |
+| Region registry and authorization | `agnocast_kmod/agnocast_ioctl.c` (`*_gpu_region`) |
+| Liveness reference, released on teardown | `agnocast_kmod/agnocast_internal.{c,h}` (`gpu_region_info`) |
+| Message handle and its declarations | `src/agnocastlib/include/agnocast/internal/gpu_message.hpp` |
+| Region table, slot pool | `src/agnocastlib/src/internal/gpu_{region_registry,slot_pool}.cpp` |
+| Allocation mechanisms (CUDA VMM) | `src/agnocast_gpu/src/{vmm_backend,cuda_driver_loader,register_backend}.cpp` |
 | Submission API, GPU message types | `src/agnocast_gpu/include/agnocast/gpu/` |
 
 ## A message identifies its memory by region and slot, never by address
@@ -41,14 +43,23 @@ message in host shared memory        GPU device memory
         computes slot_index * slot_size from its own base
 ```
 
-Two properties follow. A region id is unique for the module's lifetime and never reused, so a stale
-id resolves to nothing rather than to some unrelated region. And the pair is self-describing: a
-subscriber needs no knowledge of which topic or publisher produced a message to turn it back into an
-address, because the region id alone selects the mapping.
+Two properties follow. A region id is unique for the module's lifetime and never reused — the
+counter skips the reserved value 0 if it ever wraps — so a stale id resolves to nothing rather than
+to some unrelated region. And once a region is mapped, the id alone selects the mapping: *resolving*
+a slot needs no knowledge of which topic or publisher produced the message. Establishing the mapping
+in the first place does, which is why a message also carries its publisher's id; when the receive
+path starts telling a subscriber which publisher a message came from, that field goes away.
 
 Everything the pair is checked against — slot count, slot size, mapped size — arrives from another
-process, so every import and every resolution validates it rather than trusting it. An out-of-range
-slot index or an oversized payload yields a null pointer, never a wild device address.
+process. An out-of-range slot index, or a payload larger than a slot, yields a null pointer rather
+than a wild device address, and that check is applied on every resolution.
+
+What those numbers are *not* checked against is the kernel's own view of the allocation: nothing
+compares them with the size of the file behind the handle. Both the module and the importer apply
+the same self-consistency arithmetic — the slots must fit within the declared mapping — so a
+registration whose three numbers agree with each other is accepted. A payload size derived from a
+message's ROS fields is a second, independent source of truth, so `gpu_data_size()` is capped by
+what the handle actually reserved; the handle's own `size()` is the authoritative extent.
 
 ## The kernel module holds the region's lifetime
 
@@ -78,8 +89,11 @@ The module cannot establish that a registered descriptor is GPU memory at all; n
 interface exposes that, and the module deliberately does not interpret an export. What it can do, it
 does:
 
-- A registration must be internally consistent — the handle must be the kind the declared mechanism
-  uses, and the slots must fit the mapping.
+- A registration must be internally consistent — a mechanism whose handle is a descriptor must
+  bring one and no descriptor blob, and vice versa, and the slots must fit the declared mapping.
+  This is a presence test, not a type test: no in-kernel interface would let the module confirm that
+  a descriptor is GPU memory, so it checks only that it is not its own device, whose file would pin
+  the module.
 - Only the process that owns a publisher may register or remove memory under its name.
 - A descriptor is handed out only to a caller naming a subscriber of that topic which belongs to the
   calling process. Without that check the module would be a general descriptor-passing channel keyed
@@ -90,8 +104,11 @@ So the boundary is membership of the topic, exactly as it already is for the hos
 subscriber maps. A peer on the topic is trusted; a process that merely knows a topic name is not.
 
 Imports are mapped read-only, and a subscriber's message handle yields a `const` device pointer to
-match. The publisher writes; nobody else does. A buggy or hostile subscriber cannot corrupt a
-payload other subscribers are still reading.
+match, so a *buggy* subscriber cannot corrupt a payload others are still reading — a write through
+such a mapping faults. It is not a guarantee against a hostile one: the module hands over the
+publisher's own open file unchanged, and an importer holding the imported allocation can grant
+itself write access on its own mapping. "The publisher writes, nobody else does" is enforced within
+the library, not by the kernel.
 
 ## The mechanism axis is allocation and export only
 
@@ -116,13 +133,18 @@ because a subscriber maps an unseen region on first receipt.
 
 Three policies keep that from growing without bound:
 
-- **Slots are sized by powers of two.** Sizing them to the exact requested capacity would mean a new
-  region for every new payload size. Bucketing means a payload that grows keeps reusing its region
-  until it doubles, at a cost of less than 2x in device memory.
-- **Slot count comes from QoS depth.** "How many messages may be in flight at once" is what depth
-  already expresses, so a region holds depth slots plus one being filled.
-- **The number of regions is capped**, because growth is driven by a userspace process and each
-  region pins device memory plus a descriptor the module holds.
+- **Slots are sized by powers of two**, above a floor of the 256-byte alignment a device pointer
+  from `cudaMalloc` would have — so slot *k*, which begins at *k* × slot size, is aligned too.
+  Sizing slots to the exact requested capacity would mean a new region for every new payload size;
+  bucketing means a payload that grows keeps reusing its region until it doubles, at a cost of less
+  than 2x in device memory. Past 2 GiB a power of two no longer fits in a slot size, so the size
+  tracks the capacity and is rounded to the alignment instead.
+- **Slot count comes from QoS depth**, which is what "how many messages may be in flight at once"
+  already expresses: a region holds depth slots plus one being filled. KeepAll is the exception —
+  it reports a depth of 0, so it gets two slots and then grows by adding regions.
+- **The number of regions is capped per publisher**, because growth is driven by a userspace process
+  and each region pins device memory plus a descriptor the module holds. A process with publishers
+  on many topics is not bounded by that cap.
 
 Reaching the cap is not terminal: a region holding no message can be released to make room for a
 differently sized one. Only the publisher can know a region is empty — the module never sees which
@@ -160,10 +182,12 @@ asynchronous, so a callback that merely launched a kernel would return with the 
 reading. Waiting costs the node its own GPU time — a quantity its schedulability analysis already
 accounts for — and adds no coupling to other nodes.
 
-Transfers are declared rather than written inside the callable so the library owns them: it can
-check that host buffers are page-locked and can time transfers separately from kernels. Only an
-"upload first, download last" shape is expressible; interleaved copies belong in the callable, where
-they count as GPU work.
+Transfers are declared rather than written inside the callable so the library owns them: it checks
+that host buffers are page-locked, and owning them is what would let transfers be timed separately
+from kernels later. Only an "upload first, download last" shape is expressible; interleaved copies
+belong in the callable, where they count as GPU work. The admission control the waiting argument
+above anticipates is not implemented yet — the gate is a pair of empty calls at the points it will
+occupy.
 
 Declaring the messages a submission touches is load-bearing rather than documentation: declaring a
 message as read is what establishes the mapping for a publisher this process has not seen before.
@@ -177,18 +201,36 @@ driver's one-time bookkeeping in the mempool, where it stays for the life of the
 is a leak and none of it is per message, but it is accounted against message memory and is visible
 to every subscriber that maps the segment.
 
-A publishing node avoids this by submitting empty work once, outside any window, on each thread that
-will submit; the samples do exactly that. Two one-time allocations are deliberately left inside the
-window, since hoisting them would mean either exposing the steps as API or suspending the mempool: a
-payload's first stream-ordered device allocation, and the first frame from each publisher mapping
-its region. Both are bounded — once per process and once per publisher.
+A publishing node avoids the bulk of this by submitting empty work once, outside any window, on each
+thread that will submit; the samples do exactly that on the thread their single-threaded executor
+spins. Note the limit: with a multi-threaded or callback-isolated executor the callback threads
+belong to the library, and there is no hook on which to prime them, so each pays its own one-time
+driver setup inside the window.
+
+Some one-time allocations are deliberately left there in any case, since hoisting them would mean
+either exposing the steps as API or suspending the mempool: the GPU backend's own initialization
+(two `dlopen`s and the driver's context setup, which land on the normal heap only because the first
+borrow reaches them before it opens the window), a payload's first stream-ordered device allocation,
+and the first frame from each publisher mapping its region. Each is once per process or once per
+publisher. Nothing is allocated there per message — the per-frame path deliberately avoids even
+naming the topic, because that copy would be a mempool allocation on the message path.
 
 ## Limits this design accepts
 
 - **A publisher and its subscribers must be on the same GPU.** A region is tagged with its device
   UUID rather than an ordinal, since `CUDA_VISIBLE_DEVICES` makes ordinals process-relative, and an
   import across devices is refused rather than attempted. On a MIG-partitioned GPU the UUID is the
-  compute instance's, so an import across that boundary is refused too.
+  compute instance's, so an import across that boundary is refused too. The module stores the UUID
+  but never compares it; the refusal is the importing library's. Within a process the device is
+  bound once, by whichever GPU call comes first, and a later publisher created while a different
+  device is current still allocates on the bound one.
+- **A destroyed context is not recovered.** `cudaDeviceReset()` destroys the retained primary
+  context's resources, after which pushing it still succeeds and every call made on it fails; the
+  same is true after any sticky device fault. GPU messaging stays broken for the life of the
+  process.
+- **`kAllocateDeviceAsync` does not track the size it allocated.** A non-null target is reused as
+  is, so a transfer whose element count grows would run past the first allocation. The option is
+  for a target of fixed size, and the pointer it hands back is the caller's to free.
 - **A GPU topic does not bridge to ROS 2.** A GPU message type is not a generated ROS type, so it
   registers with an empty type name and the Agnocast-ROS 2 bridge cannot carry it.
 - **Device work must not outlive a region.** Releasing a region synchronizes the context first, so a
@@ -197,5 +239,8 @@ its region. Both are bounded — once per process and once per publisher.
 - **A publisher's own mapping is released only when the region is.** A region still holding a
   message outlives its publisher's teardown, by design; its address space is reclaimed at process
   exit.
-- **A GPU topic has no ROS type name.** Nothing keyed on one can see it, so both ends warn once at
-  construction rather than leaving a topic that silently never reaches ROS 2.
+- **A GPU message type is not assignable, and its base's `data` member is shadowed, not removed.**
+  Assignment between two GPU messages would move a reserved slot from one to the other, so it is
+  deleted; but a reference to the `sensor_msgs` base still exposes the host `data` vector, which
+  nothing reads. Converting a handle to one of the base types is rejected at compile time, because
+  it would delete through a destructor that is not virtual and lose the payload handle with it.

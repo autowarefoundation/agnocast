@@ -6,17 +6,25 @@ find_package(agnocastlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
-# Only the CUDA *headers* are needed at build time: driver symbols are resolved
-# with dlopen("libcuda.so.1") at run time (see src/cuda_driver_loader.hpp). The
-# headers keep struct layouts such as CUmemAllocationProp authoritative rather
-# than hand-replicated. Without them this package is skipped instead of failing
-# the workspace build, matching how the CUDA samples are handled.
+# No CUDA library is linked: driver symbols are resolved with
+# dlopen("libcuda.so.1") at run time (see src/cuda_driver_loader.hpp). The
+# toolkit is still required to *build*, because the headers keep struct layouts
+# such as CUmemAllocationProp authoritative rather than hand-replicated, and
+# because FindCUDAToolkit requires nvcc and cudart to report success. Without it
+# this package is skipped instead of failing the workspace build, matching how
+# the CUDA samples are handled.
 find_package(CUDAToolkit QUIET)
 if(NOT CUDAToolkit_FOUND)
   message(WARNING
-    "agnocast_gpu: CUDA headers not found; skipping this package. "
-    "GPU messages will be unavailable in this workspace, and any package that "
-    "expects agnocast_gpu to provide a GPU region backend will fail at run time.")
+    "agnocast_gpu: the CUDA toolkit was not found; building headers only. "
+    "GPU messages will be unavailable in this workspace: any process that asks "
+    "for one gets a clear error when libagnocast_gpu.so fails to load.")
+  # The headers are installed even so, because a dependent compiled against this
+  # prefix on a machine that *does* have CUDA would otherwise fail on a missing
+  # include, far from the cause. Only the backend library is absent.
+  install(DIRECTORY include/ DESTINATION include)
+  ament_export_include_directories(include)
+  ament_export_dependencies(agnocastlib rclcpp sensor_msgs)
   ament_package()
   return()
 endif()

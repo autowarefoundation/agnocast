@@ -8,6 +8,7 @@
 #include "agnocast/agnocast_ioctl.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -68,6 +69,12 @@ public:
   // no longer be able to.
   void destroy(std::string_view topic_name, topic_local_id_t publisher_id, uint32_t region_id);
 
+  // Drops only this process's mapping, leaving the kmod's reference in place for
+  // peers. What a publisher does with a region it will never write again but
+  // cannot declare unreferenced -- the kmod releases its own share once the
+  // messages still in flight drain.
+  void unmap_local(uint32_t region_id);
+
 private:
   GpuRegionRegistry() = default;
 };
@@ -80,6 +87,12 @@ private:
 // Returns a slot to the pool that owns it. A no-op in a process that does not
 // own the region, so a subscriber dropping a handle frees nothing.
 void release_gpu_slot(uint32_t region_id, uint32_t slot_index) noexcept;
+
+// Records that one received message handle refers to a region, so it is not
+// released while that handle lives. Paired across the lifetime of a
+// subscriber-side control block; both are no-ops for region id 0.
+void ref_gpu_region(uint32_t region_id) noexcept;
+void unref_gpu_region(uint32_t region_id) noexcept;
 
 // Marks a message whose payload lives in GPU device memory, so the publisher
 // knows that borrowing must also reserve a slot.
@@ -129,13 +142,13 @@ public:
   // fault rather than corrupt, but the type is what says so at the call site.
   [[nodiscard]] const T * get() const noexcept
   {
-    return static_cast<const T *>(resolve_gpu_slot(region_id_, slot_index_, count_ * sizeof(T)));
+    return static_cast<const T *>(resolve_gpu_slot(region_id_, slot_index_, byte_count()));
   }
 
   // The publisher's own message is non-const, and its mapping is writable.
   [[nodiscard]] T * get() noexcept
   {
-    return static_cast<T *>(resolve_gpu_slot(region_id_, slot_index_, count_ * sizeof(T)));
+    return static_cast<T *>(resolve_gpu_slot(region_id_, slot_index_, byte_count()));
   }
 
   [[nodiscard]] uint64_t size() const noexcept { return count_; }
@@ -149,6 +162,16 @@ public:
   [[nodiscard]] topic_local_id_t publisher_id() const noexcept { return publisher_id_; }
 
 private:
+  // count_ is a value a peer wrote into shared memory, so the product is
+  // computed with a guard: an overflowing one would wrap to a small number and
+  // pass the slot bound. The saturated value fails it instead.
+  [[nodiscard]] uint64_t byte_count() const noexcept
+  {
+    constexpr uint64_t limit = std::numeric_limits<uint64_t>::max();
+    if (sizeof(T) > 1 && count_ > limit / sizeof(T)) return limit;
+    return count_ * sizeof(T);
+  }
+
   void release() noexcept
   {
     if (region_id_ != 0) {

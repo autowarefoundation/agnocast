@@ -35,8 +35,11 @@ TEST(GpuSlotSizeTest, RoundsUpToAPowerOfTwo)
 // have allocated themselves.
 TEST(GpuSlotSizeTest, EverySizeIsAMultipleOfTheCudaMallocAlignment)
 {
-  for (uint64_t capacity = 1; capacity <= (1u << 20); capacity *= 3) {
-    EXPECT_EQ(gpu_slot_size_for(capacity) % 256u, 0u) << "capacity " << capacity;
+  for (uint64_t capacity = 1; capacity <= agnocast::internal::kMaxGpuPayloadCapacity;
+       capacity = capacity * 3 + 1) {
+    const uint32_t size = gpu_slot_size_for(capacity);
+    EXPECT_EQ(size % 256u, 0u) << "capacity " << capacity;
+    EXPECT_GE(size, capacity) << "capacity " << capacity;
   }
 }
 
@@ -58,15 +61,22 @@ TEST(GpuSlotSizeTest, GrowingPayloadsShareABoundedNumberOfSizes)
   EXPECT_LE(distinct, 32);
 }
 
-// Above 2 GiB the next power of two does not fit in a uint32 slot size, so the
-// capacity stands as asked rather than wrapping to something smaller than the
-// payload.
-TEST(GpuSlotSizeTest, DoesNotWrapNearTheTopOfTheRange)
+// Above 2 GiB the next power of two does not fit in a uint32 slot size. The size
+// then tracks the capacity, but it must still be rounded up to the alignment
+// floor and must never wrap below the payload: slot k begins at k * slot_size,
+// so an unrounded size would misalign every slot after the first -- which a
+// typed device access faults on, poisoning the process's CUDA context.
+TEST(GpuSlotSizeTest, LargeCapacitiesStayAlignedAndNeverWrap)
 {
-  constexpr uint32_t max_size = std::numeric_limits<uint32_t>::max();
   EXPECT_EQ(gpu_slot_size_for(1ULL << 31), 1u << 31);
-  EXPECT_EQ(gpu_slot_size_for((1ULL << 31) + 1), (1u << 31) + 1);
-  EXPECT_EQ(gpu_slot_size_for(max_size), max_size);
+
+  const uint32_t just_over = gpu_slot_size_for((1ULL << 31) + 1);
+  EXPECT_GE(just_over, (1ULL << 31) + 1);
+  EXPECT_EQ(just_over % 256u, 0u);
+
+  const uint32_t at_max = gpu_slot_size_for(agnocast::internal::kMaxGpuPayloadCapacity);
+  EXPECT_GE(at_max, agnocast::internal::kMaxGpuPayloadCapacity);
+  EXPECT_EQ(at_max % 256u, 0u);
 }
 
 // A message can outlive the publisher that owns its region, so releasing a slot

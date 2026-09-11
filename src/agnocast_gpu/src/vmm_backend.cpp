@@ -58,10 +58,10 @@ VmmBackend::ScopedContext::~ScopedContext()
   }
 }
 
-bool VmmBackend::ensure_context() const
+bool VmmBackend::ensure_device() const
 {
   const std::lock_guard<std::mutex> lock(mtx_);
-  if (context_ready_) return true;
+  if (device_ready_) return true;
 
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
   if (cuda == nullptr) return false;
@@ -73,7 +73,8 @@ bool VmmBackend::ensure_context() const
   }
 
   // Follow the device the caller already selected. Assuming ordinal 0 would place
-  // message buffers on a different GPU than the user's kernels run on.
+  // message buffers on a different GPU than the user's kernels run on. Whichever
+  // call gets here first binds the device for the whole process.
   CUcontext current = nullptr;
   const bool has_context = cuda->cuCtxGetCurrent(&current) == CUDA_SUCCESS && current != nullptr;
   r = has_context ? cuda->cuCtxGetDevice(&device_) : cuda->cuDeviceGet(&device_, 0);
@@ -90,11 +91,25 @@ bool VmmBackend::ensure_context() const
   }
   std::memcpy(device_uuid_.data(), uuid.bytes, device_uuid_.size());
 
+  device_ready_ = true;
+  return true;
+}
+
+bool VmmBackend::ensure_context() const
+{
+  if (!ensure_device()) return false;
+
+  const std::lock_guard<std::mutex> lock(mtx_);
+  if (context_ready_) return true;
+
+  const CudaDriverLoader * cuda = CudaDriverLoader::instance();
+
   // Retain the primary context rather than create one, so message buffers are
   // addressable by the user's runtime-API kernels. Held for the life of the
   // process; note it does not protect against cudaDeviceReset(), which destroys
-  // the context's resources whether or not it has been retained.
-  r = cuda->cuDevicePrimaryCtxRetain(&context_, device_);
+  // the context's resources whether or not it has been retained -- after which
+  // pushing it still succeeds and every call made on it fails.
+  const CUresult r = cuda->cuDevicePrimaryCtxRetain(&context_, device_);
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: cuDevicePrimaryCtxRetain failed: %s", cuda->describe(r).c_str());
@@ -127,7 +142,9 @@ bool VmmBackend::has_attribute(CUdevice_attribute attr, int number, const char *
 
 bool VmmBackend::is_supported() const noexcept
 try {
-  if (!ensure_context()) return false;
+  // Only the device is needed: both attributes answer without a context, and a
+  // process that turns out to be unsupported should not be left holding one.
+  if (!ensure_device()) return false;
 
   // Attribute numbers are quoted because that is how the CUDA documentation
   // identifies them.
@@ -164,7 +181,7 @@ size_t VmmBackend::query_granularity() const
 
 bool VmmBackend::map_and_grant(
   CUmemGenericAllocationHandle handle, size_t size, size_t granularity,
-  CUmemAccess_flags access_flags, void ** out_base) const
+  const CUmemAccess_flags access_flags, void ** out_base) const
 {
   const CudaDriverLoader * cuda = CudaDriverLoader::instance();
 

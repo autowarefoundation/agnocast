@@ -33,11 +33,29 @@ struct RegionEntry
   topic_local_id_t publisher_id = -1;
 };
 
+// How many received message handles in this process still refer to a region,
+// keyed by region id and kept independently of whether the region is mapped: a
+// handle is created before the frame that maps its region, so a count stored in
+// the mapping itself would miss the first message.
+//
+// This is what makes releasing an imported region safe. The kmod's entry
+// accounting is not enough on its own: ~SubscriptionBase issues
+// REMOVE_SUBSCRIBER while userspace may still hold handles, after which the
+// publisher's registration can disappear even though a message is still in use
+// here. The host data path sidesteps the whole question by never unmapping.
+std::unordered_map<uint32_t, uint32_t> & region_refs()
+{
+  static auto * refs =
+    new std::unordered_map<uint32_t, uint32_t>();  // NOLINT(cppcoreguidelines-owning-memory)
+  return *refs;
+}
+
 // Leaked for the same reason as the backend registry: a message destructor can
 // reach this after static destruction would have run.
 //
 // Shared rather than exclusive because resolving a slot is a read on the message
-// path, while mapping and releasing a region are cold.
+// path, while mapping and releasing a region are cold. It also guards
+// region_refs().
 std::shared_mutex & table_rwlock()
 {
   static auto * mtx = new std::shared_mutex();  // NOLINT(cppcoreguidelines-owning-memory)
@@ -165,7 +183,9 @@ std::vector<RegionEntry> collect_unreachable_regions()
 {
   std::vector<RegionEntry> released;
   for (auto it = table().begin(); it != table().end();) {
-    if (!it->second.imported || publisher_still_registered(it->second)) {
+    const auto refs = region_refs().find(it->first);
+    const bool still_referred_to = refs != region_refs().end() && refs->second != 0;
+    if (!it->second.imported || still_referred_to || publisher_still_registered(it->second)) {
       ++it;
       continue;
     }
@@ -224,6 +244,7 @@ void * GpuRegionRegistry::resolve(
 
   const CacheEntry * hit = nullptr;
   for (const CacheEntry & entry : cache) {
+    // cppcheck-suppress useStlAlgorithm ; a four-element scan, clearer as a loop
     if (entry.region_id == region_id && entry.generation == generation) {
       hit = &entry;
       break;
@@ -235,7 +256,17 @@ void * GpuRegionRegistry::resolve(
     {
       const std::shared_lock<std::shared_mutex> lock(table_rwlock());
       const auto it = table().find(region_id);
-      if (it == table().end()) return nullptr;
+      if (it == table().end()) {
+        // Silence here is the trap the declaration-based API exists to avoid: a
+        // message whose region was never mapped resolves to nullptr, which a
+        // kernel launch turns into an illegal access that poisons the context.
+        RCLCPP_ERROR_ONCE(
+          logger,
+          "GPU region %u is not mapped in this process: declare the message with reads() so "
+          "dispatch() maps it, or borrow it with the capacity overload if it is being published",
+          region_id);
+        return nullptr;
+      }
       // slot_address(0, 0) is the mapping base, null only for an invalid region,
       // which should never be in the table.
       filled.base = it->second.region.slot_address(0, 0);
@@ -296,6 +327,7 @@ bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
 
   // Collected under the lock and unmapped after it: releasing a region
   // synchronizes the device, which no one resolving a slot should wait on.
+  // cppcheck-suppress variableScope ; must outlive the lock scope below
   std::vector<RegionEntry> released;
   {
     const std::lock_guard<std::shared_mutex> lock(table_rwlock());
@@ -303,8 +335,17 @@ bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
     // candidate: its publisher answered a moment ago and probing it again would
     // only cost another call into the module.
     released = collect_unreachable_regions();
-    // A concurrent importer may have won the race; keep the mapping in use.
-    table().emplace(region_id, std::move(entry));
+    // Presence is tested before the insert rather than after, because emplace
+    // may consume the argument even when it does not insert: moving from it
+    // twice would leave the loser's region owned by nobody and leaked. A
+    // concurrent importer may have won the race, in which case the mapping in
+    // use is kept and ours joins `released` -- releasing a region synchronizes
+    // the whole device, which no resolver should wait on under the lock.
+    if (table().count(region_id) == 0) {
+      table().emplace(region_id, std::move(entry));
+    } else {
+      released.push_back(std::move(entry));
+    }
     table_generation().fetch_add(1, std::memory_order_release);
   }
   return true;
@@ -322,7 +363,7 @@ void GpuRegionRegistry::destroy(
   args.topic_name = {topic_name.data(), topic_name.size()};
   args.publisher_id = publisher_id;
   args.region_id = region_id;
-  if (ioctl(agnocast_fd, AGNOCAST_REMOVE_GPU_REGION_CMD, &args) < 0) {
+  if (agnocast_fd >= 0 && ioctl(agnocast_fd, AGNOCAST_REMOVE_GPU_REGION_CMD, &args) < 0) {
     RCLCPP_ERROR(
       logger, "AGNOCAST_REMOVE_GPU_REGION_CMD failed for topic '%.*s' region %u: %s",
       static_cast<int>(topic_name.size()), topic_name.data(), region_id, strerror(errno));
@@ -333,12 +374,59 @@ void GpuRegionRegistry::destroy(
     const std::lock_guard<std::shared_mutex> lock(table_rwlock());
     const auto it = table().find(region_id);
     if (it == table().end()) return;
+    // cppcheck-suppress unreadVariable ; holds the region so it unmaps after the lock
     released = std::move(it->second);
     table().erase(it);
     table_generation().fetch_add(1, std::memory_order_release);
   }
   // Unmapped outside the lock: releasing a region synchronizes the device, and
   // resolving a slot of another region should not wait on that.
+}
+
+void GpuRegionRegistry::unmap_local(const uint32_t region_id)
+{
+  if (region_id == 0) return;
+
+  RegionEntry released;
+  {
+    const std::lock_guard<std::shared_mutex> lock(table_rwlock());
+    const auto it = table().find(region_id);
+    if (it == table().end()) return;
+    // cppcheck-suppress unreadVariable ; holds the region so it unmaps after the lock
+    released = std::move(it->second);
+    table().erase(it);
+    table_generation().fetch_add(1, std::memory_order_release);
+  }
+  // Unmapped after the lock, as in destroy().
+}
+
+namespace
+{
+
+void adjust_region_refs(const uint32_t region_id, const bool take) noexcept
+{
+  if (region_id == 0) return;
+
+  const std::lock_guard<std::shared_mutex> lock(table_rwlock());
+  if (take) {
+    region_refs()[region_id]++;
+    return;
+  }
+  const auto it = region_refs().find(region_id);
+  if (it == region_refs().end()) return;
+  if (--it->second == 0) region_refs().erase(it);
+}
+
+}  // namespace
+
+void ref_gpu_region(const uint32_t region_id) noexcept
+{
+  adjust_region_refs(region_id, true);
+}
+
+void unref_gpu_region(const uint32_t region_id) noexcept
+{
+  adjust_region_refs(region_id, false);
 }
 
 void * resolve_gpu_slot(

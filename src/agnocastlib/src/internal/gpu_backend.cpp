@@ -53,8 +53,8 @@ void ensure_backend_loaded()
 
 }  // namespace
 
-void UniqueFd::reset()
-{
+void UniqueFd::reset() noexcept
+try {
   if (fd_ >= 0) {
     if (close(fd_) != 0) {
       // The descriptor was already closed elsewhere, which is a double-ownership
@@ -63,6 +63,10 @@ void UniqueFd::reset()
     }
     fd_ = -1;
   }
+} catch (...) {
+  // Reached from the destructor, where logging is the only thing that can throw
+  // and terminating over it would be worse than losing the message.
+  fd_ = -1;
 }
 
 void register_gpu_memory_backend_selector(GpuMemoryBackendSelector selector)

@@ -4,6 +4,7 @@
 #include "../agnocast.h"
 
 #include <kunit/test.h>
+#include <linux/anon_inodes.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 
@@ -25,9 +26,18 @@ static const uint64_t MAPPED_SIZE = 8192;
 // holds a reference on it, so any file exercises the reference handling. The
 // descriptor install is out of reach here: it depends on the calling process's
 // file table (see gpu_region_e2e.cpp).
+//
+// An anonymous inode rather than filp_open("/dev/null"): these tests also run
+// under kunit.py, which boots a kernel with no root filesystem mounted, so
+// opening a path would fail and abort most of the suite.
+static const struct file_operations handle_file_fops = {
+  .owner = THIS_MODULE,
+};
+
 static struct file * open_handle_file(struct kunit * test)
 {
-  struct file * file = filp_open("/dev/null", O_RDONLY, 0);
+  struct file * file =
+    anon_inode_getfile("agnocast_kunit_gpu_handle", &handle_file_fops, NULL, O_RDONLY);
   KUNIT_ASSERT_FALSE(test, IS_ERR(file));
   return file;
 }

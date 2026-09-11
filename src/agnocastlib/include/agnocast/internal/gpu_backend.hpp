@@ -55,7 +55,8 @@ public:
   // Used where the kmod takes over holding the region's liveness reference.
   [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
 
-  void reset();
+  // noexcept because the destructor is: it logs, and logging can throw.
+  void reset() noexcept;
 
 private:
   int fd_ = -1;
