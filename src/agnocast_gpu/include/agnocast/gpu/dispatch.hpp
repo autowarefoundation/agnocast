@@ -46,8 +46,14 @@ enum class TransferOptions : uint32_t {
   // Allocate the device-side buffer on the dispatch stream when it is still
   // null, before the work runs. cudaMalloc is synchronous and would stall the
   // host inside a callback; a stream-ordered allocation does not, so device
-  // scratch can be created where it is used rather than at construction. The
-  // caller keeps the pointer and owns it from then on.
+  // scratch can be created where it is used rather than at construction.
+  //
+  // The caller keeps the pointer and owns it from then on, with two conditions.
+  // No size is recorded, so a non-null target is reused as it is: it must be
+  // sized for the largest transfer it will ever carry, or a later, longer one
+  // runs past the allocation. And the null check and the store are the caller's
+  // own variable, unsynchronized, so a target shared by two threads races --
+  // give each thread its own.
   kAllocateDeviceAsync = 1U << 0,
 };
 
