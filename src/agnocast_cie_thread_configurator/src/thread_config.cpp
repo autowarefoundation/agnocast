@@ -184,18 +184,70 @@ SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string 
   return *parsed;
 }
 
-}  // namespace
-
-bool ThreadConfig::is_wildcard() const noexcept
+// A typo'd pattern silently treated as an exact id would never match, so any
+// id containing '*' must be a well-formed "<node name>/*".
+void validate_callback_group_id(const CallbackGroupEntry & entry)
 {
-  static constexpr std::string_view suffix = "/*";
-  return thread_str.size() >= suffix.size() &&
-         thread_str.compare(thread_str.size() - suffix.size(), suffix.size(), suffix) == 0;
+  if (entry.id.find('*') == std::string::npos) {
+    return;
+  }
+  if (!entry.is_wildcard()) {
+    throw std::runtime_error(
+      "Invalid id '" + entry.id +
+      "': '*' is only allowed as a trailing \"/*\" wildcard (e.g. /my_node/*)");
+  }
+  const std::string prefix = entry.wildcard_prefix();
+  if (prefix.empty() || prefix.find('*') != std::string::npos) {
+    throw std::runtime_error(
+      "Invalid wildcard id '" + entry.id +
+      "': the part before \"/*\" must be a non-empty node name without '*'");
+  }
+  if (prefix.find('@') != std::string::npos) {
+    throw std::runtime_error(
+      "Invalid wildcard id '" + entry.id +
+      "': the part before \"/*\" must be a plain node name, not a full callback-group id "
+      "containing '@'");
+  }
 }
 
-std::string ThreadConfig::wildcard_prefix() const
+// Duplicates would otherwise collapse to the last-inserted entry in the
+// owner's index, dropping earlier YAML lines without warning. `describe`
+// doubles as the identity, so entries with the same description are
+// duplicates.
+template <typename Entries, typename Describe>
+void reject_duplicates(const Entries & entries, const char * what, Describe describe)
 {
-  return thread_str.substr(0, thread_str.size() - 2);
+  std::unordered_set<std::string> seen;
+  for (const auto & entry : entries) {
+    // cppcheck-suppress useStlAlgorithm
+    if (!seen.insert(describe(entry)).second) {
+      throw std::runtime_error(std::string("Duplicate ") + what + " entry: " + describe(entry));
+    }
+  }
+}
+
+}  // namespace
+
+bool CallbackGroupEntry::is_wildcard() const noexcept
+{
+  static constexpr std::string_view suffix = "/*";
+  return id.size() >= suffix.size() &&
+         id.compare(id.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string CallbackGroupEntry::wildcard_prefix() const
+{
+  return id.substr(0, id.size() - 2);
+}
+
+bool KernelThreadEntry::is_managed() const noexcept
+{
+  return attrs.policy.has_value() || !attrs.affinity.empty();
+}
+
+bool IrqEntry::is_managed() const noexcept
+{
+  return !affinity.empty();
 }
 
 std::string extract_node_part(const std::string & callback_group_id)
@@ -203,260 +255,192 @@ std::string extract_node_part(const std::string & callback_group_id)
   return callback_group_id.substr(0, callback_group_id.find('@'));
 }
 
-void parse_yaml(
-  const YAML::Node & yaml, size_t default_domain_id,
-  std::vector<ThreadConfig> & callback_groups_out, std::vector<ThreadConfig> & non_ros_threads_out)
+ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
 {
-  YAML::Node callback_groups = yaml["callback_groups"];
-  YAML::Node non_ros_threads = yaml["non_ros_threads"];
+  ParsedConfig config;
 
-  callback_groups_out.clear();
-  non_ros_threads_out.clear();
-  callback_groups_out.resize(callback_groups.size());
-  non_ros_threads_out.resize(non_ros_threads.size());
-
-  for (size_t i = 0; i < callback_groups.size(); ++i) {
-    const auto & cg = callback_groups[i];
-    auto & cfg = callback_groups_out[i];
-
-    cfg.thread_str = cg["id"].as<std::string>();
-    if (cfg.thread_str.find('*') != std::string::npos) {
-      // A typo'd pattern silently treated as an exact id would never match,
-      // so any id containing '*' must be a well-formed "<node name>/*".
-      if (!cfg.is_wildcard()) {
-        throw std::runtime_error(
-          "Invalid id '" + cfg.thread_str +
-          "': '*' is only allowed as a trailing \"/*\" wildcard (e.g. /my_node/*)");
-      }
-      const std::string prefix = cfg.wildcard_prefix();
-      if (prefix.empty() || prefix.find('*') != std::string::npos) {
-        throw std::runtime_error(
-          "Invalid wildcard id '" + cfg.thread_str +
-          "': the part before \"/*\" must be a non-empty node name without '*'");
-      }
-      if (prefix.find('@') != std::string::npos) {
-        throw std::runtime_error(
-          "Invalid wildcard id '" + cfg.thread_str +
-          "': the part before \"/*\" must be a plain node name, not a full callback-group id "
-          "containing '@'");
-      }
-    }
-    cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
-    cfg.attrs.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+  // A missing or null section has no entries, like kernel_threads / irqs.
+  const YAML::Node callback_groups = yaml["callback_groups"];
+  const size_t callback_group_count =
+    (callback_groups && !callback_groups.IsNull()) ? callback_groups.size() : 0;
+  for (size_t i = 0; i < callback_group_count; ++i) {
+    const YAML::Node cg = callback_groups[i];
+    CallbackGroupEntry entry;
+    entry.id = cg["id"].as<std::string>();
+    validate_callback_group_id(entry);
+    entry.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
+    entry.attrs.affinity = parse_affinity(cg, "id=" + entry.id, /*allow_unmanageable=*/false);
     const SchedPolicy policy =
-      parse_policy_or_throw(cg["policy"].as<std::string>(), "id=" + cfg.thread_str);
-    cfg.attrs.policy = policy;
+      parse_policy_or_throw(cg["policy"].as<std::string>(), "id=" + entry.id);
+    entry.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      cfg.attrs.deadline = DeadlineParams{
+      entry.attrs.deadline = DeadlineParams{
         cg["runtime"].as<uint64_t>(), cg["period"].as<uint64_t>(), cg["deadline"].as<uint64_t>()};
     } else if (is_cfs(policy)) {
-      cfg.attrs.nice = parse_nice(cg, policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      entry.attrs.nice = parse_nice(cg, policy, "id=" + entry.id, /*allow_unmanageable=*/false);
     } else {
-      cfg.attrs.rt_priority =
-        parse_rt_priority(cg, policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      entry.attrs.rt_priority =
+        parse_rt_priority(cg, policy, "id=" + entry.id, /*allow_unmanageable=*/false);
     }
+    config.callback_groups.push_back(std::move(entry));
   }
+  reject_duplicates(config.callback_groups, "callback_group", [](const CallbackGroupEntry & e) {
+    return "domain_id=" + std::to_string(e.domain_id) + ", id=" + e.id;
+  });
 
-  for (size_t i = 0; i < non_ros_threads.size(); ++i) {
-    const auto & nrt = non_ros_threads[i];
-    auto & cfg = non_ros_threads_out[i];
-
-    cfg.thread_str = nrt["name"].as<std::string>();
-    cfg.attrs.affinity =
-      parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+  const YAML::Node non_ros_threads = yaml["non_ros_threads"];
+  const size_t non_ros_thread_count =
+    (non_ros_threads && !non_ros_threads.IsNull()) ? non_ros_threads.size() : 0;
+  for (size_t i = 0; i < non_ros_thread_count; ++i) {
+    const YAML::Node nrt = non_ros_threads[i];
+    NonRosThreadEntry entry;
+    entry.name = nrt["name"].as<std::string>();
+    entry.attrs.affinity = parse_affinity(nrt, "name=" + entry.name, /*allow_unmanageable=*/false);
     const SchedPolicy policy =
-      parse_policy_or_throw(nrt["policy"].as<std::string>(), "name=" + cfg.thread_str);
-    cfg.attrs.policy = policy;
+      parse_policy_or_throw(nrt["policy"].as<std::string>(), "name=" + entry.name);
+    entry.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      cfg.attrs.deadline = DeadlineParams{
+      entry.attrs.deadline = DeadlineParams{
         nrt["runtime"].as<uint64_t>(), nrt["period"].as<uint64_t>(),
         nrt["deadline"].as<uint64_t>()};
     } else if (is_cfs(policy)) {
-      cfg.attrs.nice =
-        parse_nice(nrt, policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      entry.attrs.nice =
+        parse_nice(nrt, policy, "name=" + entry.name, /*allow_unmanageable=*/false);
     } else {
-      cfg.attrs.rt_priority =
-        parse_rt_priority(nrt, policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      entry.attrs.rt_priority =
+        parse_rt_priority(nrt, policy, "name=" + entry.name, /*allow_unmanageable=*/false);
     }
+    config.non_ros_threads.push_back(std::move(entry));
   }
+  reject_duplicates(config.non_ros_threads, "non_ros_thread", [](const NonRosThreadEntry & e) {
+    return "name=" + e.name;
+  });
 
-  // Reject duplicates: id_to_*_config_ would silently collapse them to the
-  // last-inserted entry, dropping earlier YAML lines without warning.
-  // The std::find_if rewrite cppcheck suggests would hide a side-effecting
-  // predicate inside the algorithm; a plain loop is clearer here.
-  std::unordered_set<std::string> seen_cb;
-  for (const auto & c : callback_groups_out) {
-    // cppcheck-suppress useStlAlgorithm
-    if (!seen_cb.insert(std::to_string(c.domain_id) + ":" + c.thread_str).second) {
-      throw std::runtime_error(
-        "Duplicate callback_group entry: domain_id=" + std::to_string(c.domain_id) +
-        ", id=" + c.thread_str);
+  const YAML::Node kernel_threads = yaml["kernel_threads"];
+  if (kernel_threads && !kernel_threads.IsNull()) {
+    if (!kernel_threads.IsSequence()) {
+      throw std::runtime_error("'kernel_threads' must be a list");
     }
-  }
-  std::unordered_set<std::string> seen_nrt;
-  for (const auto & c : non_ros_threads_out) {
-    // cppcheck-suppress useStlAlgorithm
-    if (!seen_nrt.insert(c.thread_str).second) {
-      throw std::runtime_error("Duplicate non_ros_thread entry: name=" + c.thread_str);
-    }
-  }
-}
+    for (size_t i = 0; i < kernel_threads.size(); ++i) {
+      const YAML::Node kt = kernel_threads[i];
+      KernelThreadEntry entry;
+      const std::string entry_pos = "kernel_threads entry #" + std::to_string(i);
 
-bool KernelThreadConfig::is_managed() const noexcept
-{
-  return attrs.policy.has_value() || !attrs.affinity.empty();
-}
+      if (!kt.IsMap()) {
+        throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- comm: ...')");
+      }
+      if (!kt["comm"] || kt["comm"].IsNull()) {
+        throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
+      }
+      try {
+        entry.comm = kt["comm"].as<std::string>();
+      } catch (const YAML::Exception &) {
+        throw std::runtime_error(entry_pos + ": 'comm' must be a string");
+      }
+      if (entry.comm.empty()) {
+        throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
+      }
+      if (is_kworker_comm(entry.comm)) {
+        throw std::runtime_error(
+          "kernel_threads entry '" + entry.comm +
+          "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
+          "be matched reliably");
+      }
+      entry.attrs.affinity = parse_affinity(kt, "comm=" + entry.comm, /*allow_unmanageable=*/true);
 
-bool IrqConfig::is_managed() const noexcept
-{
-  return !affinity.empty();
-}
+      if (is_unset(kt["policy"], /*allow_unmanageable=*/true)) {
+        // Any policy-dependent field without 'policy' would otherwise be
+        // silently dead configuration (is_managed() == false).
+        for (const char * key : {"nice", "priority", "runtime", "period", "deadline"}) {
+          if (!is_unset(kt[key], /*allow_unmanageable=*/true)) {
+            throw std::runtime_error(
+              "'" + std::string(key) + "' requires 'policy' for comm=" + entry.comm +
+              ": set both or leave both unset");
+          }
+        }
+        config.kernel_threads.push_back(std::move(entry));
+        continue;
+      }
 
-std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
-{
-  YAML::Node section = yaml["kernel_threads"];
-  std::vector<KernelThreadConfig> result;
-  if (!section || section.IsNull()) {
-    return result;
-  }
-  if (!section.IsSequence()) {
-    throw std::runtime_error("'kernel_threads' must be a list");
-  }
-  result.resize(section.size());
+      std::string policy_str;
+      try {
+        policy_str = kt["policy"].as<std::string>();
+      } catch (const YAML::Exception &) {
+        throw std::runtime_error("'policy' must be a string for comm=" + entry.comm);
+      }
+      const SchedPolicy policy = parse_policy_or_throw(policy_str, "comm=" + entry.comm);
+      entry.attrs.policy = policy;
 
-  for (size_t i = 0; i < section.size(); ++i) {
-    const auto & kt = section[i];
-    auto & cfg = result[i];
-    const std::string entry_pos = "kernel_threads entry #" + std::to_string(i);
-
-    if (!kt.IsMap()) {
-      throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- comm: ...')");
-    }
-    if (!kt["comm"] || kt["comm"].IsNull()) {
-      throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
-    }
-    try {
-      cfg.comm = kt["comm"].as<std::string>();
-    } catch (const YAML::Exception &) {
-      throw std::runtime_error(entry_pos + ": 'comm' must be a string");
-    }
-    if (cfg.comm.empty()) {
-      throw std::runtime_error(entry_pos + " is missing a non-empty 'comm'");
-    }
-    if (is_kworker_comm(cfg.comm)) {
-      throw std::runtime_error(
-        "kernel_threads entry '" + cfg.comm +
-        "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
-        "be matched reliably");
-    }
-    cfg.attrs.affinity = parse_affinity(kt, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
-
-    if (is_unset(kt["policy"], /*allow_unmanageable=*/true)) {
-      // Any policy-dependent field without 'policy' would otherwise be
-      // silently dead configuration (is_managed() == false).
-      for (const char * key : {"nice", "priority", "runtime", "period", "deadline"}) {
-        if (!is_unset(kt[key], /*allow_unmanageable=*/true)) {
+      if (policy == SchedPolicy::Deadline) {
+        // Explicit check for a clear message: these fields are always
+        // hand-written (prerun never emits DEADLINE) and easy to forget.
+        if (
+          is_unset(kt["runtime"], /*allow_unmanageable=*/true) ||
+          is_unset(kt["period"], /*allow_unmanageable=*/true) ||
+          is_unset(kt["deadline"], /*allow_unmanageable=*/true)) {
           throw std::runtime_error(
-            "'" + std::string(key) + "' requires 'policy' for comm=" + cfg.comm +
-            ": set both or leave both unset");
+            "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + entry.comm);
+        }
+        entry.attrs.deadline = DeadlineParams{
+          parse_deadline_field(kt, "runtime", "comm=" + entry.comm),
+          parse_deadline_field(kt, "period", "comm=" + entry.comm),
+          parse_deadline_field(kt, "deadline", "comm=" + entry.comm)};
+      } else if (is_cfs(policy)) {
+        entry.attrs.nice =
+          parse_nice(kt, policy, "comm=" + entry.comm, /*allow_unmanageable=*/true);
+      } else {
+        entry.attrs.rt_priority =
+          parse_rt_priority(kt, policy, "comm=" + entry.comm, /*allow_unmanageable=*/true);
+      }
+      config.kernel_threads.push_back(std::move(entry));
+    }
+  }
+  reject_duplicates(config.kernel_threads, "kernel_thread", [](const KernelThreadEntry & e) {
+    return "comm=" + e.comm;
+  });
+
+  const YAML::Node irqs = yaml["irqs"];
+  if (irqs && !irqs.IsNull()) {
+    if (!irqs.IsSequence()) {
+      throw std::runtime_error("'irqs' must be a list");
+    }
+    for (size_t i = 0; i < irqs.size(); ++i) {
+      const YAML::Node iq = irqs[i];
+      IrqEntry entry;
+      const std::string entry_pos = "irqs entry #" + std::to_string(i);
+
+      if (!iq.IsMap()) {
+        throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- irq: ...')");
+      }
+      if (!iq["irq"] || iq["irq"].IsNull()) {
+        throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
+      }
+      const auto irq = as_base10<int>(iq["irq"]);
+      if (!irq) {
+        throw std::runtime_error(
+          entry_pos + ": 'irq' must be a non-negative decimal integer, got '" +
+          (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
+      }
+      entry.irq = *irq;
+
+      if (iq["name"] && !iq["name"].IsNull()) {
+        try {
+          entry.name = iq["name"].as<std::string>();
+        } catch (const YAML::Exception &) {
+          throw std::runtime_error("'name' must be a string for irq=" + std::to_string(entry.irq));
         }
       }
-      continue;
-    }
-
-    std::string policy_str;
-    try {
-      policy_str = kt["policy"].as<std::string>();
-    } catch (const YAML::Exception &) {
-      throw std::runtime_error("'policy' must be a string for comm=" + cfg.comm);
-    }
-    const SchedPolicy policy = parse_policy_or_throw(policy_str, "comm=" + cfg.comm);
-    cfg.attrs.policy = policy;
-
-    if (policy == SchedPolicy::Deadline) {
-      // Explicit check for a clear message: these fields are always
-      // hand-written (prerun never emits DEADLINE) and easy to forget.
-      if (
-        is_unset(kt["runtime"], /*allow_unmanageable=*/true) ||
-        is_unset(kt["period"], /*allow_unmanageable=*/true) ||
-        is_unset(kt["deadline"], /*allow_unmanageable=*/true)) {
-        throw std::runtime_error(
-          "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + cfg.comm);
-      }
-      cfg.attrs.deadline = DeadlineParams{
-        parse_deadline_field(kt, "runtime", "comm=" + cfg.comm),
-        parse_deadline_field(kt, "period", "comm=" + cfg.comm),
-        parse_deadline_field(kt, "deadline", "comm=" + cfg.comm)};
-    } else if (is_cfs(policy)) {
-      cfg.attrs.nice = parse_nice(kt, policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
-    } else {
-      cfg.attrs.rt_priority =
-        parse_rt_priority(kt, policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
+      entry.affinity =
+        parse_affinity(iq, "irq=" + std::to_string(entry.irq), /*allow_unmanageable=*/true);
+      config.irqs.push_back(std::move(entry));
     }
   }
+  reject_duplicates(
+    config.irqs, "irq", [](const IrqEntry & e) { return "irq=" + std::to_string(e.irq); });
 
-  std::unordered_set<std::string> seen;
-  for (const auto & c : result) {
-    // cppcheck-suppress useStlAlgorithm
-    if (!seen.insert(c.comm).second) {
-      throw std::runtime_error("Duplicate kernel_thread entry: comm=" + c.comm);
-    }
-  }
-  return result;
-}
-
-std::vector<IrqConfig> parse_irqs(const YAML::Node & yaml)
-{
-  YAML::Node section = yaml["irqs"];
-  std::vector<IrqConfig> result;
-  if (!section || section.IsNull()) {
-    return result;
-  }
-  if (!section.IsSequence()) {
-    throw std::runtime_error("'irqs' must be a list");
-  }
-  result.resize(section.size());
-
-  for (size_t i = 0; i < section.size(); ++i) {
-    const auto & iq = section[i];
-    auto & cfg = result[i];
-    const std::string entry_pos = "irqs entry #" + std::to_string(i);
-
-    if (!iq.IsMap()) {
-      throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- irq: ...')");
-    }
-    if (!iq["irq"] || iq["irq"].IsNull()) {
-      throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
-    }
-    const auto irq = as_base10<int>(iq["irq"]);
-    if (!irq) {
-      throw std::runtime_error(
-        entry_pos + ": 'irq' must be a non-negative decimal integer, got '" +
-        (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
-    }
-    cfg.irq = *irq;
-
-    if (iq["name"] && !iq["name"].IsNull()) {
-      try {
-        cfg.name = iq["name"].as<std::string>();
-      } catch (const YAML::Exception &) {
-        throw std::runtime_error("'name' must be a string for irq=" + std::to_string(cfg.irq));
-      }
-    }
-    cfg.affinity =
-      parse_affinity(iq, "irq=" + std::to_string(cfg.irq), /*allow_unmanageable=*/true);
-  }
-
-  std::unordered_set<int> seen;
-  for (const auto & c : result) {
-    // cppcheck-suppress useStlAlgorithm
-    if (!seen.insert(c.irq).second) {
-      throw std::runtime_error("Duplicate irq entry: irq=" + std::to_string(c.irq));
-    }
-  }
-  return result;
+  return config;
 }
 
 }  // namespace agnocast_cie_thread_configurator
