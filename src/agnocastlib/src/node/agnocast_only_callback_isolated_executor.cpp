@@ -9,6 +9,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <stdexcept>
+
 namespace agnocast
 {
 
@@ -197,6 +199,25 @@ void AgnocastOnlyCallbackIsolatedExecutor::spin()
       thread.join();
     }
   }
+}
+
+rclcpp::FutureReturnCode AgnocastOnlyCallbackIsolatedExecutor::spin_until_future_complete_impl(
+  std::chrono::nanoseconds timeout,
+  const std::function<std::future_status(std::chrono::nanoseconds wait_time)> & wait_for_future)
+{
+  (void)timeout;
+  (void)wait_for_future;
+  throw std::runtime_error(
+    "AgnocastOnlyCallbackIsolatedExecutor::spin_until_future_complete() is not supported in "
+    "AgnocastOnlyCallbackIsolatedExecutor.");
+}
+
+void AgnocastOnlyCallbackIsolatedExecutor::spin_once(std::chrono::nanoseconds timeout)
+{
+  (void)timeout;
+  throw std::runtime_error(
+    "AgnocastOnlyCallbackIsolatedExecutor::spin_once() is not supported in "
+    "AgnocastOnlyCallbackIsolatedExecutor.");
 }
 
 void AgnocastOnlyCallbackIsolatedExecutor::cancel()
