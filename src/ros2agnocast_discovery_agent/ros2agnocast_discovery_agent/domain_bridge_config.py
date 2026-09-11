@@ -50,6 +50,17 @@ def _default_config_paths():
     return paths or [DEFAULT_CONFIG_PATH]
 
 
+SHADOWED_DROP_INS_NOTICE = f'{CONFIG_ENV} is set, so these drop-ins are not read'
+
+
+def shadowed_drop_ins():
+    """Return the drop-ins ``CONFIG_ENV`` is suppressing, for the caller to report.
+
+    The variable replaces the default location instead of adding to it.
+    """
+    return sorted(glob.glob(os.path.join(default_config_dir(), '*.yaml')))
+
+
 def resolve_config_paths():
     """Return ``(paths, from_env)`` for the configs every consumer should read, in order."""
     listed = os.environ.get(CONFIG_ENV, '')

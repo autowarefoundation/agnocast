@@ -36,6 +36,10 @@ layout systemd and sysctl use, but not their precedence: a later file only adds,
 it never overrides an earlier one. Two files that bridge the same topic and domain
 to different places are a configuration error, which the kernel module rejects.
 
+`AGNOCAST_DOMAIN_BRIDGE_CONFIG` replaces the default location rather than adding to
+it, so setting it means the drop-in directory is **not** read. The agent warns when
+the variable is set and the directory still holds a `*.yaml`.
+
 The discovery agent reads the same files, to force the A2R bridge that a topic
 split across both an IPC namespace and a ROS domain needs (without it,
 `domain_bridge` waits for a DDS publisher while the A2R bridge waits for a DDS

@@ -325,6 +325,11 @@ def _load_domain_rules(logger=None) -> list:
     publication down.
     """
     paths, from_env = domain_bridge_config.resolve_config_paths()
+    if from_env and logger is not None:
+        shadowed = domain_bridge_config.shadowed_drop_ins()
+        if shadowed:
+            logger.warn(
+                f'{domain_bridge_config.SHADOWED_DROP_INS_NOTICE}: {", ".join(shadowed)}')
 
     rules = []
     for result in domain_bridge_config.load_domain_bridge_rules(paths):

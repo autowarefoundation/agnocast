@@ -485,6 +485,13 @@ def test_dispatch_sends_nothing_when_no_request_is_produced(monkeypatch):
     assert sent == []
 
 
+@pytest.fixture(autouse=True)
+def _default_config_in_tmp(monkeypatch, tmp_path):
+    """Keep the default path, and the drop-in directory beside it, out of /etc."""
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'domain_bridge.yaml'))
+
+
 def test_load_domain_rules_returns_empty_when_no_config_exists(monkeypatch, tmp_path):
     monkeypatch.delenv(CONFIG_ENV, raising=False)
     monkeypatch.setattr(
@@ -575,6 +582,32 @@ def test_load_domain_rules_reads_the_default_drop_in_directory(monkeypatch, tmp_
     (drop_in_dir / '20-lidar.yaml').write_text('from_domain: 3\nto_domain: 4\ntopics:\n  /y:\n')
 
     assert _load_domain_rules() == [('/x', '/x', 1, 2), ('/y', '/y', 3, 4)]
+
+
+def test_load_domain_rules_warns_that_the_env_var_shadows_the_drop_ins(monkeypatch, tmp_path):
+    config = tmp_path / 'listed.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-base.yaml').write_text('from_domain: 3\nto_domain: 4\ntopics:\n  /y:\n')
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    warning = logger.warn.call_args[0][0]
+    assert domain_bridge_config.SHADOWED_DROP_INS_NOTICE in warning
+    assert str(drop_in_dir / '10-base.yaml') in warning
+
+
+def test_load_domain_rules_is_quiet_when_the_drop_in_directory_is_empty(monkeypatch, tmp_path):
+    config = tmp_path / 'listed.yaml'
+    config.write_text('from_domain: 1\nto_domain: 2\ntopics:\n  /x:\n')
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    (tmp_path / 'domain_bridge.d').mkdir()
+    logger = MagicMock()
+
+    assert _load_domain_rules(logger) == [('/x', '/x', 1, 2)]
+    logger.warn.assert_not_called()
 
 
 def test_load_domain_rules_keeps_the_configs_that_load_around_a_broken_one(monkeypatch, tmp_path):
