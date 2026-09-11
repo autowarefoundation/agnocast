@@ -57,25 +57,22 @@ bool kernel_thread_in_sync(
   const agnocast_cie_thread_configurator::KernelThreadConfig & config,
   const agnocast_cie_thread_configurator::KernelThreadInfo & info)
 {
-  if (config.policy.has_value()) {
-    const auto policy = parse_sched_policy(*config.policy);
-    if (!policy || *policy == SchedPolicy::Deadline) {
-      return false;
-    }
-    if (*config.policy != info.policy) {
+  const auto & attrs = config.attrs;
+  if (attrs.policy.has_value()) {
+    if (*attrs.policy == SchedPolicy::Deadline || parse_sched_policy(info.policy) != attrs.policy) {
       return false;
     }
     // The policy classes tune different knobs: nice for CFS, rt_priority for
     // FIFO/RR (the emitter and parser agree on this split).
     const bool tunable_in_sync =
-      is_cfs(*policy) ? config.nice == info.nice : config.priority == info.rt_priority;
+      is_cfs(*attrs.policy) ? attrs.nice == info.nice : attrs.rt_priority == info.rt_priority;
     if (!tunable_in_sync) {
       return false;
     }
   }
-  if (!config.affinity.empty()) {
+  if (!attrs.affinity.empty()) {
     if (!same_cpu_set(
-          config.affinity,
+          attrs.affinity,
           agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity))) {
       return false;
     }
@@ -348,38 +345,39 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
   return true;
 }
 
-bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t thread_id)
+bool ThreadConfiguratorNode::issue_syscalls(
+  const std::string & thread_str, const SchedAttrs & attrs, int64_t thread_id)
 {
-  const auto policy = parse_sched_policy(config.policy);
-  if (!policy) {
+  if (!attrs.policy.has_value()) {
     RCLCPP_ERROR(
-      this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%" PRId64 ")",
-      config.policy.c_str(), config.thread_str.c_str(), thread_id);
+      this->get_logger(), "No scheduling policy to apply (thread=%s, tid=%" PRId64 ")",
+      thread_str.c_str(), thread_id);
     return false;
   }
+  const SchedPolicy policy = *attrs.policy;
 
   // No default: -Werror=switch must reject an unhandled SchedPolicy, since an
   // unhandled case would fall through to the affinity syscalls.
-  switch (*policy) {
+  switch (policy) {
     case SchedPolicy::Other:
     case SchedPolicy::Batch:
     case SchedPolicy::Idle:
     case SchedPolicy::Fifo:
     case SchedPolicy::Rr: {
       struct sched_param param;
-      param.sched_priority = is_cfs(*policy) ? 0 : config.priority;
+      param.sched_priority = is_cfs(policy) ? 0 : attrs.rt_priority;
 
-      if (sched_setscheduler(thread_id, to_kernel_policy(*policy), &param) == -1) {
+      if (sched_setscheduler(thread_id, to_kernel_policy(policy), &param) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
+          thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
 
-      if (is_cfs(*policy) && setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
+      if (is_cfs(policy) && setpriority(PRIO_PROCESS, thread_id, attrs.nice) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
+          thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
       break;
@@ -397,21 +395,21 @@ bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t
       attr.sched_priority = 0;
 
       attr.sched_policy = SCHED_DEADLINE;
-      attr.sched_runtime = config.runtime;
-      attr.sched_period = config.period;
-      attr.sched_deadline = config.deadline;
+      attr.sched_runtime = attrs.deadline.runtime;
+      attr.sched_period = attrs.deadline.period;
+      attr.sched_deadline = attrs.deadline.deadline;
 
       if (sched_setattr(thread_id, &attr, 0) == -1) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-          config.thread_str.c_str(), thread_id, strerror(errno));
+          thread_str.c_str(), thread_id, strerror(errno));
         return false;
       }
       break;
     }
   }
 
-  return issue_affinity_syscalls(config.thread_str, policy, config.affinity, thread_id);
+  return issue_affinity_syscalls(thread_str, policy, attrs.affinity, thread_id);
 }
 
 bool ThreadConfiguratorNode::issue_affinity_syscalls(
@@ -473,23 +471,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       continue;
     }
 
-    // Reuse the announcement-path syscall code (and its error wording)
-    // verbatim by shaping the entry as a ThreadConfig: one desired state,
-    // applied to every matched tid.
-    std::optional<ThreadConfig> shaped;
-    if (config.policy.has_value()) {
-      ThreadConfig tmp;
-      tmp.thread_str = config.comm;
-      tmp.policy = *config.policy;
-      tmp.nice = config.nice;
-      tmp.priority = config.priority;
-      tmp.affinity = config.affinity;
-      tmp.runtime = config.runtime;
-      tmp.period = config.period;
-      tmp.deadline = config.deadline;
-      shaped = std::move(tmp);
-    }
-
+    // One desired state, applied to every matched tid.
+    const SchedAttrs & attrs = config.attrs;
     for (const auto * info : matches) {
       std::string key = config.comm + ":" + std::to_string(info->tid);
       if (kernel_thread_in_sync(config, *info)) {
@@ -498,11 +481,11 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       }
       // A per-CPU kthread's affinity is kernel-fixed, but a request equal to
       // that fixed value needs no change; only a different one is impossible.
-      const bool affinity_on_fixed = !config.affinity.empty() && info->no_setaffinity;
+      const bool affinity_on_fixed = !attrs.affinity.empty() && info->no_setaffinity;
       if (
         affinity_on_fixed &&
         !same_cpu_set(
-          config.affinity,
+          attrs.affinity,
           agnocast_cie_thread_configurator::parse_manageable_cpu_list(info->affinity))) {
         RCLCPP_ERROR(
           this->get_logger(),
@@ -517,21 +500,21 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       }
 
       bool ok = false;
-      if (shaped.has_value()) {
+      if (attrs.policy.has_value()) {
         if (affinity_on_fixed) {
           // sched_setaffinity returns EINVAL for such a thread even with the
           // identical set, so issue only the policy part.
-          ThreadConfig policy_only = *shaped;
+          SchedAttrs policy_only = attrs;
           policy_only.affinity.clear();
-          ok = issue_syscalls(policy_only, info->tid);
+          ok = issue_syscalls(config.comm, policy_only, info->tid);
         } else {
-          ok = issue_syscalls(*shaped, info->tid);
+          ok = issue_syscalls(config.comm, attrs, info->tid);
         }
       } else {
         // Branch on the observed policy: an affinity-only entry matching a
         // thread currently under SCHED_DEADLINE needs the cgroup path.
         ok = issue_affinity_syscalls(
-          config.comm, parse_sched_policy(info->policy), config.affinity, info->tid);
+          config.comm, parse_sched_policy(info->policy), attrs.affinity, info->tid);
       }
 
       if (ok) {
@@ -752,7 +735,7 @@ void ThreadConfiguratorNode::callback_group_callback(
     config->thread_id = msg->thread_id;
   }
 
-  if (!issue_syscalls(*config, msg->thread_id)) {
+  if (!issue_syscalls(config->thread_str, config->attrs, msg->thread_id)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for callback group (domain=%zu, id=%s, tid=%" PRId64
@@ -803,7 +786,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     info.name.c_str());
   config->thread_id = info.tid;
 
-  if (!issue_syscalls(*config, info.tid)) {
+  if (!issue_syscalls(config->thread_str, config->attrs, info.tid)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for non-ROS thread (name=%s, tid=%" PRId64
@@ -925,7 +908,7 @@ void ThreadConfiguratorNode::on_reapply_config_request(
       bool any_applied = false;
       for (const auto & [full_id, tid] : cfg.matched_tids) {
         std::string key = std::to_string(cfg.domain_id) + ":" + full_id;
-        if (issue_syscalls(cfg, tid)) {
+        if (issue_syscalls(cfg.thread_str, cfg.attrs, tid)) {
           response->applied_callback_groups.push_back(std::move(key));
           any_applied = true;
         } else {
@@ -944,7 +927,7 @@ void ThreadConfiguratorNode::on_reapply_config_request(
       response->skipped_callback_groups.push_back(std::move(key));
       continue;
     }
-    if (issue_syscalls(cfg, cfg.thread_id)) {
+    if (issue_syscalls(cfg.thread_str, cfg.attrs, cfg.thread_id)) {
       response->applied_callback_groups.push_back(std::move(key));
       cfg.applied = true;
       unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
@@ -960,7 +943,7 @@ void ThreadConfiguratorNode::on_reapply_config_request(
         response->skipped_non_ros_threads.push_back(cfg.thread_str);
         continue;
       }
-      if (issue_syscalls(cfg, cfg.thread_id)) {
+      if (issue_syscalls(cfg.thread_str, cfg.attrs, cfg.thread_id)) {
         response->applied_non_ros_threads.push_back(cfg.thread_str);
         if (!cfg.applied) {
           cfg.applied = true;

@@ -22,6 +22,7 @@ class ThreadConfiguratorNode : public rclcpp::Node
   using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
   using KernelThreadConfig = agnocast_cie_thread_configurator::KernelThreadConfig;
   using IrqConfig = agnocast_cie_thread_configurator::IrqConfig;
+  using SchedAttrs = agnocast_cie_thread_configurator::SchedAttrs;
   using SchedPolicy = agnocast_cie_thread_configurator::SchedPolicy;
 
   // Concurrency:
@@ -61,8 +62,8 @@ private:
   void validate_rt_throttling(const YAML::Node & yaml);
   bool set_affinity_by_cgroup(int64_t thread_id, const std::vector<int> & cpus);
   // thread_id is passed explicitly because a wildcard entry applies to many
-  // threads (one per matched_tids element), not just config.thread_id.
-  bool issue_syscalls(const ThreadConfig & config, int64_t thread_id);
+  // threads (one per matched_tids element). attrs.policy must be set.
+  bool issue_syscalls(const std::string & thread_str, const SchedAttrs & attrs, int64_t thread_id);
   // Only Deadline takes the cgroup-based affinity path; any other value,
   // including nullopt (an observed policy with no YAML name), uses
   // sched_setaffinity.
