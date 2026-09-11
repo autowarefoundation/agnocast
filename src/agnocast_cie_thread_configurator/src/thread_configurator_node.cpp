@@ -54,7 +54,7 @@ bool same_cpu_set(const std::vector<int> & desired, const std::optional<std::vec
 // cannot be read back from stat, so a DEADLINE request always takes the
 // syscall path (never counted in-sync; it can still end up in failed).
 bool kernel_thread_in_sync(
-  const agnocast_cie_thread_configurator::KernelThreadConfig & config,
+  const agnocast_cie_thread_configurator::KernelThreadEntry & config,
   const agnocast_cie_thread_configurator::KernelThreadInfo & info)
 {
   const auto & attrs = config.attrs;
@@ -91,13 +91,27 @@ constexpr const char * k_cap_guidance =
 // optional (empty skips the identity check), so an unset one is labeled
 // instead of being printed as ''.
 void log_irq_vanished(
-  const rclcpp::Logger & logger, const agnocast_cie_thread_configurator::IrqConfig & config)
+  const rclcpp::Logger & logger, const agnocast_cie_thread_configurator::IrqEntry & config)
 {
   RCLCPP_ERROR(
     logger,
     "Failed to configure IRQ %d: it no longer exists (expected actions '%s'). IRQ numbers can "
     "change across boots or device changes; re-run prerun_node and update the config.",
     config.irq, config.name.empty() ? "<not recorded>" : config.name.c_str());
+}
+
+// Wraps freshly parsed entries with their (empty) runtime state.
+template <typename Tracked, typename Entry>
+std::vector<Tracked> track(std::vector<Entry> entries)
+{
+  std::vector<Tracked> tracked;
+  tracked.reserve(entries.size());
+  for (auto & entry : entries) {
+    Tracked t;
+    t.entry = std::move(entry);
+    tracked.push_back(std::move(t));
+  }
+  return tracked;
 }
 
 }  // namespace
@@ -128,10 +142,11 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
   RCLCPP_INFO(this->get_logger(), "Loaded config from: %s", config_file_.c_str());
 
-  agnocast_cie_thread_configurator::parse_yaml(
-    yaml, default_domain_id_, callback_group_configs_, non_ros_thread_configs_);
-  kernel_thread_configs_ = agnocast_cie_thread_configurator::parse_kernel_threads(yaml);
-  irq_configs_ = agnocast_cie_thread_configurator::parse_irqs(yaml);
+  auto parsed = agnocast_cie_thread_configurator::parse_config(yaml, default_domain_id_);
+  callback_group_configs_ = track<TrackedCallbackGroup>(std::move(parsed.callback_groups));
+  non_ros_thread_configs_ = track<TrackedNonRosThread>(std::move(parsed.non_ros_threads));
+  kernel_thread_configs_ = std::move(parsed.kernel_threads);
+  irq_configs_ = std::move(parsed.irqs);
 
   // Kernel threads and IRQs never announce themselves: configure them here
   // from a /proc scan, outside the announcement-driven accounting below.
@@ -151,15 +166,16 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
   std::set<size_t> domain_ids;
   for (auto & cfg : callback_group_configs_) {
-    domain_ids.insert(cfg.domain_id);
-    if (cfg.is_wildcard()) {
-      node_to_wildcard_config_[std::make_pair(cfg.domain_id, cfg.wildcard_prefix())] = &cfg;
+    const auto & entry = cfg.entry;
+    domain_ids.insert(entry.domain_id);
+    if (entry.is_wildcard()) {
+      node_to_wildcard_config_[std::make_pair(entry.domain_id, entry.wildcard_prefix())] = &cfg;
     } else {
-      id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+      id_to_callback_group_config_[std::make_pair(entry.domain_id, entry.id)] = &cfg;
     }
   }
   for (auto & cfg : non_ros_thread_configs_) {
-    id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
+    id_to_non_ros_thread_config_[cfg.entry.name] = &cfg;
   }
 
   sources_ = std::make_unique<agnocast_cie_thread_configurator::AnnouncementSources>(
@@ -278,7 +294,7 @@ void ThreadConfiguratorNode::print_all_unapplied()
 
   for (auto & config : callback_group_configs_) {
     if (!config.applied) {
-      RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
+      RCLCPP_WARN(this->get_logger(), "  - %s", config.entry.id.c_str());
     }
   }
 
@@ -286,7 +302,7 @@ void ThreadConfiguratorNode::print_all_unapplied()
 
   for (auto & config : non_ros_thread_configs_) {
     if (!config.applied) {
-      RCLCPP_WARN(this->get_logger(), "  - %s", config.thread_str.c_str());
+      RCLCPP_WARN(this->get_logger(), "  - %s", config.entry.name.c_str());
     }
   }
 }
@@ -449,7 +465,7 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
   SectionApplyOutcome outcome;
   const bool any_managed = std::any_of(
     kernel_thread_configs_.begin(), kernel_thread_configs_.end(),
-    [](const KernelThreadConfig & config) { return config.is_managed(); });
+    [](const KernelThreadEntry & config) { return config.is_managed(); });
   if (!any_managed) {
     return outcome;
   }
@@ -535,7 +551,7 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_irq_co
   SectionApplyOutcome outcome;
   const bool any_managed = std::any_of(
     irq_configs_.begin(), irq_configs_.end(),
-    [](const IrqConfig & config) { return config.is_managed(); });
+    [](const IrqEntry & config) { return config.is_managed(); });
   if (!any_managed) {
     return outcome;
   }
@@ -613,7 +629,7 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_irq_co
   return outcome;
 }
 
-bool ThreadConfiguratorNode::write_irq_affinity_file(const IrqConfig & config) const
+bool ThreadConfiguratorNode::write_irq_affinity_file(const IrqEntry & config) const
 {
   const std::string path = "/proc/irq/" + std::to_string(config.irq) + "/smp_affinity_list";
   const std::string value = agnocast_cie_thread_configurator::format_cpu_list(config.affinity);
@@ -681,7 +697,7 @@ const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_
 void ThreadConfiguratorNode::callback_group_callback(
   size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg)
 {
-  ThreadConfig * config = nullptr;
+  TrackedCallbackGroup * config = nullptr;
   bool already_seen = false;
 
   // Exact entries take precedence over wildcard ("<node>/*") entries.
@@ -711,7 +727,7 @@ void ThreadConfiguratorNode::callback_group_callback(
     already_seen = config->matched_tids.count(msg->callback_group_id) > 0;
     RCLCPP_INFO(
       this->get_logger(), "Callback group (domain=%zu, id=%s) matched wildcard entry '%s'",
-      domain_id, msg->callback_group_id.c_str(), config->thread_str.c_str());
+      domain_id, msg->callback_group_id.c_str(), config->entry.id.c_str());
   }
 
   if (already_seen) {
@@ -729,13 +745,13 @@ void ThreadConfiguratorNode::callback_group_callback(
     this->get_logger(), "Received CallbackGroupInfo: domain=%zu | tid=%" PRId64 " | %s", domain_id,
     msg->thread_id, msg->callback_group_id.c_str());
   // Record the tid before the syscall so a failed attempt can be retried via reapply.
-  if (config->is_wildcard()) {
+  if (config->entry.is_wildcard()) {
     config->matched_tids[msg->callback_group_id] = msg->thread_id;
   } else {
     config->thread_id = msg->thread_id;
   }
 
-  if (!issue_syscalls(config->thread_str, config->attrs, msg->thread_id)) {
+  if (!issue_syscalls(config->entry.id, config->entry.attrs, msg->thread_id)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for callback group (domain=%zu, id=%s, tid=%" PRId64
@@ -771,7 +787,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     return;
   }
 
-  ThreadConfig * config = it->second;
+  TrackedNonRosThread * config = it->second;
   if (config->applied) {
     // Always re-apply: the OS may reuse the same thread IDs after an application
     // restarts, so we cannot use thread_id equality to skip reconfiguration.
@@ -786,7 +802,7 @@ void ThreadConfiguratorNode::non_ros_thread_callback(
     info.name.c_str());
   config->thread_id = info.tid;
 
-  if (!issue_syscalls(config->thread_str, config->attrs, info.tid)) {
+  if (!issue_syscalls(config->entry.name, config->entry.attrs, info.tid)) {
     RCLCPP_WARN(
       this->get_logger(),
       "Skipping configuration for non-ROS thread (name=%s, tid=%" PRId64
@@ -823,14 +839,9 @@ void ThreadConfiguratorNode::on_reapply_config_request(
     return;
   }
 
-  std::vector<ThreadConfig> new_cb;
-  std::vector<ThreadConfig> new_nrt;
-  std::vector<KernelThreadConfig> new_kernel_threads;
-  std::vector<IrqConfig> new_irqs;
+  agnocast_cie_thread_configurator::ParsedConfig parsed;
   try {
-    agnocast_cie_thread_configurator::parse_yaml(yaml, default_domain_id_, new_cb, new_nrt);
-    new_kernel_threads = agnocast_cie_thread_configurator::parse_kernel_threads(yaml);
-    new_irqs = agnocast_cie_thread_configurator::parse_irqs(yaml);
+    parsed = agnocast_cie_thread_configurator::parse_config(yaml, default_domain_id_);
   } catch (const std::exception & e) {
     response->success = false;
     response->error_message = "YAML validation error for '" + config_file_ + "': " + e.what();
@@ -844,14 +855,17 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   // picked up at the next announcement (see ReapplyConfig.srv). 'applied' is
   // intentionally NOT carried: a syscall failure below must leave
   // applied=false, not the stale 'true' that a verbatim carry-over would imply.
+  auto new_cb = track<TrackedCallbackGroup>(std::move(parsed.callback_groups));
   for (auto & cfg : new_cb) {
-    if (cfg.is_wildcard()) {
-      auto it = node_to_wildcard_config_.find(std::make_pair(cfg.domain_id, cfg.wildcard_prefix()));
+    const auto & entry = cfg.entry;
+    if (entry.is_wildcard()) {
+      auto it =
+        node_to_wildcard_config_.find(std::make_pair(entry.domain_id, entry.wildcard_prefix()));
       if (it != node_to_wildcard_config_.end()) {
         cfg.matched_tids = it->second->matched_tids;
       }
     } else {
-      auto it = id_to_callback_group_config_.find(std::make_pair(cfg.domain_id, cfg.thread_str));
+      auto it = id_to_callback_group_config_.find(std::make_pair(entry.domain_id, entry.id));
       if (it != id_to_callback_group_config_.end()) {
         cfg.thread_id = it->second->thread_id;
       }
@@ -862,10 +876,11 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   id_to_callback_group_config_.clear();
   node_to_wildcard_config_.clear();
   for (auto & cfg : callback_group_configs_) {
-    if (cfg.is_wildcard()) {
-      node_to_wildcard_config_[std::make_pair(cfg.domain_id, cfg.wildcard_prefix())] = &cfg;
+    const auto & entry = cfg.entry;
+    if (entry.is_wildcard()) {
+      node_to_wildcard_config_[std::make_pair(entry.domain_id, entry.wildcard_prefix())] = &cfg;
     } else {
-      id_to_callback_group_config_[std::make_pair(cfg.domain_id, cfg.thread_str)] = &cfg;
+      id_to_callback_group_config_[std::make_pair(entry.domain_id, entry.id)] = &cfg;
     }
   }
 
@@ -874,8 +889,9 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   // update would be dropped by move-assign) nor race the counter store.
   {
     std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
+    auto new_nrt = track<TrackedNonRosThread>(std::move(parsed.non_ros_threads));
     for (auto & cfg : new_nrt) {
-      auto it = id_to_non_ros_thread_config_.find(cfg.thread_str);
+      auto it = id_to_non_ros_thread_config_.find(cfg.entry.name);
       if (it != id_to_non_ros_thread_config_.end()) {
         cfg.thread_id = it->second->thread_id;
       }
@@ -883,7 +899,7 @@ void ThreadConfiguratorNode::on_reapply_config_request(
     non_ros_thread_configs_ = std::move(new_nrt);
     id_to_non_ros_thread_config_.clear();
     for (auto & cfg : non_ros_thread_configs_) {
-      id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
+      id_to_non_ros_thread_config_[cfg.entry.name] = &cfg;
     }
 
     unapplied_num_.store(
@@ -893,22 +909,23 @@ void ThreadConfiguratorNode::on_reapply_config_request(
 
   // No carry-over: kernel threads and IRQs are matched against a fresh /proc
   // scan on every apply pass.
-  kernel_thread_configs_ = std::move(new_kernel_threads);
-  irq_configs_ = std::move(new_irqs);
+  kernel_thread_configs_ = std::move(parsed.kernel_threads);
+  irq_configs_ = std::move(parsed.irqs);
 
   for (auto & cfg : callback_group_configs_) {
-    if (cfg.is_wildcard()) {
+    const auto & entry = cfg.entry;
+    if (entry.is_wildcard()) {
       // One applied/failed key per known instance; the pattern itself is
       // reported as skipped only while no instance has been announced yet.
       if (cfg.matched_tids.empty()) {
         response->skipped_callback_groups.push_back(
-          std::to_string(cfg.domain_id) + ":" + cfg.thread_str);
+          std::to_string(entry.domain_id) + ":" + entry.id);
         continue;
       }
       bool any_applied = false;
       for (const auto & [full_id, tid] : cfg.matched_tids) {
-        std::string key = std::to_string(cfg.domain_id) + ":" + full_id;
-        if (issue_syscalls(cfg.thread_str, cfg.attrs, tid)) {
+        std::string key = std::to_string(entry.domain_id) + ":" + full_id;
+        if (issue_syscalls(entry.id, entry.attrs, tid)) {
           response->applied_callback_groups.push_back(std::move(key));
           any_applied = true;
         } else {
@@ -922,12 +939,12 @@ void ThreadConfiguratorNode::on_reapply_config_request(
       continue;
     }
 
-    std::string key = std::to_string(cfg.domain_id) + ":" + cfg.thread_str;
+    std::string key = std::to_string(entry.domain_id) + ":" + entry.id;
     if (cfg.thread_id == -1) {
       response->skipped_callback_groups.push_back(std::move(key));
       continue;
     }
-    if (issue_syscalls(cfg.thread_str, cfg.attrs, cfg.thread_id)) {
+    if (issue_syscalls(entry.id, entry.attrs, cfg.thread_id)) {
       response->applied_callback_groups.push_back(std::move(key));
       cfg.applied = true;
       unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
@@ -939,18 +956,19 @@ void ThreadConfiguratorNode::on_reapply_config_request(
   {
     std::lock_guard<std::mutex> lk(non_ros_state_mutex_);
     for (auto & cfg : non_ros_thread_configs_) {
+      const auto & entry = cfg.entry;
       if (cfg.thread_id == -1) {
-        response->skipped_non_ros_threads.push_back(cfg.thread_str);
+        response->skipped_non_ros_threads.push_back(entry.name);
         continue;
       }
-      if (issue_syscalls(cfg.thread_str, cfg.attrs, cfg.thread_id)) {
-        response->applied_non_ros_threads.push_back(cfg.thread_str);
+      if (issue_syscalls(entry.name, entry.attrs, cfg.thread_id)) {
+        response->applied_non_ros_threads.push_back(entry.name);
         if (!cfg.applied) {
           cfg.applied = true;
           unapplied_num_.fetch_sub(1, std::memory_order_acq_rel);
         }
       } else {
-        response->failed_non_ros_threads.push_back(cfg.thread_str);
+        response->failed_non_ros_threads.push_back(entry.name);
       }
     }
   }
