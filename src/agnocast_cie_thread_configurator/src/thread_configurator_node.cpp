@@ -2,6 +2,8 @@
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "agnocast_cie_thread_configurator/sched_deadline.hpp"
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -27,7 +29,10 @@
 #include <system_error>
 #include <utility>
 
-using agnocast_cie_thread_configurator::policy_to_sched_const;
+using agnocast_cie_thread_configurator::is_cfs;
+using agnocast_cie_thread_configurator::parse_sched_policy;
+using agnocast_cie_thread_configurator::SchedPolicy;
+using agnocast_cie_thread_configurator::to_kernel_policy;
 
 namespace
 {
@@ -53,7 +58,8 @@ bool kernel_thread_in_sync(
   const agnocast_cie_thread_configurator::KernelThreadInfo & info)
 {
   if (config.policy.has_value()) {
-    if (*config.policy == "SCHED_DEADLINE") {
+    const auto policy = parse_sched_policy(*config.policy);
+    if (!policy || *policy == SchedPolicy::Deadline) {
       return false;
     }
     if (*config.policy != info.policy) {
@@ -61,9 +67,8 @@ bool kernel_thread_in_sync(
     }
     // The policy classes tune different knobs: nice for CFS, rt_priority for
     // FIFO/RR (the emitter and parser agree on this split).
-    const bool tunable_in_sync = agnocast_cie_thread_configurator::is_cfs_policy(*config.policy)
-                                   ? config.nice == info.nice
-                                   : config.priority == info.rt_priority;
+    const bool tunable_in_sync =
+      is_cfs(*policy) ? config.nice == info.nice : config.priority == info.rt_priority;
     if (!tunable_in_sync) {
       return false;
     }
@@ -160,41 +165,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
   }
 
-  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-
-  non_ros_thread_listener_ =
-    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
-      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
-        this->non_ros_thread_callback(std::move(info));
-      },
-      this->get_logger());
-
-  subs_for_each_domain_.push_back(
-    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, default_domain_id = default_domain_id_](
-        const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->callback_group_callback(default_domain_id, msg);
-      }));
-
-  // Create nodes and subscriptions for other domain IDs
-  for (size_t domain_id : domain_ids) {
-    if (domain_id == default_domain_id_) {
-      continue;
-    }
-
-    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
-    nodes_for_each_domain_.push_back(node);
-
-    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->callback_group_callback(domain_id, msg);
-      });
-    subs_for_each_domain_.push_back(sub);
-
-    RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
-  }
+  sources_ = std::make_unique<agnocast_cie_thread_configurator::AnnouncementSources>(
+    *this, default_domain_id_, domain_ids,
+    [this](size_t domain_id, agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+      this->callback_group_callback(domain_id, std::move(msg));
+    },
+    [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+      this->non_ros_thread_callback(std::move(info));
+    });
 
   reapply_service_ = this->create_service<agnocast_cie_config_msgs::srv::ReapplyConfig>(
     "~/reapply_config",
@@ -207,17 +185,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
 {
-  if (!yaml["rt_throttling"]) {
-    return;
-  }
-
-  const auto & rt_bw = yaml["rt_throttling"];
-
-  // Writing to /proc/sys/kernel/sched_rt_{period,runtime}_us requires root (uid 0).
-  // Linux capabilities (CAP_SYS_ADMIN etc.) cannot bypass the proc sysctl DAC check.
-  // Instead, we validate that the current kernel values match the config and guide the
-  // user to apply them via /etc/sysctl.d/ if they differ.
-
+  // The reader reports its own failures; check_rt_throttling records such a
+  // key with an unset actual, which is skipped below.
   auto read_sysctl = [this](const std::string & path) -> std::optional<int> {
     std::ifstream file(path);
     if (!file) {
@@ -232,53 +201,23 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     return value;
   };
 
-  bool mismatch = false;
+  const auto report = agnocast_cie_thread_configurator::check_rt_throttling(yaml, read_sysctl);
 
-  if (rt_bw["period_us"]) {
-    int expected = rt_bw["period_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_period_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_period_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_period_us is already set to %d", expected);
-      }
+  for (const auto & check : report.checks) {
+    if (!check.actual.has_value()) {
+      continue;
+    }
+    if (*check.actual != check.expected) {
+      RCLCPP_ERROR(
+        this->get_logger(), "%s mismatch: expected %d, actual %d", check.key.c_str(),
+        check.expected, *check.actual);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "%s is already set to %d", check.key.c_str(), check.expected);
     }
   }
 
-  if (rt_bw["runtime_us"]) {
-    int expected = rt_bw["runtime_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_runtime_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_runtime_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_runtime_us is already set to %d", expected);
-      }
-    }
-  }
-
-  if (mismatch) {
-    std::string message =
-      "rt_throttling values do not match the configuration. "
-      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
-      "(or run 'sudo sysctl --system'):\n";
-
-    if (rt_bw["period_us"]) {
-      message +=
-        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
-    }
-    if (rt_bw["runtime_us"]) {
-      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
-    }
-
-    RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
+  if (!report.sysctl_guidance.empty()) {
+    RCLCPP_ERROR(this->get_logger(), "%s", report.sysctl_guidance.c_str());
   }
 }
 
@@ -291,32 +230,31 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
     return;
   }
 
-  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
-
-  std::vector<std::string> mismatches;
-
-  for (const auto & [key, current_value] : current_hw_info) {
-    if (!yaml_hw_info[key]) {
-      continue;
-    }
-
-    std::string yaml_value = yaml_hw_info[key].as<std::string>();
-    if (yaml_value != current_value) {
-      mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
-    }
+  if (current_hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
+    return;
   }
 
-  if (!mismatches.empty()) {
+  const auto mismatches =
+    agnocast_cie_thread_configurator::check_hardware_info(yaml["hardware_info"], current_hw_info);
+  if (!mismatches.has_value()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "hardware_info has none of the keys reported by lscpu. Skipping hardware validation.");
+    return;
+  }
+
+  if (!mismatches->empty()) {
     std::string error_msg = "Hardware validation failed with the following mismatches:\n";
-    for (const auto & mismatch : mismatches) {
+    for (const auto & mismatch : *mismatches) {
       error_msg += "  - " + mismatch + "\n";
     }
     throw std::runtime_error(error_msg);
-  } else {
-    RCLCPP_INFO(
-      this->get_logger(), "Hardware validation successful. Configuration matches this system.");
   }
+
+  RCLCPP_INFO(
+    this->get_logger(), "Hardware validation successful. Configuration matches this system.");
 }
 
 ThreadConfiguratorNode::~ThreadConfiguratorNode()
@@ -330,9 +268,7 @@ ThreadConfiguratorNode::~ThreadConfiguratorNode()
 
 void ThreadConfiguratorNode::stop() noexcept
 {
-  if (non_ros_thread_listener_) {
-    non_ros_thread_listener_->stop();
-  }
+  sources_->stop();
 }
 
 void ThreadConfiguratorNode::print_all_unapplied()
@@ -414,77 +350,76 @@ bool ThreadConfiguratorNode::set_affinity_by_cgroup(
 
 bool ThreadConfiguratorNode::issue_syscalls(const ThreadConfig & config, int64_t thread_id)
 {
-  if (
-    config.policy == "SCHED_OTHER" || config.policy == "SCHED_BATCH" ||
-    config.policy == "SCHED_IDLE") {
-    struct sched_param param;
-    param.sched_priority = 0;
-
-    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-        config.thread_str.c_str(), thread_id, strerror(errno));
-      return false;
-    }
-
-    // Specify nice value
-    if (setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
-        config.thread_str.c_str(), thread_id, strerror(errno));
-      return false;
-    }
-
-  } else if (config.policy == "SCHED_FIFO" || config.policy == "SCHED_RR") {
-    struct sched_param param;
-    param.sched_priority = config.priority;
-
-    if (sched_setscheduler(thread_id, policy_to_sched_const.at(config.policy), &param) == -1) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-        config.thread_str.c_str(), thread_id, strerror(errno));
-      return false;
-    }
-
-  } else if (config.policy == "SCHED_DEADLINE") {
-    struct sched_attr attr;
-    memset(&attr, 0, sizeof(attr));
-    attr.size = sizeof(attr);
-    // SCHED_FLAG_RESET_ON_FORK lets the target thread still call fork(2)/clone(2)
-    // after being placed under SCHED_DEADLINE; without it, clone(2) returns EAGAIN.
-    // Children reset to SCHED_OTHER; each callback-group thread that needs its own
-    // SCHED_DEADLINE gets it via its own CallbackGroupInfo message.
-    attr.sched_flags = SCHED_FLAG_RESET_ON_FORK;
-    attr.sched_nice = 0;
-    attr.sched_priority = 0;
-
-    attr.sched_policy = SCHED_DEADLINE;
-    attr.sched_runtime = config.runtime;
-    attr.sched_period = config.period;
-    attr.sched_deadline = config.deadline;
-
-    if (sched_setattr(thread_id, &attr, 0) == -1) {
-      RCLCPP_ERROR(
-        this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
-        config.thread_str.c_str(), thread_id, strerror(errno));
-      return false;
-    }
-  } else {
+  const auto policy = parse_sched_policy(config.policy);
+  if (!policy) {
     RCLCPP_ERROR(
       this->get_logger(), "Unknown scheduling policy '%s' (thread=%s, tid=%" PRId64 ")",
       config.policy.c_str(), config.thread_str.c_str(), thread_id);
     return false;
   }
 
-  return issue_affinity_syscalls(config.thread_str, config.policy, config.affinity, thread_id);
+  // No default: -Werror=switch must reject an unhandled SchedPolicy, since an
+  // unhandled case would fall through to the affinity syscalls.
+  switch (*policy) {
+    case SchedPolicy::Other:
+    case SchedPolicy::Batch:
+    case SchedPolicy::Idle:
+    case SchedPolicy::Fifo:
+    case SchedPolicy::Rr: {
+      struct sched_param param;
+      param.sched_priority = is_cfs(*policy) ? 0 : config.priority;
+
+      if (sched_setscheduler(thread_id, to_kernel_policy(*policy), &param) == -1) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+          config.thread_str.c_str(), thread_id, strerror(errno));
+        return false;
+      }
+
+      if (is_cfs(*policy) && setpriority(PRIO_PROCESS, thread_id, config.nice) == -1) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Failed to configure nice value (thread=%s, tid=%" PRId64 "): %s",
+          config.thread_str.c_str(), thread_id, strerror(errno));
+        return false;
+      }
+      break;
+    }
+    case SchedPolicy::Deadline: {
+      struct sched_attr attr;
+      memset(&attr, 0, sizeof(attr));
+      attr.size = sizeof(attr);
+      // SCHED_FLAG_RESET_ON_FORK lets the target thread still call fork(2)/clone(2)
+      // after being placed under SCHED_DEADLINE; without it, clone(2) returns EAGAIN.
+      // Children reset to SCHED_OTHER; each callback-group thread that needs its own
+      // SCHED_DEADLINE gets it via its own CallbackGroupInfo message.
+      attr.sched_flags = SCHED_FLAG_RESET_ON_FORK;
+      attr.sched_nice = 0;
+      attr.sched_priority = 0;
+
+      attr.sched_policy = SCHED_DEADLINE;
+      attr.sched_runtime = config.runtime;
+      attr.sched_period = config.period;
+      attr.sched_deadline = config.deadline;
+
+      if (sched_setattr(thread_id, &attr, 0) == -1) {
+        RCLCPP_ERROR(
+          this->get_logger(), "Failed to configure policy (thread=%s, tid=%" PRId64 "): %s",
+          config.thread_str.c_str(), thread_id, strerror(errno));
+        return false;
+      }
+      break;
+    }
+  }
+
+  return issue_affinity_syscalls(config.thread_str, policy, config.affinity, thread_id);
 }
 
 bool ThreadConfiguratorNode::issue_affinity_syscalls(
-  const std::string & thread_str, const std::string & policy, const std::vector<int> & affinity,
-  int64_t thread_id)
+  const std::string & thread_str, std::optional<SchedPolicy> policy,
+  const std::vector<int> & affinity, int64_t thread_id)
 {
   if (affinity.size() > 0) {
-    if (policy == "SCHED_DEADLINE") {
+    if (policy == SchedPolicy::Deadline) {
       if (!set_affinity_by_cgroup(thread_id, affinity)) {
         RCLCPP_ERROR(
           this->get_logger(), "Failed to configure affinity (thread=%s, tid=%" PRId64 "): %s",
@@ -595,7 +530,8 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       } else {
         // Branch on the observed policy: an affinity-only entry matching a
         // thread currently under SCHED_DEADLINE needs the cgroup path.
-        ok = issue_affinity_syscalls(config.comm, info->policy, config.affinity, info->tid);
+        ok = issue_affinity_syscalls(
+          config.comm, parse_sched_policy(info->policy), config.affinity, info->tid);
       }
 
       if (ok) {
@@ -756,7 +692,7 @@ bool ThreadConfiguratorNode::write_irq_affinity_file(const IrqConfig & config) c
 
 const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_nodes() const
 {
-  return nodes_for_each_domain_;
+  return sources_->domain_nodes();
 }
 
 void ThreadConfiguratorNode::callback_group_callback(

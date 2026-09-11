@@ -48,7 +48,8 @@ static topic_local_id_t setup_one_subscriber_in_domain_with_eventfd(
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
+      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
+      &add_process_args),
     0);
   return add_subscriber_with_eventfd(
     test, subscriber_pid, eventfd, ignore_local_publications, sub_is_bridge);
@@ -75,7 +76,8 @@ static void setup_publisher_in_domain(
   union ioctl_add_process_args add_process_args;
   KUNIT_ASSERT_EQ(
     test,
-    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args),
+    agnocast_ioctl_add_process(
+      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args),
     0);
   *ret_addr = add_process_args.ret_addr;
 
@@ -442,7 +444,7 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
+      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args),
     0);
 
   const int take_eventfd = 0;
@@ -483,7 +485,7 @@ void test_case_publish_msg_signals_large_fanout(struct kunit * test)
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, false, 0, &add_process_args),
+      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args),
     0);
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
     add_subscriber_with_eventfd(test, subscriber_pid, eventfd, false, is_bridge);
@@ -699,7 +701,7 @@ void test_case_publish_msg_no_process(struct kunit * test)
   KUNIT_ASSERT_EQ(test, global_pid, exiting_pid);
   KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, -1, &daemon_should_exit);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 

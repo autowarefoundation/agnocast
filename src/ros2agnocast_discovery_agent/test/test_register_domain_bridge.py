@@ -45,7 +45,18 @@ def test_default_config_path_is_used_when_env_unset(tmp_path, monkeypatch):
     monkeypatch.setattr(domain_bridge_config, 'DEFAULT_CONFIG_PATH', cfg)
 
     assert register_domain_bridge.main([]) == 0
-    assert fake.calls == [('chatter', 'chatter', 1, 2)]
+    assert fake.calls == [('/chatter', '/chatter', 1, 2)]
+
+
+def test_unsupported_notice_is_printed_even_when_the_config_is_missing(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: FakeAddRule())
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'absent.yaml'))
+
+    assert register_domain_bridge.main([]) == 1
+    assert register_domain_bridge.UNSUPPORTED_NOTICE in capsys.readouterr().err
 
 
 def test_registers_every_rule(tmp_path, monkeypatch):
@@ -53,7 +64,7 @@ def test_registers_every_rule(tmp_path, monkeypatch):
     monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
     cfg = _write_config(tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
     assert register_domain_bridge.main(['--config', cfg]) == 0
-    assert fake.calls == [('chatter', 'chatter', 1, 2)]
+    assert fake.calls == [('/chatter', '/chatter', 1, 2)]
 
 
 def test_registers_remapped_rule_with_both_names(tmp_path, monkeypatch):
@@ -67,7 +78,7 @@ def test_registers_remapped_rule_with_both_names(tmp_path, monkeypatch):
 
 
 def test_returns_nonzero_when_a_rule_is_rejected(tmp_path, monkeypatch):
-    fake = FakeAddRule(codes={'chatter': -16})  # -EBUSY: an endpoint already exists
+    fake = FakeAddRule(codes={'/chatter': -16})  # -EBUSY: an endpoint already exists
     monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
     cfg = _write_config(tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
     assert register_domain_bridge.main(['--config', cfg]) == 1
@@ -80,7 +91,7 @@ def test_skipped_topic_is_reported(tmp_path, monkeypatch, capsys):
     cfg = _write_config(tmp_path, 'topics:\n  chatter:\n')
     assert register_domain_bridge.main(['--config', cfg]) == 0
     assert fake.calls == []
-    assert 'skipping chatter' in capsys.readouterr().err
+    assert 'skipping /chatter' in capsys.readouterr().err
 
 
 def test_returns_nonzero_on_unreadable_config(tmp_path, monkeypatch):
@@ -97,4 +108,4 @@ def test_config_path_falls_back_to_env(tmp_path, monkeypatch):
     cfg = _write_config(tmp_path, 'from_domain: 3\nto_domain: 4\ntopics:\n  image:\n')
     monkeypatch.setenv(CONFIG_ENV, cfg)
     assert register_domain_bridge.main([]) == 0
-    assert fake.calls == [('image', 'image', 3, 4)]
+    assert fake.calls == [('/image', '/image', 3, 4)]

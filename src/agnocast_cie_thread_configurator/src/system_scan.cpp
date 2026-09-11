@@ -1,6 +1,6 @@
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 
-#include "agnocast_cie_thread_configurator/thread_config.hpp"
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 
 #include <sched.h>
 #include <unistd.h>
@@ -104,10 +104,8 @@ std::optional<std::string_view> stat_token(
 
 std::string policy_const_to_string(int policy)
 {
-  for (const auto & [name, value] : policy_to_sched_const) {
-    if (value == policy) {
-      return name;
-    }
+  if (const auto parsed = from_kernel_policy(policy)) {
+    return std::string(to_string(*parsed));
   }
   return "UNKNOWN(" + std::to_string(policy) + ")";
 }
@@ -202,6 +200,12 @@ std::optional<KernelThreadInfo> read_kernel_thread(
 }
 
 }  // namespace
+
+bool is_kworker_comm(const std::string & comm)
+{
+  constexpr std::string_view kworker_prefix = "kworker/";
+  return comm.compare(0, kworker_prefix.size(), kworker_prefix) == 0;
+}
 
 std::vector<KernelThreadInfo> scan_kernel_threads(const std::string & proc_root)
 {
@@ -356,14 +360,18 @@ std::optional<std::vector<int>> parse_cpu_list(const std::string & s)
   return result;
 }
 
+int manageable_cpu_bound()
+{
+  return static_cast<int>(std::min<long>(CPU_SETSIZE, sysconf(_SC_NPROCESSORS_CONF))) - 1;
+}
+
 std::optional<std::vector<int>> parse_manageable_cpu_list(const std::string & s)
 {
   auto cpus = parse_cpu_list(s);
   if (!cpus) {
     return std::nullopt;
   }
-  const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
-  const int max_cpu = static_cast<int>(std::min<long>(CPU_SETSIZE, num_cpus)) - 1;
+  const int max_cpu = manageable_cpu_bound();
   cpus->erase(
     std::remove_if(cpus->begin(), cpus->end(), [max_cpu](int cpu) { return cpu > max_cpu; }),
     cpus->end());

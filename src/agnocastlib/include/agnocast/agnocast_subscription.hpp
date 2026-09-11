@@ -190,8 +190,8 @@ class Subscription : public SubscriptionBase
   {
     rclcpp::CallbackGroup::SharedPtr callback_group = get_valid_callback_group(node, options);
 
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
+    [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+    const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
     init_base(node, qos, type_name, false, options, role);
 
@@ -202,10 +202,11 @@ class Subscription : public SubscriptionBase
       callback_group);
 
     {
-      uint64_t pid_callback_info_id = (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
+      [[maybe_unused]] uint64_t pid_callback_info_id =
+        (static_cast<uint64_t>(getpid()) << 32) | callback_info_id_;
       TRACEPOINT(
         agnocast_subscription_init, static_cast<const void *>(this), get_node_base_address(node),
-        callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol,
+        callback_addr, static_cast<const void *>(callback_group.get()), callback_symbol.c_str(),
         topic_name_.c_str(), actual_qos_.depth(), pid_callback_info_id);
     }
   }
@@ -325,6 +326,7 @@ public:
   {
     constructor_impl(node, qos, options, role);
 
+#ifndef TRACETOOLS_DISABLED
     {
       auto default_cbg = node->get_node_base_interface()->get_default_callback_group();
       auto dummy_cb = []() {};
@@ -336,6 +338,7 @@ public:
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(default_cbg.get()),
         dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos_.depth(), 0);
     }
+#endif
   }
 
   TakeSubscription(
@@ -346,6 +349,7 @@ public:
   {
     constructor_impl(node, qos, options, role);
 
+#ifndef TRACETOOLS_DISABLED
     {
       auto default_cbg = get_default_callback_group_for_tracepoint(node);
       auto dummy_cb = []() {};
@@ -356,6 +360,7 @@ public:
         static_cast<const void *>(&dummy_cb), static_cast<const void *>(default_cbg.get()),
         dummy_cb_symbols.c_str(), topic_name_.c_str(), actual_qos_.depth(), 0);
     }
+#endif
   }
 
   /**

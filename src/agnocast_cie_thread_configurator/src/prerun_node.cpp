@@ -1,6 +1,8 @@
 #include "agnocast_cie_thread_configurator/prerun_node.hpp"
 
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
+#include "agnocast_cie_thread_configurator/startup_checks.hpp"
 #include "agnocast_cie_thread_configurator/system_scan.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -65,45 +67,14 @@ PrerunNode::PrerunNode(const rclcpp::NodeOptions & options) : Node("prerun_node"
     domain_ids.insert(domain_id);
   }
 
-  size_t default_domain_id = agnocast_cie_thread_configurator::get_default_domain_id();
-
-  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-
-  non_ros_thread_listener_ =
-    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
-      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
-        this->non_ros_thread_callback(std::move(info));
-      },
-      this->get_logger());
-
-  // Create subscription for default domain on this node. Uses the node's default
-  // callback group, mirroring the per-domain extra nodes below.
-  subs_for_each_domain_.push_back(
-    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this,
-       default_domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(default_domain_id, msg);
-      }));
-
-  // Create nodes and subscriptions for other domain IDs
-  for (size_t domain_id : domain_ids) {
-    if (domain_id == default_domain_id) {
-      continue;
-    }
-
-    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
-    nodes_for_each_domain_.push_back(node);
-
-    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->topic_callback(domain_id, msg);
-      });
-    subs_for_each_domain_.push_back(sub);
-
-    RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
-  }
+  sources_ = std::make_unique<agnocast_cie_thread_configurator::AnnouncementSources>(
+    *this, agnocast_cie_thread_configurator::get_default_domain_id(), domain_ids,
+    [this](size_t domain_id, agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+      this->topic_callback(domain_id, std::move(msg));
+    },
+    [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+      this->non_ros_thread_callback(std::move(info));
+    });
 }
 
 void PrerunNode::topic_callback(
@@ -141,7 +112,7 @@ void PrerunNode::non_ros_thread_callback(agnocast_cie_thread_configurator::NonRo
 
 const std::vector<rclcpp::Node::SharedPtr> & PrerunNode::get_domain_nodes() const
 {
-  return nodes_for_each_domain_;
+  return sources_->domain_nodes();
 }
 
 void PrerunNode::dump_yaml_config(std::filesystem::path path)
@@ -154,7 +125,10 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Key << "hardware_info";
   out << YAML::Value << YAML::BeginMap;
 
-  auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  const auto hw_info = agnocast_cie_thread_configurator::get_hardware_info();
+  if (hw_info.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu; hardware_info will be empty.");
+  }
 
   for (const auto & [key, value] : hw_info) {
     out << YAML::Key << key << YAML::Value << value;
@@ -235,19 +209,18 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::Value << YAML::BeginSeq;
 
   for (const auto & info : kernel_threads) {
-    // A policy with no YAML representation: UNKNOWN(<n>), or SCHED_DEADLINE,
-    // whose runtime/period/deadline cannot be recovered from /proc.
+    // A policy the template cannot round-trip: UNKNOWN(<n>) has no name, and
+    // SCHED_DEADLINE's runtime/period/deadline cannot be recovered from /proc.
+    const auto policy = agnocast_cie_thread_configurator::parse_sched_policy(info.policy);
     const bool policy_representable =
-      agnocast_cie_thread_configurator::policy_to_sched_const.count(info.policy) > 0 &&
-      info.policy != "SCHED_DEADLINE";
+      policy.has_value() && *policy != agnocast_cie_thread_configurator::SchedPolicy::Deadline;
     const auto cpus = agnocast_cie_thread_configurator::parse_manageable_cpu_list(info.affinity);
 
     out << YAML::BeginMap;
     out << YAML::Key << "comm" << YAML::Value << info.comm;
     if (policy_representable) {
-      const bool is_cfs = agnocast_cie_thread_configurator::is_cfs_policy(info.policy);
       out << YAML::Key << "policy" << YAML::Value << info.policy;
-      if (is_cfs) {
+      if (agnocast_cie_thread_configurator::is_cfs(*policy)) {
         out << YAML::Key << "nice" << YAML::Value << info.nice;
       } else {
         out << YAML::Key << "priority" << YAML::Value << info.rt_priority;
@@ -303,7 +276,5 @@ PrerunNode::~PrerunNode()
 
 void PrerunNode::stop() noexcept
 {
-  if (non_ros_thread_listener_) {
-    non_ros_thread_listener_->stop();
-  }
+  sources_->stop();
 }

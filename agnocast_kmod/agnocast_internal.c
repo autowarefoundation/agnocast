@@ -349,8 +349,14 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     return;
   }
 
-  // This proc_info will be removed from proc_info_htable later by the unlink daemon.
-  proc_info->exited = true;
+  // No daemon can drain the daemon's own entry, so for this role registered means alive.
+  if (proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
+  } else {
+    // This proc_info will be removed from proc_info_htable later by the unlink daemon.
+    proc_info->exited = true;
+  }
 
   free_memory(pid);
 

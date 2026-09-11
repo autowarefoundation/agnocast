@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/node/agnocast_node.hpp"
+#include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 #include "agnocast_cie_config_msgs/msg/callback_group_info.hpp"
@@ -95,7 +96,7 @@ create_rclcpp_client_publisher()
   auto node = std::make_shared<rclcpp::Node>(
     "client_node_" + std::to_string(getpid()), "/agnocast_cie_thread_configurator", options);
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-    "/agnocast_cie_thread_configurator/callback_group_info",
+    agnocast_cie_thread_configurator::k_callback_group_info_topic,
     rclcpp::QoS(CIE_QOS_DEPTH).keep_all().reliable().transient_local());
   return publisher;
 }
@@ -117,7 +118,7 @@ create_agnocast_client_publisher()
   auto publisher = node->create_publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
     // Note: agnocast Publisher does not support keep_all(), so KeepLast is used here
     // (unlike the rclcpp variant which uses keep_all()).
-    "/agnocast_cie_thread_configurator/callback_group_info",
+    agnocast_cie_thread_configurator::k_callback_group_info_topic,
     rclcpp::QoS(rclcpp::KeepLast(CIE_QOS_DEPTH)).reliable().transient_local());
   return publisher;
 }

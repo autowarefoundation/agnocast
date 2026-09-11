@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_timer_info.hpp"
+#include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/node/agnocast_arguments.hpp"
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/node_interfaces/node_base.hpp"
@@ -605,8 +606,8 @@ public:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
+    [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+    const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
     auto timer = std::make_shared<WallTimer<CallbackT>>(timer_id, period_ns, std::move(callback));
 
@@ -615,7 +616,7 @@ public:
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
       static_cast<const void *>(node_base_.get()), callback_addr,
-      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
+      static_cast<const void *>(group.get()), callback_symbol.c_str(), period_ns.count());
 
     return timer;
   }
@@ -702,8 +703,8 @@ private:
     const uint32_t timer_id = allocate_timer_id();
     const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period);
 
-    const void * callback_addr = static_cast<const void *>(&callback);
-    const char * callback_symbol = tracetools::get_symbol(callback);
+    [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+    const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
     auto timer = std::make_shared<GenericTimer<CallbackT>>(
       timer_id, period_ns, clock, std::forward<CallbackT>(callback));
@@ -713,7 +714,7 @@ private:
     TRACEPOINT(
       agnocast_timer_init, static_cast<const void *>(timer.get()),
       static_cast<const void *>(node_base_.get()), callback_addr,
-      static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
+      static_cast<const void *>(group.get()), callback_symbol.c_str(), period_ns.count());
 
     return timer;
   }

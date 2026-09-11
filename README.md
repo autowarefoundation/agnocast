@@ -190,7 +190,7 @@ Refer to the [Linux kernel documentation](https://www.kernel.org/doc/Documentati
 
 ### Shared memory cleanup
 
-Agnocast spawns a background daemon process (forked from the first Agnocast process) that automatically cleans up shared memory when processes exit. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes. If the daemon dies, cleanup stops and resources will leak. To avoid this, stop application processes individually (e.g., with `Ctrl+C` or by targeting specific PIDs).
+Agnocast spawns a background daemon process that automatically cleans up shared memory when processes exit. It is forked by any Agnocast process that finds no daemon running, so the first process in an IPC namespace starts one, and so does the next process to start after the daemon is gone. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes; cleanup then stops until an Agnocast process starts again, which spawns a replacement and unlinks what was left behind in the meantime.
 
 If shared memory is left behind, you can remove it manually:
 

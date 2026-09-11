@@ -18,7 +18,7 @@ topics:
   chatter:
     type: std_msgs/msg/String
 """
-    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 1, 2)], [])
 
 
 def test_per_topic_domains_override_top_level():
@@ -33,8 +33,8 @@ topics:
     to_domain: 4
 """
     rules, skipped = parse_domain_bridge_config(text)
-    assert ('chatter', 'chatter', 1, 2) in rules
-    assert ('special', 'special', 3, 4) in rules
+    assert ('/chatter', '/chatter', 1, 2) in rules
+    assert ('/special', '/special', 3, 4) in rules
     assert skipped == []
 
 
@@ -59,19 +59,24 @@ topics:
   chatter:
     type: std_msgs/msg/String
 """
-    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 1, 2)], [])
 
 
 def test_non_string_topic_key_without_remap_is_coerced():
     # A non-string YAML key (here an integer) with no `remap` must not trip the remap
-    # string check; both names default to the coerced source name.
+    # string check; both names default to the coerced source name. The name itself is
+    # not asserted: rcl rejects a key like this, so domain_bridge never bridges it.
     text = """
 from_domain: 1
 to_domain: 2
 topics:
   123:
 """
-    assert parse_domain_bridge_config(text) == ([('123', '123', 1, 2)], [])
+    (rule,), skipped = parse_domain_bridge_config(text)
+    from_topic, to_topic, from_id, to_id = rule
+    assert from_topic == to_topic
+    assert (from_id, to_id) == (1, 2)
+    assert skipped == []
 
 
 def test_non_string_remap_raises():
@@ -86,6 +91,27 @@ topics:
         parse_domain_bridge_config(text)
 
 
+def test_relative_and_absolute_topic_keys_yield_the_same_rule():
+    relative = """
+from_domain: 1
+to_domain: 2
+topics:
+  chatter:
+    type: std_msgs/msg/String
+    remap: renamed
+"""
+    absolute = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    type: std_msgs/msg/String
+    remap: /renamed
+"""
+    assert parse_domain_bridge_config(relative) == parse_domain_bridge_config(absolute)
+    assert parse_domain_bridge_config(relative) == ([('/chatter', '/renamed', 1, 2)], [])
+
+
 def test_topic_without_resolvable_domain_pair_is_reported_as_skipped():
     text = """
 topics:
@@ -94,7 +120,7 @@ topics:
 """
     rules, skipped = parse_domain_bridge_config(text)
     assert rules == []
-    assert skipped == ['chatter']
+    assert skipped == ['/chatter']
 
 
 def test_empty_or_topicless_config_yields_no_rules():
@@ -168,7 +194,7 @@ to_domain: 2
 topics:
   chatter:
 """
-    assert parse_domain_bridge_config(text) == ([('chatter', 'chatter', 1, 2)], [])
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 1, 2)], [])
 
 
 def test_bidirectional_topic_yields_both_directions():

@@ -20,8 +20,8 @@ static const uint32_t OTHER_DOMAIN_ID = 2;
 static uint64_t setup_process(struct kunit * test, const pid_t pid, const uint32_t domain_id)
 {
   union ioctl_add_process_args add_process_args;
-  int ret =
-    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   return add_process_args.ret_addr;
 }

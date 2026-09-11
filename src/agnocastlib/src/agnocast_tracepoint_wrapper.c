@@ -5,7 +5,7 @@
 #ifndef TRACETOOLS_DISABLED
 
 // Humble's tracetools has no TRACETOOLS_TRACEPOINTS_EXCLUDED, so the condition below is always
-// true on Humble. This is intended. Building with TRACETOOLS_DISABLED will be supported later.
+// true on Humble. This is intended.
 #ifndef TRACETOOLS_TRACEPOINTS_EXCLUDED
 #define TRACEPOINT_CREATE_PROBES
 #define TRACEPOINT_DEFINE

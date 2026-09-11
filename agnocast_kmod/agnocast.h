@@ -2,6 +2,7 @@
 #pragma once
 
 #include <linux/ipc_namespace.h>
+#include <linux/limits.h>
 #include <linux/types.h>
 
 #define MAX_PUBLISHER_NUM 1024   // Maximum number of publishers per topic
@@ -45,10 +46,19 @@ union ioctl_get_node_names_args {
   uint32_t ret_node_num;
 };
 
+// The unlink daemon has no domain of its own.
+#define AGNOCAST_DOMAIN_ID_NONE U32_MAX
+
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
+    uint32_t role;       // enum process_role
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -353,7 +363,7 @@ struct ioctl_add_domain_bridge_prefix_args
 // ================================================
 // ros2cli ioctls
 
-#define MAX_TOPIC_NUM 1024
+#define MAX_TOPIC_NUM 2048
 
 union ioctl_topic_list_args {
   struct
@@ -454,7 +464,7 @@ int agnocast_ioctl_take_msg(
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
-  const pid_t pid, const struct ipc_namespace * ipc_ns, const bool is_bridge_manager,
+  const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret);
 
 int agnocast_ioctl_get_subscriber_num(
@@ -466,7 +476,8 @@ int agnocast_ioctl_get_publisher_num(
   union ioctl_get_publisher_num_args * ioctl_ret);
 
 int agnocast_ioctl_get_topic_list(
-  const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
+  const struct ipc_namespace * ipc_ns, char * topic_name_buf, uint32_t * domain_id_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_get_node_names(
   const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
@@ -512,12 +523,12 @@ int agnocast_ioctl_get_topic_publisher_info(
   union ioctl_topic_info_args * topic_info_args);
 
 int agnocast_ioctl_get_node_subscriber_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_get_node_publisher_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_check_and_request_bridge_shutdown(
   const pid_t pid, const struct ipc_namespace * ipc_ns,
@@ -547,7 +558,8 @@ pid_t agnocast_ioctl_get_exit_process(
   const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
 
 void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, bool * ret_daemon_should_exit);
+  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
+  bool * ret_daemon_should_exit);
 
 void agnocast_process_exit_cleanup(const pid_t pid);
 

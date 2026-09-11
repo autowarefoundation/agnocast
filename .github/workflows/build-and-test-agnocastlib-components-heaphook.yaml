@@ -70,6 +70,8 @@ jobs:
     - name: Setup ROS 2 environment
       if: github.event_name == 'push' || (steps.check_diff.outputs.cpp_changed == 'true' || steps.check_diff.outputs.heaphook_changed == 'true')
       run: |
+        # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
+        grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends software-properties-common curl gcovr ccache libunwind-dev
 

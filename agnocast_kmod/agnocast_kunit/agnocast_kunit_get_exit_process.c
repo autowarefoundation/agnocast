@@ -16,7 +16,8 @@ static const pid_t PID = 1000;
 static void setup_one_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args ioctl_ret;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &ioctl_ret);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &ioctl_ret);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -30,7 +31,7 @@ void test_case_get_exit_process_idle_poll_empty_namespace(struct kunit * test)
     agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_process_args);
 
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, -1, &daemon_should_exit);
 
   // Assert
   KUNIT_EXPECT_EQ(test, global_pid, -1);
@@ -49,7 +50,7 @@ void test_case_get_exit_process_idle_poll_process_remains(struct kunit * test)
     agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_process_args);
 
   bool daemon_should_exit = true;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, -1, &daemon_should_exit);
 
   // Assert
   KUNIT_EXPECT_EQ(test, global_pid, -1);
@@ -69,14 +70,15 @@ void test_case_get_exit_process_commit_last_process(struct kunit * test)
     agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_process_args);
 
   bool daemon_should_exit = false;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, &daemon_should_exit);
+  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, -1, &daemon_should_exit);
 
   struct ioctl_get_exit_process_args next_args = {};
   const pid_t next_global_pid =
     agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &next_args);
 
   bool next_daemon_should_exit = false;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, next_global_pid, &next_daemon_should_exit);
+  agnocast_commit_exit_process(
+    current->nsproxy->ipc_ns, next_global_pid, -1, &next_daemon_should_exit);
 
   // Assert: the flag is still derived on the idle poll that follows the commit.
   KUNIT_EXPECT_EQ(test, global_pid, PID);

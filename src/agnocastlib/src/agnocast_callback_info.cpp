@@ -72,8 +72,9 @@ void receive_and_execute_message(
   // Process entries from oldest to newest (ioctl returns oldest first)
   for (const auto & entry : entries) {
     const auto & [entry_id, entry_addr] = entry;
-    const void * callback_addr = &entry;  // For CARET
+    [[maybe_unused]] const void * callback_addr = &entry;  // For CARET
 
+#ifndef TRACETOOLS_DISABLED
     {
       constexpr uint8_t PID_SHIFT_BITS = 32;
       uint64_t pid_callback_info_id =
@@ -86,6 +87,7 @@ void receive_and_execute_message(
       // ensure that CARET can be used without modifying its implementation.
       TRACEPOINT(agnocast_create_callable, callback_addr, entry_id, pid_callback_info_id);
     }
+#endif
 
     auto typed_msg = callback_info.message_creator(
       reinterpret_cast<void *>(entry_addr), callback_info.topic_name, callback_info.subscriber_id,

@@ -68,7 +68,10 @@ void test_case_discovery_agent_exist_reflects_registration(struct kunit * test)
 
   union ioctl_add_process_args before;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 12, &before), 0);
+    test,
+    agnocast_ioctl_add_process(
+      pid++, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 12, &before),
+    0);
   KUNIT_EXPECT_FALSE(test, before.ret_discovery_agent_exist);  // process alive, no agent yet
 
   struct ioctl_add_discovery_agent_args reg;
@@ -77,7 +80,10 @@ void test_case_discovery_agent_exist_reflects_registration(struct kunit * test)
 
   union ioctl_add_process_args after;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 12, &after), 0);
+    test,
+    agnocast_ioctl_add_process(
+      pid++, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 12, &after),
+    0);
   KUNIT_EXPECT_TRUE(test, after.ret_discovery_agent_exist);  // now an agent is registered
 }
 
@@ -113,7 +119,10 @@ void test_case_discovery_agent_commit_exit_vetoed_when_busy(struct kunit * test)
 
   union ioctl_add_process_args proc;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 14, &proc), 0);
+    test,
+    agnocast_ioctl_add_process(
+      pid++, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 14, &proc),
+    0);
 
   bool should_exit = true;
   KUNIT_ASSERT_EQ(
@@ -165,7 +174,9 @@ void test_case_discovery_agent_orphan_race(struct kunit * test)
 
   union ioctl_add_process_args p2;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, false, 16, &p2), 0);
+    test,
+    agnocast_ioctl_add_process(pid++, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 16, &p2),
+    0);
   KUNIT_EXPECT_FALSE(test, p2.ret_discovery_agent_exist);  // A is gone -> P2 must spawn one
 
   const pid_t agent_b = pid++;
@@ -214,7 +225,10 @@ void test_case_discovery_agent_commit_ignores_exited_process(struct kunit * test
   const pid_t app_pid = pid++;
   union ioctl_add_process_args app;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(app_pid, current->nsproxy->ipc_ns, false, 19, &app), 0);
+    test,
+    agnocast_ioctl_add_process(
+      app_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 19, &app),
+    0);
 
   agnocast_enqueue_exit_pid(app_pid);
   msleep(20);  // let exit_worker_thread mark it exited (still present, not yet drained)

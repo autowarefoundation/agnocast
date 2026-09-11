@@ -15,7 +15,10 @@ static void setup_process_in_domain(struct kunit * test, const pid_t pid, const 
 {
   union ioctl_add_process_args args;
   KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &args), 0);
+    test,
+    agnocast_ioctl_add_process(
+      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &args),
+    0);
 }
 
 static void add_publisher_named(struct kunit * test, const pid_t pid, const char * topic_name)

@@ -175,7 +175,7 @@ void initialize_bridge_allocator(void * mempool_ptr, size_t mempool_size)
 initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 {
   union ioctl_add_process_args add_process_args = {};
-  add_process_args.is_bridge_manager = true;
+  add_process_args.role = PROCESS_ROLE_BRIDGE_MANAGER;
   add_process_args.domain_id = get_ros_domain_id();
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     throw std::runtime_error(std::string("AGNOCAST_ADD_PROCESS_CMD failed: ") + strerror(errno));
@@ -201,6 +201,22 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
 
 void poll_for_unlink()
 {
+  // Register so the kernel module can tell a live daemon from a dead one. No domain_id: the
+  // kernel module records this daemon as belonging to none.
+  union ioctl_add_process_args add_process_args = {};
+  add_process_args.role = PROCESS_ROLE_UNLINK_DAEMON;
+  if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  // Another daemon won the race and registered first; this one has nothing to do.
+  if (add_process_args.ret_unlink_daemon_exist) {
+    close(agnocast_fd);
+    exit(EXIT_SUCCESS);
+  }
+
   while (true) {
     sleep(1);
 
@@ -538,8 +554,14 @@ struct initialize_agnocast_result initialize_agnocast(
 
   // add_process_args is a union, so ADD_PROCESS overwrites domain_id with its ret_* fields.
   const uint32_t domain_id = get_ros_domain_id();
+  if (domain_id == AGNOCAST_DOMAIN_ID_NONE) {
+    RCLCPP_ERROR(logger, "ROS_DOMAIN_ID=%u is reserved by Agnocast", domain_id);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
 
   union ioctl_add_process_args add_process_args = {};
+  add_process_args.role = PROCESS_ROLE_APPLICATION;
   add_process_args.domain_id = domain_id;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
@@ -551,6 +573,8 @@ struct initialize_agnocast_result initialize_agnocast(
   auto bridge_mode = get_bridge_mode();
 
   // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
+  // ret_unlink_daemon_exist is only an early-out hint: poll_for_unlink() makes the singleton
+  // decision when it registers.
   if (!add_process_args.ret_unlink_daemon_exist) {
     spawn_daemon_process([]() { poll_for_unlink(); });
   }

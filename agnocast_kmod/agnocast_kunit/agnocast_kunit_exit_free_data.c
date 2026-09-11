@@ -19,7 +19,8 @@ static const uint32_t QOS_DEPTH = 1;
 static void setup_one_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
 
   KUNIT_ASSERT_EQ(test, ret, 0);
 }

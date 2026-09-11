@@ -61,6 +61,17 @@ def _as_bool(value, field, topic_name):
     raise ValueError(f"'{field}' for topic {topic_name!r} must be a boolean")
 
 
+def _as_topic_name(value):
+    """Coerce a YAML topic key or ``remap`` target to the absolute name domain_bridge resolves it to.
+
+    ``domain_bridge`` resolves a relative name against the root, so ``my_topic`` and
+    ``/my_topic`` name the same topic there. Matching that here keeps a shared config
+    from meaning two different topics to the external node and to this parser.
+    """
+    name = str(value)
+    return name if name.startswith('/') else '/' + name
+
+
 def parse_domain_bridge_config(text):
     """Return ``(rules, skipped)``.
 
@@ -70,6 +81,8 @@ def parse_domain_bridge_config(text):
     A ``bidirectional`` topic yields two tuples, one per direction.
     ``skipped`` lists the topic names dropped for lack of a resolvable domain
     pair, so the caller can surface them instead of dropping them silently.
+    Topic names are returned absolute, matching how ``domain_bridge`` resolves
+    the same keys.
     ``from_domain`` / ``to_domain`` are taken from the top level and may be
     overridden per topic.
 
@@ -101,21 +114,23 @@ def parse_domain_bridge_config(text):
         from_domain = spec.get('from_domain', default_from)
         to_domain = spec.get('to_domain', default_to)
         if from_domain is None or to_domain is None:
-            skipped.append(str(topic_name))
+            skipped.append(_as_topic_name(topic_name))
             continue
         # Default to the source name (coerced like from_topic below), so a non-string YAML key
         # without a remap doesn't trip the "'remap' must be a string" check.
-        to_topic = spec.get('remap', str(topic_name))
-        if not isinstance(to_topic, str):
+        remap = spec.get('remap', str(topic_name))
+        if not isinstance(remap, str):
             raise ValueError(f"'remap' for topic {topic_name!r} must be a string")
+        from_topic = _as_topic_name(topic_name)
+        to_topic = _as_topic_name(remap)
         bidirectional = _as_bool(spec.get('bidirectional', False), 'bidirectional', topic_name)
         from_id = _as_domain_id(from_domain)
         to_id = _as_domain_id(to_domain)
-        rules.append((str(topic_name), to_topic, from_id, to_id))
+        rules.append((from_topic, to_topic, from_id, to_id))
         if bidirectional:
             # The external node's reverse leg swaps the domain ids and nothing else, keeping the
             # source name on the subscribe side and the remap on the publish side.
-            rules.append((str(topic_name), to_topic, to_id, from_id))
+            rules.append((from_topic, to_topic, to_id, from_id))
     return rules, skipped
 
 

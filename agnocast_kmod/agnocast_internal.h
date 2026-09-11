@@ -81,8 +81,7 @@ static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
 struct process_info
 {
   bool exited;
-  // Tracks whether this process is the alive Bridge Manager for the IPC namespace.
-  bool is_bridge_manager;
+  enum process_role role;
   pid_t global_pid;
   pid_t local_pid;
   struct mempool_entry * mempool_entry;

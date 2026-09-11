@@ -61,12 +61,22 @@ union ioctl_get_node_names_args {
 };
 #pragma GCC diagnostic pop
 
+// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
+#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
+
+// Mirrors enum process_role in the kernel module.
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_process_args {
   struct
   {
-    bool is_bridge_manager;
+    uint32_t role;       // enum process_role
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
