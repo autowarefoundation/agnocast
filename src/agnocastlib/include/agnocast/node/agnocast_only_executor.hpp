@@ -67,13 +67,14 @@ protected:
   bool get_next_agnocast_executable(
     AgnocastExecutable & agnocast_executable,
     std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
-  bool get_next_agnocast_executable(AgnocastExecutable & agnocast_executable, const int timeout_ms);
   bool get_next_ready_agnocast_executable(AgnocastExecutable & agnocast_executable);
   void execute_agnocast_executable(AgnocastExecutable & agnocast_executable);
 
   bool is_callback_group_associated(const rclcpp::CallbackGroup::SharedPtr & group);
 
   void add_callback_groups_from_nodes_associated_to_executor();
+
+  void update_entities();
 
   virtual rclcpp::FutureReturnCode spin_until_future_complete_impl(
     std::chrono::nanoseconds timeout,
@@ -165,9 +166,9 @@ public:
   /// Spin (blocking) until the future is complete, it times out waiting, or rclcpp is interrupted.
   /// @param future The future to wait on. If this function returns SUCCESS, the future can be
   /// accessed without blocking (though it may still throw an exception).
-  /// @param timeout Optional timeout parameter, which gets passed to Executor::spin_node_once. `-1`
-  /// is block forever, `0` is non-blocking.
+  /// @param timeout Optional timeout parameter. `-1` is block forever, `0` is non-blocking.
   /// @return The return code, one of `SUCCESS`, `INTERRUPTED`, or `TIMEOUT`.
+  AGNOCAST_PUBLIC
   template <typename FutureT, typename TimeRepT = int64_t, typename TimeT = std::milli>
   rclcpp::FutureReturnCode spin_until_future_complete(
     const FutureT & future,

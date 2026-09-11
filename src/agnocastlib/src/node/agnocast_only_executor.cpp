@@ -104,12 +104,6 @@ bool AgnocastOnlyExecutor::get_next_agnocast_executable(
   return get_next_ready_agnocast_executable(agnocast_executable);
 }
 
-bool AgnocastOnlyExecutor::get_next_agnocast_executable(
-  AgnocastExecutable & agnocast_executable, const int timeout_ms)
-{
-  return get_next_agnocast_executable(agnocast_executable, std::chrono::milliseconds{timeout_ms});
-}
-
 bool AgnocastOnlyExecutor::get_next_ready_agnocast_executable(
   AgnocastExecutable & agnocast_executable)
 {
@@ -302,6 +296,16 @@ void AgnocastOnlyExecutor::add_callback_groups_from_nodes_associated_to_executor
   }
 }
 
+void AgnocastOnlyExecutor::update_entities()
+{
+  if (epoll_update_tracker_.take_update_request()) {
+    add_callback_groups_from_nodes_associated_to_executor();
+    epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
+      return is_callback_group_associated(group);
+    });
+  }
+}
+
 void AgnocastOnlyExecutor::add_node(
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr
     node_ptr,  // NOLINT(performance-unnecessary-value-param): align with rclcpp API
@@ -468,17 +472,12 @@ void AgnocastOnlyExecutor::spin_once(std::chrono::nanoseconds timeout)
 
 bool AgnocastOnlyExecutor::is_spinning()
 {
-  return spinning_;
+  return spinning_.load();
 }
 
 void AgnocastOnlyExecutor::wait_for_work(std::chrono::nanoseconds timeout)
 {
-  if (epoll_update_tracker_.take_update_request()) {
-    add_callback_groups_from_nodes_associated_to_executor();
-    epoll_manager_->prepare_epoll([this](const rclcpp::CallbackGroup::SharedPtr & group) {
-      return is_callback_group_associated(group);
-    });
-  }
+  update_entities();
 
   using IntMs = std::chrono::duration<int, std::milli>;
   int timeout_ms;
