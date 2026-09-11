@@ -14,27 +14,33 @@ ensuring nothing is moved or duplicated during sharing.
 This document records the architectural decisions shaping the feature as a whole. Localized
 implementation decisions belong alongside their respective code.
 
-```mermaid
-flowchart LR
-    subgraph Pub [Publisher process]
-        PM["message<br/>(host shared memory)<br/>ROS fields + reference"]
-    end
+```text
+     Publisher process                                      Subscriber process
+     -----------------                                      ------------------
 
-    subgraph Sub [Subscriber process]
-        SM["the same message,<br/>mapped read-only"]
-    end
+     host VA 0x7f10_0000 ---.                          .--- host VA 0x7f10_0000
+                            |    the same address      |         (read-only)
+                            v      in every process    v
+                    +------------------------------------------+
+                    |  message, in host shared memory          |
+                    |    header, width, point_step, ...        |
+                    |    payload reference:  region 7, slot 2  |
+                    +------------------------------------------+
 
-    subgraph Kmod [Kernel module: control plane]
-        KR["region registry<br/>holds the liveness reference<br/>installs a descriptor per importer"]
-    end
+                     the reference names memory without addressing it;
+                        each process resolves it for itself, below
 
-    GPU["GPU allocation<br/>divided into slots"]
-
-    PM -. "reference" .-> SM
-    PM ==>|"writes the payload"| GPU
-    SM ==>|"reads the payload"| GPU
-    Pub -->|registers its allocation| KR
-    KR -->|"descriptor, on first receipt"| Sub
+     device VA 0x7f00_0000 -.                          .- device VA 0x7d80_0000
+                            |   a different address    |
+                            v      in each process     v
+                    +------------------------------------------+
+                    |  one GPU allocation  =  region 7         |
+                    |   +-------+-------+-------+-------+      |
+                    |   | slot 0| slot 1| slot 2| slot 3|      |
+                    |   +-------+-------+---^---+-------+      |
+                    |                       |                  |
+                    |   base + 2 * slot_size = this payload    |
+                    +------------------------------------------+
 ```
 
 ## A message identifies its memory location using a region and a slot
