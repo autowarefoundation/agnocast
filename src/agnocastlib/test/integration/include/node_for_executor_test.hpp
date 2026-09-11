@@ -56,5 +56,6 @@ public:
   bool is_all_agnocast_sub_cbs_called() const;
   bool is_mutually_exclusive_agnocast() const;
   bool is_mutually_exclusive_ros2() const;
-  std::string describe_progress() const;
+  std::string describe_uncalled_agnocast_sub_cbs() const;
+  std::string describe_uncalled_ros2_sub_cbs() const;
 };

@@ -143,8 +143,11 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
       // (can_be_taken_from is false), and the guard condition alone cannot bring them back,
       // because rmw_fastrtps clears the trigger on a timed-out rmw_wait() and wait_for_work()
       // ignores the notify waitable on a Timeout result (see issue #3240 in ros2/rclcpp).
-      // The release store pairs with the can_be_taken_from restore above.
-      entities_need_rebuild_.store(true, std::memory_order_release);
+      // Storing the flag after execute_any_executable() has restored can_be_taken_from, and
+      // before the trigger, is what makes the request unlosable. It costs at most one
+      // collect_entities() more than the trigger alone, and can be dropped once the upstream fix
+      // reaches Jazzy.
+      entities_need_rebuild_.store(true);
       interrupt_guard_condition_->trigger();
     }
 #endif

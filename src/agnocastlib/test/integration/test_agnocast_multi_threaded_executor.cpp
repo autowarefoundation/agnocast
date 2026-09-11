@@ -90,8 +90,10 @@ TEST_P(MultiThreadedAgnocastExecutorTest, test_no_starvation_and_callback_group)
   spin_thread.join();
 
   // Assert
-  EXPECT_TRUE(test_node_->is_all_ros2_sub_cbs_called()) << test_node_->describe_progress();
-  EXPECT_TRUE(test_node_->is_all_agnocast_sub_cbs_called()) << test_node_->describe_progress();
+  EXPECT_TRUE(test_node_->is_all_ros2_sub_cbs_called())
+    << test_node_->describe_uncalled_ros2_sub_cbs();
+  EXPECT_TRUE(test_node_->is_all_agnocast_sub_cbs_called())
+    << test_node_->describe_uncalled_agnocast_sub_cbs();
 
   // The success rate of subsequent tests depends on the number of callbacks and CPU utilization.
   // With the current configuration, the test is almost certain to pass.

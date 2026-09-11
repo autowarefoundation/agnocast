@@ -168,20 +168,30 @@ bool NodeForExecutorTest::is_all_agnocast_sub_cbs_called() const
   return true;
 }
 
-std::string NodeForExecutorTest::describe_progress() const
+namespace
 {
-  auto uncalled = [](const std::unique_ptr<std::atomic<bool>[]> & called, const size_t num) {
-    std::string indices;
-    for (size_t i = 0; i < num; i++) {
-      if (!called[i].load(std::memory_order_acquire)) {
-        indices += " " + std::to_string(i);
-      }
+std::string uncalled_indices(const std::unique_ptr<std::atomic<bool>[]> & called, const size_t num)
+{
+  std::string indices;
+  for (size_t i = 0; i < num; i++) {
+    if (!called[i].load(std::memory_order_acquire)) {
+      indices += " " + std::to_string(i);
     }
-    return indices;
-  };
+  }
+  return indices;
+}
+}  // namespace
+
+std::string NodeForExecutorTest::describe_uncalled_agnocast_sub_cbs() const
+{
   return "uncalled_agnocast_sub_cbs=[" +
-         uncalled(agnocast_sub_cbs_called_, num_total_agnocast_sub_cbs_) +
-         " ] uncalled_ros2_sub_cbs=[" + uncalled(ros2_sub_cbs_called_, num_ros2_sub_cbs_) + " ]";
+         uncalled_indices(agnocast_sub_cbs_called_, num_total_agnocast_sub_cbs_) + " ]";
+}
+
+std::string NodeForExecutorTest::describe_uncalled_ros2_sub_cbs() const
+{
+  return "uncalled_ros2_sub_cbs=[" + uncalled_indices(ros2_sub_cbs_called_, num_ros2_sub_cbs_) +
+         " ]";
 }
 
 bool NodeForExecutorTest::is_mutually_exclusive_agnocast() const
