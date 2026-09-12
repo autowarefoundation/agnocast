@@ -81,7 +81,7 @@ void agnocast_exit_free_data(void)
 
 void agnocast_exit_kthread(void)
 {
-  swake_up_one(&worker_wait);
+  // kthread_stop() wakes the worker itself; the wait condition includes kthread_should_stop().
   kthread_stop(worker_task);
 }
 
