@@ -1,15 +1,14 @@
 # GPU IPC Design
 
-A GPU payload remains in the allocation that the GPU already reads and writes, with no process ever
-copying it. What crosses process boundaries is merely a short reference to that allocation,
-transmitted within standard host shared-memory messages alongside ROS fields.
+GPU payloads can be shared across processes without copying their contents. Instead, only a
+reference to the GPU allocation is passed between processes.
 
 This reference is deliberately not a pointer. A device address is valid only within the process that
 mapped the allocation, so each process resolves the reference into its own local address space.
 
 The underlying physical memory location—whether device memory on a discrete GPU or shared DRAM on an
 SoC—is irrelevant to the design. What matters is that every process can map the same allocation,
-ensuring nothing is moved or duplicated during sharing.
+ensuring that the payload is neither moved nor duplicated during sharing.
 
 This document records the architectural decisions shaping the feature as a whole. Localized
 implementation decisions belong alongside their respective code.
