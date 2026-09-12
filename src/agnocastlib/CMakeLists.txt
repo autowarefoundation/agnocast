@@ -253,6 +253,18 @@ if(BUILD_TESTING)
     TIMEOUT 300
   )
 
+  # AgnocastOnly executor integration test (requires kernel module, no mock)
+  ament_add_gmock(test_integration_agnocast_only_executor_${PROJECT_NAME}
+    test/integration/test_agnocast_only_single_threaded_executor.cpp)
+  target_link_libraries(test_integration_agnocast_only_executor_${PROJECT_NAME} agnocast)
+  ament_target_dependencies(test_integration_agnocast_only_executor_${PROJECT_NAME}
+    agnocast_cie_config_msgs)
+  set_tests_properties(test_integration_agnocast_only_executor_${PROJECT_NAME} PROPERTIES
+    ENVIRONMENT "GTEST_DEATH_TEST_STYLE=threadsafe;LD_PRELOAD=${CMAKE_INSTALL_PREFIX}/lib/libagnocast_heaphook.so:$ENV{LD_PRELOAD}"
+    TIMEOUT 60
+    LABELS "requires_kernel_module;requires_heaphook"
+  )
+
   # AgnocastOnly callback isolated executor integration test (requires kernel module, no mock)
   ament_add_gmock(test_integration_agnocast_only_callback_isolated_executor_${PROJECT_NAME}
     test/integration/test_agnocast_only_callback_isolated_executor.cpp)
