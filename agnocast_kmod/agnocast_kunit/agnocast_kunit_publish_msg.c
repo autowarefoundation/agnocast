@@ -8,6 +8,8 @@
 #include <kunit/test.h>
 #include <linux/delay.h>
 
+#define KUNIT_PUB_SHM_BUF_SIZE 4
+
 static char * topic_name = "/kunit_test_topic";
 static char * node_name = "/kunit_test_node";
 static uint32_t qos_depth = 1;
@@ -67,6 +69,57 @@ static topic_local_id_t setup_one_subscriber_with_eventfd(
 {
   return setup_one_subscriber_in_domain_with_eventfd(
     test, 0, is_bridge, eventfd, ignore_local_publications);
+}
+
+// Joins an already registered process, so that a case can put the subscriber in the publisher's.
+static topic_local_id_t add_subscriber_with_qos_depth(
+  struct kunit * test, const pid_t pid, const uint32_t sub_qos_depth,
+  const bool ignore_local_publications, const bool sub_is_bridge)
+{
+  union ioctl_add_subscriber_args add_subscriber_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_subscriber(
+      topic_name, current->nsproxy->ipc_ns, node_name, pid, sub_qos_depth, qos_is_transient_local,
+      qos_is_reliable, is_take_sub, ignore_local_publications, sub_is_bridge, -1,
+      &add_subscriber_args),
+    0);
+  return add_subscriber_args.ret_id;
+}
+
+static topic_local_id_t setup_subscriber_with_qos_depth_in_domain(
+  struct kunit * test, const uint32_t domain_id, const bool sub_is_bridge,
+  const uint32_t sub_qos_depth)
+{
+  subscriber_pid++;
+
+  union ioctl_add_process_args add_process_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(
+      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
+      &add_process_args),
+    0);
+  return add_subscriber_with_qos_depth(test, subscriber_pid, sub_qos_depth, false, sub_is_bridge);
+}
+
+static topic_local_id_t setup_one_subscriber_with_qos_depth(
+  struct kunit * test, const uint32_t sub_qos_depth)
+{
+  return setup_subscriber_with_qos_depth_in_domain(test, 0, is_bridge, sub_qos_depth);
+}
+
+static void publish_n(
+  struct kunit * test, const topic_local_id_t publisher_id, const uint64_t ret_addr, const int n)
+{
+  for (int i = 0; i < n; i++) {
+    union ioctl_publish_msg_args ioctl_publish_msg_ret;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_publish_msg(
+        topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, &ioctl_publish_msg_ret),
+      0);
+  }
 }
 
 static void setup_publisher_in_domain(
@@ -787,4 +840,215 @@ void test_case_publish_msg_bridge_subscriber_in_own_domain_notified(struct kunit
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, signal_count_of(eventfd), 1);
+}
+
+void test_case_publish_msg_deeper_subscriber_keeps_entries(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  setup_one_subscriber_with_qos_depth(test, 3);
+  publish_n(test, publisher_id, ret_addr, 2);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 2, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 0);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 3);
+}
+
+void test_case_publish_msg_releases_beyond_deepest_subscriber(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  setup_one_subscriber_with_qos_depth(test, 3);
+  publish_n(test, publisher_id, ret_addr, 3);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 3, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 1);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_addrs[0], ret_addr);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 3);
+}
+
+void test_case_publish_msg_falls_back_to_publisher_depth_after_subscriber_leaves(
+  struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  const topic_local_id_t subscriber_id = setup_one_subscriber_with_qos_depth(test, 3);
+  publish_n(test, publisher_id, ret_addr, 3);
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_remove_subscriber(topic_name, current->nsproxy->ipc_ns, subscriber_id), 0);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 3, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 3);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+}
+
+void test_case_publish_msg_deepest_subscriber_sets_retention(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  setup_one_subscriber_with_qos_depth(test, 2);
+  setup_one_subscriber_with_qos_depth(test, 4);
+  publish_n(test, publisher_id, ret_addr, 3);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 3, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 0);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 4);
+}
+
+// The two cases below are the reason retention_depth() filters: sub_info_htable holds subscribers
+// this publisher can never reach, and their depth must not hold its entries open.
+void test_case_publish_msg_ignores_depth_of_ignore_local_subscriber(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1, and the depth-3 subscriber sits in its process and
+  // ignores it, so retention stays at 1.
+  common_pid++;
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, common_pid, 0, is_bridge, &publisher_id, &ret_addr);
+  add_subscriber_with_qos_depth(test, common_pid, 3, true, is_bridge);
+  publish_n(test, publisher_id, ret_addr, 2);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 2, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+}
+
+void test_case_publish_msg_ignores_depth_of_other_domain_subscriber(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1. The two cells share one sub_info_htable, but a bridge
+  // endpoint never crosses domains, so the depth-3 subscriber in domain 2 is unreachable from it.
+  KUNIT_ASSERT_EQ(
+    test, agnocast_ioctl_add_domain_bridge(topic_name, topic_name, 1, 2, current->nsproxy->ipc_ns),
+    0);
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_publisher_in_domain(test, current->tgid, 1, is_bridge, &publisher_id, &ret_addr);
+  setup_subscriber_with_qos_depth_in_domain(test, 2, true, 3);
+  publish_n(test, publisher_id, ret_addr, 2);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 2, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 1);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+}
+
+// The depth a subscriber declares is what it may fall behind by, not a standing reservation: a
+// subscriber that keeps up costs the publisher nothing however deep it is declared.
+void test_case_publish_msg_caught_up_deep_subscriber_keeps_no_entries(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1, the subscriber's is 100.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  const topic_local_id_t subscriber_id = setup_one_subscriber_with_qos_depth(test, 100);
+
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  for (int i = 0; i < 5; i++) {
+    union ioctl_publish_msg_args ioctl_publish_msg_ret;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_publish_msg(
+        topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, &ioctl_publish_msg_ret),
+      0);
+
+    // Drain, so the subscriber never lags by more than the one entry just published.
+    union ioctl_receive_msg_args ioctl_receive_msg_ret;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_receive_msg(
+        topic_name, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+        &ioctl_receive_msg_ret),
+      0);
+    KUNIT_ASSERT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 1);
+
+    // Standing in for the userland free: a still-referenced entry is skipped by the release loop
+    // whatever the retention depth says, which would mask the assert below.
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_release_message_entry_reference(
+        topic_name, current->nsproxy->ipc_ns, subscriber_id,
+        ioctl_receive_msg_ret.ret_entry_ids[0]),
+      0);
+  }
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 5, &ioctl_publish_msg_ret);
+
+  // Assert: retention fell back to the publisher's own depth, not the subscriber's 100.
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 1);
+}
+
+// The same subscriber, not draining, is the case the deeper retention exists for.
+void test_case_publish_msg_lagging_deep_subscriber_keeps_entries(struct kunit * test)
+{
+  // Arrange: the publisher qos_depth is 1, the subscriber's is 100, and it never receives.
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  setup_one_publisher(test, &publisher_id, &ret_addr);
+  setup_one_subscriber_with_qos_depth(test, 100);
+  publish_n(test, publisher_id, ret_addr, 5);
+
+  union ioctl_publish_msg_args ioctl_publish_msg_ret;
+
+  // Act
+  int ret = agnocast_ioctl_publish_msg(
+    topic_name, current->nsproxy->ipc_ns, publisher_id, ret_addr + 5, &ioctl_publish_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_publish_msg_ret.ret_released_num, 0);
+  KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 6);
 }
