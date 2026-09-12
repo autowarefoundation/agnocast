@@ -96,12 +96,15 @@ protected:
   std::string service_name_;
   std::string response_topic_name_;
   std::function<bool()> check_context_ok_;
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  std::unique_ptr<ServiceEventPublisher> event_publisher_;
+#endif
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
   rclcpp::Logger get_logger() const;
 
   template <typename NodeT>
-  void init_base(NodeT * node, const std::string & service_name)
+  void init_base(NodeT * node, const std::string & service_name, const std::string & service_type)
   {
     node_ = node;
     node_name_ = node->get_fully_qualified_name();
@@ -114,6 +117,10 @@ protected:
         return rclcpp::ok(context);
       }
     };
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    event_publisher_ = std::make_unique<ServiceEventPublisher>(node_, service_name_, service_type);
+#endif
   }
 
 public:
@@ -139,6 +146,28 @@ public:
       check_context_ok_, service_name_,
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
   }
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  /**
+   * @brief Configure service introspection. Publishes REQUEST_SENT and RESPONSE_RECEIVED; the
+   * server reports its own two events through agnocast::Service::configure_introspection.
+   * @param clock The clock to use to generate introspection timestamps.
+   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
+   * @param introspection_state The state to set introspection to.
+   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
+   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
+   * is about to be created, so disabling never rejects it.
+   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
+   * loaded. Only the first transition out of OFF loads them.
+   */
+  AGNOCAST_PUBLIC
+  void configure_introspection(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t introspection_state)
+  {
+    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+  }
+#endif
 
   virtual ~ClientBase() = default;
 };
@@ -193,10 +222,6 @@ private:
   std::mutex seqno2_response_call_info_mtx_;
   std::unordered_map<int64_t, ResponseCallInfo> seqno2_response_call_info_;
   typename ServiceRequestPublisher::SharedPtr publisher_;
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  // Declared before subscriber_ so that it outlives the callback that uses it.
-  std::unique_ptr<ServiceEventPublisher> event_publisher_;
-#endif
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
@@ -252,7 +277,7 @@ private:
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group, ClientRole role)
   {
-    init_base(node, service_name);
+    init_base(node, service_name, rosidl_generator_traits::name<ServiceT>());
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -264,12 +289,6 @@ private:
 
     response_topic_name_ =
       create_service_response_topic_name(service_name_, node_name_, publisher_->get_id());
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    // Must precede the subscription: its callback is runnable as soon as it is registered.
-    event_publisher_ = std::make_unique<ServiceEventPublisher>(
-      node_, service_name_, rosidl_generator_traits::name<ServiceT>());
-#endif
 
     auto subscriber_callback = [this](ipc_shared_ptr<ResponseT> && response) {
       std::unique_lock<std::mutex> lock(seqno2_response_call_info_mtx_);
@@ -350,28 +369,6 @@ public:
     return ipc_shared_ptr<typename ServiceT::Request>(std::move(request));
   }
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  /**
-   * @brief Configure service introspection. Publishes REQUEST_SENT and RESPONSE_RECEIVED; the
-   * server reports its own two events through agnocast::Service::configure_introspection.
-   * @param clock The clock to use to generate introspection timestamps.
-   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
-   * @param introspection_state The state to set introspection to.
-   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
-   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
-   * is about to be created, so disabling never rejects it.
-   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
-   * loaded. Only the first transition out of OFF loads them.
-   */
-  AGNOCAST_PUBLIC
-  void configure_introspection(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t introspection_state)
-  {
-    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
-  }
-#endif
-
   /** @brief Send a request asynchronously and invoke a callback when the response arrives.
    *  @param request Request from borrow_loaned_request(). Must be moved in.
    *  @param callback Invoked with a SharedFuture when the response arrives. Call future.get() to
@@ -443,12 +440,51 @@ private:
 
   ServiceTsBundle service_ts_bundle_;
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<std::shared_ptr<void>> copy_request_if_contents(const void * payload);
+
+  void publish_request_sent_event(
+    const int64_t seqno, const std::optional<std::shared_ptr<void>> & request);
+#endif
+
+  template <typename Func>
+  int64_t send_request_impl(
+    ipc_shared_ptr<void> && request, ResponseCallInfo && call_info, Func && take_future)
+  {
+    auto generic_request_wrapper =
+      GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+    const int64_t seqno = generic_request_wrapper.seqno();
+
+    {
+      std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
+      take_future(
+        seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
+    }
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    const std::optional<std::shared_ptr<void>> sent_request =
+      copy_request_if_contents(generic_request_wrapper.get());
+#endif
+
+    publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
+      GenericRequestWrapper::free(p, this->service_ts_bundle_.request_members);
+    });
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    publish_request_sent_event(seqno, sent_request);
+#endif
+
+    return seqno;
+  }
+
   template <typename NodeT>
   void constructor_impl(
     NodeT * node, const std::string & service_name, const std::string & service_type,
     const rclcpp::QoS & qos_arg, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
   {
-    init_base(node, service_name);
+    init_base(node, service_name, service_type);
 
     service_ts_bundle_ = load_service_typesupport(service_type);
 
@@ -481,6 +517,12 @@ private:
       seqno2_response_call_info_.erase(it);
       /* --- critical section end --- */
       lock.unlock();
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      event_publisher_->publish_service_event_message(
+        service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED, generic_response_wrapper.get(),
+        response_seqno, get_gid().data);
+#endif
 
       info.promise.set_value(std::move(generic_response_wrapper).take_response());
       if (info.callback.has_value()) {

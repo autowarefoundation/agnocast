@@ -35,15 +35,7 @@ using Event = std_srvs::srv::SetBool_Event;
 constexpr const char * kServiceName = "test_introspected_service";
 constexpr const char * kEventTopicName = "/test_introspected_service/_service_event";
 
-const Event * find_event(const std::vector<Event> & events, const uint8_t event_type)
-{
-  const auto it = std::find_if(events.begin(), events.end(), [event_type](const Event & event) {
-    return event.info.event_type == event_type;
-  });
-  return it == events.end() ? nullptr : &*it;
-}
-
-class IntrospectionFixture : public ::testing::Test
+class ServiceIntrospectionTest : public ::testing::Test
 {
 protected:
   std::shared_ptr<rclcpp::Node> node_;
@@ -54,16 +46,23 @@ protected:
   std::vector<Event> events_;
 
   agnocast::Subscription<Event>::SharedPtr event_subscriber_;
-  agnocast::Service<SetBool>::SharedPtr service_;
-  agnocast::Client<SetBool>::SharedPtr client_;
 
   rclcpp::CallbackGroup::SharedPtr new_group()
   {
     return node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   }
 
-  void start()
+  void SetUp() override
   {
+    rclcpp::init(0, nullptr);
+
+    node_ = std::make_shared<rclcpp::Node>("test_service_introspection_node");
+
+    executor_ = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>();
+    executor_->add_node(node_);
+
+    spin_thread_ = std::thread([this] { executor_->spin(); });
+
     event_subscriber_ = agnocast::create_subscription<Event>(
       node_.get(), kEventTopicName, rclcpp::ServicesQoS(),
       [this](const agnocast::ipc_shared_ptr<const Event> & event) {
@@ -71,19 +70,6 @@ protected:
         events_.push_back(*event);
       },
       agnocast::SubscriptionOptions{new_group()});
-
-    client_ = agnocast::create_client<SetBool>(
-      node_.get(), kServiceName, rclcpp::ServicesQoS(), new_group());
-
-    executor_->add_node(node_);
-    spin_thread_ = std::thread([this]() { executor_->spin(); });
-  }
-
-  void SetUp() override
-  {
-    rclcpp::init(0, nullptr);
-    node_ = std::make_shared<rclcpp::Node>("test_service_introspection_node");
-    executor_ = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>();
   }
 
   void TearDown() override
@@ -97,22 +83,49 @@ protected:
     }
   }
 
-  void set_introspection(rcl_service_introspection_state_t state)
+  agnocast::Client<SetBool>::SharedPtr create_client()
   {
-    service_->configure_introspection(node_->get_clock(), rclcpp::ServicesQoS(), state);
+    return agnocast::create_client<SetBool>(
+      node_.get(), kServiceName, rclcpp::ServicesQoS(), new_group());
   }
 
-  void set_client_introspection(rcl_service_introspection_state_t state)
+  agnocast::GenericClient::SharedPtr create_generic_client()
   {
-    client_->configure_introspection(node_->get_clock(), rclcpp::ServicesQoS(), state);
+    return std::make_shared<agnocast::GenericClient>(
+      node_.get(), kServiceName, "std_srvs/srv/SetBool", rclcpp::ServicesQoS(), new_group());
   }
 
-  [[nodiscard]] bool call_service(bool data)
+  agnocast::Service<SetBool>::SharedPtr create_service(bool deferred = false)
   {
-    auto request = client_->borrow_loaned_request();
-    request->data = data;
-    auto future = client_->async_send_request(std::move(request));
-    return future.wait_for(5s) == std::future_status::ready;
+    if (deferred) {
+      return agnocast::create_service<SetBool>(
+        node_.get(), kServiceName,
+        [](
+          agnocast::Service<SetBool>::SharedPtr service,
+          agnocast::ipc_shared_ptr<Request> && request) {
+          auto response = service->borrow_loaned_response(request);
+          response->success = request->data;
+          response->message = "ok";
+          service->send_response(std::move(request), std::move(response));
+        },
+        rclcpp::ServicesQoS(), new_group());
+    }
+
+    return agnocast::create_service<SetBool>(
+      node_.get(), kServiceName,
+      [](
+        agnocast::ipc_shared_ptr<Request> && request,
+        agnocast::ipc_shared_ptr<Response> && response) {
+        response->success = request->data;
+        response->message = "ok";
+      },
+      rclcpp::ServicesQoS(), new_group());
+  }
+
+  template <typename T>
+  void set_introspection(std::shared_ptr<T> target, rcl_service_introspection_state_t state)
+  {
+    target->configure_introspection(node_->get_clock(), rclcpp::ServicesQoS(), state);
   }
 
   std::vector<Event> wait_for_events(size_t expected, std::chrono::milliseconds timeout = 2s)
@@ -136,123 +149,168 @@ protected:
   }
 };
 
-class ServiceIntrospectionTest : public IntrospectionFixture
+[[nodiscard]] bool call_service(std::shared_ptr<agnocast::Client<SetBool>> client, bool data)
 {
-protected:
-  void SetUp() override
-  {
-    IntrospectionFixture::SetUp();
-    service_ = agnocast::create_service<SetBool>(
-      node_.get(), kServiceName,
-      [](
-        agnocast::ipc_shared_ptr<Request> && request,
-        agnocast::ipc_shared_ptr<Response> && response) {
-        response->success = request->data;
-        response->message = "ok";
-      },
-      rclcpp::ServicesQoS(), new_group());
-    start();
-  }
-};
+  auto request = client->borrow_loaned_request();
+  request->data = data;
+  auto future = client->async_send_request(std::move(request));
+  return future.wait_for(5s) == std::future_status::ready;
+}
 
-class DeferredServiceIntrospectionTest : public IntrospectionFixture
+[[nodiscard]] bool call_service(std::shared_ptr<agnocast::GenericClient> client, bool data)
 {
-protected:
-  void SetUp() override
-  {
-    IntrospectionFixture::SetUp();
-    service_ = agnocast::create_service<SetBool>(
-      node_.get(), kServiceName,
-      [](
-        agnocast::Service<SetBool>::SharedPtr service,
-        agnocast::ipc_shared_ptr<Request> && request) {
-        auto response = service->borrow_loaned_response(request);
-        response->success = request->data;
-        response->message = "ok";
-        service->send_response(std::move(request), std::move(response));
-      },
-      rclcpp::ServicesQoS(), new_group());
-    start();
-  }
-};
+  auto request = client->borrow_loaned_request();
+  auto * request_ptr = static_cast<Request *>(request.get());
+  request_ptr->data = data;
+  auto future = client->async_send_request(std::move(request));
+  return future.wait_for(5s) == std::future_status::ready;
+}
+
+void sort_events(std::vector<Event> & events)
+{
+  std::sort(events.begin(), events.end(), [](const Event & a, const Event & b) {
+    return a.info.event_type < b.info.event_type;
+  });
+}
 
 }  // namespace
 
+#define FULL_CHECK_WITH_PAYLOAD \
+  ASSERT_EQ(events.size(), 4u); \
+  EXPECT_EQ(events[0].info.event_type, ServiceEventInfo::REQUEST_SENT); \
+  ASSERT_EQ(events[0].request.size(), 1u);                              \
+  EXPECT_TRUE(events[0].request[0].data);                               \
+  EXPECT_EQ(events[1].info.event_type, ServiceEventInfo::REQUEST_RECEIVED); \
+  ASSERT_EQ(events[1].request.size(), 1u);                                  \
+  EXPECT_TRUE(events[1].request[0].data);                                   \
+  EXPECT_EQ(events[2].info.event_type, ServiceEventInfo::RESPONSE_SENT); \
+  ASSERT_EQ(events[2].response.size(), 1u);                              \
+  EXPECT_TRUE(events[2].response[0].success);                            \
+  EXPECT_EQ(events[2].response[0].message, "ok");                        \
+  EXPECT_EQ(events[3].info.event_type, ServiceEventInfo::RESPONSE_RECEIVED); \
+  ASSERT_EQ(events[3].response.size(), 1u);                                  \
+  EXPECT_TRUE(events[3].response[0].success);                                \
+  EXPECT_EQ(events[3].response[0].message, "ok");
+
 TEST_F(ServiceIntrospectionTest, PublishesNoEventsWhileIntrospectionIsOff)
 {
+  // Arrange
+  auto service = create_service();
+  auto client = create_client();
+
   // Act
-  ASSERT_TRUE(call_service(true));
+  ASSERT_TRUE(call_service(client, true));
 
   // Assert
   EXPECT_TRUE(wait_for_events(1, 500ms).empty());
 }
 
-TEST_F(ServiceIntrospectionTest, ContentsPublishesRequestReceivedAndResponseSentWithPayload)
-{
-  // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-
-  // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(2);
-
-  // Assert
-  ASSERT_EQ(events.size(), 2u);
-  EXPECT_EQ(events[0].info.event_type, ServiceEventInfo::REQUEST_RECEIVED);
-  EXPECT_EQ(events[1].info.event_type, ServiceEventInfo::RESPONSE_SENT);
-
-  ASSERT_EQ(events[0].request.size(), 1u);
-  EXPECT_TRUE(events[0].request[0].data);
-  ASSERT_EQ(events[1].response.size(), 1u);
-  EXPECT_TRUE(events[1].response[0].success);
-  EXPECT_EQ(events[1].response[0].message, "ok");
-}
-
-TEST_F(ServiceIntrospectionTest, BothEventsOfACallCarryTheSequenceNumberOfThatCall)
-{
-  // Arrange: two calls, so a constant cannot pass for a real sequence number.
-  set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
-  ASSERT_TRUE(call_service(true));
-  const auto first = wait_for_events(2);
-  ASSERT_EQ(first.size(), 2u);
-  forget_events();
-
-  // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(2);
-
-  // Assert: a consumer pairs the two events of a call by its sequence number.
-  ASSERT_EQ(events.size(), 2u);
-  EXPECT_EQ(events[0].info.sequence_number, events[1].info.sequence_number);
-  EXPECT_NE(events[0].info.sequence_number, first[0].info.sequence_number);
-}
-
 TEST_F(ServiceIntrospectionTest, MetadataPublishesEventsWithoutPayload)
 {
   // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_METADATA);
+  set_introspection(client, RCL_SERVICE_INTROSPECTION_METADATA);
 
   // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(2);
+  ASSERT_TRUE(call_service(client, true));
+  auto events = wait_for_events(4);
+  sort_events(events);
 
-  // Assert
-  ASSERT_EQ(events.size(), 2u);
+  // Assert: each event type appears once and no payload is included
+  ASSERT_EQ(events.size(), 4u);
+
+  EXPECT_EQ(events[0].info.event_type, ServiceEventInfo::REQUEST_SENT);
   EXPECT_TRUE(events[0].request.empty());
-  EXPECT_TRUE(events[1].response.empty());
+
+  EXPECT_EQ(events[1].info.event_type, ServiceEventInfo::REQUEST_RECEIVED);
+  EXPECT_TRUE(events[1].request.empty());
+
+  EXPECT_EQ(events[2].info.event_type, ServiceEventInfo::RESPONSE_SENT);
+  EXPECT_TRUE(events[2].response.empty());
+
+  EXPECT_EQ(events[3].info.event_type, ServiceEventInfo::RESPONSE_RECEIVED);
+  EXPECT_TRUE(events[3].response.empty());
+}
+
+TEST_F(ServiceIntrospectionTest, ContentsPublishesEventsWithPayload)
+{
+  // Arrange
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  set_introspection(client, RCL_SERVICE_INTROSPECTION_CONTENTS);
+
+  // Act
+  ASSERT_TRUE(call_service(client, true));
+  auto events = wait_for_events(4);
+  sort_events(events);
+
+  // Assert: each event type appears once and payload is as expected.
+  FULL_CHECK_WITH_PAYLOAD;
+}
+
+TEST_F(ServiceIntrospectionTest, EventsOfAServiceCallShareTheSequenceNumber)
+{
+  // Arrange: do the first call to get a sequence number.
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_METADATA);
+  set_introspection(client, RCL_SERVICE_INTROSPECTION_METADATA);
+
+  ASSERT_TRUE(call_service(client, true));
+  auto events = wait_for_events(4);
+  ASSERT_EQ(events.size(), 4u);
+  const int64_t first_seqno = events[0].info.sequence_number;
+  forget_events();
+
+  // Act: do the second call to get another sequence number.
+  ASSERT_TRUE(call_service(client, true));
+  events = wait_for_events(4);
+  ASSERT_EQ(events.size(), 4u);
+  const int64_t second_seqno = events[0].info.sequence_number;
+
+  // Assert: (1) the sequence numbers from the first and second calls are different, and (2) all
+  // events in a single service call share the same sequence number.
+  EXPECT_NE(first_seqno, second_seqno);
+  EXPECT_EQ(second_seqno, events[1].info.sequence_number);
+  EXPECT_EQ(second_seqno, events[2].info.sequence_number);
+  EXPECT_EQ(second_seqno, events[3].info.sequence_number);
+}
+
+TEST_F(ServiceIntrospectionTest, EventsOfAServiceCallShareTheClientGID)
+{
+  // Arrange
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_METADATA);
+  set_introspection(client, RCL_SERVICE_INTROSPECTION_METADATA);
+
+  // Act
+  ASSERT_TRUE(call_service(client, true));
+  const auto events = wait_for_events(4);
+
+  // Assert: All events in a single service call share the same client GID.
+  ASSERT_EQ(events.size(), 4u);
+  EXPECT_EQ(events[0].info.client_gid, events[1].info.client_gid);
+  EXPECT_EQ(events[0].info.client_gid, events[2].info.client_gid);
+  EXPECT_EQ(events[0].info.client_gid, events[3].info.client_gid);
 }
 
 TEST_F(ServiceIntrospectionTest, RaisingFromMetadataToContentsStartsIncludingThePayload)
 {
   // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
-  ASSERT_TRUE(call_service(true));
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_METADATA);
+  ASSERT_TRUE(call_service(client, true));
   ASSERT_EQ(wait_for_events(2).size(), 2u);
   forget_events();
 
   // Act
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-  ASSERT_TRUE(call_service(true));
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  ASSERT_TRUE(call_service(client, true));
   const auto events = wait_for_events(2);
 
   // Assert
@@ -264,14 +322,16 @@ TEST_F(ServiceIntrospectionTest, RaisingFromMetadataToContentsStartsIncludingThe
 TEST_F(ServiceIntrospectionTest, LoweringFromContentsToMetadataStopsIncludingThePayload)
 {
   // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-  ASSERT_TRUE(call_service(true));
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  ASSERT_TRUE(call_service(client, true));
   ASSERT_EQ(wait_for_events(2).size(), 2u);
   forget_events();
 
   // Act
-  set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
-  ASSERT_TRUE(call_service(true));
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_METADATA);
+  ASSERT_TRUE(call_service(client, true));
   const auto events = wait_for_events(2);
 
   // Assert
@@ -280,20 +340,40 @@ TEST_F(ServiceIntrospectionTest, LoweringFromContentsToMetadataStopsIncludingThe
   EXPECT_TRUE(events[1].response.empty());
 }
 
+TEST_F(ServiceIntrospectionTest, SwitchingBackToOffStopsEvents)
+{
+  // Arrange
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  ASSERT_TRUE(call_service(client, true));
+  ASSERT_EQ(wait_for_events(2).size(), 2u);
+  forget_events();
+
+  // Act
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_OFF);
+  ASSERT_TRUE(call_service(client, true));
+
+  // Assert
+  EXPECT_TRUE(wait_for_events(1, 500ms).empty());
+}
+
 TEST_F(ServiceIntrospectionTest, ChangingOnlyTheStateKeepsTheClockIntrospectionWasEnabledWith)
 {
   // Arrange: steady time runs from boot, so its stamps cannot be mistaken for system time.
+  auto service = create_service();
+  auto client = create_client();
   auto steady_clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  service_->configure_introspection(
+  service->configure_introspection(
     steady_clock, rclcpp::ServicesQoS(), RCL_SERVICE_INTROSPECTION_METADATA);
 
   // Act: this call only changes the state, so this clock must be ignored.
-  service_->configure_introspection(
+  service->configure_introspection(
     std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME), rclcpp::ServicesQoS(),
     RCL_SERVICE_INTROSPECTION_CONTENTS);
 
   const auto before = steady_clock->now();
-  ASSERT_TRUE(call_service(true));
+  ASSERT_TRUE(call_service(client, true));
   const auto events = wait_for_events(2);
   const auto after = steady_clock->now();
 
@@ -305,109 +385,54 @@ TEST_F(ServiceIntrospectionTest, ChangingOnlyTheStateKeepsTheClockIntrospectionW
   EXPECT_LE(stamp, after);
 }
 
-TEST_F(ServiceIntrospectionTest, SwitchingBackToOffStopsEvents)
-{
-  // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-  ASSERT_TRUE(call_service(true));
-  ASSERT_EQ(wait_for_events(2).size(), 2u);
-  forget_events();
-
-  // Act
-  set_introspection(RCL_SERVICE_INTROSPECTION_OFF);
-  ASSERT_TRUE(call_service(true));
-
-  // Assert
-  EXPECT_TRUE(wait_for_events(1, 500ms).empty());
-}
-
 TEST_F(ServiceIntrospectionTest, ReEnablingAfterOffPublishesEventsAgain)
 {
   // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-  set_introspection(RCL_SERVICE_INTROSPECTION_OFF);
-  forget_events();
+  auto service = create_service();
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_OFF);
 
   // Act
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
-  ASSERT_TRUE(call_service(true));
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  ASSERT_TRUE(call_service(client, true));
 
   // Assert
   EXPECT_EQ(wait_for_events(2).size(), 2u);
 }
 
-TEST_F(DeferredServiceIntrospectionTest, ADeferredResponsePublishesBothEvents)
+TEST_F(ServiceIntrospectionTest, DeferredServiceSupportsIntrospection)
 {
   // Arrange
-  set_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
+  auto service = create_service(true);
+  auto client = create_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  set_introspection(client, RCL_SERVICE_INTROSPECTION_CONTENTS);
 
   // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(2);
+  ASSERT_TRUE(call_service(client, true));
+  auto events = wait_for_events(4);
+  sort_events(events);
 
   // Assert
-  ASSERT_EQ(events.size(), 2u);
-  EXPECT_EQ(events[0].info.event_type, ServiceEventInfo::REQUEST_RECEIVED);
-  EXPECT_EQ(events[1].info.event_type, ServiceEventInfo::RESPONSE_SENT);
-  ASSERT_EQ(events[1].response.size(), 1u);
-  EXPECT_TRUE(events[1].response[0].success);
+  FULL_CHECK_WITH_PAYLOAD;
 }
 
-TEST_F(ServiceIntrospectionTest, ContentsPublishesRequestSentAndResponseReceivedWithPayload)
+TEST_F(ServiceIntrospectionTest, GenericClientSupportsIntrospection)
 {
   // Arrange
-  set_client_introspection(RCL_SERVICE_INTROSPECTION_CONTENTS);
+  auto service = create_service(true);
+  auto generic_client = create_generic_client();
+  set_introspection(service, RCL_SERVICE_INTROSPECTION_CONTENTS);
+  set_introspection(generic_client, RCL_SERVICE_INTROSPECTION_CONTENTS);
 
   // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(2);
+  ASSERT_TRUE(call_service(generic_client, true));
+  auto events = wait_for_events(4);
+  sort_events(events);
 
-  // Assert: the two events are published from different threads, so look them up by type.
-  ASSERT_EQ(events.size(), 2u);
-  const auto * sent = find_event(events, ServiceEventInfo::REQUEST_SENT);
-  const auto * received = find_event(events, ServiceEventInfo::RESPONSE_RECEIVED);
-  ASSERT_NE(sent, nullptr);
-  ASSERT_NE(received, nullptr);
-
-  ASSERT_EQ(sent->request.size(), 1u);
-  EXPECT_TRUE(sent->request[0].data);
-  ASSERT_EQ(received->response.size(), 1u);
-  EXPECT_TRUE(received->response[0].success);
-  EXPECT_EQ(received->response[0].message, "ok");
-}
-
-TEST_F(ServiceIntrospectionTest, BothSidesTogetherCoverTheWholeExchange)
-{
-  // Arrange: two calls, so a constant cannot pass for a real sequence number.
-  set_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
-  set_client_introspection(RCL_SERVICE_INTROSPECTION_METADATA);
-  ASSERT_TRUE(call_service(true));
-  const auto first = wait_for_events(4);
-  ASSERT_EQ(first.size(), 4u);
-  forget_events();
-
-  // Act
-  ASSERT_TRUE(call_service(true));
-  const auto events = wait_for_events(4);
-
-  // Assert: one call, so the four events share the correlation key a consumer pairs them by.
-  ASSERT_EQ(events.size(), 4u);
-  for (const auto & event : events) {
-    EXPECT_EQ(event.info.sequence_number, events[0].info.sequence_number);
-    EXPECT_EQ(event.info.client_gid, events[0].info.client_gid);
-  }
-  EXPECT_NE(events[0].info.sequence_number, first[0].info.sequence_number);
-
-  std::vector<uint8_t> types;
-  types.reserve(events.size());
-  for (const auto & event : events) {
-    types.push_back(event.info.event_type);
-  }
-  std::sort(types.begin(), types.end());
-  EXPECT_EQ(
-    types, (std::vector<uint8_t>{
-             ServiceEventInfo::REQUEST_SENT, ServiceEventInfo::REQUEST_RECEIVED,
-             ServiceEventInfo::RESPONSE_SENT, ServiceEventInfo::RESPONSE_RECEIVED}));
+  // Assert
+  FULL_CHECK_WITH_PAYLOAD;
 }
 
 #endif  // AGNOCAST_HAS_SERVICE_INTROSPECTION
