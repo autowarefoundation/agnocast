@@ -93,51 +93,56 @@ processes, but it is deliberately omitted. The rationale is as follows:
   underlying kernel objects handle lifetime natively. Finally, CUDA IPC is a legacy interface being
   actively superseded by the CUDA VMM API for this exact reason.
 
-## A publisher grows for size, never for rate
+## A publisher grows for payload size, never for message rate
 
-Sizing an allocation is a guess about a payload size the publisher may not know in advance. Rather
-than fail a borrow that does not fit, a publisher allocates an additional region, and the message
-records which one its payload went into. Additional regions require no coordination between
-processes, precisely because a subscriber maps an unseen region on first receipt.
+Choosing an allocation size requires predicting a payload size that the publisher may not know in
+advance. Rather than failing a borrow request when no existing region can accommodate the payload,
+the publisher allocates an additional region. The resulting message identifies the region containing
+its payload. Adding a region requires no cross-process coordination because a subscriber lazily maps
+a previously unseen region when it first receives a message referring to that region.
 
-Growth answers that question and no other. A borrow can also find no slot for the opposite reason—a
-region sized for the payload exists, but every one of its slots is still held by a message in
-flight—and allocating there would be a mistake. The slot count comes from the publisher's QoS depth,
-so a full region means the node already has as many messages outstanding as it declared it wanted.
-Growing would silently overrule that number, and would answer a consumer that is not keeping up by
-taking more of a resource the whole machine shares. A full region fails the borrow instead, the way
-a full queue drops.
+Region growth serves this purpose alone. A borrow request may also fail for a different reason: a
+region large enough for the payload exists, but all of its slots are still occupied by messages in
+flight. Allocating another region in that situation would be a mistake. The number of slots is
+derived from the publisher's QoS depth, so exhausting them means that the publisher already has at
+least as many outstanding messages as its configured depth allows. Growing the pool would silently
+bypass that limit and respond to a consumer that is not keeping up by consuming more device
+memory—a resource shared across the entire machine. Instead, the borrow request fails, just as an
+enqueue operation fails or a message is dropped when a bounded queue is full.
 
-Growth for size is bounded in turn, because payload sizes can vary without limit while device memory
-cannot. Where a bound has to be enforced, it is enforced where the knowledge sits: only the publisher
-can tell that a region holds no message and may be given up for a differently sized one, since the
-module never sees which region a message was written into.
+Size-driven growth must itself be bounded because payload sizes may vary without a known upper
+limit, whereas device memory is finite. The bound is enforced where the necessary knowledge resides:
+only the publisher can determine that a region no longer contains any live messages and can
+therefore be released in favor of a differently sized region. The kernel module cannot make that
+determination because it never observes which region contains the payload of any particular message.
 
 ## Reclaiming Regions from Departed Publishers
 
-Caching a mapping is what makes processing every frame after the first zero-overhead. However,
-retaining mappings indefinitely causes a subscriber to accumulate mappings—and, because an imported
-handle holds its own driver reference, unfreeable device memory—for every region of every publisher
-it ever encounters. If a publisher is repeatedly restarted by a supervisor, this resource footprint
-would grow without bound.
+A subscriber caches every region it maps and releases one only when both of the following hold:
 
-To prevent this, an imported region is released once two conditions are met:
-
-1. No active references to the region remain within the local subscriber process.
+1. No live reference to the region remains within the subscriber process.
 2. The kernel module no longer recognizes the publisher that exported it.
 
-The second condition makes the release completely safe: because region IDs are never reused, a
-publisher that the module has forgotten can never reference that region again. The first condition
-must be tracked internally by the subscriber process itself, as the module's accounting of in-flight
-messages is not a reliable indicator of what the local process is still actively holding.
+Caching is what makes processing every frame after the first free of overhead. Releasing eventually
+is necessary because an imported handle holds its own driver reference, so a mapping that is never
+released is device memory that can never be freed—accumulated for every region of every publisher
+the subscriber has ever encountered, and unbounded if a supervisor keeps restarting one.
 
-## GPU work stays out of the shared-memory window
+The two conditions divide the question by who is able to answer it. The kernel module knows whether
+the publisher still exists, and because region IDs are never reused, a publisher the module has
+forgotten can never refer to that region again—which is what makes the release final. Only the
+subscriber process knows whether it is still holding the region, because the module's accounting of
+messages in flight does not track what the local process retains.
 
-Everything allocated between borrowing a message and publishing it comes from the process's
-shared-memory mempool—that is how a message's payload gets there. The GPU driver allocates host
-memory of its own on paths the library must call from inside that interval, and left alone, that
-bookkeeping would become a permanent resident of the segment every subscriber maps.
+## GPU metadata processing stays outside the shared-memory allocation window
 
-The library therefore suspends the window around its own work and the driver's, and restores it
-around the caller's. The division is what makes this safe: only the caller's code can allocate
-something that belongs to the message, and only the message's allocations belong in the segment.
+Between borrowing a message and publishing it, host allocations intercepted by the allocator are
+redirected to the process's shared-memory mempool. This is how dynamically allocated parts of the
+message payload are placed in the shared-memory segment. However, the GPU driver may also perform
+internal host allocations while the library processes GPU-related metadata during this interval. If
+those allocations were redirected as well, long-lived driver bookkeeping would unnecessarily consume
+space in a segment mapped by every subscriber.
+
+The library therefore temporarily disables redirection to shared memory while processing GPU-related
+metadata. Allocations made during that processing belong to the library or GPU driver, not to the
+message. Only message-owned allocations should be redirected to the shared-memory segment.
