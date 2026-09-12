@@ -28,7 +28,7 @@ union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
   const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);
 uint32_t get_subscription_count_core(const std::string & topic_name);
-uint32_t get_intra_subscription_count_core(const std::string & topic_name);
+uint32_t get_same_process_subscription_count_core(const std::string & topic_name);
 void increment_borrowed_publisher_num();
 void decrement_borrowed_publisher_num();
 
@@ -117,20 +117,45 @@ public:
   topic_local_id_t get_id() const { return id_; }
 
   /**
-   * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).
+   * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge),
+   * including Agnocast subscribers in the publisher's own process.
+   *
+   * A same-process subscriber that set `ignore_local_publications` is counted even though it never
+   * receives.
    * @return Total subscriber count.
    */
   AGNOCAST_PUBLIC
   uint32_t get_subscription_count() const { return get_subscription_count_core(topic_name_); }
 
   /**
-   * @brief Return the number of Agnocast intra-process subscribers only (excludes ROS 2).
-   * @return Agnocast subscriber count.
+   * @brief Return the number of Agnocast subscribers in the publisher's own process.
+   *
+   * Unlike `rclcpp::Publisher::get_intra_process_subscription_count()`, this does not depend on
+   * `use_intra_process_comms` or on QoS compatibility: Agnocast has no equivalent of rclcpp's
+   * intra-process manager to exclude a subscriber from. The count can therefore be larger than
+   * what rclcpp reports for the same configuration.
+   *
+   * @return Intra-process subscriber count.
    */
   AGNOCAST_PUBLIC
-  uint32_t get_intra_subscription_count() const
+  uint32_t get_intra_process_subscription_count() const
   {
-    return get_intra_subscription_count_core(topic_name_);
+    return get_same_process_subscription_count_core(topic_name_);
+  }
+
+  /**
+   * @brief Return the number of Agnocast subscribers in the publisher's own process.
+   * @deprecated Renamed to get_intra_process_subscription_count(). Note that
+   * get_subscription_count() now includes these subscribers, so adding the two together
+   * double-counts them.
+   * @return Agnocast same-process subscriber count.
+   */
+  [[deprecated(
+    "Renamed to get_intra_process_subscription_count(). Note that get_subscription_count() now "
+    "includes these subscribers, so adding the two together double-counts them.")]]
+  AGNOCAST_PUBLIC uint32_t get_intra_subscription_count() const
+  {
+    return get_intra_process_subscription_count();
   }
 
   /**

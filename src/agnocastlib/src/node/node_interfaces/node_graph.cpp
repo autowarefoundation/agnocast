@@ -139,11 +139,6 @@ std::vector<std::pair<std::string, std::string>> NodeGraph::get_node_names_and_n
 // Counts agnocast and ROS 2 endpoints, excluding the ones created by bridges.
 // agnocast::Node::count_publishers()/count_subscribers() delegate here, so the resolution and the
 // bridge bookkeeping live in one place.
-//
-// Note that count_subscribers() does not see agnocast subscribers in the caller's own process:
-// get_subscription_count_core() reports ret_other_process_subscriber_num, because its original
-// caller (agnocast::Publisher::get_subscription_count()) asks how many peers receive a published
-// message. count_publishers() has no such split.
 size_t NodeGraph::count_publishers(const std::string & topic_name) const
 {
   return get_publisher_count_core(node_base_->resolve_topic_or_service_name(topic_name, false));
