@@ -13,13 +13,13 @@ DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
 
-DEFINE_SPINLOCK(pid_queue_lock);
+DEFINE_RAW_SPINLOCK(pid_queue_lock);
 pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 uint32_t queue_head;
 uint32_t queue_tail;
 
 struct task_struct * worker_task;
-DECLARE_WAIT_QUEUE_HEAD(worker_wait);
+DECLARE_SWAIT_QUEUE_HEAD(worker_wait);
 int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
@@ -255,7 +255,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 
   bool need_wakeup = false;
 
-  spin_lock_irqsave(&pid_queue_lock, flags);
+  raw_spin_lock_irqsave(&pid_queue_lock, flags);
 
   next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
@@ -268,10 +268,10 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
     need_wakeup = true;
   }
 
-  spin_unlock_irqrestore(&pid_queue_lock, flags);
+  raw_spin_unlock_irqrestore(&pid_queue_lock, flags);
 
   if (need_wakeup) {
-    wake_up_interruptible(&worker_wait);
+    swake_up_one(&worker_wait);
   } else {
     dev_warn(
       agnocast_device,
