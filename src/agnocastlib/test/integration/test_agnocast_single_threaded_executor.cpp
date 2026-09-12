@@ -71,6 +71,8 @@ TEST_P(SingleThreadedAgnocastExecutorNoStarvationTest, test_no_starvation)
   spin_thread.join();
 
   // Assert
-  EXPECT_TRUE(test_node_->is_all_ros2_sub_cbs_called());
-  EXPECT_TRUE(test_node_->is_all_agnocast_sub_cbs_called());
+  EXPECT_TRUE(test_node_->is_all_ros2_sub_cbs_called())
+    << test_node_->describe_uncalled_ros2_sub_cbs();
+  EXPECT_TRUE(test_node_->is_all_agnocast_sub_cbs_called())
+    << test_node_->describe_uncalled_agnocast_sub_cbs();
 }

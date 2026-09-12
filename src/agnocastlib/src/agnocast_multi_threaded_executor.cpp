@@ -135,13 +135,19 @@ void MultiThreadedAgnocastExecutor::ros2_spin()
 
     execute_any_executable(any_executable);
 
-    // On rclcpp 28+ (Jazzy), interrupt_guard_condition_ is a shared_ptr.
-    // Wake up threads that may be blocked in wait_for_work() so they can re-check
-    // MutuallyExclusive callback groups whose can_be_taken_from was just restored.
 #if RCLCPP_VERSION_MAJOR >= 28
     if (
       any_executable.callback_group &&
       any_executable.callback_group->type() == rclcpp::CallbackGroupType::MutuallyExclusive) {
+      // On rclcpp 28+ (Jazzy), a rebuild running during this callback drops the group's entities
+      // (can_be_taken_from is false), and the guard condition alone cannot bring them back,
+      // because rmw_fastrtps clears the trigger on a timed-out rmw_wait() and wait_for_work()
+      // ignores the notify waitable on a Timeout result (see issue #3240 in ros2/rclcpp).
+      // Storing the flag after execute_any_executable() has restored can_be_taken_from, and
+      // before the trigger, is what makes the request unlosable. It costs at most one
+      // collect_entities() more than the trigger alone, and can be dropped once the upstream fix
+      // reaches Jazzy.
+      entities_need_rebuild_.store(true);
       interrupt_guard_condition_->trigger();
     }
 #endif

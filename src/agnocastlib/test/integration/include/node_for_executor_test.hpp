@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <vector>
 
 class NodeForExecutorTest : public rclcpp::Node
@@ -14,7 +15,7 @@ private:
 
   // For Agnocast
   std::mutex mutex_for_agnocast_cbg_;
-  bool is_mutually_exclusive_agnocast_ = true;
+  std::atomic<bool> is_mutually_exclusive_agnocast_{true};
   rclcpp::CallbackGroup::SharedPtr agnocast_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr agnocast_timer_;
   std::unique_ptr<std::atomic<bool>[]> agnocast_sub_cbs_called_;
@@ -31,7 +32,7 @@ private:
 
   // For ROS 2
   std::mutex mutex_for_ros2_cbg_;
-  bool is_mutually_exclusive_ros2_ = true;
+  std::atomic<bool> is_mutually_exclusive_ros2_{true};
   rclcpp::CallbackGroup::SharedPtr ros2_common_cbg_ = nullptr;
   rclcpp::TimerBase::SharedPtr ros2_timer_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ros2_pub_;
@@ -55,4 +56,6 @@ public:
   bool is_all_agnocast_sub_cbs_called() const;
   bool is_mutually_exclusive_agnocast() const;
   bool is_mutually_exclusive_ros2() const;
+  std::string describe_uncalled_agnocast_sub_cbs() const;
+  std::string describe_uncalled_ros2_sub_cbs() const;
 };
