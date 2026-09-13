@@ -55,7 +55,7 @@ conversion.
 
 ## The kernel module maintains region lifetime
 
-The module operates exclusively in the control plane, never reading or writing device memory.
+The kernel module operates exclusively in the control plane, never reading or writing device memory.
 
 It performs two critical tasks:
 
@@ -71,14 +71,14 @@ CUDA IPC (`cudaIpcGetMemHandle`), though seemingly the obvious choice for interp
 sharing, is deliberately excluded:
 
 - **Requirement:** Subscribers may still read payloads after their publisher dies, motivating the
-  module's liveness reference. Allocations must therefore outlive their creator.
+  kernel module's liveness reference. Allocations must therefore outlive their creator.
 
 - **Why CUDA VMM and NvSciBuf qualify:** Their backing objects support third-party retention on the
   creator's behalf: file descriptors for CUDA VMM, native reference counting for NvSciBuf. The
-  module retains these, preserving memory after process exit.
+  kernel module retains these, preserving memory after process exit.
 
 - **Why CUDA IPC fails:** Its opaque token does not reference a reference-counted kernel object;
-  neither the module nor another process can retain ownership. Allocations remain exclusively
+  neither the kernel module nor another process can retain ownership. Allocations remain exclusively
   exporter-owned and are freed on exporter exit, leaving importers with dangling device pointers.
 
 - **Required workaround:** Lifetime guarantees would require transferring allocation ownership from
@@ -118,7 +118,7 @@ memory is finite.
 Publishers enforce the bound because only they can determine whether a region contains no live
 messages and can be released for a differently sized region.
 
-The module cannot: it never observes which region holds a particular message's payload.
+The kernel module cannot: it never observes which region holds a particular message's payload.
 
 ## Reclaiming departed publishers' regions
 
@@ -126,7 +126,7 @@ Subscribers cache every mapped region, releasing it only when:
 
 1. No live reference to the region remains within the subscriber process.
 
-2. The module no longer recognizes its exporting publisher.
+2. The kernel module no longer recognizes its exporting publisher.
 
 Caching eliminates overhead after the first frame.
 
@@ -141,8 +141,8 @@ The kernel module knows whether a publisher exists.
 Since region IDs are never reused, a forgotten publisher can never reference that region again,
 making release final.
 
-Only subscribers know their locally retained references; module accounting of in-flight messages
-does not track these.
+Only subscribers know their locally retained references; kernel module accounting of in-flight
+messages does not track these.
 
 ## GPU metadata processing stays outside the shared-memory allocation window
 
