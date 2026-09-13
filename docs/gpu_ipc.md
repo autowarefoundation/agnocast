@@ -1,17 +1,15 @@
 # GPU IPC Design
 
-GPU payloads can be shared across processes without copying their contents. Instead, only a
-reference to the GPU allocation is passed between processes.
+GPU payloads can be shared across processes without copying: messages carry only a region ID and
+slot index identifying the payload.
 
-This reference is deliberately not a pointer. A device address is valid only within the process that
-mapped the allocation, so each process resolves the reference into its own local address space.
+A region is a GPU allocation divided into equal-sized slots.
 
-The underlying physical memory location—whether device memory on a discrete GPU or shared DRAM on an
-SoC—is irrelevant to the design. What matters is that every process can map the same allocation,
-ensuring that the payload is neither moved nor duplicated during sharing.
+This identifier pair deliberately replaces a pointer: device addresses are process-local, so each
+process resolves the pair into its own address space.
 
-This document records the architectural decisions shaping the feature as a whole. Localized
-implementation decisions belong alongside their respective code.
+This document records feature-wide architectural decisions; local implementation decisions belong
+beside their code.
 
 ```text
      Publisher process                                      Subscriber process
@@ -42,106 +40,122 @@ implementation decisions belong alongside their respective code.
                     +------------------------------------------+
 ```
 
-## A message identifies its memory location using a region and a slot
+## Messages identify memory by region and slot
 
-An allocation is divided into equal-sized slots. Borrowing a message reserves a slot and records two
-identifiers within the message: the region to which the slot belongs, and the slot's index within
-that region. Upon receiving its first message from a given publisher, a subscriber reads these
-values and maps the corresponding region. From then on, it resolves every subsequent message into
-its own local address space independently.
+Borrowing reserves a slot and records its region ID and slot index in the message.
 
-Region IDs remain unique throughout the kernel module's lifetime and are never reused. Consequently,
-a message referencing a defunct region resolves to nothing rather than mapping to an unrelated
-allocation. Because these two identifiers originate from another process, they are strictly
-bounds-checked before being converted into an address.
+On receiving a publisher's first message, a subscriber reads these identifiers and maps the region,
+then resolves subsequent messages into its own address space.
 
-## The kernel module holds the region's lifetime
+Region IDs are unique throughout the kernel module's lifetime and never reused, so references to
+defunct regions resolve to nothing, never unrelated allocations.
 
-The module operates strictly within the control plane: it never reads or writes device memory. It
-handles two critical tasks that userspace cannot perform for itself:
+Both identifiers originate in another process and undergo strict bounds checks before address
+conversion.
 
-First, it holds a liveness reference to the allocation, ensuring the memory outlives the process that
-created it. Even if a publisher crashes, a subscriber reading its message is accessing memory that
-remains validly allocated.
+## The kernel module maintains region lifetime
 
-Second, it installs a descriptor for each importer, eliminating the need to pass descriptors between
-processes over side channels.
+The module operates exclusively in the control plane, never reading or writing device memory.
 
-## Why CUDA IPC is Excluded
+It performs two critical tasks:
 
-CUDA IPC (`cudaIpcGetMemHandle`) seems like the obvious candidate for sharing device memory between
-processes, but it is deliberately omitted. The rationale is as follows:
+- Holds an allocation liveness reference so memory outlives its creator, remaining valid for
+  subscribers reading messages even after a publisher crashes.
 
-- **The Requirement:** A subscriber may still be reading a payload when the publisher that created
-  it dies—which is precisely why the module maintains a liveness reference. A mechanism qualifies
-  only if the memory allocation can outlive its creating process.
-- **Why Chosen Mechanisms Qualify:** For both CUDA VMM and NvSciBuf, allocations are backed by
-  objects that a third party can hold on the creator's behalf (a file descriptor for CUDA VMM, and
-  native reference counting for NvSciBuf). The module holds onto these, allowing memory to survive
-  process exit.
-- **Why CUDA IPC Fails:** A CUDA IPC handle is merely an opaque token rather than a handle to a
-  reference-counted kernel object. There is nothing for the module—or any other process—to hold. The
-  allocation remains strictly owned by the exporting process and is freed upon its exit, leaving
-  importers with dangling device pointers.
-- **What Support Would Require:** Restoring lifetime guarantees would require moving allocation
-  ownership out of the publisher. A separate, long-lived central daemon would need to execute every
-  `cudaMalloc` and distribute handles, ensuring the owner never exits while a payload is active.
-- **Why It Isn't Worth It:** Such a daemon introduces a new component to deploy, supervise, and
-  version-match, as well as a single point of failure for all GPU topics. Furthermore, it would
-  exist solely for CUDA IPC, whereas other mechanisms require no such daemon because their
-  underlying kernel objects handle lifetime natively. Finally, CUDA IPC is a legacy interface being
-  actively superseded by the CUDA VMM API for this exact reason.
+- Installs descriptors for importers, eliminating descriptor transfer through interprocess side
+  channels.
 
-## A publisher grows for payload size, never for message rate
+## Why CUDA IPC is excluded
 
-Choosing an allocation size requires predicting a payload size that the publisher may not know in
-advance. Rather than failing a borrow request when no existing region can accommodate the payload,
-the publisher allocates an additional region. The resulting message identifies the region containing
-its payload. Adding a region requires no cross-process coordination because a subscriber lazily maps
-a previously unseen region when it first receives a message referring to that region.
+CUDA IPC (`cudaIpcGetMemHandle`), though seemingly the obvious choice for interprocess device-memory
+sharing, is deliberately excluded:
 
-Region growth serves this purpose alone. A borrow request may also fail for a different reason: a
-region large enough for the payload exists, but all of its slots are still occupied by messages in
-flight. Allocating another region in that situation would be a mistake. The number of slots is
-derived from the publisher's QoS depth, so exhausting them means that the publisher already has at
-least as many outstanding messages as its configured depth allows. Growing the pool would silently
-bypass that limit and respond to a consumer that is not keeping up by consuming more device
-memory—a resource shared across the entire machine. Instead, the borrow request fails, just as an
-enqueue operation fails or a message is dropped when a bounded queue is full.
+- **Requirement:** Subscribers may still read payloads after their publisher dies, motivating the
+  module's liveness reference. Allocations must therefore outlive their creator.
 
-Size-driven growth must itself be bounded because payload sizes may vary without a known upper
-limit, whereas device memory is finite. The bound is enforced where the necessary knowledge resides:
-only the publisher can determine that a region no longer contains any live messages and can
-therefore be released in favor of a differently sized region. The kernel module cannot make that
-determination because it never observes which region contains the payload of any particular message.
+- **Why CUDA VMM and NvSciBuf qualify:** Their backing objects support third-party retention on the
+  creator's behalf: file descriptors for CUDA VMM, native reference counting for NvSciBuf. The
+  module retains these, preserving memory after process exit.
 
-## Reclaiming Regions from Departed Publishers
+- **Why CUDA IPC fails:** Its opaque token does not reference a reference-counted kernel object;
+  neither the module nor another process can retain ownership. Allocations remain exclusively
+  exporter-owned and are freed on exporter exit, leaving importers with dangling device pointers.
 
-A subscriber caches every region it maps and releases one only when both of the following hold:
+- **Required workaround:** Lifetime guarantees would require transferring allocation ownership from
+  publishers to a separate, long-lived central daemon executing every `cudaMalloc` and distributing
+  handles. It must remain alive while any payload is active.
+
+- **Why not:** Such a daemon would introduce a single point of failure across all GPU topics, yet be
+  unnecessary for any backend other than CUDA IPC. These drawbacks, combined with CUDA IPC's legacy
+  status, leave little motivation to support it.
+
+## Publishers grow for payload size, never message rate
+
+Allocation sizing requires predicting potentially unknown payload sizes.
+
+When no existing region fits a payload, the publisher allocates another region instead of failing
+the borrow.
+
+The message identifies its payload's region. Growth requires no interprocess coordination:
+subscribers lazily map unseen regions on first receiving messages referencing them.
+
+Growth serves only this purpose.
+
+Borrowing can also fail when a suitable region exists but every slot holds an in-flight message.
+
+Allocating another region then would be wrong: slot counts derive from publisher QoS depth, so
+exhaustion means outstanding messages already meet or exceed that limit.
+
+Growth would silently bypass it, compensating for a lagging consumer by consuming more machine-wide
+device memory.
+
+Instead, borrowing fails, analogous to failed enqueueing or message dropping in a full bounded
+queue.
+
+Size-driven growth must also be bounded: payload sizes may have no known upper limit, but device
+memory is finite.
+
+Publishers enforce the bound because only they can determine whether a region contains no live
+messages and can be released for a differently sized region.
+
+The module cannot: it never observes which region holds a particular message's payload.
+
+## Reclaiming departed publishers' regions
+
+Subscribers cache every mapped region, releasing it only when:
 
 1. No live reference to the region remains within the subscriber process.
-2. The kernel module no longer recognizes the publisher that exported it.
 
-Caching is what makes processing every frame after the first free of overhead. Releasing eventually
-is necessary because an imported handle holds its own driver reference, so a mapping that is never
-released is device memory that can never be freed—accumulated for every region of every publisher
-the subscriber has ever encountered, and unbounded if a supervisor keeps restarting one.
+2. The module no longer recognizes its exporting publisher.
 
-The two conditions divide the question by who is able to answer it. The kernel module knows whether
-the publisher still exists, and because region IDs are never reused, a publisher the module has
-forgotten can never refer to that region again—which is what makes the release final. Only the
-subscriber process knows whether it is still holding the region, because the module's accounting of
-messages in flight does not track what the local process retains.
+Caching eliminates overhead after the first frame.
+
+Eventual release is necessary because imported handles retain driver references: unreleased mappings
+prevent device-memory reclamation, accumulating across every region of every publisher encountered,
+without bound under repeated supervised restarts.
+
+These conditions reflect who has the necessary knowledge.
+
+The kernel module knows whether a publisher exists.
+
+Since region IDs are never reused, a forgotten publisher can never reference that region again,
+making release final.
+
+Only subscribers know their locally retained references; module accounting of in-flight messages
+does not track these.
 
 ## GPU metadata processing stays outside the shared-memory allocation window
 
-Between borrowing a message and publishing it, host allocations intercepted by the allocator are
-redirected to the process's shared-memory mempool. This is how dynamically allocated parts of the
-message payload are placed in the shared-memory segment. However, the GPU driver may also perform
-internal host allocations while the library processes GPU-related metadata during this interval. If
-those allocations were redirected as well, long-lived driver bookkeeping would unnecessarily consume
-space in a segment mapped by every subscriber.
+Between borrowing and publishing, intercepted host allocations are redirected to the process's
+shared-memory mempool, placing dynamically allocated message payload components in shared memory.
 
-The library therefore temporarily disables redirection to shared memory while processing GPU-related
-metadata. Allocations made during that processing belong to the library or GPU driver, not to the
-message. Only message-owned allocations should be redirected to the shared-memory segment.
+GPU metadata processing during this interval may also trigger internal driver host allocations.
+
+Redirecting these would unnecessarily place long-lived driver bookkeeping in a segment mapped by
+every subscriber.
+
+The library therefore temporarily disables shared-memory redirection during GPU metadata
+processing.
+
+These allocations belong to the library or driver; only message-owned allocations should enter
+shared memory.
