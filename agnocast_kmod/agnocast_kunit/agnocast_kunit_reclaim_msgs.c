@@ -50,9 +50,8 @@ static void publish_once(
 }
 
 // With no subscriber referencing them, publishing already released everything
-// beyond the depth, so a reclaim that follows finds nothing left to do. The
-// point is that it succeeds and reports zero rather than releasing an entry the
-// depth is still meant to retain.
+// beyond the depth: the reclaim must report zero rather than release an entry
+// the depth is still meant to retain.
 void test_case_reclaim_msgs_nothing_to_release(struct kunit * test)
 {
   pid_t pid;
@@ -74,9 +73,9 @@ void test_case_reclaim_msgs_nothing_to_release(struct kunit * test)
 }
 
 // A subscriber holding the oldest entry is what makes publishing unable to
-// release it, which is the state a GPU publisher runs out of slots in. Once the
-// reference is dropped nothing publishes again, so the reclaim is the only thing
-// that can hand the address back.
+// release it -- the state a GPU publisher runs out of slots in. Nothing
+// publishes after the reference is dropped, so only a reclaim can hand the
+// address back.
 void test_case_reclaim_msgs_releases_what_publish_could_not(struct kunit * test)
 {
   pid_t pid;
@@ -125,9 +124,8 @@ void test_case_reclaim_msgs_releases_what_publish_could_not(struct kunit * test)
   memset(&reclaim_args, 0, sizeof(reclaim_args));
   ret = agnocast_ioctl_reclaim_msgs(
     TOPIC_NAME, current->nsproxy->ipc_ns, pid, publisher_id, &reclaim_args);
-  // Exactly one: entries_num is 2 and the depth retains 1, so the release must
-  // take the oldest and stop. A weaker bound would pass while over-releasing --
-  // freeing a message the depth is still meant to hold.
+  // Exactly one: entries_num is 2 and the depth retains 1. A weaker bound would
+  // pass while over-releasing a message the depth is still meant to hold.
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, reclaim_args.ret_released_num, 1u);
   KUNIT_EXPECT_EQ(test, reclaim_args.ret_released_addrs[0], addr);

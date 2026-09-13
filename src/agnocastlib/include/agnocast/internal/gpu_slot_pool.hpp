@@ -8,24 +8,20 @@
 #include <mutex>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace agnocast::internal
 {
 
-// The largest payload a slot can be sized for. Above this a slot size could not
-// be rounded up to the alignment below without overflowing, and a region of that
-// size cannot be allocated anyway.
+// The largest payload a slot can be sized for. Above this the rounding below
+// would overflow, and a region of that size cannot be allocated anyway.
 constexpr uint64_t kMaxGpuPayloadCapacity = 0xFFFFFF00ULL;
 
-// The slot size a region is created with, rounded up from the payload capacity
-// asked for: the next power of two, with a floor of the alignment cudaMalloc
-// guarantees, above which it rounds to that alignment instead. The result is
-// always >= capacity and always a multiple of the alignment, so slot k, which
-// begins at k * slot_size, is aligned too. Requires
-// capacity <= kMaxGpuPayloadCapacity. See the sizing policy in
-// docs/gpu_ipc.md.
+// The slot size a region is created with: the next power of two above the
+// capacity asked for, floored at the alignment cudaMalloc guarantees and rounded
+// to that alignment above 2 GiB. Always >= capacity and always a multiple of the
+// alignment, so slot k, at k * slot_size, is aligned too. Requires
+// capacity <= kMaxGpuPayloadCapacity.
 [[nodiscard]] uint32_t gpu_slot_size_for(uint64_t capacity) noexcept;
 
 // Hands out the slots of one region. Publisher-local: a slot is free exactly
@@ -38,7 +34,7 @@ constexpr uint64_t kMaxGpuPayloadCapacity = 0xFFFFFF00ULL;
 class GpuSlotPool
 {
 public:
-  // `capacity` is the payload size the caller needs to fit. Slots are sized by
+  // `capacity` is the payload size to fit. Slots are sized by
   // gpu_slot_size_for(capacity), so slot_size() may report more than was asked
   // for and an acquire for a somewhat larger payload can still succeed.
   [[nodiscard]] static std::unique_ptr<GpuSlotPool> create(
@@ -74,17 +70,16 @@ private:
     std::string_view topic_name, topic_local_id_t publisher_id, uint32_t region_id,
     uint32_t slot_size, uint32_t slot_count);
 
-  // Owned rather than borrowed: the pool outlives nothing, but it is destroyed
-  // during publisher teardown and the name is needed to release the region then.
+  // Owned rather than borrowed: the name is needed to release the region during
+  // publisher teardown.
   std::string topic_name_;
   topic_local_id_t publisher_id_;
   uint32_t region_id_;
   uint32_t slot_size_;
   uint32_t slot_count_;
   mutable std::mutex mutex_;
-  std::vector<uint32_t> free_slots_;
-  // Which slots are currently out, so that releasing one that is not can be
-  // refused. Sized at construction and never resized.
+  // Which slots are out. Sized at construction and never resized, so a release
+  // between a borrow and its publish cannot allocate from the mempool.
   std::vector<bool> slot_is_out_;
 };
 

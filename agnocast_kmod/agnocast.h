@@ -403,9 +403,8 @@ union ioctl_topic_info_args {
   uint32_t ret_topic_info_ret_num;
 };
 
-// GPU device-memory region sharing. See docs/gpu_ipc.md for the design; the
-// module's part of it is to hold each region's liveness reference and to install
-// a descriptor for it per importer.
+// GPU device-memory region sharing: the module holds each region's liveness
+// reference and installs a descriptor for it per importer. See docs/gpu_ipc.md.
 #define GPU_DEVICE_UUID_SIZE 16
 // Regions a publisher may hold at once. Reaching it is not terminal: a region
 // holding no message can be removed to make room for another.
@@ -413,13 +412,11 @@ union ioctl_topic_info_args {
 
 // The mechanism a region's export uses, mirrored from
 // agnocast::internal::GpuMemoryBackendType. The module acts on the value only to
-// check that the handle it arrives with is the kind that mechanism uses, so a
-// mechanism it does not know is refused rather than passed through.
+// check that the handle is the kind that mechanism uses, so a mechanism it does
+// not know is refused rather than passed through.
 //
 // These values cross the userspace-kernel ABI: never renumber or reuse one. 2 is
-// spoken for by NvSciBuf, whose handle is a blob of bytes rather than a file
-// descriptor; serving it needs an export produced per importer, so it is not a
-// matter of carrying the bytes here. See docs/gpu_ipc.md.
+// spoken for by NvSciBuf, which the module does not implement.
 #define AGNOCAST_GPU_BACKEND_VMM 1
 
 union ioctl_add_gpu_region_args {
@@ -470,10 +467,8 @@ union ioctl_get_gpu_region_args {
 // alone, which are unique for the module's lifetime and never reused, so it
 // needs no publisher or subscriber to authorize against -- and an importer can
 // still ask after the publisher it imported from is gone, which is exactly when
-// it needs to. Answering "no" is final: nothing can bring that id back.
-//
-// Batched because an importer sweeps everything it has mapped at once, and one
-// syscall per region would put the cost on the path that maps a newly seen one.
+// it needs to. Batched because an importer sweeps everything it has mapped at
+// once.
 #define MAX_GPU_REGION_QUERY_NUM 64
 
 union ioctl_gpu_region_exists_args {
@@ -499,14 +494,10 @@ struct ioctl_remove_gpu_region_args
 };
 
 // Releases the caller's own entries that QoS depth no longer retains, reporting
-// their addresses exactly as a publish does. It exists because a GPU publisher
-// reclaims its slots by destroying the messages named here, and a publish is the
-// only other thing that reports them: with every slot in flight there is no
-// message to publish, so without this the publisher could never learn that its
-// slots had become free and would stall for good. See docs/gpu_ipc.md.
-//
-// Host publishing never needs it -- allocation there is bounded only by the
-// process mempool, so a borrow does not fail and the next publish always comes.
+// their addresses exactly as a publish does. A GPU publisher reclaims its slots
+// by destroying the messages named here; a publish is the only other thing that
+// reports them, and a publisher with no free slot has nothing to publish. See
+// docs/gpu_ipc.md.
 union ioctl_reclaim_msgs_args {
   struct
   {

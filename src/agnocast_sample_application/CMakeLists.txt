@@ -201,14 +201,11 @@ install(DIRECTORY launch
 find_package(agnocast_gpu QUIET)
 find_package(sensor_msgs REQUIRED)
 find_package(CUDAToolkit QUIET)
-# check_language reports CUDA availability without enabling it, which
-# enable_language cannot do: CMAKE_CUDA_COMPILER does not exist until after it
-# runs, so testing that variable first silently disables these targets.
+# check_language reports CUDA availability without enabling it; testing
+# CMAKE_CUDA_COMPILER first would silently disable these targets, since it does
+# not exist until then. It only searches PATH and CUDACXX, so seed it from
+# FindCUDAToolkit, which also honours CUDAToolkit_ROOT.
 include(CheckLanguage)
-# check_language only searches PATH and CUDACXX, while FindCUDAToolkit also
-# honours CUDAToolkit_ROOT -- the usual layout in a CUDA container whose
-# entrypoint has not been sourced. Seed it so the samples are not skipped on a
-# machine that plainly has a compiler.
 if(NOT CMAKE_CUDA_COMPILER AND CUDAToolkit_NVCC_EXECUTABLE)
   set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
 endif()
@@ -222,9 +219,8 @@ if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
     target_include_directories(${gpu_target} PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS} ${agnocast_gpu_INCLUDE_DIRS})
     target_link_libraries(${gpu_target} CUDA::cudart)
-    # Replaces the directory-wide options rather than adding to them: nvcc hands
-    # the host compiler its own generated stubs, whose #line directives -Wpedantic
-    # rejects, and the resulting warnings are about generated code.
+    # Replaces the directory-wide options rather than adding to them: -Wpedantic
+    # rejects the #line directives in the stubs nvcc generates.
     set_property(TARGET ${gpu_target} PROPERTY COMPILE_OPTIONS -Wall -Wextra)
     # Samples run on whatever GPU is present, so leave the architecture to nvcc's
     # default rather than pinning one here.

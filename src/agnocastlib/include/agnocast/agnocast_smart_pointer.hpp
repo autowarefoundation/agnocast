@@ -61,11 +61,10 @@ struct control_block
   int64_t entry_id;                     // 8-byte alignment
   std::atomic<uint32_t> ref_count{1U};  // 4-byte alignment
   topic_local_id_t pubsub_id;           // 4-byte alignment
-  // The GPU region this message's payload lives in, held for as long as the
-  // block does, or 0 for a message whose payload is entirely in host memory --
-  // which is every message type but a handful. Lives here rather than beside the
-  // payload handle because copies of an ipc_shared_ptr share one block, and the
-  // region must be held exactly once however many copies exist.
+  // The GPU region this message's payload lives in, or 0 for a host-only
+  // payload. Here rather than beside the payload handle because copies of an
+  // ipc_shared_ptr share one block, and the region must be held exactly once
+  // however many copies exist.
   uint32_t gpu_region_id{0};      // 4-byte alignment
   std::atomic<bool> valid{true};  // 1-byte alignment
 
@@ -158,20 +157,16 @@ class ipc_shared_ptr
   }
 
   // Keeps this process's mapping of the message's GPU region alive for as long
-  // as any handle to the message does. Nothing else can: the kernel module's
-  // entry accounting is dropped by ~SubscriptionBase while userspace may still
-  // hold handles, and the mapping is what a payload address is resolved through,
-  // so releasing it early leaves a live handle pointing into unmapped device
-  // memory. Compiled away entirely for message types whose payload is in host
-  // memory, which is all of them but the GPU ones.
+  // as any handle to the message does. Nothing else can: the kmod's entry
+  // accounting is dropped by ~SubscriptionBase while userspace may still hold
+  // handles, so releasing the mapping on that alone would leave a live handle
+  // pointing into unmapped device memory. Compiled away for host-only types.
   void hold_gpu_region() noexcept
   {
     if constexpr (internal::is_gpu_message_v<T>) {
-      // Received handles only. A publisher's own region is owned by its slot
-      // pool and neither reclamation rule considers it, so a reference here
-      // would buy nothing and cost a lock and a map insert on the borrow path --
-      // where the borrow window is open and the insert would come from the
-      // mempool.
+      // Received handles only: a publisher's own region is owned by its slot
+      // pool, so a reference here would buy nothing and cost a map insert on the
+      // borrow path, where it would come from the mempool.
       if (control_ == nullptr || control_->entry_id == ENTRY_ID_NOT_ASSIGNED) return;
       const uint32_t region_id = ptr_->data.region_id();
       // Recorded only once the reference is held: taking it can fail, and
@@ -411,9 +406,8 @@ public:
           std::terminate();
         }
       }
-      // After the message is done with, and unconditionally: the mapping has to
-      // outlive every use of the payload above. A no-op for a host-only message,
-      // whose region id is 0.
+      // After the message is done with: the mapping has to outlive every use of
+      // the payload above. A no-op for a host-only message, whose id is 0.
       internal::unref_gpu_region(control_->gpu_region_id);
       delete control_;
     }

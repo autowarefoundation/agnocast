@@ -21,16 +21,14 @@
 namespace agnocast::gpu
 {
 
-// Assignment between two of these is deleted. The implicit move-assignment would
-// hand one message's reserved slot to another and leave the first resolving to
-// nothing, and copy-assignment from a plain sensor_msgs value would overwrite
-// every ROS field while leaving the payload handle pointing at the old contents.
-// The publisher fills `data` in directly, which is unaffected.
+// Copy and assignment are deleted: move-assignment would hand one message's
+// reserved slot to another, and assigning a plain sensor_msgs value would
+// overwrite every ROS field while leaving the payload handle pointing at the old
+// contents. The publisher fills `data` in directly, which is unaffected.
 //
-// `data` shadows the ROS type's member of the same name rather than replacing
-// it: the base's vector is still there, empty, and is what generic code handed a
-// `RosMessageT &` will see. Converting a handle to the base type is what makes
-// that reachable, and is why it must not be done.
+// `data` shadows the ROS type's member rather than replacing it: the base's
+// vector is still there, empty, and is what generic code handed a `RosMessageT &`
+// would see -- which is why a handle must never be converted to the base type.
 template <typename RosMessageT>
 struct GpuMessage : public RosMessageT, public agnocast::internal::gpu_message_tag
 {
@@ -50,19 +48,17 @@ using Image = GpuMessage<sensor_msgs::msg::Image>;
 // Size of the device payload, derived from the same fields ROS uses for the host
 // one, so a producer sizes its slots from the message it is already filling in.
 //
-// For a message that has been *received*, `msg.data.size()` is the authoritative
-// extent: it is what the slot bound is checked against, whereas these fields are
-// values a peer wrote into host shared memory and could contradict. So the
-// derived size is never allowed to exceed the payload actually reserved. Reading
-// past the payload would otherwise be an out-of-bounds device read -- which on
-// most drivers poisons the context for the whole process, not just the kernel
-// that did it.
+// On a received message `msg.data.size()` is the authoritative extent -- it is
+// what the slot bound is checked against, whereas these fields are values a peer
+// wrote into host shared memory -- so the derived size is capped by it. Reading
+// past the payload would be an out-of-bounds device read, which on most drivers
+// poisons the context for the whole process.
 namespace detail
 {
 
 // 0 rather than a wrapped product, so an overflow cannot look like a small
-// payload. A received handle caps the result; an unpopulated one (size 0, a
-// message still being built) leaves the derived size alone.
+// payload. An unpopulated handle (size 0, a message still being built) leaves
+// the derived size alone.
 inline size_t bounded_extent(std::initializer_list<uint64_t> factors, const uint64_t reserved)
 {
   uint64_t product = 1;

@@ -374,8 +374,7 @@ struct ioctl_set_ros2_publisher_num_args
   _IOR(0xA6, 19, struct ioctl_check_and_request_bridge_shutdown_args)
 // GPU device-memory region sharing. Mirrors agnocast_kmod/agnocast.h; the two
 // copies are hand-maintained and the major.minor version gate is what stands
-// between a missed edit and silent memory corruption. See docs/gpu_ipc.md
-// for the design.
+// between a missed edit and silent memory corruption. See docs/gpu_ipc.md.
 #define GPU_DEVICE_UUID_SIZE 16
 // Regions a publisher may hold at once. Reaching it is not terminal: a region
 // holding no message can be removed to make room for another.
@@ -436,10 +435,9 @@ union ioctl_get_gpu_region_args {
 #pragma GCC diagnostic pop
 
 // Asks which of the named regions the module still holds. Keyed on region ids
-// alone, which are unique for the module's lifetime and never reused, so it
-// needs no publisher or subscriber to authorize against -- and an importer can
-// still ask after the publisher it imported from is gone, which is exactly when
-// it needs to.
+// alone, so it needs no publisher or subscriber to authorize against -- an
+// importer can still ask after the publisher it imported from is gone, which is
+// exactly when it needs to.
 #define MAX_GPU_REGION_QUERY_NUM 64
 
 #pragma GCC diagnostic push
@@ -472,14 +470,10 @@ struct ioctl_remove_gpu_region_args
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 // Releases the caller's own entries that QoS depth no longer retains, reporting
-// their addresses exactly as a publish does. It exists because a GPU publisher
-// reclaims its slots by destroying the messages named here, and a publish is the
-// only other thing that reports them: with every slot in flight there is no
-// message to publish, so without this the publisher could never learn that its
-// slots had become free and would stall for good. See docs/gpu_ipc.md.
-//
-// Host publishing never needs it -- allocation there is bounded only by the
-// process mempool, so a borrow does not fail and the next publish always comes.
+// their addresses exactly as a publish does. A GPU publisher reclaims its slots
+// by destroying the messages named here; a publish is the only other thing that
+// reports them, and a publisher with no free slot has nothing to publish. See
+// docs/gpu_ipc.md.
 union ioctl_reclaim_msgs_args {
   struct
   {

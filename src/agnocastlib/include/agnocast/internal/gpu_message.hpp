@@ -28,55 +28,36 @@ struct GpuRegionRef
   uint32_t region_id = 0;
 };
 
-// Every region this process has mapped, keyed by the id the kmod assigned it.
-//
-// A mapping lives as long as anything in this process can still refer to it,
-// which is what ref_gpu_region below tracks. A region this process created is
-// then released when its slot pool is destroyed. An imported one is released
-// when either its publisher is gone from the kmod, or the publisher has more
-// regions mapped here than it is allowed to hold at once -- meaning the extra
-// ones were retired. Without that reclamation a subscriber would accumulate a
-// mapping, and a driver reference on the memory behind it, for every region of
-// every publisher it ever saw. docs/gpu_ipc.md sets out both rules.
-class GpuRegionRegistry
-{
-public:
-  static GpuRegionRegistry & instance();
+// The process-wide table of mapped regions, keyed by the id the kmod assigned.
+// A region this process created is released by its slot pool; an imported one
+// once the kmod no longer holds it and nothing here still refers to it.
 
-  [[nodiscard]] bool is_mapped(uint32_t region_id) const;
+[[nodiscard]] bool gpu_region_is_mapped(uint32_t region_id);
 
-  // nullptr when the region is not mapped here, or the slot does not hold
-  // `bytes`. Hot path: called for every access to a message's payload.
-  [[nodiscard]] void * resolve(uint32_t region_id, uint32_t slot_index, uint64_t bytes) const;
+// Subscriber side. Idempotent: returns immediately when the region the message
+// refers to is already mapped. Also the point at which imported regions nothing
+// can refer to any more are released, so that growth in one publisher's regions
+// pays for reclaiming a departed publisher's.
+[[nodiscard]] bool ensure_gpu_region_mapped(const GpuRegionRef & ref);
 
-  // Subscriber side. Idempotent: returns immediately when the region the
-  // message refers to is already mapped. Also the point at which imported
-  // regions nothing can refer to any more are released, so that growth in one
-  // publisher's regions pays for reclaiming a departed publisher's.
-  [[nodiscard]] bool ensure_mapped(const GpuRegionRef & ref);
+// Publisher side. Allocates the region and hands its liveness reference to the
+// kmod, which holds it so the memory outlives this process. Returns the id the
+// kmod assigned, or 0 on failure.
+[[nodiscard]] uint32_t create_gpu_region(
+  std::string_view topic_name, topic_local_id_t publisher_id, uint32_t slot_size,
+  uint32_t slot_count);
 
-  // Publisher side. Allocates the region and hands its liveness reference to the
-  // kmod, which holds it so the memory outlives this process. Returns the id the
-  // kmod assigned, or 0 on failure.
-  [[nodiscard]] uint32_t create(
-    std::string_view topic_name, topic_local_id_t publisher_id, uint32_t slot_size,
-    uint32_t slot_count);
+// Publisher side. Drops the kmod's reference and then this process's mapping.
+// The caller must know that no message refers to the region: a subscriber that
+// already imported it keeps its own reference and reads on, but one that has not
+// will no longer be able to.
+void destroy_gpu_region(
+  std::string_view topic_name, topic_local_id_t publisher_id, uint32_t region_id);
 
-  // Publisher side. Drops the kmod's reference and then this process's mapping.
-  // The caller must know that no message refers to the region: a subscriber that
-  // already imported it keeps its own reference and reads on, but one that has
-  // not will no longer be able to.
-  void destroy(std::string_view topic_name, topic_local_id_t publisher_id, uint32_t region_id);
-
-  // Drops only this process's mapping, leaving the kmod's reference in place for
-  // peers. What a publisher does with a region it will never write again but
-  // cannot declare unreferenced -- the kmod releases its own share once the
-  // messages still in flight drain.
-  void unmap_local(uint32_t region_id);
-
-private:
-  GpuRegionRegistry() = default;
-};
+// Drops only this process's mapping, leaving the kmod's reference in place for
+// peers. What a publisher does with a region it will never write again but
+// cannot declare unreferenced.
+void unmap_gpu_region(uint32_t region_id);
 
 // nullptr when the region is not mapped in this process, or when the slot does
 // not hold `bytes`.
@@ -89,11 +70,10 @@ void release_gpu_slot(uint32_t region_id, uint32_t slot_index) noexcept;
 
 // Records that one received message handle refers to a region, so it is not
 // released while that handle lives. Paired across the lifetime of a
-// subscriber-side control block; both are no-ops for region id 0.
-//
-// ref returns whether the reference was actually taken: it allocates, so it can
-// fail, and a caller that recorded the id anyway would later unreference what it
-// never referenced -- decrementing a count some other live handle owns.
+// subscriber-side control block; both are no-ops for region id 0. ref reports
+// whether the reference was actually taken -- it allocates, so it can fail, and
+// unreferencing what was never referenced would drop a count another live handle
+// owns.
 [[nodiscard]] bool ref_gpu_region(uint32_t region_id) noexcept;
 void unref_gpu_region(uint32_t region_id) noexcept;
 
@@ -139,16 +119,14 @@ public:
     return *this;
   }
 
-  // Const-qualified on the message, const on the way out. A subscriber holds an
-  // ipc_shared_ptr<const MessageT>, so this is the overload it reaches, and its
-  // mapping of the region is read-only: a device pointer that let it write would
-  // fault rather than corrupt, but the type is what says so at the call site.
+  // A subscriber holds an ipc_shared_ptr<const MessageT> and a read-only mapping,
+  // so const is what it reaches; a publisher's own message and mapping are
+  // writable.
   [[nodiscard]] const T * get() const noexcept
   {
     return static_cast<const T *>(resolve_gpu_slot(region_id_, slot_index_, byte_count()));
   }
 
-  // The publisher's own message is non-const, and its mapping is writable.
   [[nodiscard]] T * get() noexcept
   {
     return static_cast<T *>(resolve_gpu_slot(region_id_, slot_index_, byte_count()));
@@ -165,9 +143,9 @@ public:
   [[nodiscard]] topic_local_id_t publisher_id() const noexcept { return publisher_id_; }
 
 private:
-  // count_ is a value a peer wrote into shared memory, so the product is
-  // computed with a guard: an overflowing one would wrap to a small number and
-  // pass the slot bound. The saturated value fails it instead.
+  // count_ is a value a peer wrote into shared memory, so an overflowing product
+  // is saturated rather than wrapped to a small number that would pass the slot
+  // bound.
   [[nodiscard]] uint64_t byte_count() const noexcept
   {
     constexpr uint64_t limit = std::numeric_limits<uint64_t>::max();

@@ -55,9 +55,8 @@ private:
   {
     const size_t bytes = agnocast::gpu::gpu_data_size(*in);
     auto out = publisher_->borrow_loaned_message(bytes);
-    // The capacity overload can fail -- no region could be allocated, or every
-    // slot is still in flight -- and returns an empty handle, which has no
-    // message to dereference. borrow_loaned_message() has already logged why.
+    // The capacity overload can fail and returns an empty handle, having already
+    // logged why.
     if (!out) {
       RCLCPP_WARN(
         get_logger(), "no GPU message available; dropping %s", in->header.frame_id.c_str());
@@ -83,9 +82,8 @@ private:
 
     out->width = *kept_ / out->point_step;
 
-    // Read before publishing: publish() hands the message to the kernel module
-    // and leaves this handle empty, so anything needed afterwards must be copied
-    // out first.
+    // publish() leaves this handle empty, so anything needed afterwards must be
+    // copied out first.
     const uint32_t published_width = out->width;
     publisher_->publish(std::move(out));
 

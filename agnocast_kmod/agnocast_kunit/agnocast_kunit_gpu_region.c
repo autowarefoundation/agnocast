@@ -14,22 +14,19 @@ static const pid_t PUBLISHER_PID = 1000;
 static const pid_t SUBSCRIBER_PID = 1001;
 static const uint32_t QOS_DEPTH = 10;
 // A macro rather than a static: checkpatch rejects a static initialised to
-// false, and CI lints this PR's diff rather than the tree, so the sibling
-// suites' `static const bool` is not a precedent that passes.
+// false, and CI lints this PR's diff rather than the tree.
 #define IS_BRIDGE false
 
 static const uint32_t SLOT_SIZE = 2048;
 static const uint32_t SLOT_COUNT = 4;
 static const uint64_t MAPPED_SIZE = 8192;
 
-// A stand-in for a GPU memory handle. The module never interprets the file, only
-// holds a reference on it, so any file exercises the reference handling. The
-// descriptor install is out of reach here: it depends on the calling process's
-// file table (see gpu_region_e2e.cpp).
+// A stand-in for a GPU memory handle: the module only holds a reference on the
+// file, so any file exercises that. The descriptor install is out of reach here,
+// since it depends on the calling process's file table (see gpu_region_e2e.cpp).
 //
 // An anonymous inode rather than filp_open("/dev/null"): these tests also run
-// under kunit.py, which boots a kernel with no root filesystem mounted, so
-// opening a path would fail and abort most of the suite.
+// under kunit.py, which boots a kernel with no root filesystem mounted.
 static const struct file_operations handle_file_fops = {
   .owner = THIS_MODULE,
 };

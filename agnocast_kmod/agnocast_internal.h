@@ -95,9 +95,7 @@ struct gpu_region_info
   struct file * handle_file;
   // In its publisher's list, and in the module-wide index keyed on region_id.
   // The index is what lets an importer ask whether a region it has mapped still
-  // exists without naming -- or being able to name -- the publisher that
-  // exported it. Ids are unique for the module's lifetime, so the answer is
-  // exact and final.
+  // exists without naming the publisher that exported it.
   struct list_head node;
   struct hlist_node global_node;
 };
@@ -124,9 +122,8 @@ struct publisher_info
 };
 
 // Unlinks a publisher_info and releases everything it owns, including each GPU
-// region's file reference. Every teardown path must go through this rather than
-// freeing the struct itself, or a resource added to publisher_info ends up
-// released on some paths and leaked on others.
+// region's file reference. Every teardown path must go through this, or a
+// resource added to publisher_info ends up leaked on some of them.
 void agnocast_free_publisher_info(struct publisher_info * pub_info);
 
 struct subscriber_info

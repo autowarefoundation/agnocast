@@ -173,8 +173,7 @@ class Subscription : public SubscriptionBase
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       return rosidl_generator_traits::name<MessageT>();
     } else if constexpr (internal::is_gpu_message_v<MessageT>) {
-      // See the matching warning in Publisher: nothing keyed on a ROS type name
-      // can see this subscription, so a ROS 2 publisher will never reach it.
+      // See the matching warning in Publisher.
       RCLCPP_WARN_ONCE(
         logger,
         "a subscription carries a GPU message type, which has no ROS type name: the "

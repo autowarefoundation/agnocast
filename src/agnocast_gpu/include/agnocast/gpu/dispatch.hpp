@@ -23,10 +23,6 @@
 namespace agnocast::gpu
 {
 
-// ---------------------------------------------------------------------------
-// Declarations
-// ---------------------------------------------------------------------------
-//
 // Named reads/writes rather than in/out because a local variable of either name
 // would shadow the function at unqualified lookup and break the call. Transfers
 // are typed so an element count cannot be mistaken for a byte count.
@@ -48,15 +44,13 @@ enum class TransferOptions : uint32_t {
   kNone = 0,
   // Allocate the device-side buffer on the dispatch stream when it is still
   // null, before the work runs. cudaMalloc is synchronous and would stall the
-  // host inside a callback; a stream-ordered allocation does not, so device
-  // scratch can be created where it is used rather than at construction.
+  // host inside a callback; a stream-ordered allocation does not.
   //
   // The caller keeps the pointer and owns it from then on, with two conditions.
   // No size is recorded, so a non-null target is reused as it is: it must be
-  // sized for the largest transfer it will ever carry, or a later, longer one
-  // runs past the allocation. And the null check and the store are the caller's
-  // own variable, unsynchronized, so a target shared by two threads races --
-  // give each thread its own.
+  // sized for the largest transfer it will ever carry. And the null check and
+  // the store are the caller's own variable, unsynchronized, so a target shared
+  // by two threads races -- give each thread its own.
   kAllocateDeviceAsync = 1U << 0,
 };
 
@@ -147,15 +141,12 @@ struct is_declaration<Download> : std::true_type
 {
 };
 
-// Logged as well as returned, because a CUDA failure here means the message a
-// node is about to publish holds whatever was in the slot before.
-//
 // Never throws, and that is load-bearing rather than tidiness: most calls sit
 // between submitting work and waiting for it, and RCLCPP_ERROR allocates --
 // inside the borrow window from the shared-memory mempool, which returns null
 // when exhausted. Unwinding from here would leave a kernel running over a slot
 // whose message is about to be destroyed, handing that slot to the next borrow
-// while the device is still writing it. Losing the log line is the lesser loss.
+// while the device is still writing it.
 inline bool check(cudaError_t status, const char * what) noexcept
 {
   if (status == cudaSuccess) return true;
@@ -166,10 +157,10 @@ inline bool check(cudaError_t status, const char * what) noexcept
   return false;
 }
 
-// Owns a thread's stream and event so they are destroyed when the thread exits.
-// Without this a node that dispatches from short-lived worker threads leaks one
+// Owns a thread's stream and event so they are destroyed when the thread exits;
+// without this a node that dispatches from short-lived worker threads leaks one
 // of each per thread. Errors are ignored: at thread exit during process teardown
-// the driver may already be gone, and there is nothing to report to.
+// the driver may already be gone.
 struct ThreadCudaObjects
 {
   cudaStream_t stream = nullptr;
@@ -221,7 +212,7 @@ inline cudaEvent_t completion_event()
 
 // Pageable host memory makes cudaMemcpyAsync behave synchronously, putting an
 // unexpected host block inside the GPU window.
-inline bool host_buffer_is_pinned(const void * host_ptr)
+inline void warn_if_pageable(const void * host_ptr, const char * declaration)
 {
   // The caller's pending error, if any, is preserved: this probe runs before the
   // work and must not consume state the caller is entitled to read.
@@ -234,7 +225,12 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
       agnocast::logger, "a CUDA error was already pending on entry to dispatch(): %s",
       cudaGetErrorString(pending));
   }
-  return probed == cudaSuccess && attributes.type == cudaMemoryTypeHost;
+  if (probed == cudaSuccess && attributes.type == cudaMemoryTypeHost) return;
+  RCLCPP_WARN_ONCE(
+    agnocast::logger,
+    "%s was given pageable host memory; the copy will block the host. Allocate it with "
+    "cudaMallocHost.",
+    declaration);
 }
 
 // Maps the region the message refers to, if this process has not mapped it yet:
@@ -242,8 +238,7 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
 // one resolves against it. For the publisher's own region this is a lookup.
 //
 // This is the one part of a dispatch that allocates host memory in the driver,
-// which is why run() keeps the borrow window closed across it; see
-// docs/gpu_ipc.md.
+// which is why run() keeps the borrow window closed across it.
 template <typename T>
 bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
 {
@@ -252,10 +247,9 @@ bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
   // The common case -- every frame after the first from a given publisher -- is
   // settled without naming the topic at all. get_topic_name() returns a string
   // by value, and inside the borrow window that copy comes from the
-  // shared-memory mempool, so doing it per frame would put an allocation on the
-  // message path for the sake of a lookup that is about to be skipped.
+  // shared-memory mempool.
   const uint32_t region_id = message->data.region_id();
-  if (region_id != 0 && agnocast::internal::GpuRegionRegistry::instance().is_mapped(region_id)) {
+  if (region_id != 0 && agnocast::internal::gpu_region_is_mapped(region_id)) {
     return message->data.get() != nullptr;
   }
 
@@ -264,7 +258,7 @@ bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
   // the calling process before handing out a descriptor.
   const agnocast::internal::GpuRegionRef ref{
     topic_name, message->data.publisher_id(), message.get_pubsub_id(), region_id};
-  if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
+  if (!agnocast::internal::ensure_gpu_region_mapped(ref)) {
     RCLCPP_ERROR(
       agnocast::logger, "could not map the GPU region of topic '%s'", topic_name.c_str());
     return false;
@@ -288,9 +282,7 @@ bool prepare(const Writes<T> & declaration, cudaStream_t)
   if (!message || message->data.get() != nullptr) return true;
 
   // Otherwise the work would run against a null device pointer, or be skipped
-  // with no trace: the two ways to get here -- a message borrowed without the
-  // capacity overload, and one whose region is gone -- are both silent
-  // everywhere else.
+  // with no trace: the two ways to get here are both silent everywhere else.
   RCLCPP_ERROR(
     agnocast::logger,
     "the GPU payload of a message declared with writes() does not resolve: it was not borrowed "
@@ -325,12 +317,7 @@ bool issue_upload(const T &, cudaStream_t)
 }
 inline bool issue_upload(const Upload & u, cudaStream_t s)
 {
-  if (!host_buffer_is_pinned(u.host_src)) {
-    RCLCPP_WARN_ONCE(
-      agnocast::logger,
-      "uploads() was given pageable host memory; the copy will block the host and its cost will "
-      "be counted as GPU time. Allocate it with cudaMallocHost.");
-  }
+  warn_if_pageable(u.host_src, "uploads()");
   return check(
     cudaMemcpyAsync(*u.device_dst, u.host_src, u.bytes, cudaMemcpyHostToDevice, s), "upload");
 }
@@ -342,12 +329,7 @@ bool issue_download(const T &, cudaStream_t)
 }
 inline bool issue_download(const Download & d, cudaStream_t s)
 {
-  if (!host_buffer_is_pinned(d.host_dst)) {
-    RCLCPP_WARN_ONCE(
-      agnocast::logger,
-      "downloads() was given pageable host memory; the copy will block the host. Allocate it with "
-      "cudaMallocHost.");
-  }
+  warn_if_pageable(d.host_dst, "downloads()");
   return check(
     cudaMemcpyAsync(d.host_dst, *d.device_src, d.bytes, cudaMemcpyDeviceToHost, s), "download");
 }
@@ -360,20 +342,17 @@ bool run(Tuple && parts, std::index_sequence<I...>)
     (is_declaration<std::decay_t<std::tuple_element_t<I, std::decay_t<Tuple>>>>::value && ...),
     "every argument before the last must be reads(), writes(), uploads() or downloads()");
 
-  // Everything this function does outside the caller's callable is the library's
-  // own work or the driver's, and none of it belongs to the message, so it is
-  // kept out of the shared-memory mempool: creating this thread's stream and
-  // event, mapping a region on first receipt, the stream-ordered allocator's
-  // pool. Without this the first submission on a thread would leave the driver's
-  // one-time bookkeeping in the segment for the life of the process -- and on an
-  // executor that owns its callback threads there is no earlier moment at which
-  // to do it instead.
+  // Everything outside the caller's callable is the library's own work or the
+  // driver's, so it is kept out of the shared-memory mempool: this thread's
+  // stream and event, mapping a region on first receipt, the stream-ordered
+  // allocator's pool. On an executor that owns its callback threads there is no
+  // earlier moment at which to do that instead.
   //
   // An optional rather than a unique_ptr, because the window has to be reopened
   // around the caller's callable and a unique_ptr allocates to do it: `operator
   // new` runs before the constructor that closes the window, so the allocation
-  // lands in the very mempool this exists to keep out of, and throws there when
-  // it is exhausted. emplace() constructs in place and does neither.
+  // would land in the very mempool this exists to keep out of. emplace()
+  // constructs in place and does neither.
   std::optional<agnocast::internal::SuspendedBorrowWindow> suspended;
   suspended.emplace();
 
@@ -382,15 +361,11 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   if (s == nullptr || done == nullptr) return false;
 
   // Armed before anything reaches the stream, because preparing a declaration
-  // already queues work: a stream-ordered allocation for an upload, and a region
-  // mapping that can throw from the string and the log line it takes. From here
-  // the device may be touching the message's slot, so every path out of this
-  // function has to wait for it first -- an exception as much as a return.
-  // Unwinding with work still in flight would let the slot be returned to its
-  // pool and handed to the next borrow while the device is still writing it. The
-  // caller's callable is the obvious way that happens, but not the only one:
-  // every RCLCPP_* call below allocates, and inside the borrow window that is
-  // the mempool, which throws when exhausted.
+  // already queues work. From here the device may be touching the message's
+  // slot, so every path out of this function has to wait for it first -- an
+  // exception as much as a return, since unwinding with work still in flight
+  // would let the slot be handed to the next borrow while the device is still
+  // writing it.
   //
   // The guard closes the window itself rather than leaning on `suspended`:
   // guards are destroyed before objects declared above them, so when the
@@ -413,8 +388,7 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   if (!ok) {
     // Running the work anyway would compute over a buffer an upload failed to
     // fill, and the result would then be published: a caller is invited to
-    // ignore this function's result, so the frame has to be abandoned here
-    // rather than completed with whatever the buffer held.
+    // ignore this function's result, so the frame has to be abandoned here.
     RCLCPP_ERROR(agnocast::logger, "not submitting GPU work: a declared transfer failed");
     return false;
   }

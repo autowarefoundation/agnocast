@@ -43,8 +43,8 @@ void agnocast_free_publisher_info(struct publisher_info * pub_info)
   struct gpu_region_info * tmp_region;
   list_for_each_entry_safe(region, tmp_region, &pub_info->gpu_regions, node)
   {
-    // Dropping this reference is what eventually returns the device memory to
-    // the driver, once every importer has closed its own descriptor.
+    // The memory returns to the driver once every importer has closed its own
+    // descriptor too.
     fput(region->handle_file);
     list_del(&region->node);
     hash_del(&region->global_node);

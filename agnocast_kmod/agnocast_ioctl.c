@@ -784,9 +784,8 @@ unlock:
 
 // Releases the oldest unreferenced entries of one publisher beyond its QoS
 // depth, reporting their addresses so the caller can free the messages. Takes
-// the output fields rather than an args union because two ioctls need it: a
-// publish, and a reclaim that runs when a GPU publisher has no slot left. The
-// depth semantics are therefore the same for both by construction.
+// the output fields rather than an args union because both a publish and a
+// reclaim need it, so the depth semantics are the same for the two.
 static int release_msgs_to_meet_depth(
   struct topic_wrapper * wrapper, struct publisher_info * pub_info, uint32_t * ret_released_num,
   uint64_t * ret_released_addrs)
@@ -2559,8 +2558,7 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
 
 // Zero is reserved: it means "any" to GET and is refused by REMOVE, so a region
-// that was handed it would be unremovable and would answer every "any" lookup.
-// The counter is 32-bit, so say so rather than assume it never wraps.
+// handed it would be unremovable and would answer every "any" lookup.
 static uint32_t allocate_gpu_region_id(void)
 {
   uint32_t id;
@@ -2572,10 +2570,8 @@ static uint32_t allocate_gpu_region_id(void)
   return id;
 }
 
-// Checks that the handle is the kind the declared mechanism uses. A mismatch
-// would only surface in the importer, which cannot report it back. A mechanism
-// the module does not implement is refused here rather than registered and
-// discovered to be unusable by whoever imports it.
+// Checks that the handle is the kind the declared mechanism uses: a mismatch
+// would otherwise surface only in the importer, which cannot report it back.
 static int validate_gpu_handle(const uint32_t backend_type, const struct file * handle_file)
 {
   if (backend_type == AGNOCAST_GPU_BACKEND_VMM) {
@@ -2584,11 +2580,11 @@ static int validate_gpu_handle(const uint32_t backend_type, const struct file * 
   return -EINVAL;
 }
 
-// Only the owning process may register or release memory in a publisher's name,
-// and only while it is still that process: a publisher_info outlives a publisher
-// that exited with messages still referenced, so without the liveness check a
-// recycled pid could act in its name. The same pairing guards the host data path
-// (see set_publisher_shm_info).
+// Only the owning process may act in a publisher's name, and only while it is
+// still that process: a publisher_info outlives a publisher that exited with
+// messages still referenced, so without the liveness check a recycled pid could
+// act in its name. The host data path pairs the two the same way (see
+// set_publisher_shm_info).
 static bool caller_owns_live_publisher(const struct publisher_info * pub_info, const pid_t pid)
 {
   const struct process_info * pub_proc = agnocast_find_process_info(pub_info->pid);
@@ -2631,15 +2627,11 @@ int agnocast_ioctl_add_gpu_region(
     return ret;
   }
 
-  // Allocated before the locks are taken. Nothing here depends on what they
-  // protect, and a GFP_KERNEL allocation can enter direct reclaim: doing it
-  // under topic->rwsem would stall every publish and receive on the topic for
-  // the duration of a cold control-plane call.
+  // Allocated before the locks are taken: a GFP_KERNEL allocation can enter
+  // direct reclaim, which under topic->rwsem would stall every publish and
+  // receive on the topic.
   struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
   if (!region) return -ENOMEM;
-
-  // Exclusive rather than shared: this inserts into the module-wide region
-  // index, not just into the topic. Both are cold control-plane calls.
 
   region->backend_type = args->backend_type;
   region->slot_size = args->slot_size;
@@ -2649,6 +2641,8 @@ int agnocast_ioctl_add_gpu_region(
   region->handle_file = handle_file;
   region->region_id = allocate_gpu_region_id();
 
+  // Exclusive rather than shared: this inserts into the module-wide region index
+  // as well as into the topic.
   down_write(&global_htables_rwsem);
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
@@ -2729,17 +2723,9 @@ int agnocast_ioctl_get_gpu_region(
   // The caller must be a subscriber of this topic, in the process it claims to
   // be. A descriptor is the only way to reach a GPU payload -- there is no named
   // object a bystander can open -- so this check is what stands between a peer
-  // on the topic and any other process on the machine.
-  //
-  // Note that this makes GPU payloads less reachable than host ones, not more: a
-  // publisher's host shared memory is a named object left world-readable, so the
-  // module's bookkeeping there governs delivery and lifetime rather than who may
-  // read. The difference follows from the mechanism rather than from a policy
-  // choice, but it is the GPU side that is the stricter of the two.
-  //
-  // It is a boundary, not a sandbox. The module cannot establish that a
-  // descriptor handed to it is GPU memory at all, and the read-only access an
-  // importer ends up with is imposed by the importing library rather than here.
+  // on the topic and any other process on the machine. It is a boundary, not a
+  // sandbox: the read-only access an importer ends up with is imposed by the
+  // importing library rather than here.
   const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
   if (!sub_info || sub_info->pid != pid) {
     dev_warn(
@@ -2830,11 +2816,8 @@ int agnocast_ioctl_reclaim_msgs(
   }
 
   // Only the owning process may have its messages freed on its behalf: the
-  // addresses reported here are passed straight to delete by the caller, and
-  // they lie in the publisher's mempool. The liveness half matters as much as
-  // the pid: a publisher_info outlives a publisher that exited with messages
-  // still referenced, so a recycled pid could otherwise be handed a dead
-  // process's addresses to free.
+  // addresses reported here lie in the publisher's mempool and are passed
+  // straight to delete by the caller.
   if (!caller_owns_live_publisher(pub_info, pid)) {
     dev_warn(
       agnocast_device,
@@ -2894,8 +2877,8 @@ int agnocast_ioctl_remove_gpu_region(
   // release memory it is still writing into.
   if (region_id == 0) return -EINVAL;
 
-  // Exclusive rather than shared: this removes from the module-wide region
-  // index as well as from the topic.
+  // Exclusive rather than shared: this removes from the module-wide region index
+  // as well as from the topic.
   down_write(&global_htables_rwsem);
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
@@ -3390,8 +3373,8 @@ static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
   int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
   if (ret) return ret;
 
-  // Resolving the descriptor here rather than in the core keeps the core free of
-  // any dependency on the calling process's file table.
+  // Resolved here rather than in the core, which then depends on nothing in the
+  // calling process's file table.
   struct file * handle_file = NULL;
   if (args.handle_fd >= 0) {
     handle_file = fget(args.handle_fd);
@@ -3486,15 +3469,11 @@ static long reclaim_msgs_cmd(union ioctl_reclaim_msgs_args __user * arg)
   const topic_local_id_t publisher_id = args.publisher_id;
 
   ret = agnocast_ioctl_reclaim_msgs(topic_name_buf, ipc_ns, pid, publisher_id, &args);
-  // Reported even on error: the release that filled these in has already erased
-  // the entries, so an error return that skipped the copy would leave the caller
-  // unable to free messages the module has stopped tracking -- for a GPU
-  // publisher, slots that never come back.
+  // Reported even on error, and nothing here can be undone: the release has
+  // already erased the entries, so an address that does not reach the caller is
+  // a message it can never free.
   if (ret < 0 && args.ret_released_num == 0) return ret;
 
-  // A failure here loses the addresses, so the caller never frees those
-  // messages: their memory and, for a GPU publisher, their slots stay held until
-  // the process exits. Nothing can undo the release, since the entries are gone.
   if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
   return 0;
 }

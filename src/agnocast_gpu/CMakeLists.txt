@@ -7,22 +7,19 @@ find_package(rclcpp REQUIRED)
 find_package(rcpputils REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
-# No CUDA library is linked: driver symbols are resolved with
-# dlopen("libcuda.so.1") at run time (see src/cuda_driver_loader.hpp). The
-# toolkit is still required to *build*, because the headers keep struct layouts
-# such as CUmemAllocationProp authoritative rather than hand-replicated, and
-# because FindCUDAToolkit requires nvcc and cudart to report success. Without it
-# this package is skipped instead of failing the workspace build, matching how
-# the CUDA samples are handled.
+# No CUDA library is linked: driver symbols are resolved with dlopen at run time
+# (see src/cuda_driver_loader.hpp). The toolkit is still needed to *build*, for
+# its headers. Without it this package is skipped rather than failing the
+# workspace build.
 find_package(CUDAToolkit QUIET)
 if(NOT CUDAToolkit_FOUND)
   message(WARNING
     "agnocast_gpu: the CUDA toolkit was not found; building headers only. "
     "GPU messages will be unavailable in this workspace: any process that asks "
     "for one gets a clear error when libagnocast_gpu.so fails to load.")
-  # The headers are installed even so, because a dependent compiled against this
-  # prefix on a machine that *does* have CUDA would otherwise fail on a missing
-  # include, far from the cause. Only the backend library is absent.
+  # The headers are installed even so: a dependent compiled against this prefix
+  # on a machine that does have CUDA would otherwise fail on a missing include,
+  # far from the cause. Only the backend library is absent.
   install(DIRECTORY include/ DESTINATION include)
   ament_export_include_directories(include)
   ament_export_dependencies(agnocastlib rclcpp rcpputils sensor_msgs)
@@ -39,10 +36,9 @@ target_include_directories(agnocast_gpu PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 
 ament_target_dependencies(agnocast_gpu agnocastlib rclcpp rcpputils sensor_msgs)
 
-# Deliberately NOT linked against CUDA::cuda_driver. The stub library the toolkit
-# ships satisfies the linker while providing no driver behind it, which would
-# turn a missing driver into a confusing runtime failure instead of the explicit
-# diagnostic the loader produces.
+# Deliberately NOT linked against CUDA::cuda_driver: the toolkit's stub library
+# satisfies the linker with no driver behind it, turning a missing driver into a
+# confusing runtime failure instead of the loader's explicit diagnostic.
 target_link_libraries(agnocast_gpu ${CMAKE_DL_LIBS})
 
 install(DIRECTORY include/ DESTINATION include)
@@ -59,10 +55,8 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
 
   # Exercises the cross-process path, so it needs both the kernel module and a
-  # GPU. Labelled so the default run excludes it, matching how agnocastlib
-  # separates tests that cannot run unattended. The label covers the module; the
-  # GPU it cannot, so the test reports a skip when there is no backend and
-  # SKIP_RETURN_CODE keeps that out of the failure count.
+  # GPU. The label covers the module; for the GPU the test reports a skip when
+  # there is no backend, which SKIP_RETURN_CODE keeps out of the failure count.
   add_executable(gpu_region_e2e test/gpu_region_e2e.cpp)
   target_include_directories(gpu_region_e2e PRIVATE src ${CUDAToolkit_INCLUDE_DIRS})
   target_link_libraries(gpu_region_e2e agnocast_gpu CUDA::cudart)
@@ -72,11 +66,10 @@ if(BUILD_TESTING)
     LABELS "requires_kernel_module"
     SKIP_RETURN_CODE 77)
 
-  # No GPU required: these cover descriptor ownership, slot arithmetic and the
-  # library-constructor registration, all of which must work on a machine with
-  # no driver.
-  # cudart only for the read-back that proves an imported mapping is usable; the
-  # GPU-free cases above it still run where there is no device.
+  # Mostly GPU-free: descriptor ownership, geometry checks and the
+  # library-constructor registration all have to work on a machine with no
+  # driver. cudart is only for the read-back that proves an imported mapping is
+  # usable.
   ament_add_gmock(test_agnocast_gpu test/test_gpu_backend.cpp)
   target_include_directories(test_agnocast_gpu PRIVATE src ${CUDAToolkit_INCLUDE_DIRS})
   target_link_libraries(test_agnocast_gpu agnocast_gpu CUDA::cudart)

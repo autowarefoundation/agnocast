@@ -8,6 +8,7 @@
 
 #include <cuda.h>
 
+#include <array>
 #include <mutex>
 #include <optional>
 
@@ -33,10 +34,9 @@ private:
     void * base, const agnocast::internal::GpuRegionGeometry & geometry,
     uint64_t backend_token) noexcept override;
 
-  // Binds the context for one operation. Push/pop rather than set, because a
-  // context binding belongs to the calling thread and these operations run on
-  // whichever executor thread delivered the message, which must not disturb a
-  // binding the user's own code established.
+  // Binds the context for one operation. Push/pop rather than set: these run on
+  // whichever executor thread delivered the message, and must not disturb a
+  // binding the user's own code established on it.
   class ScopedContext
   {
   public:
@@ -57,10 +57,9 @@ private:
   // has succeeded, so every entry point that allocates or maps calls it first.
   [[nodiscard]] bool ensure_context() const;
 
-  // Resolves the driver and the device without retaining a context. Split out
-  // because answering "can this machine share GPU memory at all?" needs no
-  // context, and creating one costs over a hundred megabytes that a process
-  // which turns out to be unsupported would then hold for its lifetime.
+  // Split out from ensure_context because answering "can this machine share GPU
+  // memory at all?" needs no context, and creating one costs over a hundred
+  // megabytes that an unsupported process would then hold for its lifetime.
   [[nodiscard]] bool ensure_device() const;
 
   [[nodiscard]] bool has_attribute(CUdevice_attribute attr, int number, const char * name) const;

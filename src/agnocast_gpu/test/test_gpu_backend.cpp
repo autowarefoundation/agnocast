@@ -17,7 +17,6 @@ using agnocast::internal::GpuRegionGeometry;
 using agnocast::internal::is_consistent;
 using agnocast::internal::MappedGpuRegion;
 using agnocast::internal::UniqueFd;
-using agnocast::internal::VmmExportHandle;
 
 namespace
 {
@@ -108,21 +107,20 @@ TEST(GpuRegionGeometryTest, RejectsSlotsThatDoNotFitTheMapping)
   EXPECT_FALSE(is_consistent(GpuRegionGeometry{2048, 0, 8192, {}}));
 }
 
-TEST(GpuRegionExportTest, HandleIsMoveOnlyAndTyped)
+TEST(GpuRegionExportTest, HandleIsMoveOnly)
 {
   static_assert(
     !std::is_copy_constructible_v<GpuRegionExport>,
     "a copyable export would duplicate handle ownership");
 
   GpuRegionExport exported;
-  EXPECT_TRUE(std::holds_alternative<std::monostate>(exported.handle));
+  EXPECT_FALSE(exported.handle.valid());
 
-  exported.handle = VmmExportHandle{UniqueFd(make_test_fd())};
-  const int raw = std::get<VmmExportHandle>(exported.handle).fd.get();
+  exported.handle = UniqueFd(make_test_fd());
+  const int raw = exported.handle.get();
 
   const GpuRegionExport moved = std::move(exported);
-  ASSERT_TRUE(std::holds_alternative<VmmExportHandle>(moved.handle));
-  EXPECT_EQ(std::get<VmmExportHandle>(moved.handle).fd.get(), raw);
+  EXPECT_EQ(moved.handle.get(), raw);
   EXPECT_TRUE(fd_is_open(raw));
 }
 
@@ -183,8 +181,7 @@ TEST(VmmBackendGpuTest, CreateExportImportRoundTrip)
   // The mechanism an importer selects on, and the value the module checks the
   // handle against, so it crosses the ABI and is worth asserting here.
   EXPECT_EQ(exported->backend, GpuMemoryBackendType::Vmm);
-  ASSERT_TRUE(std::holds_alternative<VmmExportHandle>(exported->handle));
-  EXPECT_TRUE(std::get<VmmExportHandle>(exported->handle).fd.valid());
+  EXPECT_TRUE(exported->handle.valid());
   EXPECT_EQ(exported->geometry.mapped_size, region.geometry().mapped_size);
   EXPECT_EQ(exported->geometry.device_uuid, region.geometry().device_uuid);
 

@@ -17,9 +17,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <mutex>
 
 namespace agnocast
@@ -38,9 +36,7 @@ union ioctl_publish_msg_args publish_core(
   const uint64_t msg_virtual_address,
   std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs);
 // Releases the caller's own entries that QoS depth no longer retains, without
-// publishing anything, and reports their addresses for the caller to free. The
-// GPU borrow path uses it to recover slots when it has none left; the host path
-// never needs it, because a borrow there cannot fail for want of room.
+// publishing anything, and reports their addresses for the caller to free.
 union ioctl_reclaim_msgs_args reclaim_msgs_core(
   const std::string & topic_name, const topic_local_id_t publisher_id);
 uint32_t get_subscription_count_core(const std::string & topic_name);
@@ -51,30 +47,24 @@ void decrement_borrowed_publisher_num();
 extern int agnocast_fd;
 extern "C" uint32_t agnocast_get_borrowed_publisher_num();
 
-// Defined in agnocast_publisher.cpp. Declared here with the same TLS model as
-// the definition on purpose: a global-dynamic reference from another
-// translation unit would resolve through __tls_get_addr, which can allocate,
-// which is the recursion the definition's comment warns about.
+// The same TLS model as the definition on purpose: a global-dynamic reference
+// from another translation unit would resolve through __tls_get_addr, which can
+// allocate -- the recursion the definition's comment warns about.
 extern __attribute__((tls_model("initial-exec"))) thread_local uint32_t borrowed_publisher_num;
 
 namespace internal
 {
 
-// Suspends this thread's borrow window for as long as it is alive, so that
-// allocations made meanwhile come from the process heap instead of the
-// shared-memory mempool.
-//
-// The window exists so that a message's payload lands in shared memory. But
-// anything else allocated while it is open lands there too, and the GPU driver
-// allocates host memory of its own on paths the library has to call from inside
-// it -- creating a stream, importing a region. Left alone, that bookkeeping
-// becomes a permanent resident of the segment every subscriber maps.
+// Suspends this thread's borrow window while it is alive, so that allocations
+// made meanwhile come from the process heap rather than the shared-memory
+// mempool. Used around driver calls the library must make from inside the
+// window, whose host-side bookkeeping would otherwise become a permanent
+// resident of the segment every subscriber maps.
 //
 // Only code that allocates nothing belonging to the message may be wrapped:
-// suspending the window around a step that does would put part of a message in
-// this process's heap, where a peer resolving it would find nothing. That rules
-// out wrapping user callbacks, and makes this an internal tool rather than an
-// API.
+// doing so around a step that does would put part of a message in this
+// process's heap, where a peer resolving it would find nothing. That rules out
+// user callbacks, and is why this is internal rather than an API.
 class SuspendedBorrowWindow
 {
 public:
@@ -137,77 +127,24 @@ protected:
   topic_local_id_t id_ = -1;
   uint32_t qos_depth_ = 1;
   // Grown on demand rather than fixed. The first is created on the first GPU
-  // borrow.
+  // borrow. Defined in agnocast_publisher.cpp.
   mutable std::mutex gpu_pools_mtx_;
   std::vector<std::unique_ptr<internal::GpuSlotPool>> gpu_pools_;
 
-  // One slot per message that may be in flight, plus one being filled. KeepAll
-  // reports a depth of 0, which would size a region for a single message. This
-  // is the bound on messages in flight, not merely a starting size: regions are
-  // added when the payload outgrows them, never to hold more messages at once.
-  uint32_t gpu_slot_count() const { return std::max(qos_depth_, 1U) + 1; }
+  // Reserves a slot for a `capacity`-byte payload, allocating a region -- or
+  // retiring an idle one to make room for it -- when no existing region fits.
+  // nullptr when every fitting region is full, or when no region of that size
+  // could be provided.
+  internal::GpuSlotPool * acquire_gpu_slot(size_t capacity, uint32_t & slot_index);
 
-  // The first region whose slots fit `capacity` and has one free, or nullptr.
-  // Costs nothing but a scan of a list that is at most
-  // MAX_GPU_REGION_NUM_PER_PUBLISHER long. Caller holds gpu_pools_mtx_.
-  internal::GpuSlotPool * try_acquire_gpu_slot(const size_t capacity, uint32_t & slot_index)
-  {
-    for (const auto & candidate : gpu_pools_) {
-      if (candidate->acquire(capacity, slot_index)) return candidate.get();
-    }
-    return nullptr;
-  }
+  // Reports which of the two reasons a borrow failed for, since they call for
+  // different fixes. Caller does not hold gpu_pools_mtx_.
+  void report_gpu_borrow_failure(size_t capacity) const;
 
-  // Adds a region sized for `capacity` and takes a slot in it, or nullptr.
-  // Caller holds gpu_pools_mtx_ and has checked the region cap.
-  internal::GpuSlotPool * grow_gpu_pool(const size_t capacity, uint32_t & slot_index)
-  {
-    auto grown = internal::GpuSlotPool::create(topic_name_, id_, capacity, gpu_slot_count());
-    if (grown == nullptr) {
-      RCLCPP_ERROR(
-        logger,
-        "could not allocate a GPU region for a %zu byte payload on topic '%s' (%zu region(s) "
-        "held). See the GPU backend errors above for the cause.",
-        capacity, topic_name_.c_str(), gpu_pools_.size());
-      return nullptr;
-    }
+  // Whether any region's slots are large enough for `capacity`, regardless of
+  // whether one is free. Caller holds gpu_pools_mtx_.
+  [[nodiscard]] bool has_gpu_region_fitting(size_t capacity) const;
 
-    // Handed to the vector before a slot is taken. push_back allocates, and a
-    // throw with a slot already out would destroy a pool that is not idle --
-    // which takes ~GpuSlotPool's unmap_local branch rather than destroy, leaving
-    // the kmod holding the region and one of this publisher's region slots for
-    // the life of the process.
-    internal::GpuSlotPool * pool = grown.get();
-    gpu_pools_.push_back(std::move(grown));
-    if (!pool->acquire(capacity, slot_index)) {
-      // A fresh region is sized for this payload and has every slot free, so
-      // this cannot happen; retiring it keeps the vector honest if it ever does.
-      gpu_pools_.pop_back();
-      return nullptr;
-    }
-    return pool;
-  }
-
-  // Drops a region that holds no message and is too small for `capacity`, to
-  // make room under MAX_GPU_REGION_NUM_PER_PUBLISHER. The smallest such region
-  // goes, since its device memory buys the least. Caller holds gpu_pools_mtx_.
-  void retire_idle_gpu_pool(const size_t capacity)
-  {
-    auto victim = gpu_pools_.end();
-    for (auto it = gpu_pools_.begin(); it != gpu_pools_.end(); ++it) {
-      if ((*it)->slot_size() >= capacity || !(*it)->is_idle()) continue;
-      if (victim == gpu_pools_.end() || (*it)->slot_size() < (*victim)->slot_size()) {
-        victim = it;
-      }
-    }
-    if (victim == gpu_pools_.end()) return;
-
-    RCLCPP_INFO(
-      logger,
-      "releasing an unused %u byte GPU region of topic '%s' to make room for a %zu byte payload",
-      (*victim)->slot_size(), topic_name_.c_str(), capacity);
-    gpu_pools_.erase(victim);  // the pool's destructor releases the region
-  }
   std::string topic_name_;
   // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
   // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
@@ -281,9 +218,9 @@ class Publisher : public PublisherBase
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       type_name = rosidl_generator_traits::name<MessageT>();
     } else if constexpr (internal::is_gpu_message_v<MessageT>) {
-      // A GPU message type is not a generated ROS type, so it has no name to
-      // register and everything keyed on one skips it. Said out loud because the
-      // symptom otherwise is a topic that simply never reaches ROS 2.
+      // A GPU message type is not a generated ROS type, so everything keyed on a
+      // type name skips it. Warned about because the symptom is otherwise a
+      // topic that simply never reaches ROS 2.
       RCLCPP_WARN_ONCE(
         logger,
         "topic '%s' carries a GPU message type, which has no ROS type name: it will not appear "
@@ -357,15 +294,7 @@ public:
    * region id and slot index in the message, which is how a subscriber finds the
    * payload. A region is allocated on the first borrow, sized from the QoS
    * depth; later borrows only reserve a slot, so in steady state no GPU
-   * allocation happens on the message path.
-   *
-   * A capacity larger than every existing slot allocates another region rather
-   * than failing, which costs latency on that one publish but never data. A
-   * capacity that fits, with every such slot still in flight, is the QoS depth
-   * being reached: this releases whatever the depth no longer retains and, if
-   * that frees no slot, returns empty -- growing there would overrule the depth
-   * the node asked for. The empty return costs that one frame and not the topic.
-   * See docs/gpu_ipc.md.
+   * allocation happens on the message path. See docs/gpu_ipc.md.
    */
   ipc_shared_ptr<MessageT> borrow_loaned_message(const size_t capacity)
   {
@@ -380,90 +309,26 @@ public:
       return ipc_shared_ptr<MessageT>();
     }
 
-    uint32_t region_id = 0;
     uint32_t slot_index = 0;
-    {
-      const std::lock_guard<std::mutex> lock(gpu_pools_mtx_);
-
-      // Two different things leave a borrow without a slot, and only one of
-      // them is answered by allocating.
-      //
-      // No region whose slots fit the payload: the payload has outgrown what
-      // this publisher allocated, and another region is the only answer. Growth
-      // exists for this and nothing else.
-      //
-      // A region fits and every one of its slots is still out: the publisher
-      // has as many messages in flight as its QoS depth allows, because the
-      // depth is what sized the slot count. Growing here would overrule the
-      // number the node asked for and would answer a consumer that is not
-      // keeping up by taking more of a resource the whole machine shares. So
-      // this asks the module to release what the depth no longer retains, and
-      // drops the frame if that frees nothing -- as a full bounded queue does.
-      //
-      // Releasing is also what makes that failure recoverable rather than
-      // permanent: a slot is returned only by destroying its message, and the
-      // module names releasable messages only when something is published, so a
-      // publisher with no slot has nothing to publish and would never learn its
-      // slots had come free. That is why the loop runs twice -- releasing can
-      // empty a region, and an idle region is what retiring needs.
-      internal::GpuSlotPool * pool = nullptr;
-      bool released_already = false;
-      for (int attempt = 0; attempt < 2 && pool == nullptr; attempt++) {
-        pool = try_acquire_gpu_slot(capacity, slot_index);
-        if (pool != nullptr) break;
-
-        const bool a_region_fits_the_payload = std::any_of(
-          gpu_pools_.begin(), gpu_pools_.end(),
-          [capacity](const auto & candidate) { return candidate->slot_size() >= capacity; });
-
-        if (!a_region_fits_the_payload) {
-          // At the cap, a region holding no message and too small for this
-          // payload can go. That is the only way a publisher whose payloads grow
-          // ever gets a region that fits, and it costs no device memory overall.
-          if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
-            retire_idle_gpu_pool(capacity);
-          }
-          if (gpu_pools_.size() < static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
-            pool = grow_gpu_pool(capacity, slot_index);
-          }
-          if (pool != nullptr) break;
-        }
-
-        if (released_already) break;
-        const union ioctl_reclaim_msgs_args reclaimed = reclaim_msgs_core(topic_name_, id_);
-        for (uint32_t i = 0; i < reclaimed.ret_released_num; i++) {
-          delete reinterpret_cast<MessageT *>(reclaimed.ret_released_addrs[i]);
-        }
-        released_already = true;
-        if (reclaimed.ret_released_num == 0) break;
+    internal::GpuSlotPool * pool = acquire_gpu_slot(capacity, slot_index);
+    if (pool == nullptr) {
+      // Every fitting region is full, which means as many messages are in flight
+      // as the QoS depth allows. Ask the kmod to release what the depth no longer
+      // retains and retry once; destroying those messages is what returns their
+      // slots. Without this the publisher would stall for good, since the kmod
+      // names releasable messages only from publish() and a publisher holding no
+      // slot has nothing to publish.
+      const union ioctl_reclaim_msgs_args reclaimed = reclaim_msgs_core(topic_name_, id_);
+      for (uint32_t i = 0; i < reclaimed.ret_released_num; i++) {
+        delete reinterpret_cast<MessageT *>(reclaimed.ret_released_addrs[i]);
       }
-
-      if (pool == nullptr) {
-        // Which of the two got us here decides what the reader should do.
-        const bool a_region_fits_the_payload = std::any_of(
-          gpu_pools_.begin(), gpu_pools_.end(),
-          [capacity](const auto & candidate) { return candidate->slot_size() >= capacity; });
-        if (a_region_fits_the_payload) {
-          RCLCPP_ERROR(
-            logger,
-            "no free GPU slot for topic '%s': every slot of the regions that fit a %zu byte "
-            "payload is still held by a message in flight, and releasing the messages the QoS "
-            "depth no longer retains freed none. Subscribers are not releasing messages as fast "
-            "as they are published; raise the QoS depth if this rate is expected. This frame is "
-            "dropped and publishing resumes once they do.",
-            topic_name_.c_str(), capacity);
-        } else {
-          RCLCPP_ERROR(
-            logger,
-            "no GPU region for topic '%s': a %zu byte payload is larger than every slot this "
-            "publisher has, and another region could not be allocated (%zu of %d held). Keeping "
-            "the payload size stable needs far fewer regions.",
-            topic_name_.c_str(), capacity, gpu_pools_.size(), MAX_GPU_REGION_NUM_PER_PUBLISHER);
-        }
-        return ipc_shared_ptr<MessageT>();
-      }
-      region_id = pool->region_id();
+      if (reclaimed.ret_released_num > 0) pool = acquire_gpu_slot(capacity, slot_index);
     }
+    if (pool == nullptr) {
+      report_gpu_borrow_failure(capacity);
+      return ipc_shared_ptr<MessageT>();
+    }
+    const uint32_t region_id = pool->region_id();
 
     // Everything from here can throw -- the message, its control block and the
     // handle's topic name all allocate, and inside the borrow window that is the
@@ -479,9 +344,6 @@ public:
       rcpputils::make_scope_exit([]() noexcept { decrement_borrowed_publisher_num(); });
 
     MessageT * ptr = new MessageT();
-    // Guarded too: constructing the handle allocates its control block, and a
-    // throw there would otherwise leave the message itself in the mempool with
-    // nothing owning it -- each retry under the same pressure leaking another.
     auto message_guard = rcpputils::make_scope_exit([ptr]() noexcept { delete ptr; });
     ptr->data = internal::gpu_array<uint8_t>(region_id, slot_index, capacity, id_);
     // The handle owns the message from here, and the message owns the slot.
@@ -529,14 +391,6 @@ public:
       // Deleting the message returns its GPU slot along with its host payload:
       // the kmod reports an entry here only once nothing references it, so the
       // slot is free by the same fact that made the memory reclaimable.
-      //
-      // "Nothing references it" is the kmod's accounting, not a statement about
-      // handles: REMOVE_SUBSCRIBER clears a subscriber's bit on every entry of
-      // the topic whether or not userspace still holds the message. A node that
-      // keeps a received handle past its own subscription therefore reads a slot
-      // this publisher may already have refilled. That predates GPU payloads --
-      // the same sequence frees host message memory under a live handle -- and
-      // is not something this loop can decide.
       delete release_ptr;
     }
 

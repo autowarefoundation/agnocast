@@ -13,6 +13,7 @@
 #include <rmw/serialized_message.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <array>
 #include <new>
 
@@ -274,6 +275,108 @@ template rclcpp::QoS PublisherBase::init_base<rclcpp::Node>(
 template rclcpp::QoS PublisherBase::init_base<agnocast::Node>(
   agnocast::Node *, const std::string &, const std::string &, const rclcpp::QoS &,
   const PublisherOptions &, PublisherRole);
+
+namespace
+{
+
+// One slot per message that may be in flight, plus one being filled. KeepAll
+// reports a depth of 0, which would size a region for a single message. This is
+// the bound on messages in flight, not merely a starting size: regions are added
+// when the payload outgrows them, never to hold more messages at once.
+uint32_t gpu_slot_count(const uint32_t qos_depth)
+{
+  return std::max(qos_depth, 1U) + 1;
+}
+
+}  // namespace
+
+bool PublisherBase::has_gpu_region_fitting(const size_t capacity) const
+{
+  return std::any_of(gpu_pools_.begin(), gpu_pools_.end(), [capacity](const auto & pool) {
+    return pool->slot_size() >= capacity;
+  });
+}
+
+internal::GpuSlotPool * PublisherBase::acquire_gpu_slot(
+  const size_t capacity, uint32_t & slot_index)
+{
+  const std::lock_guard<std::mutex> lock(gpu_pools_mtx_);
+
+  for (const auto & candidate : gpu_pools_) {
+    if (candidate->acquire(capacity, slot_index)) return candidate.get();
+  }
+
+  // A region fits but has no free slot: the publisher already has as many
+  // messages in flight as its QoS depth allows, and growing would overrule that
+  // depth by taking more of a resource the whole machine shares. Growth is for
+  // payloads that have outgrown every region, and nothing else. See
+  // docs/gpu_ipc.md.
+  if (has_gpu_region_fitting(capacity)) return nullptr;
+
+  // At the cap, a region holding no message and too small for this payload can
+  // go: the smallest such one, since its device memory buys the least. That is
+  // the only way a publisher whose payloads grow ever gets a region that fits,
+  // and it costs no device memory overall.
+  if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
+    auto victim = gpu_pools_.end();
+    for (auto it = gpu_pools_.begin(); it != gpu_pools_.end(); ++it) {
+      if ((*it)->slot_size() >= capacity || !(*it)->is_idle()) continue;
+      if (victim == gpu_pools_.end() || (*it)->slot_size() < (*victim)->slot_size()) victim = it;
+    }
+    if (victim == gpu_pools_.end()) return nullptr;
+
+    RCLCPP_INFO(
+      logger,
+      "releasing an unused %u byte GPU region of topic '%s' to make room for a %zu byte payload",
+      (*victim)->slot_size(), topic_name_.c_str(), capacity);
+    gpu_pools_.erase(victim);  // the pool's destructor releases the region
+  }
+
+  auto grown =
+    internal::GpuSlotPool::create(topic_name_, id_, capacity, gpu_slot_count(qos_depth_));
+  if (grown == nullptr) {
+    RCLCPP_ERROR(
+      logger,
+      "could not allocate a GPU region for a %zu byte payload on topic '%s' (%zu region(s) held). "
+      "See the GPU backend errors above for the cause.",
+      capacity, topic_name_.c_str(), gpu_pools_.size());
+    return nullptr;
+  }
+
+  // Handed to the vector before a slot is taken. push_back allocates, and a
+  // throw with a slot already out would destroy a pool that is not idle, leaving
+  // the kmod holding the region and one of this publisher's region slots for the
+  // life of the process.
+  internal::GpuSlotPool * pool = grown.get();
+  gpu_pools_.push_back(std::move(grown));
+  if (!pool->acquire(capacity, slot_index)) {
+    // A fresh region is sized for this payload and has every slot free, so this
+    // cannot happen; retiring it keeps the vector honest if it ever does.
+    gpu_pools_.pop_back();
+    return nullptr;
+  }
+  return pool;
+}
+
+void PublisherBase::report_gpu_borrow_failure(const size_t capacity) const
+{
+  const std::lock_guard<std::mutex> lock(gpu_pools_mtx_);
+  if (has_gpu_region_fitting(capacity)) {
+    RCLCPP_ERROR(
+      logger,
+      "no free GPU slot for topic '%s': every slot fitting a %zu byte payload is held by a message "
+      "in flight, and the QoS depth released none. This frame is dropped; raise the depth if "
+      "subscribers are expected to lag.",
+      topic_name_.c_str(), capacity);
+    return;
+  }
+  RCLCPP_ERROR(
+    logger,
+    "no GPU region for topic '%s': a %zu byte payload exceeds every slot this publisher has, and "
+    "another region could not be allocated (%zu of %d held). A stable payload size needs far fewer "
+    "regions.",
+    topic_name_.c_str(), capacity, gpu_pools_.size(), MAX_GPU_REGION_NUM_PER_PUBLISHER);
+}
 
 void PublisherBase::generate_gid()
 {
