@@ -2558,7 +2558,8 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
 
 // Zero is reserved: it means "any" to GET and is refused by REMOVE, so a region
-// handed it would be unremovable and would answer every "any" lookup.
+// handed it would be unremovable and would answer every "any" lookup. The
+// counter is 32-bit, so it is skipped on wrap rather than assumed unreachable.
 static uint32_t allocate_gpu_region_id(void)
 {
   uint32_t id;
@@ -2794,6 +2795,11 @@ int agnocast_ioctl_reclaim_msgs(
   const topic_local_id_t publisher_id, union ioctl_reclaim_msgs_args * ioctl_ret)
 {
   int ret = 0;
+
+  // Before any error return, because the caller reports the count whether or not
+  // this succeeds. Left unset it would be whatever the input struct it overlays
+  // held, which the caller would take as a number of addresses to free.
+  ioctl_ret->ret_released_num = 0;
 
   down_read(&global_htables_rwsem);
 

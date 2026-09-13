@@ -313,14 +313,15 @@ internal::GpuSlotPool * PublisherBase::acquire_gpu_slot(
   // docs/gpu_ipc.md.
   if (has_gpu_region_fitting(capacity)) return nullptr;
 
-  // At the cap, a region holding no message and too small for this payload can
-  // go: the smallest such one, since its device memory buys the least. That is
-  // the only way a publisher whose payloads grow ever gets a region that fits,
-  // and it costs no device memory overall.
+  // At the cap, a region holding no message can go -- every one of them is too
+  // small for this payload, or the test above would have returned. The smallest
+  // goes, since its device memory buys the least. That is the only way a
+  // publisher whose payloads grow ever gets a region that fits, and it costs no
+  // device memory overall.
   if (gpu_pools_.size() >= static_cast<size_t>(MAX_GPU_REGION_NUM_PER_PUBLISHER)) {
     auto victim = gpu_pools_.end();
     for (auto it = gpu_pools_.begin(); it != gpu_pools_.end(); ++it) {
-      if ((*it)->slot_size() >= capacity || !(*it)->is_idle()) continue;
+      if (!(*it)->is_idle()) continue;
       if (victim == gpu_pools_.end() || (*it)->slot_size() < (*victim)->slot_size()) victim = it;
     }
     if (victim == gpu_pools_.end()) return nullptr;

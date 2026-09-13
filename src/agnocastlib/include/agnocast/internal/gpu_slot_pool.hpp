@@ -28,9 +28,9 @@ constexpr uint64_t kMaxGpuPayloadCapacity = 0xFFFFFF00ULL;
 // when the message occupying it has been destroyed, which the kmod already
 // decides, so nothing here duplicates that bookkeeping.
 //
-// A pool registers itself under its region id and unregisters on destruction,
-// so a message outliving its publisher resolves to nothing rather than to a
-// freed pool.
+// A pool is registered under its region id and unregisters on destruction, so
+// releasing the slot of a message that outlived its pool is a no-op rather than
+// a use-after-free.
 class GpuSlotPool
 {
 public:

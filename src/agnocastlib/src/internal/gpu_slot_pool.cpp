@@ -122,10 +122,10 @@ GpuSlotPool::~GpuSlotPool()
 
   // A slot is still out, so the kmod must keep the region for whatever is still
   // in flight -- but this process will never write it again, and the messages
-  // holding those slots may never be deleted at all: the kmod reports released
-  // addresses only from publish(), so anything QoS was still retaining at
-  // teardown is never handed back. Waiting for idleness would therefore pin this
-  // mapping, and a share of device memory, for the life of the process.
+  // holding those slots may never be deleted at all: the kmod names releasable
+  // addresses only from a publish or a reclaim, and neither happens again once
+  // teardown has begun. Waiting for idleness would therefore pin this mapping,
+  // and a share of device memory, for the life of the process.
   unmap_gpu_region(region_id_);
 }
 

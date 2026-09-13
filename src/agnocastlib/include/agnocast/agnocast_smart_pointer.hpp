@@ -61,8 +61,9 @@ struct control_block
   int64_t entry_id;                     // 8-byte alignment
   std::atomic<uint32_t> ref_count{1U};  // 4-byte alignment
   topic_local_id_t pubsub_id;           // 4-byte alignment
-  // The GPU region this message's payload lives in, or 0 for a host-only
-  // payload. Here rather than beside the payload handle because copies of an
+  // The GPU region this block holds a reference on, or 0 when it holds none: a
+  // host-only payload, or a publisher's own message, whose region its slot pool
+  // owns. Here rather than beside the payload handle because copies of an
   // ipc_shared_ptr share one block, and the region must be held exactly once
   // however many copies exist.
   uint32_t gpu_region_id{0};      // 4-byte alignment

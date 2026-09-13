@@ -345,12 +345,17 @@ public:
 
     MessageT * ptr = new MessageT();
     auto message_guard = rcpputils::make_scope_exit([ptr]() noexcept { delete ptr; });
+
+    // The message owns the slot from here, and deleting it is what returns the
+    // slot, so the guard above replaces this one rather than joining it: leaving
+    // both armed would release the slot twice on a throw below, and the second
+    // release could take it back from a borrow that had already been given it.
     ptr->data = internal::gpu_array<uint8_t>(region_id, slot_index, capacity, id_);
-    // The handle owns the message from here, and the message owns the slot.
+    slot_guard.cancel();
+
     ipc_shared_ptr<MessageT> message(ptr, topic_name_.c_str(), id_);
     message_guard.cancel();
     window_guard.cancel();
-    slot_guard.cancel();
     return message;
   }
 

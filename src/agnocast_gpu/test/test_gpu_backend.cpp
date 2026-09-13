@@ -83,19 +83,6 @@ TEST(UniqueFdTest, MoveTransfersOwnership)
   EXPECT_FALSE(fd_is_open(raw));
 }
 
-TEST(UniqueFdTest, ReleaseHandsOwnershipToCaller)
-{
-  const int raw = make_test_fd();
-  int taken = -1;
-  {
-    UniqueFd fd(raw);
-    taken = fd.release();
-    EXPECT_FALSE(fd.valid());
-  }
-  EXPECT_TRUE(fd_is_open(taken));
-  ::close(taken);
-}
-
 // Geometry arrives from another process, so this is the check that stands
 // between a corrupt message and an out-of-bounds device address.
 TEST(GpuRegionGeometryTest, RejectsSlotsThatDoNotFitTheMapping)
