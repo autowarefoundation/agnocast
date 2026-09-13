@@ -10,7 +10,6 @@
 #include <optional>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace agnocast::internal
 {
@@ -27,12 +26,12 @@ enum class GpuMemoryBackendType : uint32_t {
   Unknown = 0,
   // Shared as a POSIX file descriptor. Discrete GPU and SoC.
   Vmm = 1,
-  // Shared as an endpoint-bound descriptor. Reserved, not implemented: an
-  // NvSciBuf export is reconciled against the destination endpoint, so the bytes
-  // one subscriber receives mean nothing to another. Serving it needs an export
-  // produced per request, where the kmod stores a single export at registration
-  // and hands the same bytes to every importer.
-  NvSciBuf = 2,
+  // 2 is reserved for NvSciBuf and deliberately absent: its export is reconciled
+  // against the destination endpoint, so the bytes one subscriber receives mean
+  // nothing to another. Serving it needs an export produced per request, which
+  // is a different shape from the single retained handle below -- not a variant
+  // of it -- so it is left to be designed with its implementation rather than
+  // guessed at here. See docs/gpu_ipc.md.
 };
 
 // The descriptor references the whole allocation, not one slot, so leaking one
@@ -100,12 +99,10 @@ struct VmmExportHandle
   UniqueFd fd;
 };
 
-struct NvSciBufExportHandle
-{
-  std::vector<uint8_t> descriptor;
-};
-
-using GpuRegionExportHandle = std::variant<std::monostate, VmmExportHandle, NvSciBufExportHandle>;
+// A variant with one alternative today, because the type of a handle is what a
+// backend is chosen by: an importer must be able to refuse an export it cannot
+// read rather than reinterpret its bytes.
+using GpuRegionExportHandle = std::variant<std::monostate, VmmExportHandle>;
 
 // What crosses the process boundary: everything a peer needs to map the region.
 struct GpuRegionExport
@@ -183,19 +180,17 @@ class GpuMemoryBackend
 public:
   virtual ~GpuMemoryBackend() = default;
 
-  [[nodiscard]] virtual GpuMemoryBackendType type() const noexcept = 0;
   [[nodiscard]] virtual bool is_supported() const noexcept = 0;
 
   // The backend owns all allocation-size rounding and records the result in the
   // returned region's geometry. Failure yields an invalid region.
   [[nodiscard]] virtual MappedGpuRegion create_region(uint32_t slot_size, uint32_t slot_count) = 0;
 
-  // Produces everything a peer needs to map the region. `subscriber_id` names
-  // the peer it is meant for, for a mechanism whose descriptor is bound to its
-  // destination; one whose descriptor is not may ignore it and serve every
-  // subscriber the same export.
-  [[nodiscard]] virtual std::optional<GpuRegionExport> export_for(
-    const MappedGpuRegion & region, topic_local_id_t subscriber_id) = 0;
+  // Produces everything a peer needs to map the region. One export serves every
+  // subscriber: the kmod retains the handle and installs a descriptor for the
+  // same open file per importer, so there is no destination to reconcile against.
+  [[nodiscard]] virtual std::optional<GpuRegionExport> export_region(
+    const MappedGpuRegion & region) = 0;
 
   [[nodiscard]] virtual MappedGpuRegion import_region(const GpuRegionExport & exported) = 0;
 

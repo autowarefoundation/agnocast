@@ -21,6 +21,8 @@
 
   <depend>agnocastlib</depend>
   <depend>rclcpp</depend>
+  <!-- dispatch.hpp, which this package installs, includes rcpputils/scope_exit.hpp. -->
+  <depend>rcpputils</depend>
   <!-- message_types.hpp, which this package installs, includes sensor_msgs headers. -->
   <depend>sensor_msgs</depend>
 

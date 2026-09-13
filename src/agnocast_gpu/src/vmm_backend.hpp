@@ -19,17 +19,12 @@ class CudaDriverLoader;
 class VmmBackend : public agnocast::internal::GpuMemoryBackend
 {
 public:
-  [[nodiscard]] agnocast::internal::GpuMemoryBackendType type() const noexcept override
-  {
-    return agnocast::internal::GpuMemoryBackendType::Vmm;
-  }
-
   [[nodiscard]] bool is_supported() const noexcept override;
 
   [[nodiscard]] agnocast::internal::MappedGpuRegion create_region(
     uint32_t slot_size, uint32_t slot_count) override;
-  [[nodiscard]] std::optional<agnocast::internal::GpuRegionExport> export_for(
-    const agnocast::internal::MappedGpuRegion & region, topic_local_id_t subscriber_id) override;
+  [[nodiscard]] std::optional<agnocast::internal::GpuRegionExport> export_region(
+    const agnocast::internal::MappedGpuRegion & region) override;
   [[nodiscard]] agnocast::internal::MappedGpuRegion import_region(
     const agnocast::internal::GpuRegionExport & exported) override;
 

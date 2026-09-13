@@ -1,8 +1,11 @@
 #include "agnocast/internal/gpu_slot_pool.hpp"
 
+#include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/internal/gpu_message.hpp"
+#include "rcpputils/scope_exit.hpp"
 
+#include <cstdio>
 #include <limits>
 #include <unordered_map>
 
@@ -75,14 +78,37 @@ std::unique_ptr<GpuSlotPool> GpuSlotPool::create(
   const std::string_view topic_name, const topic_local_id_t publisher_id, const uint64_t capacity,
   const uint32_t slot_count)
 {
+  // None of what this function allocates belongs to a message -- the pool, its
+  // free list, the registry entry -- so none of it should land in the mempool if
+  // a borrow happens to be open on this thread. The registry suspends the window
+  // for its own driver calls; this covers the rest.
+  const SuspendedBorrowWindow suspended;
+
   const uint32_t slot_size = gpu_slot_size_for(capacity);
 
   const uint32_t region_id =
     GpuRegionRegistry::instance().create(topic_name, publisher_id, slot_size, slot_count);
   if (region_id == 0) return nullptr;
 
+  // The region now exists -- device memory allocated, its liveness reference
+  // handed to the kmod, its mapping in this process -- but nothing owns it yet,
+  // and constructing the owner allocates. A throw here would strand all of that
+  // for the life of the process, along with one of the publisher's
+  // MAX_GPU_REGION_NUM_PER_PUBLISHER slots, with the id needed to release it
+  // known to nobody. Armed only until the pool exists, because from then on
+  // ~GpuSlotPool is what releases the region.
+  auto unowned = rcpputils::make_scope_exit([topic_name, publisher_id, region_id]() noexcept {
+    try {
+      GpuRegionRegistry::instance().destroy(topic_name, publisher_id, region_id);
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+      // Runs while another exception unwinds, where terminating over a failed
+      // log line would be worse than the leak the line would have reported.
+    }
+  });
+
   auto pool = std::unique_ptr<GpuSlotPool>(
     new GpuSlotPool(topic_name, publisher_id, region_id, slot_size, slot_count));
+  unowned.cancel();
 
   const std::lock_guard<std::mutex> lock(pool_table_mutex());
   pool_table()[region_id] = pool.get();
@@ -158,8 +184,12 @@ size_t GpuSlotPool::available() const
   return free_slots_.size();
 }
 
+// noexcept because the caller is a message destructor, while locking can throw
+// and so can the RCLCPP_ERROR that release() reaches on a corrupted slot index --
+// terminating there would be worse than the index it was reporting. A
+// function-try-block, as on UniqueFd::reset and VmmBackend::release_region.
 void release_gpu_slot(const uint32_t region_id, const uint32_t slot_index) noexcept
-{
+try {
   // The lock is held across the release, not just the lookup: the message being
   // destroyed here may be the last one outliving its publisher, so dropping it
   // first would let ~GpuSlotPool free the pool between the two. Nothing takes
@@ -168,6 +198,11 @@ void release_gpu_slot(const uint32_t region_id, const uint32_t slot_index) noexc
   const auto it = pool_table().find(region_id);
   if (it == pool_table().end()) return;  // not ours: a peer's region
   it->second->release(slot_index);
+} catch (...) {
+  // The slot never returns to its pool, so the region can no longer reach the
+  // idle state it needs to be retired -- a bounded leak, and the safe direction.
+  std::fprintf(
+    stderr, "[agnocast] failed to release GPU slot %u of region %u\n", slot_index, region_id);
 }
 
 }  // namespace agnocast::internal

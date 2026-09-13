@@ -30,15 +30,14 @@ struct GpuRegionRef
 
 // Every region this process has mapped, keyed by the id the kmod assigned it.
 //
-// A mapping lives as long as anything in this process can still refer to it.
-// For a region this process created, that is until its slot pool is destroyed
-// with no slot outstanding. An imported one lives until the kmod no longer knows
-// the publisher that exported it: while this process holds a received message,
-// it holds a reference on that message's kmod entry, so the publisher cannot
-// have been forgotten; once it has been, no handle to any of its messages exists
-// here and none can appear, because region ids are never reused. Without that
-// reclamation a subscriber would accumulate a mapping -- and a driver reference
-// on the memory behind it -- for every region of every publisher it ever saw.
+// A mapping lives as long as anything in this process can still refer to it,
+// which is what ref_gpu_region below tracks. A region this process created is
+// then released when its slot pool is destroyed. An imported one is released
+// when either its publisher is gone from the kmod, or the publisher has more
+// regions mapped here than it is allowed to hold at once -- meaning the extra
+// ones were retired. Without that reclamation a subscriber would accumulate a
+// mapping, and a driver reference on the memory behind it, for every region of
+// every publisher it ever saw. docs/gpu_ipc.md sets out both rules.
 class GpuRegionRegistry
 {
 public:
@@ -63,10 +62,10 @@ public:
     std::string_view topic_name, topic_local_id_t publisher_id, uint32_t slot_size,
     uint32_t slot_count);
 
-  // Publisher side. Releases the mapping and the kmod's reference. The caller
-  // must know that no message refers to the region: a subscriber that already
-  // imported it keeps its own reference and reads on, but one that has not will
-  // no longer be able to.
+  // Publisher side. Drops the kmod's reference and then this process's mapping.
+  // The caller must know that no message refers to the region: a subscriber that
+  // already imported it keeps its own reference and reads on, but one that has
+  // not will no longer be able to.
   void destroy(std::string_view topic_name, topic_local_id_t publisher_id, uint32_t region_id);
 
   // Drops only this process's mapping, leaving the kmod's reference in place for
@@ -91,7 +90,11 @@ void release_gpu_slot(uint32_t region_id, uint32_t slot_index) noexcept;
 // Records that one received message handle refers to a region, so it is not
 // released while that handle lives. Paired across the lifetime of a
 // subscriber-side control block; both are no-ops for region id 0.
-void ref_gpu_region(uint32_t region_id) noexcept;
+//
+// ref returns whether the reference was actually taken: it allocates, so it can
+// fail, and a caller that recorded the id anyway would later unreference what it
+// never referenced -- decrementing a count some other live handle owns.
+[[nodiscard]] bool ref_gpu_region(uint32_t region_id) noexcept;
 void unref_gpu_region(uint32_t region_id) noexcept;
 
 // Marks a message whose payload lives in GPU device memory, so the publisher

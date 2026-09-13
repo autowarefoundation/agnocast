@@ -107,11 +107,8 @@ struct gpu_region_info
   uint32_t slot_count;
   uint64_t mapped_size;
   uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
-  // The reference that keeps the allocation alive. NULL for mechanisms whose
-  // handle is a blob rather than a file descriptor.
+  // The reference that keeps the allocation alive.
   struct file * handle_file;
-  uint8_t * blob;
-  uint32_t blob_size;
   struct list_head node;
 };
 
@@ -154,11 +151,8 @@ static inline void free_publisher_info(struct publisher_info * pub_info)
   {
     // Dropping this reference is what eventually returns the device memory to
     // the driver, once every importer has closed its own descriptor.
-    if (region->handle_file) {
-      fput(region->handle_file);
-    }
+    fput(region->handle_file);
     list_del(&region->node);
-    kfree(region->blob);
     kfree(region);
   }
 

@@ -269,11 +269,8 @@ MappedGpuRegion VmmBackend::create_region(uint32_t slot_size, uint32_t slot_coun
   return MappedGpuRegion(*this, base, geometry, static_cast<uint64_t>(handle));
 }
 
-std::optional<GpuRegionExport> VmmBackend::export_for(
-  const MappedGpuRegion & region, topic_local_id_t /*subscriber_id*/)
+std::optional<GpuRegionExport> VmmBackend::export_region(const MappedGpuRegion & region)
 {
-  // A VMM shareable handle is not bound to a destination, so every subscriber
-  // receives an equivalent export.
   if (!region.valid()) {
     RCLCPP_ERROR(logger, "Agnocast GPU: cannot export an unmapped region");
     return std::nullopt;

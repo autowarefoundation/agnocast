@@ -4,6 +4,7 @@ project(agnocast_gpu)
 find_package(ament_cmake REQUIRED)
 find_package(agnocastlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcpputils REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 # No CUDA library is linked: driver symbols are resolved with
@@ -24,7 +25,7 @@ if(NOT CUDAToolkit_FOUND)
   # include, far from the cause. Only the backend library is absent.
   install(DIRECTORY include/ DESTINATION include)
   ament_export_include_directories(include)
-  ament_export_dependencies(agnocastlib rclcpp sensor_msgs)
+  ament_export_dependencies(agnocastlib rclcpp rcpputils sensor_msgs)
   ament_package()
   return()
 endif()
@@ -36,7 +37,7 @@ add_library(agnocast_gpu SHARED
 
 target_include_directories(agnocast_gpu PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 
-ament_target_dependencies(agnocast_gpu agnocastlib rclcpp sensor_msgs)
+ament_target_dependencies(agnocast_gpu agnocastlib rclcpp rcpputils sensor_msgs)
 
 # Deliberately NOT linked against CUDA::cuda_driver. The stub library the toolkit
 # ships satisfies the linker while providing no driver behind it, which would
@@ -52,7 +53,7 @@ install(TARGETS agnocast_gpu
   LIBRARY DESTINATION lib)
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(agnocastlib rclcpp sensor_msgs)
+ament_export_dependencies(agnocastlib rclcpp rcpputils sensor_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gmock REQUIRED)
