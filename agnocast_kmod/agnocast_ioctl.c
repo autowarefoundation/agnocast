@@ -2638,6 +2638,9 @@ int agnocast_ioctl_add_gpu_region(
   struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
   if (!region) return -ENOMEM;
 
+  // Exclusive rather than shared: this inserts into the module-wide region
+  // index, not just into the topic. Both are cold control-plane calls.
+
   region->backend_type = args->backend_type;
   region->slot_size = args->slot_size;
   region->slot_count = args->slot_count;
@@ -2646,7 +2649,7 @@ int agnocast_ioctl_add_gpu_region(
   region->handle_file = handle_file;
   region->region_id = allocate_gpu_region_id();
 
-  down_read(&global_htables_rwsem);
+  down_write(&global_htables_rwsem);
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
   if (!wrapper) {
@@ -2686,13 +2689,14 @@ int agnocast_ioctl_add_gpu_region(
   }
 
   list_add_tail(&region->node, &pub_info->gpu_regions);
+  hash_add(gpu_region_htable, &region->global_node, region->region_id);
   pub_info->gpu_region_num++;
   args->ret_region_id = region->region_id;
 
 unlock_all:
   up_write(&wrapper->topic->rwsem);
 unlock_only_global:
-  up_read(&global_htables_rwsem);
+  up_write(&global_htables_rwsem);
   if (ret != 0) {
     // Never committed, so the caller keeps its handle reference and we drop only
     // what was allocated here.
@@ -2851,6 +2855,35 @@ unlock_only_global:
   return ret;
 }
 
+int agnocast_ioctl_gpu_region_exists(
+  const uint32_t * region_ids, const uint32_t region_num,
+  union ioctl_gpu_region_exists_args * ioctl_ret)
+{
+  if (region_num > MAX_GPU_REGION_QUERY_NUM) return -EINVAL;
+
+  uint64_t bitmap = 0;
+
+  down_read(&global_htables_rwsem);
+
+  for (uint32_t i = 0; i < region_num; i++) {
+    const struct gpu_region_info * region;
+    // Id 0 is never assigned, so it answers "gone" without a lookup.
+    if (region_ids[i] == 0) continue;
+    hash_for_each_possible(gpu_region_htable, region, global_node, region_ids[i])
+    {
+      if (region->region_id == region_ids[i]) {
+        bitmap |= 1ULL << i;
+        break;
+      }
+    }
+  }
+
+  up_read(&global_htables_rwsem);
+
+  ioctl_ret->ret_exists_bitmap = bitmap;
+  return 0;
+}
+
 int agnocast_ioctl_remove_gpu_region(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   const topic_local_id_t publisher_id, const uint32_t region_id)
@@ -2861,7 +2894,9 @@ int agnocast_ioctl_remove_gpu_region(
   // release memory it is still writing into.
   if (region_id == 0) return -EINVAL;
 
-  down_read(&global_htables_rwsem);
+  // Exclusive rather than shared: this removes from the module-wide region
+  // index as well as from the topic.
+  down_write(&global_htables_rwsem);
 
   struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
   if (!wrapper) {
@@ -2901,6 +2936,7 @@ int agnocast_ioctl_remove_gpu_region(
   }
 
   list_del(&region->node);
+  hash_del(&region->global_node);
   pub_info->gpu_region_num--;
   // A subscriber that already imported the region holds its own reference and
   // reads on; one that has not will now fail to, which is why the caller must
@@ -2911,7 +2947,7 @@ int agnocast_ioctl_remove_gpu_region(
 unlock_all:
   up_write(&wrapper->topic->rwsem);
 unlock_only_global:
-  up_read(&global_htables_rwsem);
+  up_write(&global_htables_rwsem);
   return ret;
 }
 
@@ -3463,6 +3499,29 @@ static long reclaim_msgs_cmd(union ioctl_reclaim_msgs_args __user * arg)
   return 0;
 }
 
+static long gpu_region_exists_cmd(union ioctl_gpu_region_exists_args __user * arg)
+{
+  union ioctl_gpu_region_exists_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  const uint32_t region_num = args.region_num;
+  if (region_num > MAX_GPU_REGION_QUERY_NUM) return -EINVAL;
+
+  uint32_t region_ids[MAX_GPU_REGION_QUERY_NUM];
+  if (region_num > 0) {
+    if (copy_from_user(
+          region_ids, (const void __user *)args.region_ids_addr,
+          region_num * sizeof(region_ids[0])))
+      return -EFAULT;
+  }
+
+  const int ret = agnocast_ioctl_gpu_region_exists(region_ids, region_num, &args);
+  if (ret < 0) return ret;
+
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return 0;
+}
+
 static long remove_gpu_region_cmd(struct ioctl_remove_gpu_region_args __user * arg)
 {
   const pid_t pid = current->tgid;
@@ -3727,6 +3786,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return remove_gpu_region_cmd((struct ioctl_remove_gpu_region_args __user *)arg);
     case AGNOCAST_RECLAIM_MSGS_CMD:
       return reclaim_msgs_cmd((union ioctl_reclaim_msgs_args __user *)arg);
+    case AGNOCAST_GPU_REGION_EXISTS_CMD:
+      return gpu_region_exists_cmd((union ioctl_gpu_region_exists_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     default:

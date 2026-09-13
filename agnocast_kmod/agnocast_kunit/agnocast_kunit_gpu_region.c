@@ -482,3 +482,55 @@ void test_case_gpu_region_get_without_registration(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, -ENOENT);
   KUNIT_EXPECT_PTR_EQ(test, handle_file, NULL);
 }
+
+// The module-wide index is what lets an importer ask about a region without
+// naming its publisher -- the case that matters is exactly the one where the
+// publisher is already gone.
+void test_case_gpu_region_exists_reports_registered_regions(struct kunit * test)
+{
+  const topic_local_id_t publisher_id = setup_publisher(test);
+  union ioctl_gpu_region_exists_args exists_args;
+  uint32_t ids[3];
+  int ret;
+
+  const uint32_t first_id = add_region(test, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+  const uint32_t second_id = add_region(test, publisher_id, SLOT_SIZE, SLOT_COUNT, MAPPED_SIZE);
+
+  ids[0] = first_id;
+  ids[1] = second_id;
+  // Never assigned, so it must answer "gone" rather than match anything.
+  ids[2] = 0;
+
+  memset(&exists_args, 0, sizeof(exists_args));
+  ret = agnocast_ioctl_gpu_region_exists(ids, 3, &exists_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, exists_args.ret_exists_bitmap, 0x3ull);
+
+  // Removing one must change exactly its own bit: ids are never reused, so the
+  // answer for a removed region is final.
+  ret = agnocast_ioctl_remove_gpu_region(
+    TOPIC_NAME, current->nsproxy->ipc_ns, PUBLISHER_PID, publisher_id, first_id);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  memset(&exists_args, 0, sizeof(exists_args));
+  ret = agnocast_ioctl_gpu_region_exists(ids, 3, &exists_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, exists_args.ret_exists_bitmap, 0x2ull);
+}
+
+// An id that was never assigned, and a batch larger than the module accepts.
+void test_case_gpu_region_exists_rejects_an_oversized_batch(struct kunit * test)
+{
+  union ioctl_gpu_region_exists_args exists_args;
+  uint32_t unknown_id = 0xDEADBEEF;
+  int ret;
+
+  memset(&exists_args, 0, sizeof(exists_args));
+  ret = agnocast_ioctl_gpu_region_exists(&unknown_id, 1, &exists_args);
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, exists_args.ret_exists_bitmap, 0x0ull);
+
+  memset(&exists_args, 0, sizeof(exists_args));
+  ret = agnocast_ioctl_gpu_region_exists(&unknown_id, MAX_GPU_REGION_QUERY_NUM + 1, &exists_args);
+  KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+}

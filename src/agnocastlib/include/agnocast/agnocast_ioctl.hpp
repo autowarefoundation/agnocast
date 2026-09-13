@@ -435,6 +435,26 @@ union ioctl_get_gpu_region_args {
 };
 #pragma GCC diagnostic pop
 
+// Asks which of the named regions the module still holds. Keyed on region ids
+// alone, which are unique for the module's lifetime and never reused, so it
+// needs no publisher or subscriber to authorize against -- and an importer can
+// still ask after the publisher it imported from is gone, which is exactly when
+// it needs to.
+#define MAX_GPU_REGION_QUERY_NUM 64
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+union ioctl_gpu_region_exists_args {
+  struct
+  {
+    uint64_t region_ids_addr;
+    uint32_t region_num;
+  };
+  // Bit i is set when the i-th id given is still registered.
+  uint64_t ret_exists_bitmap;
+};
+#pragma GCC diagnostic pop
+
 // Releases the module's liveness reference on one region. The caller must own
 // the publisher and must already know that no message refers to the region.
 struct ioctl_remove_gpu_region_args
@@ -478,5 +498,6 @@ union ioctl_reclaim_msgs_args {
 #define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 33, union ioctl_get_gpu_region_args)
 #define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 34, struct ioctl_remove_gpu_region_args)
 #define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 35, union ioctl_reclaim_msgs_args)
+#define AGNOCAST_GPU_REGION_EXISTS_CMD _IOWR(0xA6, 36, union ioctl_gpu_region_exists_args)
 
 }  // namespace agnocast

@@ -466,6 +466,28 @@ union ioctl_get_gpu_region_args {
   };
 };
 
+// Asks which of the named regions the module still holds. Keyed on region ids
+// alone, which are unique for the module's lifetime and never reused, so it
+// needs no publisher or subscriber to authorize against -- and an importer can
+// still ask after the publisher it imported from is gone, which is exactly when
+// it needs to. Answering "no" is final: nothing can bring that id back.
+//
+// Batched because an importer sweeps everything it has mapped at once, and one
+// syscall per region would put the cost on the path that maps a newly seen one.
+#define MAX_GPU_REGION_QUERY_NUM 64
+
+union ioctl_gpu_region_exists_args {
+  struct
+  {
+    // Array of `region_num` uint32_t ids, read through copy_from_user rather
+    // than the struct, like other variable-length ioctl payloads.
+    uint64_t region_ids_addr;
+    uint32_t region_num;
+  };
+  // Bit i is set when the i-th id given is still registered.
+  uint64_t ret_exists_bitmap;
+};
+
 // Releases the module's liveness reference on one region. The caller must own
 // the publisher and must already know that no message refers to the region;
 // the module cannot check that, as it never sees which region a message used.
@@ -507,6 +529,7 @@ union ioctl_reclaim_msgs_args {
 #define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 33, union ioctl_get_gpu_region_args)
 #define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 34, struct ioctl_remove_gpu_region_args)
 #define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 35, union ioctl_reclaim_msgs_args)
+#define AGNOCAST_GPU_REGION_EXISTS_CMD _IOWR(0xA6, 36, union ioctl_gpu_region_exists_args)
 
 // ================================================
 // public macros and functions in agnocast_main.c
@@ -599,6 +622,13 @@ int agnocast_ioctl_get_gpu_region(
   const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
   const uint32_t wanted_region_id, union ioctl_get_gpu_region_args * ioctl_ret,
   struct file ** out_handle_file);
+
+// Which of `region_ids` the module still holds, as a bitmap. Needs no
+// authorization: a region id names nothing a caller could not already have seen
+// in a message, and the answer is one bit.
+int agnocast_ioctl_gpu_region_exists(
+  const uint32_t * region_ids, const uint32_t region_num,
+  union ioctl_gpu_region_exists_args * ioctl_ret);
 
 // Drops the module's reference on one region of a publisher owned by `pid`. The
 // memory itself goes away once every importer has closed its own descriptor.

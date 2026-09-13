@@ -93,7 +93,7 @@ sharing, is deliberately excluded:
   unnecessary for any backend other than CUDA IPC. These drawbacks, combined with CUDA IPC's legacy
   status, leave little motivation to support it.
 
-## Publishers grow rather than fail a borrow
+## Publishers grow for payload size, never message rate
 
 Allocation sizing requires predicting potentially unknown payload sizes.
 
@@ -103,27 +103,26 @@ the borrow.
 The message identifies its payload's region. Growth requires no interprocess coordination:
 subscribers lazily map unseen regions on first receiving messages referencing them.
 
-Borrowing can also find every slot of a fitting region already holding an in-flight message. That
-is the same situation, and it grows too, for the same reason the host path does.
+Growth serves only this purpose.
 
-Host publishing cannot fail for want of room: a borrow allocates from the process mempool, so QoS
-depth is a retention target the kernel module applies lazily at each publish, never a bound on
-borrowing. A subscriber still referencing the oldest entry when the next message is published
-leaves the publisher holding more messages than its depth retains, and the host path absorbs that
-by allocating. GPU slots are preallocated per region, so the same excess would exhaust them.
+Borrowing can also fail when a suitable region exists but every slot holds an in-flight message.
 
-Two steps give the excess the outcome it has on the host side, and a borrow takes at most one of
-them, because each costs a call into the kernel module.
+Allocating another region then would be wrong: slot counts derive from publisher QoS depth, so
+exhaustion means outstanding messages already meet or exceed that limit.
 
-Growth comes first: it is what the mempool does under the same pressure, bounded by the number of
-regions a publisher may hold rather than by the mempool size. It also restores the ability to
-publish, and publishing is what drains the backlog.
+Growth would silently bypass it, compensating for a lagging consumer by consuming more machine-wide
+device memory. Device memory differs from the host path's mempool here: that mempool is reserved
+per process up front, so absorbing a lagging consumer costs the process its own reservation, while
+a device allocation is taken from every process on the machine.
 
-At that bound, or when the allocation fails, the publisher instead asks the kernel module to
-release what QoS depth no longer retains and frees those messages, which returns their slots. This
-step is what makes the failure recoverable rather than permanent: a slot is returned only by
-destroying its message, the kernel module names releasable messages only when something is
-published, and a publisher with no slot has nothing to publish.
+Instead, the publisher asks the kernel module to release whatever the QoS depth no longer retains,
+and borrowing fails if that frees no slot — analogous to failed enqueueing or message dropping in a
+full bounded queue.
+
+That release is not an optimization. A slot is returned only by destroying its message, and the
+kernel module names releasable messages only when something is published, so a publisher holding no
+free slot has nothing to publish and would never learn that its slots had come free. Without it the
+first transient excess would stall the publisher permanently instead of costing it a frame.
 
 Size-driven growth must also be bounded: payload sizes may have no known upper limit, but device
 memory is finite.
@@ -133,10 +132,6 @@ messages and can be released for a differently sized region.
 
 The kernel module cannot: it never observes which region holds a particular message's payload.
 
-Reaching the bound with every slot in flight is the one case a borrow still fails. It costs a
-frame, not the topic: the release above runs on every later borrow, so publishing resumes as soon
-as subscribers let go.
-
 ## Reclaiming regions a subscriber can no longer need
 
 Subscribers cache every mapped region. Caching eliminates overhead after the first frame.
@@ -145,40 +140,24 @@ Eventual release is necessary because imported handles retain driver references:
 prevent device-memory reclamation, accumulating across every region of every publisher encountered,
 without bound under repeated supervised restarts.
 
-No release happens while a live reference to the region remains within the subscriber process. Only
-subscribers know their locally retained references; kernel module accounting of in-flight messages
-does not track these, and it is dropped by subscription teardown while handles are still held. This
-condition gates both rules below.
+A region is released when both hold:
 
-Beyond it, two rules release a region, because a region stops being reachable in two ways.
+1. No live reference to the region remains within the subscriber process.
 
-**Its publisher is gone.** The kernel module knows whether a publisher exists. Since region IDs are
-never reused, a forgotten publisher can never reference that region again, making release final.
+2. The kernel module no longer holds the region itself.
 
-**Its publisher retired it.** A publisher bounded to `MAX_GPU_REGION_NUM_PER_PUBLISHER` regions can
-name no more than that many in any message it still sends, so a subscriber holding more than that
-for one publisher is holding regions the publisher has already released. The bound the publisher
-already enforces is therefore the bound the subscriber applies, and the oldest region ID is the one
-retired first.
+These conditions reflect who has the necessary knowledge.
 
-The first rule alone would not suffice. A publisher that retires a region and carries on answers
-"still registered" for as long as it lives. The same answer arrives when a restarted publisher is
-assigned a topic-local ID its predecessor used, which the kernel module restarts whenever a topic
-loses its last endpoint. Both cases leave the subscriber holding a region nothing can reach, and
-both are bounded by the second rule rather than detected by the first.
+Only subscribers know their locally retained references. Kernel module accounting of in-flight
+messages does not track these, and it is dropped by subscription teardown while handles are still
+held, so it cannot stand in for the first condition.
 
-## GPU metadata processing stays outside the shared-memory allocation window
+Only the kernel module knows whether a region still exists. It is asked about the region rather
+than about its exporting publisher, because the two answers differ: a publisher that retires a
+region and carries on still exists, and so does a restarted publisher that has been assigned its
+predecessor's topic-local id. Both would keep a defunct region mapped forever.
 
-Between borrowing and publishing, intercepted host allocations are redirected to the process's
-shared-memory mempool, placing dynamically allocated message payload components in shared memory.
-
-GPU metadata processing during this interval may also trigger internal driver host allocations.
-
-Redirecting these would unnecessarily place long-lived driver bookkeeping in a segment mapped by
-every subscriber.
-
-The library therefore temporarily disables shared-memory redirection during GPU metadata
-processing.
-
-These allocations belong to the library or driver; only message-owned allocations should enter
-shared memory.
+Region IDs are unique throughout the kernel module's lifetime and never reused, so the question
+needs no publisher or subscriber to authorize against — which matters, because the case it exists
+for is precisely the one where the exporting publisher is already gone and the importing
+subscription may be too. For the same reason the answer is final: nothing can bring that ID back.

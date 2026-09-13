@@ -11,6 +11,7 @@ DECLARE_RWSEM(global_htables_rwsem);
 
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+DEFINE_HASHTABLE(gpu_region_htable, GPU_REGION_HASH_BITS);
 DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
@@ -46,6 +47,7 @@ void agnocast_free_publisher_info(struct publisher_info * pub_info)
     // the driver, once every importer has closed its own descriptor.
     fput(region->handle_file);
     list_del(&region->node);
+    hash_del(&region->global_node);
     kfree(region);
   }
   pub_info->gpu_region_num = 0;
