@@ -59,10 +59,10 @@ bool is_referenced(const Registry & state, const uint32_t region_id)
   return it != state.refs.end() && it->second != 0;
 }
 
-// Which of `region_ids` the kmod still holds. A failed call reports everything
-// as still held: releasing a live region on a transient error would leave a
-// later message unable to resolve, which is far worse than keeping a mapping
-// until the next sweep.
+// Which of `region_ids` the kmod still holds. A failed call leaves everything it
+// did not answer for marked as held: releasing a live region on a transient
+// error would leave a later message unable to resolve, which is far worse than
+// keeping a mapping until the next sweep.
 void query_regions_still_held(const std::vector<uint32_t> & region_ids, std::vector<bool> & held)
 {
   held.assign(region_ids.size(), true);
@@ -309,12 +309,12 @@ void unmap_gpu_region(const uint32_t region_id)
 {
   if (region_id == 0) return;
 
-  // Deliberately not gated on a reference count, unlike the sweep: the callers
-  // are a publisher retiring a region it has proven idle, and publisher
-  // teardown, where waiting for a handle to be dropped would pin this mapping
-  // and its share of device memory for the life of the process. A handle the
-  // owning process still holds then resolves to nullptr rather than to unmapped
-  // memory.
+  // Deliberately not gated on a reference count, unlike the sweep: every caller
+  // is a publisher acting on a region of its own -- rolling back one it has just
+  // created, retiring one it has proven idle, or tearing down -- and at teardown
+  // waiting for a handle to be dropped would pin this mapping, and its share of
+  // device memory, for the life of the process. A handle the owning process
+  // still holds then resolves to nullptr rather than to unmapped memory.
   //
   // As in create_gpu_region(): releasing a mapping calls into the driver, which
   // allocates host memory of its own.

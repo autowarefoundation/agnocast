@@ -13,6 +13,10 @@ static const uint32_t QOS_DEPTH = 1;
 static const uint32_t PUBLISH_NUM = 3;
 #define IS_BRIDGE false
 #define KUNIT_PUB_SHM_BUF_SIZE 4
+// Stands in for what the input struct this field overlays leaves behind, so the
+// error paths below are shown to clear the count rather than report garbage the
+// caller would take as a number of addresses to free.
+#define RELEASED_NUM_SENTINEL 0xDEADBEEFu
 
 static pid_t publisher_pid = 4000;
 
@@ -142,20 +146,24 @@ void test_case_reclaim_msgs_rejects_a_foreign_process(struct kunit * test)
 
   union ioctl_reclaim_msgs_args reclaim_args;
   memset(&reclaim_args, 0, sizeof(reclaim_args));
+  reclaim_args.ret_released_num = RELEASED_NUM_SENTINEL;
   const int ret = agnocast_ioctl_reclaim_msgs(
     TOPIC_NAME, current->nsproxy->ipc_ns, pid + 1, publisher_id, &reclaim_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EPERM);
+  KUNIT_EXPECT_EQ(test, reclaim_args.ret_released_num, 0u);
 }
 
 void test_case_reclaim_msgs_topic_not_found(struct kunit * test)
 {
   union ioctl_reclaim_msgs_args reclaim_args;
   memset(&reclaim_args, 0, sizeof(reclaim_args));
+  reclaim_args.ret_released_num = RELEASED_NUM_SENTINEL;
   const int ret =
     agnocast_ioctl_reclaim_msgs("/no_such_topic", current->nsproxy->ipc_ns, 1, 0, &reclaim_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+  KUNIT_EXPECT_EQ(test, reclaim_args.ret_released_num, 0u);
 }
 
 void test_case_reclaim_msgs_publisher_not_found(struct kunit * test)
@@ -167,8 +175,10 @@ void test_case_reclaim_msgs_publisher_not_found(struct kunit * test)
 
   union ioctl_reclaim_msgs_args reclaim_args;
   memset(&reclaim_args, 0, sizeof(reclaim_args));
+  reclaim_args.ret_released_num = RELEASED_NUM_SENTINEL;
   const int ret = agnocast_ioctl_reclaim_msgs(
     TOPIC_NAME, current->nsproxy->ipc_ns, pid, publisher_id + 100, &reclaim_args);
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+  KUNIT_EXPECT_EQ(test, reclaim_args.ret_released_num, 0u);
 }
