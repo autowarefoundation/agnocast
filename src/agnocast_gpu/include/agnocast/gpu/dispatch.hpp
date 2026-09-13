@@ -9,11 +9,12 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/internal/gpu_message.hpp"
+#include "rcpputils/scope_exit.hpp"
 
 #include <cuda_runtime.h>
 
 #include <cstddef>
-#include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -148,10 +149,20 @@ struct is_declaration<Download> : std::true_type
 
 // Logged as well as returned, because a CUDA failure here means the message a
 // node is about to publish holds whatever was in the slot before.
-inline bool check(cudaError_t status, const char * what)
+//
+// Never throws, and that is load-bearing rather than tidiness: most calls sit
+// between submitting work and waiting for it, and RCLCPP_ERROR allocates --
+// inside the borrow window from the shared-memory mempool, which returns null
+// when exhausted. Unwinding from here would leave a kernel running over a slot
+// whose message is about to be destroyed, handing that slot to the next borrow
+// while the device is still writing it. Losing the log line is the lesser loss.
+inline bool check(cudaError_t status, const char * what) noexcept
 {
   if (status == cudaSuccess) return true;
-  RCLCPP_ERROR(agnocast::logger, "%s failed: %s", what, cudaGetErrorString(status));
+  try {
+    RCLCPP_ERROR(agnocast::logger, "%s failed: %s", what, cudaGetErrorString(status));
+  } catch (...) {  // NOLINT(bugprone-empty-catch)
+  }
   return false;
 }
 
@@ -208,15 +219,6 @@ inline cudaEvent_t completion_event()
   return e;
 }
 
-// Admission control. Empty until the dispatch scheduler exists; the call sites
-// are here so that adding it changes neither this signature nor user code.
-inline void gate()
-{
-}
-inline void gate_release()
-{
-}
-
 // Pageable host memory makes cudaMemcpyAsync behave synchronously, putting an
 // unexpected host block inside the GPU window.
 inline bool host_buffer_is_pinned(const void * host_ptr)
@@ -240,8 +242,8 @@ inline bool host_buffer_is_pinned(const void * host_ptr)
 // one resolves against it. For the publisher's own region this is a lookup.
 //
 // This is the one part of a dispatch that allocates host memory in the driver,
-// so it lands in the shared-memory mempool when a node borrows before
-// dispatching; see docs/gpu_ipc.md for why it is left here.
+// which is why run() keeps the borrow window closed across it; see
+// docs/gpu_ipc.md.
 template <typename T>
 bool ensure_message_mapped(const agnocast::ipc_shared_ptr<T> & message)
 {
@@ -366,11 +368,38 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   // one-time bookkeeping in the segment for the life of the process -- and on an
   // executor that owns its callback threads there is no earlier moment at which
   // to do it instead.
-  auto suspended = std::make_unique<agnocast::internal::SuspendedBorrowWindow>();
+  //
+  // An optional rather than a unique_ptr, because the window has to be reopened
+  // around the caller's callable and a unique_ptr allocates to do it: `operator
+  // new` runs before the constructor that closes the window, so the allocation
+  // lands in the very mempool this exists to keep out of, and throws there when
+  // it is exhausted. emplace() constructs in place and does neither.
+  std::optional<agnocast::internal::SuspendedBorrowWindow> suspended;
+  suspended.emplace();
 
   cudaStream_t s = stream();
   cudaEvent_t done = completion_event();
   if (s == nullptr || done == nullptr) return false;
+
+  // Armed before anything reaches the stream, because preparing a declaration
+  // already queues work: a stream-ordered allocation for an upload, and a region
+  // mapping that can throw from the string and the log line it takes. From here
+  // the device may be touching the message's slot, so every path out of this
+  // function has to wait for it first -- an exception as much as a return.
+  // Unwinding with work still in flight would let the slot be returned to its
+  // pool and handed to the next borrow while the device is still writing it. The
+  // caller's callable is the obvious way that happens, but not the only one:
+  // every RCLCPP_* call below allocates, and inside the borrow window that is
+  // the mempool, which throws when exhausted.
+  //
+  // The guard closes the window itself rather than leaning on `suspended`:
+  // guards are destroyed before objects declared above them, so when the
+  // caller's callable throws this runs with the window open again, and the
+  // driver call it makes allocates host memory of its own.
+  auto drain = rcpputils::make_scope_exit([s]() noexcept {
+    const agnocast::internal::SuspendedBorrowWindow drain_suspended;
+    static_cast<void>(cudaStreamSynchronize(s));
+  });
 
   // Folded so that every declaration is prepared even once one has failed:
   // allocations made here are the caller's from then on.
@@ -378,7 +407,6 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   ((ready = prepare(std::get<I>(parts), s) && ready), ...);
   if (!ready) return false;
 
-  gate();
   bool ok = true;
   ((ok = issue_upload(std::get<I>(parts), s) && ok), ...);
 
@@ -388,8 +416,6 @@ bool run(Tuple && parts, std::index_sequence<I...>)
     // ignore this function's result, so the frame has to be abandoned here
     // rather than completed with whatever the buffer held.
     RCLCPP_ERROR(agnocast::logger, "not submitting GPU work: a declared transfer failed");
-    static_cast<void>(cudaStreamSynchronize(s));
-    gate_release();
     return false;
   }
 
@@ -401,29 +427,19 @@ bool run(Tuple && parts, std::index_sequence<I...>)
   // The callable is the user's, and may well fill in message fields, so it runs
   // with the window as it found it.
   suspended.reset();
-
-  // The completion guarantee has to survive an exception from the caller's work:
-  // returning with a kernel still running would let the message's slot be
-  // returned to its pool and handed to another message while the device is still
-  // writing it. Synchronize, release the gate, then let the exception continue.
-  try {
-    std::get<kWork>(parts)(s);
-  } catch (...) {
-    static_cast<void>(cudaStreamSynchronize(s));
-    gate_release();
-    throw;
-  }
+  std::get<kWork>(parts)(s);
   ok = check(cudaGetLastError(), "work submission") && ok;
 
-  suspended = std::make_unique<agnocast::internal::SuspendedBorrowWindow>();
+  // Reopened for the driver calls below, which allocate host memory of their own.
+  suspended.emplace();
   ok = check(cudaEventRecord(done, s), "event record") && ok;
   ok = check(cudaEventSynchronize(done), "event synchronize") && ok;
-  gate_release();
 
-  // Downloads follow the release so the GPU is available to the next admitted
-  // node while this one copies its results back.
+  // Downloads follow completion, so they read results rather than a buffer the
+  // work is still writing.
   ((ok = issue_download(std::get<I>(parts), s) && ok), ...);
   ok = check(cudaStreamSynchronize(s), "stream synchronize") && ok;
+  drain.cancel();
   return ok;
 }
 

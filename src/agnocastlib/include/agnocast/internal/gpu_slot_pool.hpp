@@ -14,40 +14,6 @@
 namespace agnocast::internal
 {
 
-// Runs an action unless it is dismissed, so a slot reserved before a step that
-// can throw is returned on the way out. Lives here rather than in a header of
-// its own because the borrow path is its only caller: what has to be undone
-// there -- a slot addressed by index, a counter that opens the shared-memory
-// allocation window -- is not an object with a destructor of its own.
-template <typename Action>
-class ScopeGuard
-{
-public:
-  explicit ScopeGuard(Action action) : action_(std::move(action)) {}
-  ~ScopeGuard()
-  {
-    if (armed_) action_();
-  }
-
-  ScopeGuard(const ScopeGuard &) = delete;
-  ScopeGuard & operator=(const ScopeGuard &) = delete;
-  ScopeGuard(ScopeGuard &&) = delete;
-  ScopeGuard & operator=(ScopeGuard &&) = delete;
-
-  // Called once the step the guard covered has succeeded.
-  void dismiss() noexcept { armed_ = false; }
-
-private:
-  Action action_;
-  bool armed_ = true;
-};
-
-template <typename Action>
-[[nodiscard]] ScopeGuard<Action> make_scope_guard(Action action)
-{
-  return ScopeGuard<Action>(std::move(action));
-}
-
 // The largest payload a slot can be sized for. Above this a slot size could not
 // be rounded up to the alignment below without overflowing, and a region of that
 // size cannot be allocated anyway.
@@ -89,7 +55,6 @@ public:
 
   [[nodiscard]] uint32_t region_id() const noexcept { return region_id_; }
   [[nodiscard]] uint32_t slot_size() const noexcept { return slot_size_; }
-  [[nodiscard]] uint32_t slot_count() const noexcept { return slot_count_; }
 
   // No slot is out, so nothing refers to this region and it can be released,
   // which is what lets a publisher at the region cap trade it for another size.

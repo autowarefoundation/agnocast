@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 
 namespace agnocast::gpu
@@ -25,30 +26,26 @@ namespace agnocast::gpu
 // nothing, and copy-assignment from a plain sensor_msgs value would overwrite
 // every ROS field while leaving the payload handle pointing at the old contents.
 // The publisher fills `data` in directly, which is unaffected.
-struct PointCloud2 : public sensor_msgs::msg::PointCloud2,
-                     public agnocast::internal::gpu_message_tag
+//
+// `data` shadows the ROS type's member of the same name rather than replacing
+// it: the base's vector is still there, empty, and is what generic code handed a
+// `RosMessageT &` will see. Converting a handle to the base type is what makes
+// that reachable, and is why it must not be done.
+template <typename RosMessageT>
+struct GpuMessage : public RosMessageT, public agnocast::internal::gpu_message_tag
 {
   agnocast::internal::gpu_array<uint8_t> data;
 
-  PointCloud2() = default;
-  ~PointCloud2() = default;
-  PointCloud2(const PointCloud2 &) = delete;
-  PointCloud2(PointCloud2 &&) = delete;
-  PointCloud2 & operator=(const PointCloud2 &) = delete;
-  PointCloud2 & operator=(PointCloud2 &&) = delete;
+  GpuMessage() = default;
+  ~GpuMessage() = default;
+  GpuMessage(const GpuMessage &) = delete;
+  GpuMessage(GpuMessage &&) = delete;
+  GpuMessage & operator=(const GpuMessage &) = delete;
+  GpuMessage & operator=(GpuMessage &&) = delete;
 };
 
-struct Image : public sensor_msgs::msg::Image, public agnocast::internal::gpu_message_tag
-{
-  agnocast::internal::gpu_array<uint8_t> data;
-
-  Image() = default;
-  ~Image() = default;
-  Image(const Image &) = delete;
-  Image(Image &&) = delete;
-  Image & operator=(const Image &) = delete;
-  Image & operator=(Image &&) = delete;
-};
+using PointCloud2 = GpuMessage<sensor_msgs::msg::PointCloud2>;
+using Image = GpuMessage<sensor_msgs::msg::Image>;
 
 // Size of the device payload, derived from the same fields ROS uses for the host
 // one, so a producer sizes its slots from the message it is already filling in.
@@ -66,34 +63,27 @@ namespace detail
 // 0 rather than a wrapped product, so an overflow cannot look like a small
 // payload. A received handle caps the result; an unpopulated one (size 0, a
 // message still being built) leaves the derived size alone.
-inline size_t bounded_gpu_data_size(const size_t derived, const bool overflowed, uint64_t reserved)
+inline size_t bounded_extent(std::initializer_list<uint64_t> factors, const uint64_t reserved)
 {
-  if (overflowed) return 0;
-  if (reserved == 0) return derived;
-  return (derived > reserved) ? static_cast<size_t>(reserved) : derived;
-}
-
-inline bool mul_overflows(const uint64_t a, const uint64_t b)
-{
-  return a != 0 && b > std::numeric_limits<uint64_t>::max() / a;
+  uint64_t product = 1;
+  for (const uint64_t factor : factors) {
+    if (factor != 0 && product > std::numeric_limits<uint64_t>::max() / factor) return 0;
+    product *= factor;
+  }
+  if (reserved != 0 && product > reserved) return static_cast<size_t>(reserved);
+  return static_cast<size_t>(product);
 }
 
 }  // namespace detail
 
 inline size_t gpu_data_size(const PointCloud2 & msg)
 {
-  const uint64_t row = static_cast<uint64_t>(msg.width) * static_cast<uint64_t>(msg.point_step);
-  const bool overflowed =
-    detail::mul_overflows(msg.width, msg.point_step) || detail::mul_overflows(row, msg.height);
-  return detail::bounded_gpu_data_size(
-    static_cast<size_t>(row * msg.height), overflowed, msg.data.size());
+  return detail::bounded_extent({msg.width, msg.point_step, msg.height}, msg.data.size());
 }
 
 inline size_t gpu_data_size(const Image & msg)
 {
-  const bool overflowed = detail::mul_overflows(msg.height, msg.step);
-  return detail::bounded_gpu_data_size(
-    static_cast<size_t>(static_cast<uint64_t>(msg.height) * msg.step), overflowed, msg.data.size());
+  return detail::bounded_extent({msg.height, msg.step}, msg.data.size());
 }
 
 }  // namespace agnocast::gpu

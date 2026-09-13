@@ -376,5 +376,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
+ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters rcpputils tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
 ament_package()

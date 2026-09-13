@@ -377,15 +377,14 @@ struct ioctl_set_ros2_publisher_num_args
 // between a missed edit and silent memory corruption. See docs/gpu_ipc.md
 // for the design.
 #define GPU_DEVICE_UUID_SIZE 16
-#define MAX_GPU_HANDLE_BLOB_SIZE 4096
 // Regions a publisher may hold at once. Reaching it is not terminal: a region
 // holding no message can be removed to make room for another.
 #define MAX_GPU_REGION_NUM_PER_PUBLISHER 16
 
 // Mirrors agnocast::internal::GpuMemoryBackendType for the module's check that a
-// handle is the kind the declared mechanism uses.
+// handle is the kind the declared mechanism uses. Never renumber or reuse one; 2
+// is spoken for by NvSciBuf, which the module does not implement.
 #define AGNOCAST_GPU_BACKEND_VMM 1
-#define AGNOCAST_GPU_BACKEND_NVSCIBUF 2
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -399,10 +398,7 @@ union ioctl_add_gpu_region_args {
     uint32_t slot_count;
     uint64_t mapped_size;
     uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
-    // -1 for mechanisms whose handle is not a file descriptor.
     int32_t handle_fd;
-    uint64_t blob_addr;
-    uint32_t blob_size;
   };
   // Unique for the module's lifetime and never reused. The publisher records it
   // in each message written into this region, and a subscriber resolves it back
@@ -424,8 +420,6 @@ union ioctl_get_gpu_region_args {
     // The region id read out of the message being resolved, or 0 for "any",
     // which is what a caller that has not seen a message yet asks for.
     uint32_t region_id;
-    uint64_t blob_buffer_addr;
-    uint32_t blob_buffer_size;
   };
   struct
   {
@@ -434,10 +428,8 @@ union ioctl_get_gpu_region_args {
     uint32_t ret_slot_count;
     uint64_t ret_mapped_size;
     uint8_t ret_device_uuid[GPU_DEVICE_UUID_SIZE];
-    // Installed in this process for the same open file the kernel module holds,
-    // or -1 for mechanisms that do not use one.
+    // Installed in this process for the same open file the kernel module holds.
     int32_t ret_handle_fd;
-    uint32_t ret_blob_size;
     uint32_t ret_region_id;
   };
 };
@@ -457,8 +449,34 @@ struct ioctl_remove_gpu_region_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+// Releases the caller's own entries that QoS depth no longer retains, reporting
+// their addresses exactly as a publish does. It exists because a GPU publisher
+// reclaims its slots by destroying the messages named here, and a publish is the
+// only other thing that reports them: with every slot in flight there is no
+// message to publish, so without this the publisher could never learn that its
+// slots had become free and would stall for good. See docs/gpu_ipc.md.
+//
+// Host publishing never needs it -- allocation there is bounded only by the
+// process mempool, so a borrow does not fail and the next publish always comes.
+union ioctl_reclaim_msgs_args {
+  struct
+  {
+    struct name_info topic_name;
+    topic_local_id_t publisher_id;
+  };
+  struct
+  {
+    uint32_t ret_released_num;
+    uint64_t ret_released_addrs[MAX_RELEASE_NUM];
+  };
+};
+#pragma GCC diagnostic pop
+
 #define AGNOCAST_ADD_GPU_REGION_CMD _IOWR(0xA6, 32, union ioctl_add_gpu_region_args)
 #define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 33, union ioctl_get_gpu_region_args)
 #define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 34, struct ioctl_remove_gpu_region_args)
+#define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 35, union ioctl_reclaim_msgs_args)
 
 }  // namespace agnocast

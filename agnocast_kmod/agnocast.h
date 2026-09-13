@@ -407,18 +407,20 @@ union ioctl_topic_info_args {
 // module's part of it is to hold each region's liveness reference and to install
 // a descriptor for it per importer.
 #define GPU_DEVICE_UUID_SIZE 16
-// Upper bound on an exported descriptor, for the mechanisms whose handle is a
-// blob of bytes rather than a file descriptor.
-#define MAX_GPU_HANDLE_BLOB_SIZE 4096
 // Regions a publisher may hold at once. Reaching it is not terminal: a region
 // holding no message can be removed to make room for another.
 #define MAX_GPU_REGION_NUM_PER_PUBLISHER 16
 
 // The mechanism a region's export uses, mirrored from
 // agnocast::internal::GpuMemoryBackendType. The module acts on the value only to
-// check that the handle it arrives with is the kind that mechanism uses.
+// check that the handle it arrives with is the kind that mechanism uses, so a
+// mechanism it does not know is refused rather than passed through.
+//
+// These values cross the userspace-kernel ABI: never renumber or reuse one. 2 is
+// spoken for by NvSciBuf, whose handle is a blob of bytes rather than a file
+// descriptor; serving it needs an export produced per importer, so it is not a
+// matter of carrying the bytes here. See docs/gpu_ipc.md.
 #define AGNOCAST_GPU_BACKEND_VMM 1
-#define AGNOCAST_GPU_BACKEND_NVSCIBUF 2
 
 union ioctl_add_gpu_region_args {
   struct
@@ -430,12 +432,7 @@ union ioctl_add_gpu_region_args {
     uint32_t slot_count;
     uint64_t mapped_size;
     uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
-    // -1 for mechanisms whose handle is not a file descriptor.
     int32_t handle_fd;
-    // Read through copy_from_user rather than the struct, like other
-    // variable-length ioctl payloads.
-    uint64_t blob_addr;
-    uint32_t blob_size;
   };
   // Unique for the module's lifetime and never reused. The publisher records it
   // in each message written into this region, and a subscriber resolves it back
@@ -449,15 +446,11 @@ union ioctl_get_gpu_region_args {
     struct name_info topic_name;
     topic_local_id_t publisher_id;
     // Who is asking: authorization, not routing. Must name a subscriber of this
-    // topic belonging to the calling process. (An endpoint-bound mechanism would
-    // also need it to reconcile a descriptor per request; see
-    // docs/gpu_ipc.md.)
+    // topic belonging to the calling process.
     topic_local_id_t subscriber_id;
     // The region id read out of the message being resolved, or 0 for "any",
     // which is what a caller that has not seen a message yet asks for.
     uint32_t region_id;
-    uint64_t blob_buffer_addr;
-    uint32_t blob_buffer_size;
   };
   struct
   {
@@ -467,9 +460,8 @@ union ioctl_get_gpu_region_args {
     uint64_t ret_mapped_size;
     uint8_t ret_device_uuid[GPU_DEVICE_UUID_SIZE];
     // A descriptor installed in the calling process for the same open file the
-    // kernel module holds, or -1 for mechanisms that do not use one.
+    // kernel module holds.
     int32_t ret_handle_fd;
-    uint32_t ret_blob_size;
     uint32_t ret_region_id;
   };
 };
@@ -484,6 +476,28 @@ struct ioctl_remove_gpu_region_args
   uint32_t region_id;
 };
 
+// Releases the caller's own entries that QoS depth no longer retains, reporting
+// their addresses exactly as a publish does. It exists because a GPU publisher
+// reclaims its slots by destroying the messages named here, and a publish is the
+// only other thing that reports them: with every slot in flight there is no
+// message to publish, so without this the publisher could never learn that its
+// slots had become free and would stall for good. See docs/gpu_ipc.md.
+//
+// Host publishing never needs it -- allocation there is bounded only by the
+// process mempool, so a borrow does not fail and the next publish always comes.
+union ioctl_reclaim_msgs_args {
+  struct
+  {
+    struct name_info topic_name;
+    topic_local_id_t publisher_id;
+  };
+  struct
+  {
+    uint32_t ret_released_num;
+    uint64_t ret_released_addrs[MAX_RELEASE_NUM];
+  };
+};
+
 #define AGNOCAST_GET_TOPIC_LIST_CMD _IOWR(0xA6, 20, union ioctl_topic_list_args)
 #define AGNOCAST_GET_TOPIC_SUBSCRIBER_INFO_CMD _IOWR(0xA6, 21, union ioctl_topic_info_args)
 #define AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD _IOWR(0xA6, 22, union ioctl_topic_info_args)
@@ -492,6 +506,7 @@ struct ioctl_remove_gpu_region_args
 #define AGNOCAST_ADD_GPU_REGION_CMD _IOWR(0xA6, 32, union ioctl_add_gpu_region_args)
 #define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 33, union ioctl_get_gpu_region_args)
 #define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 34, struct ioctl_remove_gpu_region_args)
+#define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 35, union ioctl_reclaim_msgs_args)
 
 // ================================================
 // public macros and functions in agnocast_main.c
@@ -571,26 +586,31 @@ int agnocast_ioctl_remove_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, topic_local_id_t publisher_id);
 
 // `handle_file` is consumed on success and left untouched on failure, so the
-// caller retains its reference only when this returns non-zero. `blob` is copied.
-// `pid` must own the publisher.
+// caller retains its reference only when this returns non-zero. `pid` must own
+// the publisher.
 int agnocast_ioctl_add_gpu_region(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
-  union ioctl_add_gpu_region_args * args, struct file * handle_file, const uint8_t * blob);
+  union ioctl_add_gpu_region_args * args, struct file * handle_file);
 
 // On success `*out_handle_file` holds a new reference for the caller to install
-// or release; it is NULL for mechanisms without a descriptor. `blob_buf` receives
-// the exported descriptor. Authorizes on `subscriber_id` belonging to `pid`.
+// or release. Authorizes on `subscriber_id` belonging to `pid`.
 int agnocast_ioctl_get_gpu_region(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
-  const uint32_t wanted_region_id, uint8_t * blob_buf, uint32_t blob_buf_size,
-  union ioctl_get_gpu_region_args * ioctl_ret, struct file ** out_handle_file);
+  const uint32_t wanted_region_id, union ioctl_get_gpu_region_args * ioctl_ret,
+  struct file ** out_handle_file);
 
 // Drops the module's reference on one region of a publisher owned by `pid`. The
 // memory itself goes away once every importer has closed its own descriptor.
 int agnocast_ioctl_remove_gpu_region(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
   const topic_local_id_t publisher_id, const uint32_t region_id);
+
+// Runs the same QoS-depth release a publish does, without publishing anything.
+// `pid` must own the publisher.
+int agnocast_ioctl_reclaim_msgs(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, union ioctl_reclaim_msgs_args * ioctl_ret);
 
 int agnocast_ioctl_add_bridge(
   const char * topic_name, const pid_t pid, bool is_r2a, const struct ipc_namespace * ipc_ns,

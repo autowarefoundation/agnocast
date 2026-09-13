@@ -75,7 +75,11 @@ sharing, is deliberately excluded:
 
 - **Why CUDA VMM and NvSciBuf qualify:** Their backing objects support third-party retention on the
   creator's behalf: file descriptors for CUDA VMM, native reference counting for NvSciBuf. The
-  kernel module retains these, preserving memory after process exit.
+  kernel module retains these, preserving memory after process exit. Only CUDA VMM is implemented;
+  NvSciBuf holds the reserved mechanism number 2. Its export is reconciled against the destination
+  endpoint, so one importer's bytes mean nothing to another, and serving it needs an export produced
+  per request rather than the single retained handle the module holds today. That is a different
+  shape, so it is left to be designed alongside its implementation.
 
 - **Why CUDA IPC fails:** Its opaque token does not reference a reference-counted kernel object;
   neither the kernel module nor another process can retain ownership. Allocations remain exclusively
@@ -89,7 +93,7 @@ sharing, is deliberately excluded:
   unnecessary for any backend other than CUDA IPC. These drawbacks, combined with CUDA IPC's legacy
   status, leave little motivation to support it.
 
-## Publishers grow for payload size, never message rate
+## Publishers grow rather than fail a borrow
 
 Allocation sizing requires predicting potentially unknown payload sizes.
 
@@ -99,18 +103,27 @@ the borrow.
 The message identifies its payload's region. Growth requires no interprocess coordination:
 subscribers lazily map unseen regions on first receiving messages referencing them.
 
-Growth serves only this purpose.
+Borrowing can also find every slot of a fitting region already holding an in-flight message. That
+is the same situation, and it grows too, for the same reason the host path does.
 
-Borrowing can also fail when a suitable region exists but every slot holds an in-flight message.
+Host publishing cannot fail for want of room: a borrow allocates from the process mempool, so QoS
+depth is a retention target the kernel module applies lazily at each publish, never a bound on
+borrowing. A subscriber still referencing the oldest entry when the next message is published
+leaves the publisher holding more messages than its depth retains, and the host path absorbs that
+by allocating. GPU slots are preallocated per region, so the same excess would exhaust them.
 
-Allocating another region then would be wrong: slot counts derive from publisher QoS depth, so
-exhaustion means outstanding messages already meet or exceed that limit.
+Two steps give the excess the outcome it has on the host side, and a borrow takes at most one of
+them, because each costs a call into the kernel module.
 
-Growth would silently bypass it, compensating for a lagging consumer by consuming more machine-wide
-device memory.
+Growth comes first: it is what the mempool does under the same pressure, bounded by the number of
+regions a publisher may hold rather than by the mempool size. It also restores the ability to
+publish, and publishing is what drains the backlog.
 
-Instead, borrowing fails, analogous to failed enqueueing or message dropping in a full bounded
-queue.
+At that bound, or when the allocation fails, the publisher instead asks the kernel module to
+release what QoS depth no longer retains and frees those messages, which returns their slots. This
+step is what makes the failure recoverable rather than permanent: a slot is returned only by
+destroying its message, the kernel module names releasable messages only when something is
+published, and a publisher with no slot has nothing to publish.
 
 Size-driven growth must also be bounded: payload sizes may have no known upper limit, but device
 memory is finite.
@@ -120,29 +133,39 @@ messages and can be released for a differently sized region.
 
 The kernel module cannot: it never observes which region holds a particular message's payload.
 
-## Reclaiming departed publishers' regions
+Reaching the bound with every slot in flight is the one case a borrow still fails. It costs a
+frame, not the topic: the release above runs on every later borrow, so publishing resumes as soon
+as subscribers let go.
 
-Subscribers cache every mapped region, releasing it only when:
+## Reclaiming regions a subscriber can no longer need
 
-1. No live reference to the region remains within the subscriber process.
-
-2. The kernel module no longer recognizes its exporting publisher.
-
-Caching eliminates overhead after the first frame.
+Subscribers cache every mapped region. Caching eliminates overhead after the first frame.
 
 Eventual release is necessary because imported handles retain driver references: unreleased mappings
 prevent device-memory reclamation, accumulating across every region of every publisher encountered,
 without bound under repeated supervised restarts.
 
-These conditions reflect who has the necessary knowledge.
+No release happens while a live reference to the region remains within the subscriber process. Only
+subscribers know their locally retained references; kernel module accounting of in-flight messages
+does not track these, and it is dropped by subscription teardown while handles are still held. This
+condition gates both rules below.
 
-The kernel module knows whether a publisher exists.
+Beyond it, two rules release a region, because a region stops being reachable in two ways.
 
-Since region IDs are never reused, a forgotten publisher can never reference that region again,
-making release final.
+**Its publisher is gone.** The kernel module knows whether a publisher exists. Since region IDs are
+never reused, a forgotten publisher can never reference that region again, making release final.
 
-Only subscribers know their locally retained references; kernel module accounting of in-flight
-messages does not track these.
+**Its publisher retired it.** A publisher bounded to `MAX_GPU_REGION_NUM_PER_PUBLISHER` regions can
+name no more than that many in any message it still sends, so a subscriber holding more than that
+for one publisher is holding regions the publisher has already released. The bound the publisher
+already enforces is therefore the bound the subscriber applies, and the oldest region ID is the one
+retired first.
+
+The first rule alone would not suffice. A publisher that retires a region and carries on answers
+"still registered" for as long as it lives. The same answer arrives when a restarted publisher is
+assigned a topic-local ID its predecessor used, which the kernel module restarts whenever a topic
+loses its last endpoint. Both cases leave the subscriber holding a region nothing can reach, and
+both are bounded by the second rule rather than detected by the first.
 
 ## GPU metadata processing stays outside the shared-memory allocation window
 

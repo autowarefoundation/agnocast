@@ -5,14 +5,18 @@
 
 #include <sys/ioctl.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace agnocast::internal
@@ -85,15 +89,32 @@ std::atomic<uint64_t> & table_generation()
 // Anything other than the module's "no such topic or publisher" is treated as
 // still registered: releasing a live region on a transient error would leave a
 // later message unable to resolve, which is far worse than keeping a mapping.
-bool publisher_still_registered(const RegionEntry & entry)
+bool publisher_still_registered(const std::string & topic_name, const topic_local_id_t publisher_id)
 {
   if (agnocast_fd < 0) return true;
 
   struct ioctl_get_publisher_qos_args args = {};
-  args.topic_name = {entry.topic_name.data(), entry.topic_name.size()};
-  args.publisher_id = entry.publisher_id;
+  args.topic_name = {topic_name.data(), topic_name.size()};
+  args.publisher_id = publisher_id;
   if (ioctl(agnocast_fd, AGNOCAST_GET_PUBLISHER_QOS_CMD, &args) >= 0) return true;
   return errno != EINVAL;
+}
+
+// One region the sweep is considering, copied out of the table so the module can
+// be asked about it with no lock held.
+struct ReleaseCandidate
+{
+  uint32_t region_id;
+  std::string topic_name;
+  topic_local_id_t publisher_id;
+};
+
+// Whether a handle in this process can still resolve a payload in this region.
+// Caller holds the lock, in either mode.
+bool region_is_referenced(const uint32_t region_id)
+{
+  const auto refs = region_refs().find(region_id);
+  return refs != region_refs().end() && refs->second != 0;
 }
 
 // One export serves every subscriber, because the kmod holds the reference and
@@ -102,7 +123,7 @@ uint32_t create_via_kmod(
   GpuMemoryBackend & backend, const std::string_view topic_name,
   const topic_local_id_t publisher_id, MappedGpuRegion & region)
 {
-  const std::optional<GpuRegionExport> exported = backend.export_for(region, 0);
+  const std::optional<GpuRegionExport> exported = backend.export_region(region);
   if (!exported) return 0;
 
   union ioctl_add_gpu_region_args args = {};
@@ -115,12 +136,18 @@ uint32_t create_via_kmod(
   std::memcpy(args.device_uuid, exported->geometry.device_uuid.data(), GPU_DEVICE_UUID_SIZE);
   args.handle_fd = -1;
 
-  if (const auto * vmm = std::get_if<VmmExportHandle>(&exported->handle)) {
-    args.handle_fd = vmm->fd.get();
-  } else if (const auto * blob = std::get_if<NvSciBufExportHandle>(&exported->handle)) {
-    args.blob_addr = reinterpret_cast<uint64_t>(blob->descriptor.data());
-    args.blob_size = static_cast<uint32_t>(blob->descriptor.size());
+  // Unreachable while VMM is the only mechanism, but silently registering a
+  // region the module would refuse -- or worse, one whose handle it reads as the
+  // wrong kind -- is not the way to find out that changed.
+  const auto * vmm = std::get_if<VmmExportHandle>(&exported->handle);
+  if (vmm == nullptr) {
+    RCLCPP_ERROR(
+      logger, "the GPU backend exported region of topic '%.*s' as mechanism %u, which is not VMM",
+      static_cast<int>(topic_name.size()), topic_name.data(),
+      static_cast<uint32_t>(exported->backend));
+    return 0;
   }
+  args.handle_fd = vmm->fd.get();
 
   // The export still owns the handle: the kmod takes its own reference on
   // success, so releasing ours when `exported` dies is correct either way.
@@ -136,15 +163,11 @@ uint32_t create_via_kmod(
 MappedGpuRegion import_via_kmod(
   GpuMemoryBackend & backend, const GpuRegionRef & ref, uint32_t & out_region_id)
 {
-  std::vector<uint8_t> blob(MAX_GPU_HANDLE_BLOB_SIZE);
-
   union ioctl_get_gpu_region_args args = {};
   args.topic_name = {ref.topic_name.data(), ref.topic_name.size()};
   args.publisher_id = ref.publisher_id;
   args.subscriber_id = ref.subscriber_id;
   args.region_id = ref.region_id;
-  args.blob_buffer_addr = reinterpret_cast<uint64_t>(blob.data());
-  args.blob_buffer_size = static_cast<uint32_t>(blob.size());
 
   if (ioctl(agnocast_fd, AGNOCAST_GET_GPU_REGION_CMD, &args) < 0) {
     RCLCPP_ERROR(
@@ -163,40 +186,130 @@ MappedGpuRegion import_via_kmod(
   // The kmod installed the descriptor in this process, so it is ours from here.
   if (args.ret_handle_fd >= 0) {
     exported.handle = VmmExportHandle{UniqueFd(args.ret_handle_fd)};
-  } else if (args.ret_blob_size > 0) {
-    blob.resize(args.ret_blob_size);
-    exported.handle = NvSciBufExportHandle{std::move(blob)};
   }
 
   out_region_id = args.ret_region_id;
   return backend.import_region(exported);
 }
 
-// Imported regions nothing can refer to any more, because the kmod has forgotten
-// the publisher that exported them: a received message holds a reference on its
-// kmod entry, so a publisher with a message still held here cannot have been
-// forgotten, and one that has been can never produce another message naming
-// these regions, since ids are never reused.
+// Imported regions whose exporting publisher the kmod has forgotten. Nothing can
+// refer to them any more: a handle held here keeps its region referenced, and a
+// forgotten publisher can never produce another message naming one, since ids
+// are never reused.
 //
-// Returned rather than destroyed so the caller can unmap outside the lock.
-// Caller holds the lock exclusively.
+// Three phases, because the middle one is a blocking ioctl per candidate and a
+// thread resolving a slot must not queue behind a sweep of every publisher this
+// process has ever received from. Only the first and last take the lock, and the
+// reference test is repeated under the second: the module's answer was obtained
+// without the lock, and a message naming the region may have arrived since.
+//
+// Returned rather than destroyed so the caller can unmap outside the lock too --
+// releasing a region synchronizes the whole device.
 std::vector<RegionEntry> collect_unreachable_regions()
 {
-  std::vector<RegionEntry> released;
-  for (auto it = table().begin(); it != table().end();) {
-    const auto refs = region_refs().find(it->first);
-    const bool still_referred_to = refs != region_refs().end() && refs->second != 0;
-    if (!it->second.imported || still_referred_to || publisher_still_registered(it->second)) {
-      ++it;
-      continue;
+  std::vector<ReleaseCandidate> candidates;
+  {
+    const std::shared_lock<std::shared_mutex> lock(table_rwlock());
+    for (const auto & [region_id, entry] : table()) {
+      if (!entry.imported || region_is_referenced(region_id)) continue;
+      candidates.push_back({region_id, entry.topic_name, entry.publisher_id});
     }
-    RCLCPP_DEBUG(
-      logger, "releasing the mapping of GPU region %u: publisher %d of topic '%s' is gone",
-      it->first, it->second.publisher_id, it->second.topic_name.c_str());
-    released.push_back(std::move(it->second));
-    it = table().erase(it);
+  }
+
+  // One call per publisher rather than per region: the question is keyed on
+  // (topic, publisher), so a publisher holding sixteen regions would otherwise
+  // cost sixteen identical blocking ioctls every time a newly seen region is
+  // mapped.
+  using PublisherKey = std::pair<std::string, topic_local_id_t>;
+  std::vector<PublisherKey> asked;
+  std::vector<PublisherKey> gone;
+  for (const auto & candidate : candidates) {
+    const PublisherKey key{candidate.topic_name, candidate.publisher_id};
+    if (std::find(asked.begin(), asked.end(), key) != asked.end()) continue;
+    asked.push_back(key);
+    if (!publisher_still_registered(candidate.topic_name, candidate.publisher_id)) {
+      gone.push_back(key);
+    }
+  }
+  if (gone.empty()) return {};
+
+  std::vector<ReleaseCandidate> departed;
+  for (auto & candidate : candidates) {
+    const PublisherKey key{candidate.topic_name, candidate.publisher_id};
+    if (std::find(gone.begin(), gone.end(), key) != gone.end()) {
+      departed.push_back(std::move(candidate));
+    }
+  }
+  if (departed.empty()) return {};
+
+  std::vector<RegionEntry> released;
+  {
+    const std::lock_guard<std::shared_mutex> lock(table_rwlock());
+    for (const auto & candidate : departed) {
+      if (region_is_referenced(candidate.region_id)) continue;
+      const auto it = table().find(candidate.region_id);
+      if (it == table().end()) continue;
+      RCLCPP_DEBUG(
+        logger, "releasing the mapping of GPU region %u: publisher %d of topic '%s' is gone",
+        candidate.region_id, candidate.publisher_id, candidate.topic_name.c_str());
+      released.push_back(std::move(it->second));
+      table().erase(it);
+    }
+    if (!released.empty()) table_generation().fetch_add(1, std::memory_order_release);
   }
   return released;
+}
+
+// Regions this process has mapped for one publisher beyond the number that
+// publisher can hold at once.
+//
+// MAX_GPU_REGION_NUM_PER_PUBLISHER bounds the publisher, so no message it can
+// still send names more than that many regions. Anything mapped beyond it for
+// the same publisher is one the publisher has already retired, and nothing but a
+// handle held here can still want it -- which the reference test below is what
+// answers.
+//
+// This is what actually bounds the cache, and the sweep above cannot do it: that
+// one asks whether the *publisher* is still registered, and a publisher that
+// retires a region and carries on answers yes for as long as it lives. It is
+// also what keeps a publisher restarting onto the same topic-local id from
+// accumulating, since the kmod restarts those ids whenever a topic loses its
+// last endpoint and a live id makes the sweep's question answer yes as well.
+//
+// Oldest first, by region id: the kmod hands them out monotonically, so the
+// lowest id a publisher still has mapped here is the one it retired first.
+// Caller holds the lock exclusively.
+void collect_surplus_regions(
+  const std::string_view topic_name, const topic_local_id_t publisher_id,
+  const uint32_t just_mapped_region_id, std::vector<RegionEntry> & released)
+{
+  std::vector<uint32_t> mapped_for_publisher;
+  for (const auto & [region_id, entry] : table()) {
+    if (entry.imported && entry.publisher_id == publisher_id && entry.topic_name == topic_name) {
+      mapped_for_publisher.push_back(region_id);
+    }
+  }
+  if (mapped_for_publisher.size() <= MAX_GPU_REGION_NUM_PER_PUBLISHER) return;
+
+  std::sort(mapped_for_publisher.begin(), mapped_for_publisher.end());
+  size_t surplus = mapped_for_publisher.size() - MAX_GPU_REGION_NUM_PER_PUBLISHER;
+  for (const uint32_t region_id : mapped_for_publisher) {
+    if (surplus == 0) break;
+    // Counted but never evicted: the caller is about to resolve a message
+    // against it, and referenced older regions make this loop walk past them to
+    // the newest ids. Releasing it here would leave ensure_mapped reporting
+    // success for a region it had just unmapped.
+    if (region_id == just_mapped_region_id) continue;
+    if (region_is_referenced(region_id)) continue;
+    const auto it = table().find(region_id);
+    if (it == table().end()) continue;
+    RCLCPP_DEBUG(
+      logger, "releasing the mapping of GPU region %u: publisher %d of topic '%.*s' retired it",
+      region_id, publisher_id, static_cast<int>(topic_name.size()), topic_name.data());
+    released.push_back(std::move(it->second));
+    table().erase(it);
+    surplus--;
+  }
 }
 
 }  // namespace
@@ -331,16 +444,14 @@ bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
   entry.topic_name = std::string(ref.topic_name);
   entry.publisher_id = ref.publisher_id;
 
-  // Collected under the lock and unmapped after it: releasing a region
-  // synchronizes the device, which no one resolving a slot should wait on.
+  // Swept before the insertion, so the region just imported is not itself a
+  // candidate: its publisher answered a moment ago and probing it again would
+  // only cost another call into the module. Outside the lock, which is where the
+  // sweep does its own locking around the calls it has to make.
   // cppcheck-suppress variableScope ; must outlive the lock scope below
-  std::vector<RegionEntry> released;
+  std::vector<RegionEntry> released = collect_unreachable_regions();
   {
     const std::lock_guard<std::shared_mutex> lock(table_rwlock());
-    // Swept before the insertion, so the region just imported is not itself a
-    // candidate: its publisher answered a moment ago and probing it again would
-    // only cost another call into the module.
-    released = collect_unreachable_regions();
     // Presence is tested before the insert rather than after, because emplace
     // may consume the argument even when it does not insert: moving from it
     // twice would leave the loser's region owned by nobody and leaked. A
@@ -352,6 +463,9 @@ bool GpuRegionRegistry::ensure_mapped(const GpuRegionRef & ref)
     } else {
       released.push_back(std::move(entry));
     }
+    // After the insertion, so this publisher's newest region counts towards the
+    // bound it is measured against.
+    collect_surplus_regions(ref.topic_name, ref.publisher_id, region_id, released);
     table_generation().fetch_add(1, std::memory_order_release);
   }
   return true;
@@ -375,24 +489,28 @@ void GpuRegionRegistry::destroy(
       static_cast<int>(topic_name.size()), topic_name.data(), region_id, strerror(errno));
   }
 
-  RegionEntry released;
-  {
-    const std::lock_guard<std::shared_mutex> lock(table_rwlock());
-    const auto it = table().find(region_id);
-    if (it == table().end()) return;
-    // cppcheck-suppress unreadVariable ; holds the region so it unmaps after the lock
-    released = std::move(it->second);
-    table().erase(it);
-    table_generation().fetch_add(1, std::memory_order_release);
-  }
-  // Unmapped outside the lock: releasing a region synchronizes the device, and
-  // resolving a slot of another region should not wait on that.
+  unmap_local(region_id);
 }
 
 void GpuRegionRegistry::unmap_local(const uint32_t region_id)
 {
   if (region_id == 0) return;
 
+  // Deliberately not gated on region_is_referenced(), unlike the two sweeps: the
+  // callers are a publisher retiring a region it has proven idle, and publisher
+  // teardown, where waiting for a handle to be dropped would pin this mapping
+  // and its share of device memory for the life of the process. See
+  // ~GpuSlotPool. A handle the owning process still holds at teardown therefore
+  // resolves to nullptr rather than to unmapped memory.
+  //
+  // As in create(): releasing a mapping calls into the driver, which allocates
+  // host memory of its own, and a publisher retiring a region while another
+  // borrow is outstanding would otherwise leave that bookkeeping in the mempool.
+  const SuspendedBorrowWindow suspended;
+
+  // Held past the lock on purpose: releasing a region synchronizes the whole
+  // device, and a thread resolving a slot of another region should not wait on
+  // that. The destructor at the end of this scope is what unmaps.
   RegionEntry released;
   {
     const std::lock_guard<std::shared_mutex> lock(table_rwlock());
@@ -403,15 +521,21 @@ void GpuRegionRegistry::unmap_local(const uint32_t region_id)
     table().erase(it);
     table_generation().fetch_add(1, std::memory_order_release);
   }
-  // Unmapped after the lock, as in destroy().
 }
 
 namespace
 {
 
-void adjust_region_refs(const uint32_t region_id, const bool take) noexcept
+void adjust_region_refs(const uint32_t region_id, const bool take)
 {
   if (region_id == 0) return;
+
+  // The map node, and any rehash of the bucket array, are this library's
+  // bookkeeping rather than part of a message. A subscriber can be inside an
+  // open borrow window when it takes a handle -- a filter node that receives
+  // while holding a borrow -- and without this they would be served from the
+  // mempool and stay resident in the segment every peer maps.
+  const SuspendedBorrowWindow suspended;
 
   const std::lock_guard<std::shared_mutex> lock(table_rwlock());
   if (take) {
@@ -425,20 +549,40 @@ void adjust_region_refs(const uint32_t region_id, const bool take) noexcept
 
 }  // namespace
 
-void ref_gpu_region(const uint32_t region_id) noexcept
-{
+// The three below are noexcept because their callers are: a message destructor,
+// and an accessor on the payload of a message being read. Locking and the map
+// insert can both throw, and logging -- which allocates -- can throw inside the
+// borrow window where the mempool is what serves it. A function-try-block, as on
+// UniqueFd::reset and VmmBackend::release_region, so a throw costs the
+// bookkeeping rather than the process.
+
+bool ref_gpu_region(const uint32_t region_id) noexcept
+try {
   adjust_region_refs(region_id, true);
+  return true;
+} catch (...) {
+  // Losing the reference means the region may be unmapped while this handle
+  // lives, so it is worth a line -- but only if saying so cannot throw again.
+  std::fprintf(
+    stderr, "[agnocast] failed to reference GPU region %u; its mapping may be released early\n",
+    region_id);
+  return false;
 }
 
 void unref_gpu_region(const uint32_t region_id) noexcept
-{
+try {
   adjust_region_refs(region_id, false);
+} catch (...) {
+  // The count stays high, so the region is never reclaimed: a bounded leak, and
+  // the safe direction to fail in.
 }
 
 void * resolve_gpu_slot(
   const uint32_t region_id, const uint32_t slot_index, const uint64_t bytes) noexcept
-{
+try {
   return GpuRegionRegistry::instance().resolve(region_id, slot_index, bytes);
+} catch (...) {
+  return nullptr;
 }
 
 }  // namespace agnocast::internal

@@ -47,14 +47,9 @@ agnocast::internal::GpuMemoryBackend * gpu_backend_or_skip()
 class NullBackend : public agnocast::internal::GpuMemoryBackend
 {
 public:
-  [[nodiscard]] GpuMemoryBackendType type() const noexcept override
-  {
-    return GpuMemoryBackendType::Unknown;
-  }
   [[nodiscard]] bool is_supported() const noexcept override { return false; }
   [[nodiscard]] MappedGpuRegion create_region(uint32_t, uint32_t) override { return {}; }
-  [[nodiscard]] std::optional<GpuRegionExport> export_for(
-    const MappedGpuRegion &, agnocast::topic_local_id_t) override
+  [[nodiscard]] std::optional<GpuRegionExport> export_region(const MappedGpuRegion &) override
   {
     return std::nullopt;
   }
@@ -159,7 +154,9 @@ TEST(BackendRegistryTest, BackendIsSelectedOnDemand)
 {
   auto * backend = agnocast::internal::get_gpu_memory_backend();
   if (backend == nullptr) GTEST_SKIP() << "no supported GPU memory backend";
-  EXPECT_EQ(backend->type(), GpuMemoryBackendType::Vmm);
+  // Resolved once and cached: selection probes the driver, and a second answer
+  // would mean a second set of driver calls per region created.
+  EXPECT_EQ(backend, agnocast::internal::get_gpu_memory_backend());
 }
 
 TEST(VmmBackendGpuTest, CreateExportImportRoundTrip)
@@ -181,8 +178,11 @@ TEST(VmmBackendGpuTest, CreateExportImportRoundTrip)
       static_cast<uint8_t *>(region.slot_address(0, slot_size)),
     static_cast<ptrdiff_t>(slot_size));
 
-  const auto exported = backend->export_for(region, /*subscriber_id=*/7);
+  const auto exported = backend->export_region(region);
   ASSERT_TRUE(exported.has_value());
+  // The mechanism an importer selects on, and the value the module checks the
+  // handle against, so it crosses the ABI and is worth asserting here.
+  EXPECT_EQ(exported->backend, GpuMemoryBackendType::Vmm);
   ASSERT_TRUE(std::holds_alternative<VmmExportHandle>(exported->handle));
   EXPECT_TRUE(std::get<VmmExportHandle>(exported->handle).fd.valid());
   EXPECT_EQ(exported->geometry.mapped_size, region.geometry().mapped_size);
@@ -214,7 +214,7 @@ TEST(VmmBackendGpuTest, ImportedMappingReadsWhatTheExporterWrote)
     cudaMemcpy(region.slot_address(1, kPayload), pattern.data(), kPayload, cudaMemcpyHostToDevice),
     cudaSuccess);
 
-  const auto exported = backend->export_for(region, 0);
+  const auto exported = backend->export_region(region);
   ASSERT_TRUE(exported.has_value());
   const MappedGpuRegion imported = backend->import_region(*exported);
   ASSERT_TRUE(imported.valid());
@@ -272,7 +272,7 @@ TEST(VmmBackendGpuTest, ImportRejectsAForeignDevice)
   const MappedGpuRegion region = backend->create_region(1U << 20, 2);
   ASSERT_TRUE(region.valid());
 
-  auto exported = backend->export_for(region, 0);
+  auto exported = backend->export_region(region);
   ASSERT_TRUE(exported.has_value());
   exported->geometry.device_uuid[0] =
     static_cast<uint8_t>(exported->geometry.device_uuid[0] ^ 0xFFU);
@@ -288,7 +288,7 @@ TEST(VmmBackendGpuTest, ImportRejectsInconsistentGeometry)
   const MappedGpuRegion region = backend->create_region(1U << 20, 2);
   ASSERT_TRUE(region.valid());
 
-  auto exported = backend->export_for(region, 0);
+  auto exported = backend->export_region(region);
   ASSERT_TRUE(exported.has_value());
   exported->geometry.slot_count = 1024;  // no longer fits mapped_size
 

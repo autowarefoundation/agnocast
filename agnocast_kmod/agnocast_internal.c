@@ -44,11 +44,8 @@ void agnocast_free_publisher_info(struct publisher_info * pub_info)
   {
     // Dropping this reference is what eventually returns the device memory to
     // the driver, once every importer has closed its own descriptor.
-    if (region->handle_file) {
-      fput(region->handle_file);
-    }
+    fput(region->handle_file);
     list_del(&region->node);
-    kfree(region->blob);
     kfree(region);
   }
   pub_info->gpu_region_num = 0;

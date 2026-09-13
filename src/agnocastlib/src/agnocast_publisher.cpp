@@ -81,6 +81,24 @@ topic_local_id_t initialize_publisher(
   return pub_args.ret_id;
 }
 
+union ioctl_reclaim_msgs_args reclaim_msgs_core(
+  const std::string & topic_name, const topic_local_id_t publisher_id)
+{
+  union ioctl_reclaim_msgs_args reclaim_args = {};
+  reclaim_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  reclaim_args.publisher_id = publisher_id;
+
+  if (ioctl(agnocast_fd, AGNOCAST_RECLAIM_MSGS_CMD, &reclaim_args) < 0) {
+    // Reported rather than fatal, unlike the publish path: the caller is trying
+    // to recover from having no slot, and failing to means one dropped frame.
+    RCLCPP_ERROR(
+      logger, "AGNOCAST_RECLAIM_MSGS_CMD failed for topic '%s': %s", topic_name.c_str(),
+      strerror(errno));
+    reclaim_args.ret_released_num = 0;
+  }
+  return reclaim_args;
+}
+
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle /* for CARET */, const std::string & topic_name,
   const std::string & mq_topic_name, const topic_local_id_t publisher_id,
