@@ -97,11 +97,21 @@ void BridgeManager::worker_loop()
       batch.swap(pending_msgs_);
     }
 
+    // One graph view for the whole iteration, rebuilt only when the graph moved:
+    // the batch and every sweep below ask about the same graph, and both the
+    // per-topic queries and the rebuild walk all of it.
+    const auto now = std::chrono::steady_clock::now();
+    if (!graph_view_ || graph_event_->check_and_clear() || now >= graph_view_deadline_) {
+      graph_view_.emplace(container_node_.get());
+      graph_view_deadline_ = now + GRAPH_VIEW_MAX_AGE;
+    }
+    const Ros2GraphView & graph = *graph_view_;
+
     for (const auto & msg : batch) {
       if (shutdown_requested_.load(std::memory_order_relaxed)) {
         break;
       }
-      dispatch_bridge_message(msg);
+      dispatch_bridge_message(msg, graph);
     }
 
     // Gate the creating steps and re-check between them: each can dlopen a plugin
@@ -114,14 +124,14 @@ void BridgeManager::worker_loop()
     if (shutting_down()) {
       break;
     }
-    check_and_create_pubsub_bridges();
+    check_and_create_pubsub_bridges(graph);
 
     if (shutting_down()) {
       break;
     }
     create_daemon_forced_bridges();
 
-    check_and_remove_pubsub_bridges();
+    check_and_remove_pubsub_bridges(graph);
 
     if (shutting_down()) {
       break;
@@ -137,6 +147,8 @@ void BridgeManager::start_ros_execution()
 {
   const std::string node_name = get_bridge_node_name(self_ipc_ns_inode_);
   container_node_ = std::make_shared<rclcpp::Node>(node_name);
+
+  graph_event_ = container_node_->get_graph_event();
 
   // We must not use single-threaded executors because of how service bridges work. Service bridges
   // require two callback groups to execute concurrently. If a single-threaded executor is used, it
@@ -235,7 +247,7 @@ void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
   }
 }
 
-void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
+void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg, const Ros2GraphView & graph)
 {
   switch (msg.type) {
     case BridgeMsgType::Service: {
@@ -262,7 +274,7 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
       request_cache_[topic_name][target_id] = payload;
 
       create_pubsub_bridge_if_needed(
-        topic_name, request_cache_[topic_name], message_type, payload.direction);
+        topic_name, request_cache_[topic_name], message_type, payload.direction, graph);
       break;
     }
     case BridgeMsgType::DaemonPubSub: {
@@ -421,7 +433,7 @@ std::string BridgeManager::on_socket_request() const
          std::to_string(getpid()) + "}";
 }
 
-void BridgeManager::check_and_create_pubsub_bridges()
+void BridgeManager::check_and_create_pubsub_bridges(const Ros2GraphView & graph)
 {
   for (auto cache_it = request_cache_.begin(); cache_it != request_cache_.end();) {
     const auto & topic_name = cache_it->first;
@@ -436,9 +448,9 @@ void BridgeManager::check_and_create_pubsub_bridges()
       static_cast<const char *>(requests.begin()->second.message_type);
 
     create_pubsub_bridge_if_needed(
-      topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST);
+      topic_name, requests, message_type, BridgeDirection::ROS2_TO_AGNOCAST, graph);
     create_pubsub_bridge_if_needed(
-      topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2);
+      topic_name, requests, message_type, BridgeDirection::AGNOCAST_TO_ROS2, graph);
 
     if (requests.empty()) {
       cache_it = request_cache_.erase(cache_it);
@@ -448,13 +460,13 @@ void BridgeManager::check_and_create_pubsub_bridges()
   }
 }
 
-void BridgeManager::check_and_remove_pubsub_bridges()
+void BridgeManager::check_and_remove_pubsub_bridges(const Ros2GraphView & graph)
 {
   auto r2a_it = active_pubsub_r2a_bridges_.begin();
   while (r2a_it != active_pubsub_r2a_bridges_.end()) {
     const std::string & topic_name = r2a_it->first;
     auto result = get_agnocast_subscriber_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_publisher(container_node_.get(), topic_name);
+    bool is_demanded_by_ros2 = graph.has_external_publisher(topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get subscriber count for topic '%s'. Requesting shutdown.",
@@ -490,7 +502,7 @@ void BridgeManager::check_and_remove_pubsub_bridges()
   while (a2r_it != active_pubsub_a2r_bridges_.end()) {
     const std::string & topic_name = a2r_it->first;
     auto result = get_agnocast_publisher_count(topic_name);
-    bool is_demanded_by_ros2 = has_external_ros2_subscriber(container_node_.get(), topic_name);
+    bool is_demanded_by_ros2 = graph.has_external_subscriber(topic_name);
     if (result.count == -1) {
       RCLCPP_ERROR(
         logger_, "Failed to get publisher count for topic '%s'. Requesting shutdown.",
@@ -568,7 +580,7 @@ void BridgeManager::check_and_request_shutdown()
 }
 
 bool BridgeManager::should_create_pubsub_bridge(
-  const std::string & topic_name, BridgeDirection direction) const
+  const std::string & topic_name, BridgeDirection direction, const Ros2GraphView & graph) const
 {
   if (direction == BridgeDirection::ROS2_TO_AGNOCAST) {
     if (active_pubsub_r2a_bridges_.count(topic_name) > 0) {
@@ -580,7 +592,7 @@ bool BridgeManager::should_create_pubsub_bridge(
       return false;
     }
 
-    return has_external_ros2_publisher(container_node_.get(), topic_name);
+    return graph.has_external_publisher(topic_name);
   }
   if (active_pubsub_a2r_bridges_.count(topic_name) > 0) {
     return false;
@@ -591,14 +603,14 @@ bool BridgeManager::should_create_pubsub_bridge(
     return false;
   }
 
-  return has_external_ros2_subscriber(container_node_.get(), topic_name);
+  return graph.has_external_subscriber(topic_name);
 }
 
 void BridgeManager::create_pubsub_bridge_if_needed(
   const std::string & topic_name, RequestMap & requests, const std::string & message_type,
-  BridgeDirection direction)
+  BridgeDirection direction, const Ros2GraphView & graph)
 {
-  if (!should_create_pubsub_bridge(topic_name, direction)) {
+  if (!should_create_pubsub_bridge(topic_name, direction, graph)) {
     return;
   }
 

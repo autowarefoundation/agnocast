@@ -11,6 +11,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace agnocast
@@ -66,6 +67,33 @@ bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & t
 bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_publisher(const rclcpp::Node * node, const std::string & topic_name);
 bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string & topic_name);
+// A cached view is refreshed whenever the graph event fires; this only bounds how
+// long a missed event could keep it stale.
+inline constexpr std::chrono::seconds GRAPH_VIEW_MAX_AGE{10};
+
+/// @brief One DDS graph snapshot, reused for every topic examined in the same
+/// worker-loop iteration.
+///
+/// `has_external_ros2_{publisher,subscriber}` each walk the whole graph, so asking
+/// them per topic costs O(topics x graph). A topic absent from
+/// `get_topic_names_and_types()` has no DDS endpoint at all and so cannot have an
+/// external one; only topics that do appear pay for the per-topic query.
+///
+/// The view is as stale as the iteration that took it, which is the granularity
+/// the maintenance sweep already works at.
+class Ros2GraphView
+{
+public:
+  explicit Ros2GraphView(const rclcpp::Node * node);
+
+  bool has_external_publisher(const std::string & topic_name) const;
+  bool has_external_subscriber(const std::string & topic_name) const;
+
+private:
+  const rclcpp::Node * node_;
+  std::unordered_set<std::string> topics_with_endpoints_;
+};
+
 rclcpp::QoS get_service_qos(const std::string & service_name);
 bool is_agnocast_service_alive(const std::string & service_name, std::string & reason);
 std::pair<std::string, std::string> split_full_node_name(const std::string & fqn);
