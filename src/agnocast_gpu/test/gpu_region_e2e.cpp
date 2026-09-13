@@ -203,7 +203,7 @@ int run_subscriber(int notify_fd)
   // for a previously unseen publisher on a live topic.
   const agnocast::internal::GpuRegionRef ref{
     kTopic, msg.publisher_id, subscriber_id, msg.region_id};
-  if (!agnocast::internal::GpuRegionRegistry::instance().ensure_mapped(ref)) {
+  if (!agnocast::internal::ensure_gpu_region_mapped(ref)) {
     std::fprintf(stderr, "ensure_mapped failed\n");
     return 1;
   }

@@ -15,9 +15,9 @@ agnocast::internal::GpuMemoryBackend * select_backend()
   return vmm->is_supported() ? vmm : nullptr;
 }
 
-// Runs when this library is loaded, so it must touch no CUDA: the backends are
-// only constructed here, and every driver call is deferred to first use.
-// Selection is likewise deferred, because probing support requires the driver.
+// Runs when this library is loaded, so it must touch no CUDA: backends are only
+// constructed here, and both selection and every driver call are deferred to
+// first use.
 __attribute__((constructor)) void register_selected_backend()
 {
   agnocast::internal::register_gpu_memory_backend_selector(&select_backend);

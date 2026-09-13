@@ -14,12 +14,11 @@ namespace
 // library, which resolves every symbol with no driver behind it.
 constexpr const char * kDriverSoname = "libcuda.so.1";
 
-// Several driver entry points are macros onto versioned symbols
-// (cuda.h: cuCtxPushCurrent -> cuCtxPushCurrent_v2). The member declarations are
-// rewritten by those macros but a hand-written string literal is not, and
-// libcuda still exports the superseded entry point, so a mismatch resolves
-// silently to the wrong function. Stringifying after expansion keeps the name
-// used for dlsym identical to the one that was declared.
+// Several driver entry points are macros onto versioned symbols (cuda.h:
+// cuCtxPushCurrent -> cuCtxPushCurrent_v2), and libcuda still exports the
+// superseded one, so a hand-written literal would resolve silently to the wrong
+// function. Stringifying after expansion keeps the dlsym name identical to the
+// declared one.
 #define AGNOCAST_STRINGIFY_EXPANDED(x) #x
 #define AGNOCAST_SYMBOL_NAME(x) AGNOCAST_STRINGIFY_EXPANDED(x)
 #define AGNOCAST_LOAD(field) load(field, AGNOCAST_SYMBOL_NAME(field))

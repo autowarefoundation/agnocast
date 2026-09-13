@@ -1,11 +1,9 @@
 #pragma once
 
-// Runtime loader for the slice of the CUDA driver API this package uses.
-//
-// Types come from <cuda.h> at build time, symbols from dlopen at run time. The
-// header keeps struct layouts such as CUmemAllocationProp authoritative rather
-// than hand-replicated, while linking no driver lets the package build where
-// none is installed and load harmlessly where there is no GPU.
+// Runtime loader for the slice of the CUDA driver API this package uses. Types
+// come from <cuda.h> at build time, symbols from dlopen at run time: linking no
+// driver lets the package build where none is installed and load harmlessly
+// where there is no GPU.
 
 #include <cuda.h>
 
@@ -17,17 +15,16 @@ namespace agnocast::gpu
 class CudaDriverLoader
 {
 public:
-  // Returns nullptr when the driver is unavailable, logging the cause once.
-  // Not fatal by itself: a process loaded on a machine with no driver simply has
-  // no GPU backend.
+  // nullptr when the driver is unavailable, logging the cause once. Not fatal by
+  // itself: a process on a machine with no driver simply has no GPU backend.
   static const CudaDriverLoader * instance();
 
   CUresult (*cuInit)(unsigned int) = nullptr;
   CUresult (*cuDeviceGet)(CUdevice *, int) = nullptr;
   CUresult (*cuDeviceGetAttribute)(int *, CUdevice_attribute, CUdevice) = nullptr;
-  // The _v2 form, because it reports the MIG compute instance's UUID where the
-  // original reports the parent GPU's. MIG instances are memory-isolated, so
-  // conflating them would let an import be attempted across that boundary.
+  // The _v2 form reports the MIG compute instance's UUID where the original
+  // reports the parent GPU's. MIG instances are memory-isolated, so conflating
+  // them would let an import be attempted across that boundary.
   CUresult (*cuDeviceGetUuid_v2)(CUuuid *, CUdevice) = nullptr;
   CUresult (*cuDevicePrimaryCtxRetain)(CUcontext *, CUdevice) = nullptr;
 
@@ -58,8 +55,7 @@ public:
   CUresult (*cuGetErrorName)(CUresult, const char **) = nullptr;
   CUresult (*cuGetErrorString)(CUresult, const char **) = nullptr;
 
-  // Formats a driver result for a log line, falling back to the numeric code so
-  // a diagnostic is never empty.
+  // Falls back to the numeric code, so a diagnostic is never empty.
   [[nodiscard]] std::string describe(CUresult result) const;
 
 private:

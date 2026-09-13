@@ -66,8 +66,7 @@ int main(int argc, char ** argv)
 {
   agnocast::init(argc, argv);
   agnocast::AgnocastOnlySingleThreadedExecutor executor;
-  // Follows /gpu_points by default, or whichever topic is named first on the
-  // command line, so the same binary can watch either end of the pipeline.
+  // The same binary can watch either end of the pipeline.
   auto node = std::make_shared<GpuListener>(argc > 1 ? argv[1] : "/gpu_points");
   executor.add_node(node);
   executor.spin();

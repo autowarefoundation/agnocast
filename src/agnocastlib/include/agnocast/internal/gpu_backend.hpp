@@ -9,29 +9,19 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
-#include <variant>
 
 namespace agnocast::internal
 {
 
-// How a region's memory was allocated and made importable by another process.
-// That is the only axis this type represents: how memory is shared says nothing
-// about how access to it is synchronized, and the same memory may be paired with
-// CUDA events, NvSciSync, or nothing at all. Keeping the two apart is what lets
-// a synchronization mechanism be chosen per topic later without touching this.
+// How a region's memory was allocated and made importable. Deliberately says
+// nothing about how access to it is synchronized, so a synchronization mechanism
+// can be chosen per topic later without touching this.
 //
 // These values cross the userspace-kernel ABI, so never renumber or reuse one.
-// docs/gpu_ipc.md covers which mechanisms qualify and why CUDA IPC does not.
+// 2 is reserved for NvSciBuf; docs/gpu_ipc.md covers which mechanisms qualify.
 enum class GpuMemoryBackendType : uint32_t {
   Unknown = 0,
-  // Shared as a POSIX file descriptor. Discrete GPU and SoC.
   Vmm = 1,
-  // 2 is reserved for NvSciBuf and deliberately absent: its export is reconciled
-  // against the destination endpoint, so the bytes one subscriber receives mean
-  // nothing to another. Serving it needs an export produced per request, which
-  // is a different shape from the single retained handle below -- not a variant
-  // of it -- so it is left to be designed with its implementation rather than
-  // guessed at here. See docs/gpu_ipc.md.
 };
 
 // The descriptor references the whole allocation, not one slot, so leaking one
@@ -69,9 +59,6 @@ private:
   int fd_ = -1;
 };
 
-// The specification of a region: how large it is, how it is divided into slots,
-// and which device it lives on. Description only; MappedGpuRegion below is what
-// holds one.
 struct GpuRegionGeometry
 {
   uint32_t slot_size = 0;
@@ -94,22 +81,14 @@ struct GpuRegionGeometry
          static_cast<uint64_t>(geometry.slot_size) * geometry.slot_count <= geometry.mapped_size;
 }
 
-struct VmmExportHandle
-{
-  UniqueFd fd;
-};
-
-// A variant with one alternative today, because the type of a handle is what a
-// backend is chosen by: an importer must be able to refuse an export it cannot
-// read rather than reinterpret its bytes.
-using GpuRegionExportHandle = std::variant<std::monostate, VmmExportHandle>;
-
 // What crosses the process boundary: everything a peer needs to map the region.
+// `backend` is what an importer refuses on, rather than reinterpreting a handle
+// it cannot read.
 struct GpuRegionExport
 {
   GpuMemoryBackendType backend = GpuMemoryBackendType::Unknown;
   GpuRegionGeometry geometry;
-  GpuRegionExportHandle handle;
+  UniqueFd handle;
 };
 
 class GpuMemoryBackend;
@@ -186,9 +165,8 @@ public:
   // returned region's geometry. Failure yields an invalid region.
   [[nodiscard]] virtual MappedGpuRegion create_region(uint32_t slot_size, uint32_t slot_count) = 0;
 
-  // Produces everything a peer needs to map the region. One export serves every
-  // subscriber: the kmod retains the handle and installs a descriptor for the
-  // same open file per importer, so there is no destination to reconcile against.
+  // One export serves every subscriber: the kmod retains the handle and installs
+  // a descriptor for the same open file per importer.
   [[nodiscard]] virtual std::optional<GpuRegionExport> export_region(
     const MappedGpuRegion & region) = 0;
 

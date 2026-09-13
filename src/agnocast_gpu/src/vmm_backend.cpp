@@ -14,7 +14,6 @@ using agnocast::internal::GpuRegionGeometry;
 using agnocast::internal::is_consistent;
 using agnocast::internal::MappedGpuRegion;
 using agnocast::internal::UniqueFd;
-using agnocast::internal::VmmExportHandle;
 
 namespace
 {
@@ -72,7 +71,7 @@ bool VmmBackend::ensure_device() const
     return false;
   }
 
-  // Follow the device the caller already selected. Assuming ordinal 0 would place
+  // Follow the device the caller already selected: assuming ordinal 0 would place
   // message buffers on a different GPU than the user's kernels run on. Whichever
   // call gets here first binds the device for the whole process.
   CUcontext current = nullptr;
@@ -106,8 +105,8 @@ bool VmmBackend::ensure_context() const
 
   // Retain the primary context rather than create one, so message buffers are
   // addressable by the user's runtime-API kernels. Held for the life of the
-  // process; note it does not protect against cudaDeviceReset(), which destroys
-  // the context's resources whether or not it has been retained -- after which
+  // process. It does not protect against cudaDeviceReset(), which destroys the
+  // context's resources whether or not it has been retained -- after which
   // pushing it still succeeds and every call made on it fails.
   const CUresult r = cuda->cuDevicePrimaryCtxRetain(&context_, device_);
   if (r != CUDA_SUCCESS) {
@@ -146,8 +145,7 @@ try {
   // process that turns out to be unsupported should not be left holding one.
   if (!ensure_device()) return false;
 
-  // Attribute numbers are quoted because that is how the CUDA documentation
-  // identifies them.
+  // Numbered as the CUDA documentation identifies them.
   return has_attribute(
            CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, 102,
            "VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED") &&
@@ -294,14 +292,13 @@ std::optional<GpuRegionExport> VmmBackend::export_region(const MappedGpuRegion &
   GpuRegionExport exported;
   exported.backend = GpuMemoryBackendType::Vmm;
   exported.geometry = region.geometry();
-  exported.handle = VmmExportHandle{UniqueFd(raw_fd)};
+  exported.handle = UniqueFd(raw_fd);
   return exported;
 }
 
 MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
 {
-  const auto * vmm = std::get_if<VmmExportHandle>(&exported.handle);
-  if (exported.backend != GpuMemoryBackendType::Vmm || vmm == nullptr || !vmm->fd.valid()) {
+  if (exported.backend != GpuMemoryBackendType::Vmm || !exported.handle.valid()) {
     RCLCPP_ERROR(
       logger, "Agnocast GPU: region export is not a VMM export (backend=%u)",
       static_cast<uint32_t>(exported.backend));
@@ -329,14 +326,12 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
   if (!ctx.ok()) return MappedGpuRegion{};
 
   // The descriptor is borrowed, not surrendered: the caller's UniqueFd closes
-  // it. NVIDIA documents no ownership rule for this API (the wording about the
-  // driver taking the descriptor belongs to cudaImportExternalMemory, a
-  // different mechanism), so it was measured: on driver 610.43.02 the import
-  // duplicates no descriptor, leaves ours open, and the allocation stays usable
-  // after we close it.
+  // it. NVIDIA documents no ownership rule for this API, so it was measured: on
+  // driver 610.43.02 the import duplicates no descriptor, leaves ours open, and
+  // the allocation stays usable after we close it.
   CUmemGenericAllocationHandle handle = 0;
   const CUresult r = cuda->cuMemImportFromShareableHandle(
-    &handle, reinterpret_cast<void *>(static_cast<uintptr_t>(vmm->fd.get())),
+    &handle, reinterpret_cast<void *>(static_cast<uintptr_t>(exported.handle.get())),
     CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
   if (r != CUDA_SUCCESS) {
     RCLCPP_ERROR(
@@ -351,9 +346,9 @@ MappedGpuRegion VmmBackend::import_region(const GpuRegionExport & exported)
   }
 
   // Read-only: an importer is a subscriber, and a message it receives is const.
-  // This is the library's doing, not the kernel's -- the module hands over the
-  // publisher's own open file unchanged -- so it stops a buggy subscriber, not a
-  // determined one, which is the same bargain the host data plane makes.
+  // The library's doing, not the kmod's -- it hands over the publisher's own
+  // open file unchanged -- so this stops a buggy subscriber, not a determined
+  // one, the same bargain the host data plane makes.
   void * base = nullptr;
   if (!map_and_grant(
         handle, exported.geometry.mapped_size, granularity, CU_MEM_ACCESS_FLAGS_PROT_READ, &base)) {
