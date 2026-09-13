@@ -49,6 +49,8 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PROC_INFO_HASH_BITS 10
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
+// Every GPU region of every publisher, across all topics and namespaces.
+#define GPU_REGION_HASH_BITS 6
 
 // Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
 #define NOTIFY_CTXS_MIN_CAPACITY 8
@@ -109,8 +111,16 @@ struct gpu_region_info
   uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
   // The reference that keeps the allocation alive.
   struct file * handle_file;
+  // In its publisher's list, and in the module-wide index keyed on region_id.
+  // The index is what lets an importer ask whether a region it has mapped still
+  // exists without naming -- or being able to name -- the publisher that
+  // exported it. Ids are unique for the module's lifetime, so the answer is
+  // exact and final.
   struct list_head node;
+  struct hlist_node global_node;
 };
+
+extern DECLARE_HASHTABLE(gpu_region_htable, GPU_REGION_HASH_BITS);
 
 struct publisher_info
 {
@@ -153,6 +163,7 @@ static inline void free_publisher_info(struct publisher_info * pub_info)
     // the driver, once every importer has closed its own descriptor.
     fput(region->handle_file);
     list_del(&region->node);
+    hash_del(&region->global_node);
     kfree(region);
   }
 

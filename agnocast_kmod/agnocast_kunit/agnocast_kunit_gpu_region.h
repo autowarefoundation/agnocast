@@ -19,7 +19,9 @@
     KUNIT_CASE(test_case_gpu_region_add_rejects_a_foreign_process),      \
     KUNIT_CASE(test_case_gpu_region_get_publisher_not_found),            \
     KUNIT_CASE(test_case_gpu_region_get_rejects_an_unauthorized_caller), \
-    KUNIT_CASE(test_case_gpu_region_get_without_registration)
+    KUNIT_CASE(test_case_gpu_region_get_without_registration),           \
+    KUNIT_CASE(test_case_gpu_region_exists_reports_registered_regions),  \
+    KUNIT_CASE(test_case_gpu_region_exists_rejects_an_oversized_batch)
 
 void test_case_gpu_region_round_trip(struct kunit * test);
 
@@ -42,3 +44,6 @@ void test_case_gpu_region_add_rejects_a_foreign_process(struct kunit * test);
 void test_case_gpu_region_get_publisher_not_found(struct kunit * test);
 void test_case_gpu_region_get_rejects_an_unauthorized_caller(struct kunit * test);
 void test_case_gpu_region_get_without_registration(struct kunit * test);
+
+void test_case_gpu_region_exists_reports_registered_regions(struct kunit * test);
+void test_case_gpu_region_exists_rejects_an_oversized_batch(struct kunit * test);
