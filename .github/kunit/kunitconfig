@@ -13,3 +13,9 @@ CONFIG_IPC_NS=y
 # the suite fails to start (-ENOENT). FTRACE gates ENABLE_DEFAULT_TRACERS.
 CONFIG_FTRACE=y
 CONFIG_ENABLE_DEFAULT_TRACERS=y
+
+# Catch sleeping-in-atomic regressions in the exit tracepoint path. Partial guard only:
+# RT-specific classes (spinlock_t becoming a sleeping rt_mutex) stay invisible on this
+# non-PREEMPT_RT UML kernel.
+CONFIG_DEBUG_KERNEL=y
+CONFIG_DEBUG_ATOMIC_SLEEP=y

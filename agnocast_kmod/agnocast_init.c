@@ -35,10 +35,9 @@ static int exit_worker_thread(void * data)
     // Drain all queued PIDs in a single wake-up cycle
     while (true) {
       pid_t pid;
-      unsigned long flags;
       bool got_pid = false;
 
-      raw_spin_lock_irqsave(&pid_queue_lock, flags);
+      raw_spin_lock(&pid_queue_lock);
 
       if (queue_head != queue_tail) {
         pid = exit_pid_queue[queue_head];
@@ -50,7 +49,7 @@ static int exit_worker_thread(void * data)
       // preventing the enqueuer from seeing a stale 0 after re-checking the queue.
       if (queue_head == queue_tail) smp_store_release(&has_new_pid, 0);
 
-      raw_spin_unlock_irqrestore(&pid_queue_lock, flags);
+      raw_spin_unlock(&pid_queue_lock);
 
       if (!got_pid) break;
 
