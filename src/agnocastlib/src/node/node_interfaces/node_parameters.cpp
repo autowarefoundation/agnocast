@@ -1,7 +1,6 @@
 #include "agnocast/node/node_interfaces/node_parameters.hpp"
 
 #include "agnocast/node/agnocast_arguments.hpp"
-#include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_parameter_service.hpp"
 #include "rclcpp/exceptions/exceptions.hpp"
 
@@ -351,13 +350,8 @@ NodeParameters::NodeParameters(
   bool automatically_declare_parameters_from_overrides)
 : node_base_(std::move(node_base)), allow_undeclared_(allow_undeclared_parameters)
 {
-  const rcl_arguments_t * global_args = nullptr;
-  if (use_global_arguments) {
-    std::lock_guard<std::mutex> lock(g_context_mtx);
-    if (g_context.is_initialized()) {
-      global_args = g_context.get_parsed_arguments();
-    }
-  }
+  const rcl_arguments_t * global_args =
+    use_global_arguments ? resolve_global_arguments(node_base_->get_context()) : nullptr;
 
   std::string combined_name = node_base_->get_fully_qualified_name();
   parameter_overrides_ =

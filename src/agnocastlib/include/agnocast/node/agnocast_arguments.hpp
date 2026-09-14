@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rclcpp/context.hpp>
 #include <rclcpp/parameter.hpp>
 #include <rclcpp/parameter_value.hpp>
 
@@ -38,6 +39,14 @@ private:
 };
 
 ParsedArguments parse_arguments(const std::vector<std::string> & arguments);
+
+// Resolve the global arguments a node must honour, for NodeOptions::use_global_arguments().
+// agnocast::init() parses them when it is called; a process whose main() belongs to someone else,
+// such as a component container, parses the command line into its rclcpp context instead, and that
+// is where they are then. Reading both makes the option mean the same thing for agnocast::Node as
+// it does for rclcpp::Node. Returns nullptr when neither source has any. The result points into
+// whichever source it came from, so the caller must keep `context` alive while it uses it.
+const rcl_arguments_t * resolve_global_arguments(const rclcpp::Context::SharedPtr & context);
 
 // Resolve parameter overrides from multiple sources.
 // Corresponds to rclcpp::detail::resolve_parameter_overrides.
