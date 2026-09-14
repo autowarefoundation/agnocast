@@ -1,0 +1,10 @@
+#pragma once
+
+// Generated from package.xml. Reported through agnocast_gpu_get_version() so
+// agnocastlib can refuse a backend built against a different release: the two
+// share a C++ interface that is internal and carries no ABI guarantee.
+
+namespace agnocast::gpu
+{
+constexpr const char * VERSION = "${PACKAGE_VERSION}";
+}

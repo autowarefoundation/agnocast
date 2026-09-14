@@ -1,4 +1,5 @@
 #include "agnocast/internal/gpu_backend.hpp"
+#include "agnocast_gpu_version.hpp"
 #include "vmm_backend.hpp"
 
 namespace agnocast::gpu
@@ -26,3 +27,11 @@ __attribute__((constructor)) void register_selected_backend()
 }  // namespace
 
 }  // namespace agnocast::gpu
+
+// Read by agnocastlib right after it loads this library, which refuses a version
+// other than its own: the GpuMemoryBackend interface between the two is internal
+// and carries no ABI guarantee, so a mismatched pair would not fail cleanly.
+extern "C" const char * agnocast_gpu_get_version()
+{
+  return agnocast::gpu::VERSION;
+}

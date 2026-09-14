@@ -88,7 +88,7 @@ void query_regions_still_held(const std::vector<uint32_t> & region_ids, std::vec
 
 uint32_t create_via_kmod(
   GpuMemoryBackend & backend, const std::string_view topic_name,
-  const topic_local_id_t publisher_id, MappedGpuRegion & region)
+  const topic_local_id_t publisher_id, const MappedGpuRegion & region)
 {
   const std::optional<GpuRegionExport> exported = backend.export_region(region);
   if (!exported) return 0;
@@ -254,6 +254,12 @@ uint32_t create_gpu_region(
 bool ensure_gpu_region_mapped(const GpuRegionRef & ref)
 {
   if (ref.region_id != 0 && gpu_region_is_mapped(ref.region_id)) return true;
+
+  // As in create_gpu_region(): loading the backend, importing the region and the
+  // sweep below all allocate host memory that belongs to no message. dispatch()
+  // already suspends the window across this, but the guard belongs with the
+  // allocations rather than with the one caller that happens to make them.
+  const SuspendedBorrowWindow suspended;
 
   GpuMemoryBackend * backend = get_gpu_memory_backend();
   if (backend == nullptr) return false;

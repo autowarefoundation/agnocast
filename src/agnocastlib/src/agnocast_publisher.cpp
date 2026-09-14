@@ -339,6 +339,13 @@ void PublisherBase::generate_gid()
 
 PublisherBase::~PublisherBase()
 {
+  // Before REMOVE_PUBLISHER below, and before the members are destroyed: the
+  // kmod keys region removal on the publisher, so a region released afterwards
+  // would be refused -- the publisher's own teardown frees its regions once its
+  // last entry is gone. Releasing them here means a region this publisher has
+  // proven idle is handed back while it can still be named.
+  gpu_pools_.clear();
+
   if (id_ >= 0) {
     // NOTE: When a publisher is destroyed, subscribers should unmap its memory, but this is not yet
     // implemented. Since multiple publishers in the same process share a mempool, process-level

@@ -1,6 +1,7 @@
 #include "agnocast/internal/gpu_backend.hpp"
 
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/agnocast_version.hpp"
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -38,17 +39,37 @@ BackendRegistry & backend_registry()
 // API references none of agnocast_gpu's symbols, so --as-needed would drop the
 // DT_NEEDED entry and its registering constructor would never run. RTLD_NODELETE
 // because regions dispatch into the library from their destructors.
+//
+// The version is checked exactly, as agnocastlib and heaphook check each other:
+// the GpuMemoryBackend interface the two share is internal and carries no ABI
+// guarantee, so a mismatched pair is undefined behaviour rather than a clean
+// failure. A stale libagnocast_gpu.so earlier on the search path is the way that
+// happens.
 bool backend_library_loaded()
 {
   static const bool loaded = [] {
-    if (dlopen("libagnocast_gpu.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE) != nullptr) {
-      return true;
+    void * handle = dlopen("libagnocast_gpu.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
+    if (handle == nullptr) {
+      const char * error = dlerror();
+      RCLCPP_ERROR(
+        logger, "Agnocast: GPU memory requested but libagnocast_gpu.so is unavailable: %s",
+        error != nullptr ? error : "unknown error");
+      return false;
     }
-    const char * error = dlerror();
-    RCLCPP_ERROR(
-      logger, "Agnocast: GPU memory requested but libagnocast_gpu.so is unavailable: %s",
-      error != nullptr ? error : "unknown error");
-    return false;
+
+    using VersionFn = const char * (*)();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto * get_version = reinterpret_cast<VersionFn>(dlsym(handle, "agnocast_gpu_get_version"));
+    const char * version = (get_version != nullptr) ? get_version() : nullptr;
+    if (version == nullptr || std::strcmp(version, agnocastlib::VERSION) != 0) {
+      RCLCPP_ERROR(
+        logger,
+        "Agnocast: libagnocast_gpu.so reports version %s but agnocastlib is %s; refusing to use "
+        "it. The two are matched exactly because the interface between them is internal.",
+        version != nullptr ? version : "none", agnocastlib::VERSION);
+      return false;
+    }
+    return true;
   }();
   return loaded;
 }
