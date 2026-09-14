@@ -112,6 +112,22 @@ YAML::Node section_entries(const YAML::Node & yaml, const char * name, const cha
   return section;
 }
 
+std::string required_string(
+  const YAML::Node & entry, const char * key, const std::string & entry_position)
+{
+  const YAML::Node node = entry[key];
+  if (!node || node.IsNull()) {
+    throw std::runtime_error(entry_position + " is missing a non-empty '" + key + "'");
+  }
+  if (!node.IsScalar()) {
+    throw std::runtime_error(entry_position + ": '" + key + "' must be a string");
+  }
+  if (node.Scalar().empty()) {
+    throw std::runtime_error(entry_position + " is missing a non-empty '" + key + "'");
+  }
+  return node.Scalar();
+}
+
 // The policy's tunable ('nice' for CFS, 'priority' for FIFO/RR) is mandatory
 // once 'policy' is set. setpriority(2) would silently clamp an out-of-range
 // nice to [-20, 19], so both ranges are enforced here and a misunderstanding
@@ -324,9 +340,18 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
   for (size_t i = 0; i < callback_groups.size(); ++i) {
     const YAML::Node cg = callback_groups[i];
     CallbackGroupEntry entry;
-    entry.id = cg["id"].as<std::string>();
+    entry.id = required_string(cg, "id", entry_pos("callback_groups", i));
     validate_callback_group_id(entry);
-    entry.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
+    entry.domain_id = default_domain_id;
+    if (!is_unset(cg["domain_id"], /*allow_unmanageable=*/false)) {
+      const auto domain_id = as_decimal<size_t>(cg["domain_id"]);
+      if (!domain_id) {
+        throw std::runtime_error(
+          "'domain_id' must be a non-negative decimal integer for id=" + entry.id + ", got '" +
+          scalar_or_placeholder(cg["domain_id"]) + "'");
+      }
+      entry.domain_id = *domain_id;
+    }
     entry.attrs = parse_sched_attrs(cg, EntryContext{"id=" + entry.id, /*scanned=*/false});
     config.callback_groups.push_back(std::move(entry));
   }
@@ -338,7 +363,7 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
   for (size_t i = 0; i < non_ros_threads.size(); ++i) {
     const YAML::Node nrt = non_ros_threads[i];
     NonRosThreadEntry entry;
-    entry.name = nrt["name"].as<std::string>();
+    entry.name = required_string(nrt, "name", entry_pos("non_ros_threads", i));
     entry.attrs = parse_sched_attrs(nrt, EntryContext{"name=" + entry.name, /*scanned=*/false});
     config.non_ros_threads.push_back(std::move(entry));
   }
@@ -350,18 +375,7 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
   for (size_t i = 0; i < kernel_threads.size(); ++i) {
     const YAML::Node kt = kernel_threads[i];
     KernelThreadEntry entry;
-    const std::string entry_position = entry_pos("kernel_threads", i);
-    if (!kt["comm"] || kt["comm"].IsNull()) {
-      throw std::runtime_error(entry_position + " is missing a non-empty 'comm'");
-    }
-    try {
-      entry.comm = kt["comm"].as<std::string>();
-    } catch (const YAML::Exception &) {
-      throw std::runtime_error(entry_position + ": 'comm' must be a string");
-    }
-    if (entry.comm.empty()) {
-      throw std::runtime_error(entry_position + " is missing a non-empty 'comm'");
-    }
+    entry.comm = required_string(kt, "comm", entry_pos("kernel_threads", i));
     if (is_kworker_comm(entry.comm)) {
       throw std::runtime_error(
         "kernel_threads entry '" + entry.comm +
@@ -391,12 +405,11 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     }
     entry.irq = *irq;
     const std::string desc = "irq=" + std::to_string(entry.irq);
-    if (iq["name"] && !iq["name"].IsNull()) {
-      try {
-        entry.name = iq["name"].as<std::string>();
-      } catch (const YAML::Exception &) {
+    if (!is_unset(iq["name"], /*allow_unmanageable=*/false)) {
+      if (!iq["name"].IsScalar()) {
         throw std::runtime_error("'name' must be a string for " + desc);
       }
+      entry.name = iq["name"].Scalar();
     }
     entry.affinity = parse_affinity(iq, EntryContext{desc, /*scanned=*/true});
     config.irqs.push_back(std::move(entry));
