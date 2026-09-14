@@ -1,0 +1,38 @@
+<launch>
+    <!--
+      Two publishers and two subscribers, all in separate processes. Each
+      publisher owns its own GPU memory region, so every subscriber maps two and
+      resolves each frame against the one it names. Payloads are never copied
+      between processes.
+    -->
+    <arg name="discovery_agent" default="true"/>
+    <include file="$(find-pkg-share ros2agnocast_discovery_agent)/launch/discovery_agent.launch.xml"
+             if="$(var discovery_agent)"/>
+
+    <node pkg="agnocast_sample_application" exec="gpu_talker" name="gpu_talker_1" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <node pkg="agnocast_sample_application" exec="gpu_talker" name="gpu_talker_2" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <node pkg="agnocast_sample_application" exec="gpu_listener" name="gpu_listener_1" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <node pkg="agnocast_sample_application" exec="gpu_listener" name="gpu_listener_2" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <!-- Reads one cloud and writes another in a single dispatch, then a listener
+         follows its output, so the whole chain stays in device memory. -->
+    <node pkg="agnocast_sample_application" exec="gpu_listen_talker" name="gpu_listen_talker" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+
+    <node pkg="agnocast_sample_application" exec="gpu_listener" name="gpu_listener_filtered"
+          args="/gpu_points_filtered" output="screen">
+        <env name="LD_PRELOAD" value="libagnocast_heaphook.so:$(env LD_PRELOAD '')" />
+    </node>
+</launch>

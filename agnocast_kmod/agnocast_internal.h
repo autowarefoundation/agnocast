@@ -6,6 +6,7 @@
 
 #include <linux/device.h>
 #include <linux/eventfd.h>
+#include <linux/file.h>  // fput
 #include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
@@ -47,6 +48,8 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PROC_INFO_HASH_BITS 10
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
+// Every GPU region of every publisher, across all topics and namespaces.
+#define GPU_REGION_HASH_BITS 6
 
 // Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
 #define NOTIFY_CTXS_MIN_CAPACITY 8
@@ -95,6 +98,27 @@ struct process_info
 
 extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 
+// One of a publisher's GPU device-memory regions, stored verbatim and never
+// interpreted here. See docs/gpu_ipc.md.
+struct gpu_region_info
+{
+  uint32_t region_id;
+  uint32_t backend_type;
+  uint32_t slot_size;
+  uint32_t slot_count;
+  uint64_t mapped_size;
+  uint8_t device_uuid[GPU_DEVICE_UUID_SIZE];
+  // The reference that keeps the allocation alive.
+  struct file * handle_file;
+  // In its publisher's list, and in the module-wide index keyed on region_id.
+  // The index is what lets an importer ask whether a region it has mapped still
+  // exists without naming the publisher that exported it.
+  struct list_head node;
+  struct hlist_node global_node;
+};
+
+extern DECLARE_HASHTABLE(gpu_region_htable, GPU_REGION_HASH_BITS);
+
 struct publisher_info
 {
   topic_local_id_t id;
@@ -115,11 +139,35 @@ struct publisher_info
   // Never below the topic's notifiable subscriber count, and never shrinks, so only a join can grow
   // it and every other rebuild is allocation-free.
   uint32_t notify_capacity;
+  // Empty unless this publisher registered GPU regions. Bounded by
+  // MAX_GPU_REGION_NUM_PER_PUBLISHER.
+  struct list_head gpu_regions;
+  uint32_t gpu_region_num;
   struct hlist_node node;
 };
 
+// Releases everything a publisher_info owns. Every teardown path must go through
+// it, or a resource added to publisher_info ends up leaked on some of them. The
+// caller unlinks the publisher from the topic's table first, where it was linked
+// at all -- one caller frees a publisher that never got that far.
+//
+// Requires global_htables_rwsem held for write, because releasing a GPU region
+// removes it from the module-wide region index.
 static inline void free_publisher_info(struct publisher_info * pub_info)
 {
+  struct gpu_region_info * region;
+  struct gpu_region_info * tmp_region;
+
+  list_for_each_entry_safe(region, tmp_region, &pub_info->gpu_regions, node)
+  {
+    // The memory returns to the driver once every importer has closed its own
+    // descriptor too.
+    fput(region->handle_file);
+    list_del(&region->node);
+    hash_del(&region->global_node);
+    kfree(region);
+  }
+
   kvfree(pub_info->notify_ctxs);
   kfree(pub_info->node_name);
   kfree(pub_info);

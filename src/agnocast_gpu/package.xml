@@ -1,10 +1,12 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>agnocast_sample_application</name>
+  <name>agnocast_gpu</name>
   <version>2.4.0</version>
   <description>
-    A sample application for Agnocast.
+    GPU device memory sharing backends for Agnocast. Builds only where the CUDA
+    driver headers are available, and loads libcuda.so.1 at run time so the
+    package is harmless on machines without a GPU.
   </description>
   <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
   <maintainer email="atsushi.yano.2@tier4.jp">Atsushi Yano</maintainer>
@@ -14,26 +16,17 @@
 
   <!-- Original authors -->
   <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
-  <author email="veqcc.c@gmail.com">Ryuta Kambe</author>
-  <author email="atsushi.yano.2@tier4.jp">Atsushi Yano</author>
-  <author email="koichi.imai.2@tier4.jp">Koichi Imai</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>rclcpp</depend>
-  <depend>rclcpp_components</depend>
-
-  <depend>agnocast_components</depend>
-  <depend>agnocast_sample_interfaces</depend>
   <depend>agnocastlib</depend>
-  <!-- Optional: the GPU samples build only when this and the CUDA toolkit are present. -->
-  <depend>agnocast_gpu</depend>
+  <depend>rclcpp</depend>
+  <!-- dispatch.hpp, which this package installs, includes rcpputils/scope_exit.hpp. -->
+  <depend>rcpputils</depend>
+  <!-- message_types.hpp, which this package installs, includes sensor_msgs headers. -->
   <depend>sensor_msgs</depend>
 
-  <exec_depend>ros2agnocast_discovery_agent</exec_depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gmock</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/internal/gpu_message.hpp"
 #include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
@@ -179,6 +180,13 @@ class Subscription : public SubscriptionBase
   {
     if constexpr (rosidl_generator_traits::is_message<MessageT>::value) {
       return rosidl_generator_traits::name<MessageT>();
+    } else if constexpr (internal::is_gpu_message_v<MessageT>) {
+      // See the matching warning in Publisher.
+      RCLCPP_WARN_ONCE(
+        logger,
+        "a subscription carries a GPU message type, which has no ROS type name: the "
+        "Agnocast-ROS 2 bridge cannot feed it, so it receives only from Agnocast publishers on "
+        "the same GPU.");
     }
     return std::string{};
   }
