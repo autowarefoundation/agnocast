@@ -1,3 +1,35 @@
+agnocast-kmod-v2.4.0 (2.4.0-1) noble; urgency=medium
+
+  * fix(agnocast_kmod): count qos_depth in messages the subscriber can be handed (#1602 <https://github.com/tier4/agnocast/issues/1602>)
+  * fix(agnocast_kmod): track the unlink daemon instead of inferring it from the process count (#1582 <https://github.com/tier4/agnocast/issues/1582>)
+  * feat(agnocastlib)[need-minor-update]: report the agnocast nodes in get_node_names() (#1573 <https://github.com/tier4/agnocast/issues/1573>)
+  * feat(agnocast_kmod)[need-minor-update]: add prefix domain bridge rules (#1547 <https://github.com/tier4/agnocast/issues/1547>)
+  * fix(agnocast_kmod): reject a domain bridge direction added after an endpoint joined (#1559 <https://github.com/tier4/agnocast/issues/1559>)
+  * fix(agnocast_kmod): keep bridge endpoints out of cross-domain delivery (#1557 <https://github.com/tier4/agnocast/issues/1557>)
+  * feat(agnocast_kmod)[need-minor-update]: count subscribers reachable across a domain bridge (#1542 <https://github.com/tier4/agnocast/issues/1542>)
+  * refactor(agnocast_kmod): split the domain bridge rule add path into helpers (#1539 <https://github.com/tier4/agnocast/issues/1539>)
+  * perf(agnocastlib)[need-minor-update]: exec the discovery agent directly instead of via ros2 run (#1473 <https://github.com/tier4/agnocast/issues/1473>)
+  * perf(agnocast_kmod): take read lock in receive/take ioctls (#1420 <https://github.com/tier4/agnocast/issues/1420>)
+  * perf(agnocast_kmod): precompute each publisher's notify list at registration (#1504 <https://github.com/tier4/agnocast/issues/1504>)
+  * fix(kmod): read-lock get_exit_process phase 1 and stop the exit-flag copy from leaking shm (#1520 <https://github.com/tier4/agnocast/issues/1520>)
+  * refactor(agnocast)[need-minor-update]: remove the subscriber MQ machinery eventfd made dead (#1503 <https://github.com/tier4/agnocast/issues/1503>)
+  * refactor(kmod)[need-minor-update]: rename performance bridge manager to bridge manager (#1513 <https://github.com/tier4/agnocast/issues/1513>)
+  * feat(agnocast)[need-minor-update]: replace POSIX MQ publish notification with eventfd (#1432 <https://github.com/tier4/agnocast/issues/1432>)
+  * fix(agnocast_kmod): build against the target kernel instead of the running one (#1514 <https://github.com/tier4/agnocast/issues/1514>)
+  * test(agnocast_kmod): move the discovery agent kunit cases out of add_process (#1509 <https://github.com/tier4/agnocast/issues/1509>)
+  * refactor(agnocast_kmod): funnel publisher/subscriber_info release through helpers (#1502 <https://github.com/tier4/agnocast/issues/1502>)
+  * feat(agnocast_kmod, agnocastlib)[needs minor version update]: notify renamed cross-domain subscribers on the canonical MQ (#1443 <https://github.com/tier4/agnocast/issues/1443>)
+  * feat(agnocast_kmod)[needs minor version update]: support cross-domain topic rename in the domain bridge (#1436 <https://github.com/tier4/agnocast/issues/1436>)
+  * feat(agnocast_kmod)[needs minor version update]: manage the discovery agent in a kmod registry (#1426 <https://github.com/tier4/agnocast/issues/1426>)
+  * feat(agnocast_kmod)[needs minor version update]: domain bridge for same-IPC-namespace cross-domain zero-copy (#1417 <https://github.com/tier4/agnocast/issues/1417>)
+  * refactor(agnocast_kmod): heap-allocate topic_struct behind a pointer (#1416 <https://github.com/tier4/agnocast/issues/1416>)
+  * feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): make cross-NS discovery and bridge decisions domain-aware (#1410 <https://github.com/tier4/agnocast/issues/1410>)
+  * feat(agnocast_kmod, agnocast_ioctl_wrapper)[needs minor version update]: make the kmod domain-aware (topic ioctls + bridge-manager spawn) (#1409 <https://github.com/tier4/agnocast/issues/1409>)
+  * feat(agnocast_kmod, agnocastlib)[need-minor-update]: isolate topics by ROS_DOMAIN_ID (#1398 <https://github.com/tier4/agnocast/issues/1398>)
+  * chore(docs, ros2agnocast, agnocast_kmod): reflect standard bridge removal (#1406 <https://github.com/tier4/agnocast/issues/1406>)
+
+ -- Koichi Imai <kotty.0704@gmail.com>  Tue, 01 Sep 2026 13:43:00 +0900
+
 agnocast-kmod-v2.3.5 (2.3.5-1) noble; urgency=medium
 
  -- Takahiro Ishikawa-Aso <sykwer@gmail.com>  Tue, 09 Jun 2026 18:30:00 +0900

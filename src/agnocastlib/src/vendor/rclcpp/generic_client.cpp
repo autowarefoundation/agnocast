@@ -16,9 +16,7 @@
 
 #include "agnocast/vendor/rclcpp/generic_client.hpp"
 
-#include "agnocast/vendor/rclcpp/generic_service.hpp"  // get_service_typesupport_handle
-
-#include <rclcpp/version.h>
+#include <rclcpp/exceptions.hpp>
 
 namespace agnocast::vendor_rclcpp
 {
@@ -28,30 +26,8 @@ GenericClient::GenericClient(
   const rclcpp::QoS & qos)
 : ClientBase(node->get_node_base_interface().get(), node->get_node_graph_interface())
 {
-  static const std::string ts_identifier = "rosidl_typesupport_cpp";
-  static const std::string ts_introspection_identifier = "rosidl_typesupport_introspection_cpp";
-
-  const std::string response_type = service_type + "_Response";
-
-  const rosidl_service_type_support_t * service_ts = nullptr;
   try {
-    ts_lib_ = rclcpp::get_typesupport_library(service_type, ts_identifier);
-    ts_lib_introspection_ =
-      rclcpp::get_typesupport_library(service_type, ts_introspection_identifier);
-
-#if RCLCPP_VERSION_MAJOR >= 28
-    service_ts = rclcpp::get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
-
-    const rosidl_message_type_support_t * response_ts = rclcpp::get_message_typesupport_handle(
-      response_type, ts_introspection_identifier, *ts_lib_introspection_);
-#else
-    service_ts = get_service_typesupport_handle(service_type, ts_identifier, *ts_lib_);
-
-    const rosidl_message_type_support_t * response_ts = rclcpp::get_typesupport_handle(
-      response_type, ts_introspection_identifier, *ts_lib_introspection_);
-#endif
-    response_members_ =
-      static_cast<const rosidl_typesupport_introspection_cpp::MessageMembers *>(response_ts->data);
+    service_ts_bundle_ = agnocast::load_service_typesupport(service_type);
   } catch (std::runtime_error & err) {
     RCLCPP_ERROR(node_logger_.get_child("agnocast.rclcpp"), "Invalid service type: %s", err.what());
     throw;
@@ -61,8 +37,8 @@ GenericClient::GenericClient(
   client_options.qos = qos.get_rmw_qos_profile();
 
   rcl_ret_t ret = rcl_client_init(
-    this->get_client_handle().get(), this->get_rcl_node_handle(), service_ts, service_name.c_str(),
-    &client_options);
+    this->get_client_handle().get(), this->get_rcl_node_handle(), service_ts_bundle_.service_ts,
+    service_name.c_str(), &client_options);
   if (ret != RCL_RET_OK) {
     if (ret == RCL_RET_SERVICE_NAME_INVALID) {
       auto * rcl_node_handle = this->get_rcl_node_handle();
@@ -92,10 +68,12 @@ GenericClient::SharedPtr GenericClient::create_generic_client(
 
 std::shared_ptr<void> GenericClient::create_response()
 {
-  void * response = new uint8_t[response_members_->size_of_];
-  response_members_->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
-  return {response, [this](void * p) {
-            response_members_->fini_function(p);
+  const auto * response_members = service_ts_bundle_.response_members;
+  void * response = new uint8_t[response_members->size_of_];
+  response_members->init_function(response, rosidl_runtime_cpp::MessageInitialization::ZERO);
+  // The deleter can outlive this client, so it owns the bundle that keeps fini_function mapped.
+  return {response, [bundle = service_ts_bundle_](void * p) {
+            bundle.response_members->fini_function(p);
             delete[] reinterpret_cast<uint8_t *>(p);  // NOLINT(cppcoreguidelines-owning-memory)
           }};
 }

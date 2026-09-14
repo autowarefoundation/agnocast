@@ -8,7 +8,7 @@
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 
-#define MAX_TOPIC_NUM 1024
+#define MAX_TOPIC_NUM 2048
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define TOPIC_NAME_BUFFER_SIZE 256
@@ -99,7 +99,7 @@ struct ioctl_discovery_agent_should_exit_args
 struct ioctl_add_discovery_agent_args
 {
   uint32_t domain_id;
-  bool ret_already_exists;
+  bool ret_owned_by_caller;
 };
 
 struct ioctl_discovery_agent_exists_args

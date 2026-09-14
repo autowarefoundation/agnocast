@@ -8,7 +8,7 @@
 # requires sudo unshare); instead it runs the daemon and the CLI in the
 # same namespace and checks that:
 #
-#   * Each verb accepts `--gossip-timeout`.
+#   * Each verb accepts its discovery wait flag.
 #   * Each verb finishes without raising when the daemon is publishing.
 #   * Local Agnocast endpoints surface in the CLI output.
 #
@@ -85,7 +85,7 @@ fail() {
 }
 
 # ----- topic list_agnocast -----
-out=$(ros2 topic list_agnocast --gossip-timeout "$GOSSIP_TIMEOUT" 2>&1) \
+out=$(ros2 topic list_agnocast --spin-time "$GOSSIP_TIMEOUT" 2>&1) \
     || fail "topic list_agnocast exited non-zero" "$out"
 grep -q -- "/my_topic" <<<"$out" \
     || fail "topic list_agnocast did not include /my_topic" "$out"

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agnocast/agnocast_ioctl.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
@@ -13,12 +12,10 @@
 #include "rcpputils/scope_exit.hpp"
 #include "rosidl_typesupport_introspection_cpp/message_introspection.hpp"
 
-#include <mqueue.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <mutex>
 
 namespace agnocast
 {
@@ -29,18 +26,16 @@ const void * get_node_base_address(Node * node);
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge, const std::string & type_name, std::string & out_mq_topic_name);
+  const bool is_bridge, const std::string & type_name);
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
-  const std::string & mq_topic_name, const topic_local_id_t publisher_id,
-  const uint64_t msg_virtual_address,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> & opened_mqs);
+  const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);
 // Releases the caller's own entries that QoS depth no longer retains, without
 // publishing anything, and reports their addresses for the caller to free.
 union ioctl_reclaim_msgs_args reclaim_msgs_core(
   const std::string & topic_name, const topic_local_id_t publisher_id);
 uint32_t get_subscription_count_core(const std::string & topic_name);
-uint32_t get_intra_subscription_count_core(const std::string & topic_name);
+uint32_t get_same_process_subscription_count_core(const std::string & topic_name);
 void increment_borrowed_publisher_num();
 void decrement_borrowed_publisher_num();
 
@@ -118,14 +113,14 @@ enum class PublisherRole : uint8_t {
 };
 
 // Base class for Agnocast publishers. This class handles the common operations
-// shared with all Agnocast publishers, such as kernel registration and message queue management.
+// shared with all Agnocast publishers, such as kernel registration, GID generation, and
+// bridge registration.
 class PublisherBase
 {
   void generate_gid();
 
 protected:
   topic_local_id_t id_ = -1;
-  uint32_t qos_depth_ = 1;
   // Grown on demand rather than fixed. The first is created on the first GPU
   // borrow. Defined in agnocast_publisher.cpp.
   mutable std::mutex gpu_pools_mtx_;
@@ -146,16 +141,12 @@ protected:
   [[nodiscard]] bool has_gpu_region_fitting(size_t capacity) const;
 
   std::string topic_name_;
-  // Topic name for the publish-notification MQ (returned by the kmod). Differs from topic_name_
-  // only for a domain-bridged/renamed topic, where it is the pair's canonical name so a publisher
-  // and a renamed subscriber derive the same MQ name.
-  std::string mq_topic_name_;
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> opened_mqs_;
-  std::mutex opened_mqs_mtx_;
   rmw_gid_t gid_;
+  // The depth is a placeholder: rclcpp::QoS has no default constructor.
+  rclcpp::QoS actual_qos_{1};
 
   template <typename NodeT>
-  rclcpp::QoS init_base(
+  void init_base(
     NodeT * node, const std::string & topic_name, const std::string & type_name,
     const rclcpp::QoS & qos, const PublisherOptions & options, const PublisherRole role);
 
@@ -178,21 +169,65 @@ public:
   const rmw_gid_t & get_gid() const { return gid_; }
 
   /**
-   * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge).
+   * @brief Return the per-topic id the kernel module assigned to this publisher.
+   * @return Publisher id.
+   */
+  AGNOCAST_PUBLIC
+  topic_local_id_t get_id() const { return id_; }
+
+  /**
+   * @brief Return the total subscriber count for this topic (Agnocast + ROS 2 via bridge),
+   * including Agnocast subscribers in the publisher's own process.
+   *
+   * A same-process subscriber that set `ignore_local_publications` is counted even though it never
+   * receives.
    * @return Total subscriber count.
    */
   AGNOCAST_PUBLIC
   uint32_t get_subscription_count() const { return get_subscription_count_core(topic_name_); }
 
   /**
-   * @brief Return the number of Agnocast intra-process subscribers only (excludes ROS 2).
-   * @return Agnocast subscriber count.
+   * @brief Return the number of Agnocast subscribers in the publisher's own process.
+   *
+   * Unlike `rclcpp::Publisher::get_intra_process_subscription_count()`, this does not depend on
+   * `use_intra_process_comms` or on QoS compatibility: Agnocast has no equivalent of rclcpp's
+   * intra-process manager to exclude a subscriber from. The count can therefore be larger than
+   * what rclcpp reports for the same configuration.
+   *
+   * @return Intra-process subscriber count.
    */
   AGNOCAST_PUBLIC
-  uint32_t get_intra_subscription_count() const
+  uint32_t get_intra_process_subscription_count() const
   {
-    return get_intra_subscription_count_core(topic_name_);
+    return get_same_process_subscription_count_core(topic_name_);
   }
+
+  /**
+   * @brief Return the number of Agnocast subscribers in the publisher's own process.
+   * @deprecated Renamed to get_intra_process_subscription_count(). Note that
+   * get_subscription_count() now includes these subscribers, so adding the two together
+   * double-counts them.
+   * @return Agnocast same-process subscriber count.
+   */
+  [[deprecated(
+    "Renamed to get_intra_process_subscription_count(). Note that get_subscription_count() now "
+    "includes these subscribers, so adding the two together double-counts them.")]]
+  AGNOCAST_PUBLIC uint32_t get_intra_subscription_count() const
+  {
+    return get_intra_process_subscription_count();
+  }
+
+  /**
+   * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
+   *
+   * Unlike `rclcpp::PublisherBase::get_actual_qos()`, the value is not RMW-resolved:
+   * there is no DDS entity to query, so `SystemDefault` and the policies Agnocast ignores are
+   * reported as requested.
+   *
+   * @return Effective QoS of this publisher.
+   */
+  AGNOCAST_PUBLIC
+  rclcpp::QoS get_actual_qos() const { return actual_qos_; }
 };
 
 /**
@@ -207,7 +242,7 @@ template <typename MessageT>
 class Publisher : public PublisherBase
 {
   template <typename NodeT>
-  rclcpp::QoS constructor_impl(
+  void constructor_impl(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options, const PublisherRole role)
   {
@@ -229,7 +264,7 @@ class Publisher : public PublisherBase
         topic_name.c_str());
     }
 
-    return this->init_base(node, topic_name, type_name, qos, options, role);
+    this->init_base(node, topic_name, type_name, qos, options, role);
   }
 
 public:
@@ -239,14 +274,13 @@ public:
     rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const PublisherOptions & options, const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
-    qos_depth_ = static_cast<uint32_t>(actual_qos.depth());
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(
         node->get_node_base_interface()->get_shared_rcl_node_handle().get()),
-      topic_name_.c_str(), actual_qos.depth());
+      topic_name_.c_str(), actual_qos_.depth());
   }
 
   Publisher(
@@ -254,13 +288,12 @@ public:
     const PublisherOptions & options = PublisherOptions{},
     const PublisherRole role = PublisherRole::Default)
   {
-    const rclcpp::QoS actual_qos = constructor_impl(node, topic_name, qos, options, role);
-    qos_depth_ = static_cast<uint32_t>(actual_qos.depth());
+    constructor_impl(node, topic_name, qos, options, role);
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
       static_cast<const void *>(get_node_base_address(node)), topic_name_.c_str(),
-      actual_qos.depth());
+      actual_qos_.depth());
   }
 
   /**
@@ -384,12 +417,8 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    union ioctl_publish_msg_args publish_msg_args;
-    {
-      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-      publish_msg_args =
-        publish_core(this, topic_name_, mq_topic_name_, id_, msg_virtual_address, opened_mqs_);
-    }
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       MessageT * release_ptr = reinterpret_cast<MessageT *>(publish_msg_args.ret_released_addrs[i]);
@@ -471,12 +500,8 @@ public:
 
     decrement_borrowed_publisher_num();
 
-    union ioctl_publish_msg_args publish_msg_args;
-    {
-      std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
-      publish_msg_args =
-        publish_core(this, topic_name_, mq_topic_name_, id_, msg_virtual_address, opened_mqs_);
-    }
+    const union ioctl_publish_msg_args publish_msg_args =
+      publish_core(this, topic_name_, id_, msg_virtual_address);
 
     for (uint32_t i = 0; i < publish_msg_args.ret_released_num; i++) {
       void * release_ptr = reinterpret_cast<void *>(publish_msg_args.ret_released_addrs[i]);

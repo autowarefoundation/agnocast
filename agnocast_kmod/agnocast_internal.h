@@ -5,6 +5,8 @@
 #include "agnocast_memory_allocator.h"
 
 #include <linux/device.h>
+#include <linux/eventfd.h>
+#include <linux/file.h>  // fput
 #include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
@@ -49,23 +51,40 @@ extern struct rw_semaphore global_htables_rwsem;
 // Every GPU region of every publisher, across all topics and namespaces.
 #define GPU_REGION_HASH_BITS 6
 
-// Allocated in pre_handler_subscriber_exit(), freed in agnocast_commit_exit_process() after
-// the daemon successfully copies the data to user-space.
-struct exit_subscription_entry
+// Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
+#define NOTIFY_CTXS_MIN_CAPACITY 8
+
+// All eventfd access goes through these wrappers so the KUnit build can substitute fakes; see
+// agnocast_kunit/agnocast_kunit_eventfd.c for why real contexts are unobtainable there.
+#ifdef KUNIT_BUILD
+struct eventfd_ctx * agnocast_eventfd_get(int fd);
+void agnocast_eventfd_signal(struct eventfd_ctx * ctx);
+void agnocast_eventfd_put(struct eventfd_ctx * ctx);
+#else
+static inline struct eventfd_ctx * agnocast_eventfd_get(int fd)
 {
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-  struct list_head list;
-};
+  return eventfd_ctx_fdget(fd);
+}
+
+static inline void agnocast_eventfd_signal(struct eventfd_ctx * ctx)
+{
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+  eventfd_signal(ctx);
+#else
+  eventfd_signal(ctx, 1);
+#endif
+}
+
+static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
+{
+  eventfd_ctx_put(ctx);
+}
+#endif
 
 struct process_info
 {
   bool exited;
-  // Tracks whether this process is the alive Bridge Manager for the IPC namespace.
-  // The name is kept as "is_performance_bridge_manager" for ABI compatibility with existing
-  // kmod interfaces, even though the Standard Bridge has been removed and this now refers
-  // to the single unified Bridge Manager.
-  bool is_performance_bridge_manager;
+  enum process_role role;
   pid_t global_pid;
   pid_t local_pid;
   struct mempool_entry * mempool_entry;
@@ -73,8 +92,6 @@ struct process_info
   // The process's ROS_DOMAIN_ID (0 if unset), fixed for the process's lifetime.
   // Used as the domain component of the topic key for this process's operations.
   uint32_t domain_id;
-  struct list_head exit_subscription_list;
-  uint32_t exit_subscription_count;
   struct hlist_node node;
   struct rcu_head rcu_head;
 };
@@ -114,6 +131,14 @@ struct publisher_info
   bool qos_is_transient_local;
   uint32_t entries_num;
   bool is_bridge;
+  // The eventfd contexts PUBLISH signals, in no particular order. Membership depends only on the
+  // endpoints, never on the message, so the list is built as endpoints register and publish only
+  // reads it.
+  struct eventfd_ctx ** notify_ctxs;
+  uint32_t notify_num;
+  // Never below the topic's notifiable subscriber count, and never shrinks, so only a join can grow
+  // it and every other rebuild is allocation-free.
+  uint32_t notify_capacity;
   // Empty unless this publisher registered GPU regions. Bounded by
   // MAX_GPU_REGION_NUM_PER_PUBLISHER.
   struct list_head gpu_regions;
@@ -121,10 +146,32 @@ struct publisher_info
   struct hlist_node node;
 };
 
-// Unlinks a publisher_info and releases everything it owns, including each GPU
-// region's file reference. Every teardown path must go through this, or a
-// resource added to publisher_info ends up leaked on some of them.
-void agnocast_free_publisher_info(struct publisher_info * pub_info);
+// Releases everything a publisher_info owns. Every teardown path must go through
+// it, or a resource added to publisher_info ends up leaked on some of them. The
+// caller unlinks the publisher from the topic's table first, where it was linked
+// at all -- one caller frees a publisher that never got that far.
+//
+// Requires global_htables_rwsem held for write, because releasing a GPU region
+// removes it from the module-wide region index.
+static inline void free_publisher_info(struct publisher_info * pub_info)
+{
+  struct gpu_region_info * region;
+  struct gpu_region_info * tmp_region;
+
+  list_for_each_entry_safe(region, tmp_region, &pub_info->gpu_regions, node)
+  {
+    // The memory returns to the driver once every importer has closed its own
+    // descriptor too.
+    fput(region->handle_file);
+    list_del(&region->node);
+    hash_del(&region->global_node);
+    kfree(region);
+  }
+
+  kvfree(pub_info->notify_ctxs);
+  kfree(pub_info->node_name);
+  kfree(pub_info);
+}
 
 struct subscriber_info
 {
@@ -141,8 +188,18 @@ struct subscriber_info
   bool ignore_local_publications;
   bool need_mmap_update;
   bool is_bridge;
+  struct eventfd_ctx * notify_ctx;  // eventfd for publish notifications (NULL for take_sub)
   struct hlist_node node;
 };
+
+// Use agnocast_unlink_subscriber_info() instead unless the whole topic is being torn down: a
+// subscriber leaving a live topic must also leave the publishers' notify lists.
+static inline void free_subscriber_info(struct subscriber_info * sub_info)
+{
+  if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
+  kfree(sub_info->node_name);
+  kfree(sub_info);
+}
 
 // Helper to copy a name_info string from userspace to a kernel stack buffer.
 // Returns 0 on success, -EINVAL if too long, -EFAULT on copy failure.
@@ -165,7 +222,11 @@ struct topic_struct
   int64_t current_entry_id;
   uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
   uint32_t ros2_publisher_num;   // Updated by Bridge Manager
-  // Per-topic rwsem: read for read-only ops, write for publish/receive/modify.
+  // Per-topic rwsem. Write is taken by publish and by the Bridge Manager's ros2_*_num setters;
+  // read by receive/take, message-entry reference release, and the query ioctls.
+  // Structural changes, like adding or removing publishers and subscribers, run under
+  // global_htables_rwsem WRITE and do not take this rwsem. This is why holding global read
+  // for the whole receive keeps both the tree and this struct alive.
   struct rw_semaphore rwsem;
   // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
   // bridge rule groups two domains' wrappers onto one entry/id space. The struct
@@ -215,8 +276,8 @@ extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
 // A domain bridge rule relays one topic between two ROS domains within one IPC
 // namespace. The pair is stored canonically (domain_a < domain_b) with the enabled
-// direction(s) in a_to_b / b_to_a. See agnocast_ioctl_add_domain_bridge for the rules
-// on adding one.
+// direction(s) in a_to_b / b_to_a. See add_domain_rule in agnocast_ioctl.c for the
+// rules on adding one.
 struct domain_bridge_rule
 {
   // Per-domain topic names. Equal when the rule does not rename; a rename pairs
@@ -229,6 +290,10 @@ struct domain_bridge_rule
   uint32_t domain_b;
   bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
   bool b_to_a;
+  // When set, topic_name_a is a prefix rather than a whole name and topic_name_b equals it: the
+  // rule pairs every topic whose name starts with the prefix against the *same* name in the other
+  // domain, so a prefix rule never renames.
+  bool is_prefix;
   struct hlist_node node;
 };
 
@@ -265,13 +330,7 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 
 bool agnocast_is_referenced(struct entry_node * en);
 
-// The canonical topic name whose publish-notification MQ this wrapper's endpoints use. Shared
-// between registration (returned to userspace) and exit cleanup so both derive the same MQ name.
-const char * agnocast_notify_mq_topic_name(const struct topic_wrapper * wrapper);
-
 struct process_info * agnocast_find_process_info(const pid_t pid);
-
-void agnocast_free_exit_subscription_list(struct process_info * proc_info);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
@@ -279,6 +338,16 @@ void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_nod
 // struct itself) is freed only when the last referencing wrapper is dropped, so
 // a grouped partner keeps working until it too is released.
 void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
+
+// The single place a subscriber is dropped from a live topic, so that releasing its eventfd
+// context and rebuilding the notify lists pointing at it cannot be forgotten at one call site.
+// Caller holds global_htables_rwsem (write).
+void agnocast_unlink_subscriber_info(
+  struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
+
+// Recomputes the publishers' notify lists, for the one caller that unlinks subscribers in bulk and
+// so cannot use agnocast_unlink_subscriber_info(). Caller holds global_htables_rwsem (write).
+void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 

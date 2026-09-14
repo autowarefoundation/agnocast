@@ -2,6 +2,7 @@
 
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+#include "rclcpp/version.h"
 
 #include <sys/ioctl.h>
 
@@ -98,6 +99,28 @@ void ServiceBridgeItem::erase_expired_shadow_node(
   }
 }
 
+// Returns false only if the shadow node was wanted but could not be created (the error string will
+// be set).
+bool ServiceBridgeItem::acquire_shadow_node()
+{
+  if (!shadow_node_identity_.has_value() || shadow_node_ != nullptr) {
+    return true;
+  }
+
+  shadow_node_ = find_or_create_shadow_node(*shadow_node_identity_);
+  return shadow_node_ != nullptr;
+}
+
+void ServiceBridgeItem::release_shadow_node()
+{
+  if (shadow_node_ == nullptr) {
+    return;
+  }
+
+  shadow_node_ = nullptr;
+  erase_expired_shadow_node(*shadow_node_identity_);
+}
+
 // Returns 0 on success, -1 on error (the error string will be set).
 int ServiceBridgeItem::get_agno_service_qos(rclcpp::QoS & qos)
 {
@@ -173,8 +196,50 @@ bool ServiceBridgeItem::ros2_service_exists(const ServiceBridgeDeps & deps)
   }
 }
 
+// Returns false if no external ROS 2 client for the target service exists or if an exception occurs
+// while checking it (the reason will be set in the error string).
+//
+// This is the ROS 2 side demand signal for an R2A service bridge, symmetric with
+// has_external_ros2_subscriber() for pub/sub. An R2A bridge costs a callback group, which
+// CallbackIsolatedAgnocastExecutor backs with a thread and an epoll of its own. Gating on this
+// signal keeps that cost proportional to actual use. Ungated, every service pays it
+// unconditionally, and at scale (every agnocast::Node auto-creates six parameter services) that
+// exhausts the manager's file descriptors.
+bool ServiceBridgeItem::ros2_client_exists(const ServiceBridgeDeps & deps)
+{
+  try {
+#if RCLCPP_VERSION_MAJOR >= 28
+    const bool exists = deps.container_node->count_clients(this->service_name_) > 0;
+    if (!exists) {
+      set_error_string("No external ROS 2 client found");
+    }
+    return exists;
+#else
+    // Pre-Jazzy rclcpp has no service-client count in the graph API, so demand cannot be observed.
+    // Claiming a client unconditionally leaves R2A bridges ungated on those distros -- each still
+    // costs a thread and an epoll -- but returning false would keep them from ever being built.
+    (void)deps;
+    return true;
+#endif
+  } catch (const std::exception & e) {
+    set_error_string(e.what());
+    return false;
+  } catch (...) {
+    set_error_string("Unknown error");
+    return false;
+  }
+}
+
+bool ServiceBridgeItem::r2a_forced() const
+{
+  return r2a_forced_until_.has_value() &&
+         is_daemon_force_active(*r2a_forced_until_, std::chrono::steady_clock::now());
+}
+
 // Returns false if the target Agnocast service does not exist or if an error occurs while checking
-// it (the reason will be set in the error string).
+// it (the reason will be set in the error string). "Two or more services share this name" is one
+// such error: the probe below reads at most one entry, so a name collision reads as absence rather
+// than presence.
 bool ServiceBridgeItem::agno_service_exists()
 {
   // TODO(bdm-k): Add a dedicated service-liveness ioctl so we can validate target service state
@@ -220,18 +285,10 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
     return -1;
   }
 
-  std::shared_ptr<rcl_node_t> shadow_node;
-  if (shadow_node_identity_.has_value()) {
-    const auto & identity = *shadow_node_identity_;
-    if ((shadow_node = find_or_create_shadow_node(identity)) == nullptr) {
-      return -1;
-    }
-  }
-
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_r2a_service_bridge(
+      entity = deps.bridge_loader->create_r2a_service_bridge(
         deps.container_node, service_name_, *service_type_, service_qos);
     } catch (const std::exception & e) {
       set_error_string(e.what());
@@ -252,7 +309,6 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::R2A;
   entity_ = std::move(entity);
-  shadow_node_ = std::move(shadow_node);
 
   // The groups are created with auto_add=false and their agnocast entities now exist, so add them
   // to the executor explicitly here for a deterministic (agnocast-capable) classification.
@@ -272,9 +328,9 @@ int ServiceBridgeItem::start_r2a_bridge(const ServiceBridgeDeps & deps)
 int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 {
   ServiceBridgeEntity entity;
-  if (service_type_.has_value() && deps.performance_loader != nullptr) {
+  if (service_type_.has_value() && deps.bridge_loader != nullptr) {
     try {
-      entity = deps.performance_loader->create_a2r_service_bridge(
+      entity = deps.bridge_loader->create_a2r_service_bridge(
         deps.container_node, service_name_, *service_type_, rclcpp::ServicesQoS());
     } catch (const std::exception & e) {
       set_error_string(e.what());
@@ -295,7 +351,6 @@ int ServiceBridgeItem::start_a2r_bridge(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::A2R;
   entity_ = std::move(entity);
-  shadow_node_ = nullptr;
 
   // The groups are created with auto_add=false and their agnocast entities now exist, so add them
   // to the executor explicitly here for a deterministic (agnocast-capable) classification.
@@ -330,13 +385,14 @@ void ServiceBridgeItem::update_configuration(const BridgeMsgServicePayload & pay
   }
 }
 
+// Stays in R2A, or takes arrow (6) back to PENDING.
 void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
 {
-  if (agno_service_exists()) {
+  if (agno_service_exists() && (ros2_client_exists(deps) || r2a_forced())) {
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing R2A service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -351,22 +407,22 @@ void ServiceBridgeItem::check_and_update_r2a(const ServiceBridgeDeps & deps)
     deps.executor->stop_callback_group(entity_.client_cb_group);
   }
 
+  // The shadow node deliberately survives this hop: dropping it here would hide the node from the
+  // graph just as the next client goes looking for it. check_and_update_pending() releases it.
   state_ = ServiceBridgeState::PENDING;
   entity_ = {nullptr, nullptr, nullptr};
-  shadow_node_ = nullptr;
-
-  if (shadow_node_identity_.has_value()) {
-    erase_expired_shadow_node(shadow_node_identity_.value());
-  }
 }
 
+// Stays in A2R, or takes arrow (4) back to PENDING.
 void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 {
-  if (ros2_service_exists(deps)) {
+  if (may_start_r2a_bridge_ && agno_service_exists()) {
+    set_error_string("An Agnocast service now owns this name");
+  } else if (ros2_service_exists(deps) && agno_client_exists()) {
     return;
   }
 
-  RCLCPP_WARN(
+  RCLCPP_DEBUG(
     deps.logger, "Removing A2R service bridge for '%s': %s", service_name_.c_str(),
     get_error_string());
 
@@ -383,13 +439,24 @@ void ServiceBridgeItem::check_and_update_a2r(const ServiceBridgeDeps & deps)
 
   state_ = ServiceBridgeState::PENDING;
   entity_ = {nullptr, nullptr, nullptr};
-  shadow_node_ = nullptr;
 }
 
+// Stays in PENDING, or takes arrow (5), (3) or (2), in that order of precedence.
 void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
 {
+  // (5)'s precondition, not (5) itself; it also excludes (3) and (2), hence the unconditional
+  // return.
   if (may_start_r2a_bridge_ && agno_service_exists()) {
-    if (start_r2a_bridge(deps) != 0) {
+    // Before the client check on purpose: the node must be resolvable for that client to appear.
+    if (!acquire_shadow_node()) {
+      RCLCPP_WARN(
+        deps.logger, "Failed to create the shadow node for '%s': %s", service_name_.c_str(),
+        get_error_string());
+      return;
+    }
+
+    // Arrow (5).
+    if ((ros2_client_exists(deps) || r2a_forced()) && start_r2a_bridge(deps) != 0) {
       RCLCPP_WARN(
         deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
         get_error_string());
@@ -397,7 +464,11 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
     return;
   }
 
-  if (may_start_a2r_bridge_ && ros2_service_exists(deps)) {
+  // Reached only when (5)'s precondition fails, so the shadow node has nothing left to stand for.
+  release_shadow_node();
+
+  // Arrow (3).
+  if (may_start_a2r_bridge_ && ros2_service_exists(deps) && agno_client_exists()) {
     if (start_a2r_bridge(deps) != 0) {
       RCLCPP_WARN(
         deps.logger, "Failed to start A2R service bridge for '%s': %s", service_name_.c_str(),
@@ -406,8 +477,9 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
     return;
   }
 
+  // Arrow (2).
   if (!agno_client_exists()) {
-    RCLCPP_WARN(
+    RCLCPP_DEBUG(
       deps.logger, "Removing service bridge state-machine for '%s': %s", service_name_.c_str(),
       get_error_string());
 
@@ -415,6 +487,9 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
   }
 }
 
+// Runs one maintenance tick. Every arrow except (1) is taken from here; the state diagram in
+// agnocast_service_bridge.hpp defines them all, and the "arrow (n)" markers in this file refer to
+// its numbering.
 void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
 {
   switch (state_) {
@@ -432,32 +507,19 @@ void ServiceBridgeItem::check_and_update(const ServiceBridgeDeps & deps)
   }
 }
 
-void ServiceBridgeItem::handle_request_with_direction(
-  BridgeDirection direction, const ServiceBridgeDeps & deps)
+// Takes arrow (1). Creating a bridge is left to check_and_update() above.
+void ServiceBridgeItem::handle_request(const BridgeMsgServicePayload & payload)
 {
-  switch (direction) {
-    case BridgeDirection::ROS2_TO_AGNOCAST:
-      if (state_ == ServiceBridgeState::NONE || state_ == ServiceBridgeState::PENDING) {
-        if (start_r2a_bridge(deps) != 0) {
-          RCLCPP_WARN(
-            deps.logger, "Failed to start R2A service bridge for '%s': %s", service_name_.c_str(),
-            get_error_string());
-        }
-      }
-      break;
-    case BridgeDirection::AGNOCAST_TO_ROS2:
-      if (state_ == ServiceBridgeState::NONE) {
-        state_ = ServiceBridgeState::PENDING;
-      }
-      break;
+  update_configuration(payload);
+
+  if (state_ == ServiceBridgeState::NONE) {
+    state_ = ServiceBridgeState::PENDING;
   }
 }
 
-void ServiceBridgeItem::handle_request(
-  const BridgeMsgServicePayload & payload, const ServiceBridgeDeps & deps)
+void ServiceBridgeItem::handle_daemon_request()
 {
-  update_configuration(payload);
-  handle_request_with_direction(payload.direction, deps);
+  r2a_forced_until_ = daemon_force_deadline(std::chrono::steady_clock::now());
 }
 
 }  // namespace agnocast

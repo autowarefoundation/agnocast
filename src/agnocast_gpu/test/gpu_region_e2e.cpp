@@ -19,6 +19,7 @@
 
 #include <cuda_runtime.h>
 #include <fcntl.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -188,11 +189,22 @@ int run_subscriber(int notify_fd)
 
   // The kernel module hands a descriptor only to a registered subscriber of the
   // topic running in the calling process, so this is what authorizes the import.
+  // A subscriber that is not a take-subscription must hand the module an eventfd
+  // to be signalled on, as agnocast_subscription.cpp does. Nothing waits on it
+  // here -- the pipe below is what sequences the two processes -- but the module
+  // rejects a registration without one. It closes with this process.
+  const int notify_eventfd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (notify_eventfd < 0) {
+    std::fprintf(stderr, "eventfd() failed: %s\n", std::strerror(errno));
+    return 1;
+  }
+
   ioctl_add_subscriber_args sub_args = {};
   sub_args.topic_name = {kTopic, std::strlen(kTopic)};
   sub_args.node_name = {kNode, std::strlen(kNode)};
   sub_args.qos_depth = kSlotCount;
   sub_args.qos_is_reliable = true;
+  sub_args.eventfd = notify_eventfd;
   if (ioctl(agnocast::agnocast_fd, AGNOCAST_ADD_SUBSCRIBER_CMD, &sub_args) < 0) {
     std::fprintf(stderr, "ADD_SUBSCRIBER failed: %s\n", std::strerror(errno));
     return 1;

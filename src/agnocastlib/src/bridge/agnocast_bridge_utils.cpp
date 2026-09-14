@@ -50,10 +50,10 @@ BridgeMode get_bridge_mode()
   return BridgeMode::On;
 }
 
-std::string get_performance_bridge_node_name(const uint64_t self_ipc_ns_inode)
+std::string get_bridge_node_name(const uint64_t self_ipc_ns_inode)
 {
-  std::string default_name = "agnocast_bridge_node_performance_" +
-                             std::to_string(self_ipc_ns_inode) + "_" + std::to_string(getpid());
+  std::string default_name =
+    "agnocast_bridge_node_" + std::to_string(self_ipc_ns_inode) + "_" + std::to_string(getpid());
 
   const char * env_val = std::getenv("AGNOCAST_BRIDGE_NODE_NAME_SUFFIX");
   if (env_val == nullptr || *env_val == '\0') {
@@ -65,7 +65,7 @@ std::string get_performance_bridge_node_name(const uint64_t self_ipc_ns_inode)
   std::replace(suffix.begin(), suffix.end(), '-', '_');
   std::replace(suffix.begin(), suffix.end(), '.', '_');
 
-  std::string node_name = "agnocast_bridge_node_performance_" + suffix;
+  std::string node_name = "agnocast_bridge_node_" + suffix;
 
   // rmw rejects node names longer than RMW_NODE_NAME_MAX_NAME_LENGTH.
   const bool valid = node_name.size() <= RMW_NODE_NAME_MAX_NAME_LENGTH &&
@@ -446,7 +446,7 @@ void register_service_bridge(
   if (get_bridge_mode() != BridgeMode::On) {
     return;
   }
-  send_performance_service_bridge_registration_by_type_name(
+  send_service_bridge_registration_by_type_name(
     service_type, service_name, direction, shadow_node_identity);
 }
 

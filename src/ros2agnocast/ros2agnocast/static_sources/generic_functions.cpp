@@ -1,6 +1,6 @@
 #include "generic_functions.hpp"
 
-PerformancePubsubBridgeResult create_r2a_generic_bridge(
+PubsubBridgeResult create_r2a_generic_bridge(
   rclcpp::Node::SharedPtr node, const std::string & topic_name, const rclcpp::QoS & sub_qos,
   const std::string & type_name,
   std::function<void(std::shared_ptr<rclcpp::SerializedMessage>)> callback)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "agnocast/agnocast_utils.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/bridge/agnocast_bridge_plugin_api.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -13,17 +13,17 @@
 namespace agnocast
 {
 
-class PerformanceBridgeLoader
+class BridgeLoader
 {
 public:
-  explicit PerformanceBridgeLoader(const rclcpp::Logger & logger);
-  ~PerformanceBridgeLoader();
+  explicit BridgeLoader(const rclcpp::Logger & logger);
+  ~BridgeLoader();
 
-  PerformancePubsubBridgeResult create_r2a_pubsub_bridge(
+  PubsubBridgeResult create_r2a_pubsub_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
-  PerformancePubsubBridgeResult create_a2r_pubsub_bridge(
+  PubsubBridgeResult create_a2r_pubsub_bridge(
     rclcpp::Node::SharedPtr node, const std::string & topic_name, const std::string & message_type,
     const rclcpp::QoS & qos);
 
@@ -41,11 +41,11 @@ private:
   // path -> handle
   std::unordered_map<std::string, void *> loaded_libraries_;
 
-  static PerformancePubsubBridgeResult create_r2a_pubsub_bridge_generic(
+  static PubsubBridgeResult create_r2a_pubsub_bridge_generic(
     const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
     const std::string & message_type, const rclcpp::QoS & qos);
 
-  static PerformancePubsubBridgeResult create_a2r_pubsub_bridge_generic(
+  static PubsubBridgeResult create_a2r_pubsub_bridge_generic(
     const rclcpp::Node::SharedPtr & node, const std::string & topic_name,
     const std::string & message_type, const rclcpp::QoS & qos);
 

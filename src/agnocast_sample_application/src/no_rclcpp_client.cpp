@@ -1,4 +1,5 @@
 #include "agnocast/agnocast.hpp"
+#include "agnocast/node/agnocast_parameter_client.hpp"
 #include "agnocast_sample_interfaces/srv/sum_int_array.hpp"
 
 #include <thread>
@@ -18,6 +19,28 @@ int main(int argc, char * argv[])
     executor.spin();
   });
 
+  // === Use AsyncParametersClient to get the QoS depth from the server ===
+  auto params_client =
+    std::make_shared<agnocast::AsyncParametersClient>(node.get(), "no_rclcpp_server_node");
+  while (!params_client->wait_for_service(1s)) {
+    if (!agnocast::ok()) {
+      RCLCPP_ERROR(
+        node->get_logger(), "Interrupted while waiting for parameter services. Exiting.");
+      spin_thread.join();
+      agnocast::shutdown();
+      return 0;
+    }
+    RCLCPP_INFO(node->get_logger(), "Parameter services not available, waiting again...");
+  }
+  auto params_fut = params_client->get_parameters({"qos.depth"});
+  auto const & params = params_fut.get();
+  if (!params.empty()) {
+    RCLCPP_INFO(node->get_logger(), "Server QoS depth: %ld", params[0].as_int());
+  } else {
+    RCLCPP_INFO(node->get_logger(), "Server QoS depth: N/A (parameter not declared)");
+  }
+
+  // === Use Client to call the service ===
   using ServiceT = agnocast_sample_interfaces::srv::SumIntArray;
   auto client = node->create_client<ServiceT>("sum_int_array");
 

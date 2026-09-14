@@ -21,7 +21,6 @@ When a process first calls malloc or other memory related functions, Agnocast st
 
 1. get an allocatable area through `AGNOCAST_ADD_PROCESS_CMD` ioctl.
 2. open a writable shared memory on the allocatable area, with `shm_open`, `ftruncate` and `mmap` system calls.
-3. create a thread and open a message queue so that the process can recognize a emergence of a new publisher later.
 
 #### Creation of a publisher
 
@@ -29,8 +28,8 @@ When a process calls `create_publisher` for a topic `T`, the shared memory of th
 Thus the following procedures are executed:
 
 1. The publisher process gets the information about subscribers already registered for the topic `T` through `AGNOCAST_ADD_PUBLISHER_CMD` ioctl.
-2. The publisher process opens a message queue and send the shared memory information in order to notify the subscribers already created for the topic `T` that a new publisher is registered.
-3. The subscriber process receives the message and maps the publisher's shared memory area with a read-only privilege.
+2. The kernel module returns the new publisher's shared memory information to each subscriber on its next `AGNOCAST_RECEIVE_MSG_CMD` or `AGNOCAST_TAKE_MSG_CMD` ioctl.
+3. The subscriber process maps the publisher's shared memory area with a read-only privilege.
 
 #### Creation of a subscriber
 
@@ -44,10 +43,6 @@ When a process calls `create_subscription` for topic `T`, then the process maps 
 In Agnocast, there is exactly one writable process and there are some read-only processes for a shared memory.
 Suppose the writable process's id is `pid`, then the shared memory is named as "/agnocast@pid".
 The name should start with '/' and should not include '/' any more.
-
-Message queue is also created for each process.
-Suppose the process's id is `pid`, then the message queue is named as "/new_publisher@pid".
-The restriction for the name is the same as the shared memory.
 
 ## Memory allocation for shared memory
 

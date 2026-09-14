@@ -54,11 +54,22 @@ TEST(DaemonBridgeUdsTest, DaemonPayloadWireLayout)
   EXPECT_EQ(offsetof(BridgeMsgDaemonPubSubPayload, qos_is_reliable), 521u);
 }
 
+// Same contract for the service variant, whose layout the daemon mirrors as
+// `_SERVICE_MSG_PACK_FORMAT`.
+TEST(DaemonBridgeUdsTest, DaemonServicePayloadWireLayout)
+{
+  using agnocast::BridgeMsgDaemonServicePayload;
+  EXPECT_EQ(sizeof(BridgeMsgDaemonServicePayload), 256u);
+  EXPECT_EQ(offsetof(BridgeMsgDaemonServicePayload, service_name), 0u);
+  EXPECT_EQ(agnocast::bridge_msg_wire_size<BridgeMsgDaemonServicePayload>(), 260u);
+}
+
 TEST(DaemonBridgeUdsTest, BridgeMsgTypeNumeric)
 {
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::PubSub), 0u);
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::Service), 1u);
   EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonPubSub), 2u);
+  EXPECT_EQ(static_cast<uint32_t>(agnocast::BridgeMsgType::DaemonService), 3u);
 }
 
 TEST(DaemonBridgeUdsTest, BridgeMsgWireLayout)
@@ -136,7 +147,7 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrIsCanonicalPerDomain)
   EXPECT_EQ(addr_for("007"), addr_for("7"));
 }
 
-// Performance-mode daemon bridges have no local endpoint to query, so the QoS
+// Daemon bridges have no local endpoint to query, so the QoS
 // must be rebuilt faithfully from the request's explicit fields.
 TEST(DaemonBridgeUdsTest, DaemonRequestQosReliableTransientLocal)
 {
@@ -164,7 +175,7 @@ TEST(DaemonBridgeUdsTest, DaemonRequestQosBestEffortVolatile)
   EXPECT_EQ(qos.durability(), rclcpp::DurabilityPolicy::Volatile);
 }
 
-// The daemon-forced lease (used by the performance bridge_manager to keep a
+// The daemon-forced lease (used by the bridge manager to keep a
 // cross-NS bridge alive without a same-graph DDS counterpart) is active for the
 // half-open window [registered, registered + DAEMON_FORCE_TTL).
 TEST(DaemonBridgeUdsTest, DaemonForceLeaseWindowIsHalfOpen)

@@ -17,6 +17,9 @@ static const uint32_t QOS_DEPTH = 10;
 // false, and CI lints this PR's diff rather than the tree.
 #define IS_BRIDGE false
 
+// These tests never wait on a publish, so they register no eventfd.
+#define NO_EVENTFD (-1)
+
 static const uint32_t SLOT_SIZE = 2048;
 static const uint32_t SLOT_COUNT = 4;
 static const uint64_t MAPPED_SIZE = 8192;
@@ -46,7 +49,7 @@ static topic_local_id_t setup_publisher(struct kunit * test)
   int ret;
 
   ret = agnocast_ioctl_add_process(
-    PUBLISHER_PID, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+    PUBLISHER_PID, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   ret = agnocast_ioctl_add_publisher(
@@ -64,7 +67,7 @@ static topic_local_id_t setup_subscriber(struct kunit * test)
   union ioctl_add_subscriber_args add_sub_args;
   int ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, false, true, false,
-    false, IS_BRIDGE, &add_sub_args);
+    false, IS_BRIDGE, NO_EVENTFD, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   return add_sub_args.ret_id;
 }

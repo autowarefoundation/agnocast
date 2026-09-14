@@ -52,8 +52,7 @@ public:
       qos.transient_local();
     }
 
-    sub_ =
-      std::make_shared<agnocast::TakeSubscription<std_msgs::msg::Int64>>(this, topic_name, qos);
+    sub_ = agnocast::create_take_subscription<std_msgs::msg::Int64>(this, topic_name, qos);
     timer_ = this->create_wall_timer(10ms, std::bind(&TestTakeSubscriber::timer_callback, this));
   }
 };

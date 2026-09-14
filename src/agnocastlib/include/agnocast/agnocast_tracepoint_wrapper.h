@@ -96,3 +96,60 @@ DECLARE_TRACEPOINT(
 #ifdef __cplusplus
 }
 #endif
+
+#ifdef __cplusplus
+
+#include "tracetools/utils.hpp"
+
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <type_traits>
+
+// Compatibility: Humble defines this, Jazzy returns nullptr instead.
+#ifndef TRACETOOLS_SYMBOL_UNKNOWN
+#define TRACETOOLS_SYMBOL_UNKNOWN "UNKNOWN"
+#endif
+
+namespace agnocast
+{
+
+/// Get the symbol of a callback, for use as a tracepoint argument.
+/**
+ * This wraps `tracetools::get_symbol` to hide two portability problems:
+ *
+ * - It is only declared when tracing is compiled in, so calling it unconditionally breaks the
+ *   build with `TRACETOOLS_DISABLED`.
+ * - Its ownership contract differs across distributions. Humble returns a pointer that must not
+ *   be freed, while Jazzy returns heap memory that the caller must free, and may return nullptr.
+ *
+ * Returning by value keeps the ownership handling in one place and gives the call sites a symbol
+ * that is always valid to pass to `ctf_string()`.
+ *
+ * \param[in] callback the callback to resolve
+ * \return the symbol, or `TRACETOOLS_SYMBOL_UNKNOWN` if it could not be resolved
+ */
+template <typename CallbackT>
+inline std::string get_callback_symbol([[maybe_unused]] const CallbackT & callback)
+{
+#ifndef TRACETOOLS_DISABLED
+  auto * symbol = tracetools::get_symbol(callback);
+  if (symbol == nullptr) {
+    // Jazzy signals failure with nullptr, Humble with this value. Report one form.
+    return TRACETOOLS_SYMBOL_UNKNOWN;
+  }
+  // A non-const return type marks the buffer as caller-owned: Humble's `const char *` must not
+  // be freed, Jazzy's `char *` must. The guard frees it on every exit path, throws included.
+  std::unique_ptr<char, decltype(&std::free)> owned{nullptr, &std::free};
+  if constexpr (!std::is_const_v<std::remove_pointer_t<decltype(symbol)>>) {
+    owned.reset(symbol);
+  }
+  return std::string{symbol};
+#else
+  return TRACETOOLS_SYMBOL_UNKNOWN;
+#endif
+}
+
+}  // namespace agnocast
+
+#endif  // __cplusplus

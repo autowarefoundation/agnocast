@@ -21,7 +21,8 @@ Before=my-robot-apps.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-Environment=AGNOCAST_DOMAIN_BRIDGE_CONFIG=/etc/agnocast/domain_bridge.yaml
+# No AGNOCAST_DOMAIN_BRIDGE_CONFIG: an Environment= here reaches this unit only,
+# never the agent, which the applications exec. See README.md to move the config.
 # Source ROS 2 and the workspace so `ros2 run` resolves, then register.
 ExecStart=/bin/bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 run ros2agnocast_discovery_agent register_domain_bridge'
 

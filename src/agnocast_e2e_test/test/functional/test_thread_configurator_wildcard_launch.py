@@ -137,7 +137,7 @@ def _replace_publisher_entries_with_wildcard():
         'id': WILDCARD_ID,
         'domain_id': _WILDCARD_DOMAIN_ID,
         'policy': 'SCHED_OTHER',
-        'priority': 10,
+        'nice': 10,
         'affinity': [],
     }
     cfg['callback_groups'] = kept + [wildcard_entry]
@@ -262,7 +262,7 @@ class TestThreadConfiguratorWildcard(unittest.TestCase):
             e for e in cfg.get('callback_groups', []) if e['id'] == WILDCARD_ID
         ]
         self.assertEqual(len(wildcard_entries), 1)
-        wildcard_entries[0]['priority'] = 11
+        wildcard_entries[0]['nice'] = 11
         _write_config(cfg)
 
         response = _call_reapply()
@@ -307,7 +307,7 @@ class TestThreadConfiguratorWildcard(unittest.TestCase):
         cfg = _read_config()
         exact_entry = dict(_PUBLISHER_ENTRIES[0])
         exact_entry['policy'] = 'SCHED_OTHER'
-        exact_entry['priority'] = 15
+        exact_entry['nice'] = 15
         exact_entry['affinity'] = []
         cfg['callback_groups'] = cfg['callback_groups'] + [exact_entry]
         _write_config(cfg)
@@ -348,7 +348,7 @@ class TestThreadConfiguratorWildcard(unittest.TestCase):
         cfg = _read_config()
         exact_entry = dict(_PUBLISHER_ENTRIES[0])
         exact_entry['policy'] = 'SCHED_OTHER'
-        exact_entry['priority'] = 15
+        exact_entry['nice'] = 15
         exact_entry['affinity'] = []
         cfg['callback_groups'] = [exact_entry] + cfg['callback_groups']
         _write_config(cfg)
