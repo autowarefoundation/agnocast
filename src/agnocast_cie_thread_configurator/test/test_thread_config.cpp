@@ -66,6 +66,18 @@ acie::SchedAttrs attrs_of(const ThreadSection & section, const std::string & bod
   return section.attrs(parse(section.header + body));
 }
 
+struct Section
+{
+  const char * name;
+  const char * key;
+};
+
+constexpr Section kSections[] = {
+  {"callback_groups", "id"},
+  {"non_ros_threads", "name"},
+  {"kernel_threads", "comm"},
+  {"irqs", "irq"},
+};
 }  // namespace
 
 // ---------- sections ----------
@@ -80,6 +92,27 @@ TEST(ParseConfig, MissingOrNullOrEmptySectionsYieldEmpty)
     EXPECT_TRUE(config.non_ros_threads.empty()) << yaml;
     EXPECT_TRUE(config.kernel_threads.empty()) << yaml;
     EXPECT_TRUE(config.irqs.empty()) << yaml;
+  }
+}
+
+TEST(ParseConfig, RejectsNonListSection)
+{
+  // A scalar or map section would otherwise silently parse as empty.
+  for (const auto & section : kSections) {
+    const std::string name = section.name;
+    expect_error(name + ": oops\n", "'" + name + "' must be a list");
+    expect_error(name + ":\n  " + section.key + ": x\n", "'" + name + "' must be a list");
+  }
+}
+
+TEST(ParseConfig, RejectsScalarListEntry)
+{
+  // A plausible shorthand (a list of bare ids/comms/IRQ numbers) must fail
+  // with the entry diagnostic, not a raw yaml-cpp BadSubscript.
+  for (const auto & section : kSections) {
+    const std::string name = section.name;
+    expect_error(
+      name + ": [x]\n", name + " entry #0 must be a mapping (e.g. '- " + section.key + ": ...')");
   }
 }
 
@@ -800,20 +833,6 @@ kernel_threads:
     "Duplicate kernel_thread entry: comm=nfsd");
 }
 
-TEST(ParseKernelThreads, RejectsNonListSection)
-{
-  // A scalar or map section would otherwise silently parse as empty.
-  expect_error("kernel_threads: oops\n", "'kernel_threads' must be a list");
-  expect_error("kernel_threads:\n  comm: nfsd\n", "'kernel_threads' must be a list");
-}
-
-TEST(ParseKernelThreads, RejectsScalarListEntry)
-{
-  // A plausible shorthand (a list of bare comms) must fail with the entry
-  // diagnostic, not a raw yaml-cpp BadSubscript.
-  expect_error("kernel_threads: [nfsd]\n", "kernel_threads entry #0 must be a mapping");
-}
-
 TEST(ParseKernelThreads, RejectsPolicyDependentFieldsWithoutPolicy)
 {
   // Such an entry would otherwise parse cleanly as unmanaged, i.e. silently
@@ -915,17 +934,4 @@ TEST(ParseIrqs, RejectsDuplicateIrq)
   expect_error(
     "irqs:\n  - irq: 5\n    affinity: ~\n  - irq: 5\n    affinity: ~\n",
     "Duplicate irq entry: irq=5");
-}
-
-TEST(ParseIrqs, RejectsNonListSection)
-{
-  expect_error("irqs: oops\n", "'irqs' must be a list");
-  expect_error("irqs:\n  irq: 5\n", "'irqs' must be a list");
-}
-
-TEST(ParseIrqs, RejectsScalarListEntry)
-{
-  // A plausible shorthand (a list of bare IRQ numbers) must fail with the
-  // entry diagnostic, not a raw yaml-cpp BadSubscript.
-  expect_error("irqs: [42]\n", "irqs entry #0 must be a mapping");
 }
