@@ -150,13 +150,8 @@ public:
    * double-counts them.
    * @return Agnocast same-process subscriber count.
    */
-  [[deprecated(
-    "Renamed to get_intra_process_subscription_count(). Note that get_subscription_count() now "
-    "includes these subscribers, so adding the two together double-counts them.")]]
-  AGNOCAST_PUBLIC uint32_t get_intra_subscription_count() const
-  {
-    return get_intra_process_subscription_count();
-  }
+  AGNOCAST_PUBLIC
+  uint32_t get_intra_subscription_count() const { return get_intra_process_subscription_count(); }
 
   /**
    * @brief Return the QoS passed at construction with any `qos_overriding_options` applied.
