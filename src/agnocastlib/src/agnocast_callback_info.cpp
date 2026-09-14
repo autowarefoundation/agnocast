@@ -2,7 +2,6 @@
 
 #include "agnocast/agnocast_epoll_event.hpp"
 #include "agnocast/agnocast_executor.hpp"
-#include "agnocast/agnocast_mq.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 
 #include <sys/epoll.h>
@@ -45,6 +44,9 @@ void receive_and_execute_message(
   receive_args.pub_shm_info_size = MAX_PUBLISHER_NUM;
 
   {
+    // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
+    // mmap that makes it usable, and it is what serializes same-subscriber receives for the kernel
+    // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
     std::lock_guard<std::mutex> lock(mmap_mtx);
 
     if (ioctl(agnocast_fd, AGNOCAST_RECEIVE_MSG_CMD, &receive_args) < 0) {
@@ -70,8 +72,9 @@ void receive_and_execute_message(
   // Process entries from oldest to newest (ioctl returns oldest first)
   for (const auto & entry : entries) {
     const auto & [entry_id, entry_addr] = entry;
-    const void * callback_addr = &entry;  // For CARET
+    [[maybe_unused]] const void * callback_addr = &entry;  // For CARET
 
+#ifndef TRACETOOLS_DISABLED
     {
       constexpr uint8_t PID_SHIFT_BITS = 32;
       uint64_t pid_callback_info_id =
@@ -84,6 +87,7 @@ void receive_and_execute_message(
       // ensure that CARET can be used without modifying its implementation.
       TRACEPOINT(agnocast_create_callable, callback_addr, entry_id, pid_callback_info_id);
     }
+#endif
 
     auto typed_msg = callback_info.message_creator(
       reinterpret_cast<void *>(entry_addr), callback_info.topic_name, callback_info.subscriber_id,
@@ -164,7 +168,7 @@ void SubscriptionEventHandler::prepare_epoll(
     struct epoll_event ev = {};
     ev.events = EPOLLIN;
     ev.data.u64 = pack_epoll_data(EpollEventType::Subscription, callback_info_id);
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.mqdes, &ev) == -1) {
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.notify_eventfd, &ev) == -1) {
       RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
       close(agnocast_fd);
       exit(EXIT_FAILURE);
@@ -198,15 +202,14 @@ void SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
     callback_info = it->second;
   }
 
-  MqMsgAgnocast mq_msg = {};
-
-  // non-blocking
-  auto ret =
-    mq_receive(callback_info.mqdes, reinterpret_cast<char *>(&mq_msg), sizeof(mq_msg), nullptr);
+  // Drain the counter; the value is unused, the fd is a pure wakeup. EFD_NONBLOCK, so a
+  // spurious or coalesced wake returns EAGAIN.
+  uint64_t counter = 0;
+  const ssize_t ret = read(callback_info.notify_eventfd, &counter, sizeof(counter));
   if (ret < 0) {
     if (errno != EAGAIN) {
       RCLCPP_ERROR_STREAM(
-        logger, "mq_receive failed for topic '"
+        logger, "eventfd read failed for topic '"
                   << callback_info.topic_name << "' (subscriber_id=" << callback_info.subscriber_id
                   << "): " << strerror(errno));
       close(agnocast_fd);

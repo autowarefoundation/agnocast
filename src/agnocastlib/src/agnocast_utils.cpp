@@ -50,35 +50,6 @@ void validate_ld_preload()
   }
 }
 
-static std::string create_mq_name(
-  const std::string & header, const std::string & topic_name, const topic_local_id_t id)
-{
-  if (topic_name.length() == 0 || topic_name[0] != '/') {
-    RCLCPP_ERROR(logger, "create_mq_name failed");
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
-  std::string mq_name = topic_name;
-  mq_name[0] = '@';
-  mq_name = header + mq_name + "@" + std::to_string(id);
-
-  // As a mq_name, '/' cannot be used
-  for (size_t i = 1; i < mq_name.size(); i++) {
-    if (mq_name[i] == '/') {
-      mq_name[i] = '_';
-    }
-  }
-
-  return mq_name;
-}
-
-std::string create_mq_name_for_agnocast_publish(
-  const std::string & topic_name, const topic_local_id_t id)
-{
-  return create_mq_name("/agnocast", topic_name, id);
-}
-
 uint32_t get_ros_domain_id()
 {
   const char * domain_id_env = getenv("ROS_DOMAIN_ID");
@@ -143,9 +114,11 @@ std::string create_service_request_topic_name(const std::string & service_name)
 }
 
 std::string create_service_response_topic_name(
-  const std::string & service_name, const std::string & client_node_name)
+  const std::string & service_name, const std::string & client_node_name,
+  const topic_local_id_t client_publisher_id)
 {
-  return "/AGNOCAST_SRV_RESPONSE" + service_name + "_SEP_" + client_node_name;
+  return "/AGNOCAST_SRV_RESPONSE" + service_name + "_SEP_" + client_node_name + "_SEP_" +
+         std::to_string(client_publisher_id);
 }
 
 uint64_t agnocast_get_timestamp()

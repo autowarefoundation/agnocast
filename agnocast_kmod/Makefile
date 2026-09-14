@@ -23,9 +23,9 @@ else
 	agnocast_internal.o
 endif
 
-KERNEL_VERSION ?= $(shell uname -r)
-KERNEL_MAJOR := $(shell echo $(KERNEL_VERSION) | cut -d '.' -f 1)
-KERNEL_MINOR := $(shell echo $(KERNEL_VERSION) | cut -d '.' -f 2)
+KVERSION ?= $(shell uname -r)
+KERNEL_MAJOR := $(shell echo $(KVERSION) | cut -d '.' -f 1)
+KERNEL_MINOR := $(shell echo $(KVERSION) | cut -d '.' -f 2)
 
 # In Linux kernel v5.17 and earlier, the top-level Linux Makefile specifies -std=gnu89,
 # so it is necessary to declare the variable used as the iterator in the for loop beforehand.
@@ -48,16 +48,16 @@ ifeq ($(shell expr $(KERNEL_MAJOR) \< 6 \| $(KERNEL_MAJOR) = 6 \& $(KERNEL_MINOR
 endif
 
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) modules
 
 test:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) KUNIT_BUILD=y modules
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) KUNIT_BUILD=y modules
 
 sparse:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) C=2 modules > sparse.log 2>&1 || { cat sparse.log; exit 1; }
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) C=2 modules > sparse.log 2>&1 || { cat sparse.log; exit 1; }
 	! grep 'agnocast_kmod/.*warning' sparse.log && rm -f sparse.log
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) clean
 
 .PHONY: all test sparse clean

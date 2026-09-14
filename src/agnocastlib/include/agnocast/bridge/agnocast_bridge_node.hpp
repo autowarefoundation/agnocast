@@ -30,10 +30,10 @@ namespace agnocast
 
 static constexpr size_t DEFAULT_QOS_DEPTH = 10;
 
-inline void send_performance_pubsub_bridge_registration_by_type_name(
+inline void send_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction);
-inline void send_performance_service_bridge_registration_by_type_name(
+inline void send_service_bridge_registration_by_type_name(
   const std::string & service_type_name, const std::string & service_name,
   BridgeDirection direction,
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity);
@@ -44,16 +44,15 @@ inline void register_pubsub_bridge_by_type_name(
 {
   auto bridge_mode = get_bridge_mode();
   if (bridge_mode == BridgeMode::On) {
-    send_performance_pubsub_bridge_registration_by_type_name(
-      topic_name, id, message_type, direction);
+    send_pubsub_bridge_registration_by_type_name(topic_name, id, message_type, direction);
   }
 }
 
-inline void send_performance_pubsub_bridge_registration_by_type_name(
+inline void send_pubsub_bridge_registration_by_type_name(
   const std::string & topic_name, topic_local_id_t id, const std::string & message_type_name,
   BridgeDirection direction)
 {
-  static const auto logger = rclcpp::get_logger("agnocast_performance_bridge_registrar");
+  static const auto logger = rclcpp::get_logger("agnocast_bridge_registrar");
 
   auto [msg, reason] = BridgeRegistrationMsgBuilder()
                          .set_direction(direction)
@@ -63,8 +62,7 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
                          .set_pubsub_target_id(id)
                          .build_message();
   if (!reason.empty()) {
-    RCLCPP_ERROR(
-      logger, "Failed to build performance pubsub bridge registration: %s", reason.c_str());
+    RCLCPP_ERROR(logger, "Failed to build pubsub bridge registration: %s", reason.c_str());
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
@@ -73,12 +71,12 @@ inline void send_performance_pubsub_bridge_registration_by_type_name(
   send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
 }
 
-inline void send_performance_service_bridge_registration_by_type_name(
+inline void send_service_bridge_registration_by_type_name(
   const std::string & service_type_name, const std::string & service_name,
   BridgeDirection direction,
   const std::optional<std::pair<std::string, std::string>> & shadow_node_identity)
 {
-  static const auto logger = rclcpp::get_logger("agnocast_performance_service_bridge_registrar");
+  static const auto logger = rclcpp::get_logger("agnocast_service_bridge_registrar");
 
   auto [msg, reason] = BridgeRegistrationMsgBuilder()
                          .set_direction(direction)
@@ -88,8 +86,7 @@ inline void send_performance_service_bridge_registration_by_type_name(
                          .set_shadow_node_identity(shadow_node_identity)
                          .build_message();
   if (!reason.empty()) {
-    RCLCPP_ERROR(
-      logger, "Failed to build performance service bridge registration: %s", reason.c_str());
+    RCLCPP_ERROR(logger, "Failed to build service bridge registration: %s", reason.c_str());
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }

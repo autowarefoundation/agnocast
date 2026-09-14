@@ -8,6 +8,7 @@
 
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -46,6 +47,9 @@ public:
 
   bool spin_once(int timeout_ms);
 
+  // Wake up the event loop from another thread.
+  void wakeup();
+
   void set_message_handler(MessageCallback cb);
   void set_signal_handler(SignalCallback cb);
   void set_socket_handler(SocketCallback cb);
@@ -61,6 +65,7 @@ private:
   int epoll_fd_ = -1;
   int signal_fd_ = -1;
   int socket_fd_ = -1;
+  int wakeup_efd_ = -1;
 
   int listener_fd_ = -1;
   std::string uds_addr_;
@@ -74,6 +79,7 @@ private:
   void setup_signals(
     const std::vector<int> & signals_to_block, const std::vector<int> & signals_to_ignore);
   void setup_socket();
+  void setup_wakeup_eventfd();
   void setup_epoll();
   void cleanup_resources();
 
@@ -93,6 +99,7 @@ inline IpcEventLoopBase::IpcEventLoopBase(
     setup_listener();
     setup_signals(signals_to_block, signals_to_ignore);
     setup_socket();
+    setup_wakeup_eventfd();
     setup_epoll();
   } catch (...) {
     cleanup_resources();
@@ -133,6 +140,12 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
       if (s == sizeof(struct signalfd_siginfo)) {
         handle_signal();
       }
+    } else if (fd == wakeup_efd_) {
+      uint64_t val;
+      ssize_t s = read(wakeup_efd_, &val, sizeof(val));
+      if (s == -1 && !(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+        RCLCPP_WARN(logger_, "read() on wakeup eventfd failed: %s", strerror(errno));
+      }
     } else if (fd == socket_fd_) {
       int client_fd = accept4(socket_fd_, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
       if (client_fd == -1) {
@@ -146,6 +159,15 @@ inline bool IpcEventLoopBase::spin_once(int timeout_ms)
     }
   }
   return true;
+}
+
+inline void IpcEventLoopBase::wakeup()
+{
+  uint64_t val = 1;
+  ssize_t w = write(wakeup_efd_, &val, sizeof(val));
+  if (w == -1) {
+    RCLCPP_WARN(logger_, "write() on wakeup eventfd failed: %s", strerror(errno));
+  }
 }
 
 inline void IpcEventLoopBase::handle_signal()
@@ -310,6 +332,14 @@ inline void IpcEventLoopBase::setup_socket()
   socket_fd_ = fd;
 }
 
+inline void IpcEventLoopBase::setup_wakeup_eventfd()
+{
+  wakeup_efd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (wakeup_efd_ == -1) {
+    throw std::system_error(errno, std::generic_category(), "eventfd failed");
+  }
+}
+
 inline void IpcEventLoopBase::setup_epoll()
 {
   epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
@@ -319,6 +349,7 @@ inline void IpcEventLoopBase::setup_epoll()
 
   add_fd_to_epoll(listener_fd_, "BridgeUDS");
   add_fd_to_epoll(signal_fd_, "Signal");
+  add_fd_to_epoll(wakeup_efd_, "WakeupEventfd");
   if (socket_fd_ != -1) {
     add_fd_to_epoll(socket_fd_, "DebugSocket");
   }
@@ -387,6 +418,13 @@ inline void IpcEventLoopBase::cleanup_resources()
       RCLCPP_WARN(logger_, "Failed to close signal_fd: %s", strerror(errno));
     }
     signal_fd_ = -1;
+  }
+
+  if (wakeup_efd_ != -1) {
+    if (close(wakeup_efd_) == -1) {
+      RCLCPP_WARN(logger_, "Failed to close wakeup_efd: %s", strerror(errno));
+    }
+    wakeup_efd_ = -1;
   }
 
   if (listener_fd_ != -1) {

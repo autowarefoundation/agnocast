@@ -2,6 +2,15 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.0 (2026-09-01)
+------------------
+* feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)
+* feat(agnocast_cie_thread_configurator): apply kernel thread and IRQ configs with reapply support (`#1546 <https://github.com/tier4/agnocast/issues/1546>`_)
+* test(e2e_test): add e2e service tests (`#1476 <https://github.com/tier4/agnocast/issues/1476>`_)
+* fix(agnocast_cie_thread_configurator): take 'nice' instead of 'priority' for CFS policies (`#1529 <https://github.com/tier4/agnocast/issues/1529>`_)
+* feat(agnocast_cie_thread_configurator): support wildcard callback group ids (<node name>/*) in the config YAML (`#1454 <https://github.com/tier4/agnocast/issues/1454>`_)
+* refactor(agnocastlib): remove standard bridge code (`#1402 <https://github.com/tier4/agnocast/issues/1402>`_)
+
 2.3.5 (2026-06-09)
 ------------------
 

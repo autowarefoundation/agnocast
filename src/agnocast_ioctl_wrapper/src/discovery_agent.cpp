@@ -43,7 +43,7 @@ int agnocast_discovery_agent_register(uint32_t domain_id)
   }
 
   close(fd);
-  return args.ret_already_exists ? 1 : 0;
+  return args.ret_owned_by_caller ? 0 : 1;
 }
 
 // Read-only idle poll (the agent counts consecutive idle polls before exiting). Returns 1 (domain

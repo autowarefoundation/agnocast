@@ -14,6 +14,7 @@ using namespace agnocast;
 int release_subscriber_reference_mock_called_count = 0;
 int publish_core_mock_called_count = 0;
 uint32_t mock_borrowed_publisher_num = 0;
+size_t initialize_publisher_mock_last_qos_depth = 0;
 
 extern "C" uint32_t agnocast_get_borrowed_publisher_num()
 {
@@ -40,15 +41,14 @@ void increment_borrowed_publisher_num()
 }
 
 topic_local_id_t initialize_publisher(
-  const std::string & topic_name, const std::string &, const rclcpp::QoS &, const bool,
-  const std::string &, std::string & out_mq_topic_name)
+  const std::string &, const std::string &, const rclcpp::QoS & qos, const bool,
+  const std::string &)
 {
-  out_mq_topic_name = topic_name;  // non-bridged: the notification MQ uses the topic's own name
-  return 0;                        // Dummy value
+  initialize_publisher_mock_last_qos_depth = qos.depth();
+  return 0;  // Dummy value
 }
 union ioctl_publish_msg_args publish_core(
-  const void *, const std::string &, const std::string &, const topic_local_id_t, const uint64_t,
-  std::unordered_map<topic_local_id_t, std::tuple<mqd_t, bool>> &)
+  const void *, const std::string &, const topic_local_id_t, const uint64_t)
 {
   publish_core_mock_called_count++;
   return ioctl_publish_msg_args{};  // Dummy value
@@ -56,7 +56,7 @@ union ioctl_publish_msg_args publish_core(
 
 BridgeMode get_bridge_mode()
 {
-  return BridgeMode::Off;  // Skip MQ sending in tests
+  return BridgeMode::Off;  // Skip bridge registration requests in tests
 }
 
 PublisherBase::~PublisherBase() = default;

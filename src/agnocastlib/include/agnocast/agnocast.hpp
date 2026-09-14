@@ -11,7 +11,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
-#include "agnocast/bridge/performance/agnocast_performance_bridge_plugin_api.hpp"
+#include "agnocast/bridge/agnocast_bridge_plugin_api.hpp"
 #include "agnocast/message_filters/pass_through.hpp"
 #include "agnocast/message_filters/subscriber.hpp"
 #include "agnocast/message_filters/sync_policies/approximate_time.hpp"
@@ -26,7 +26,6 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -192,6 +191,44 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
     std::forward<Func>(callback), options);
 }
 
+/// @brief Create an Agnocast take-subscription (Stage 1 free function, QoS overload).
+/// @tparam MessageT ROS message type.
+/// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
+/// @param node Pointer to the node.
+/// @param topic_name Topic name.
+/// @param qos Quality of service profile.
+/// @param options Subscription options.
+/// @return Shared pointer to the created take-subscription.
+AGNOCAST_PUBLIC
+template <typename MessageT, typename NodeT>
+typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+  NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+{
+  static_assert(
+    std::is_base_of_v<rclcpp::Node, NodeT> || std::is_base_of_v<agnocast::Node, NodeT>,
+    "NodeT must be rclcpp::Node or agnocast::Node (or derived from them)");
+  return std::make_shared<TakeSubscription<MessageT>>(node, topic_name, qos, std::move(options));
+}
+
+/// @brief Create an Agnocast take-subscription (Stage 1 free function, history-depth overload).
+/// @tparam MessageT ROS message type.
+/// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
+/// @param node Pointer to the node.
+/// @param topic_name Topic name.
+/// @param qos_history_depth History depth for the QoS profile.
+/// @param options Subscription options.
+/// @return Shared pointer to the created take-subscription.
+AGNOCAST_PUBLIC
+template <typename MessageT, typename NodeT>
+typename TakeSubscription<MessageT>::SharedPtr create_take_subscription(
+  NodeT * node, const std::string & topic_name, const size_t qos_history_depth,
+  agnocast::SubscriptionOptions options = agnocast::SubscriptionOptions{})
+{
+  return create_take_subscription<MessageT>(
+    node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), std::move(options));
+}
+
 /// @brief Create an Agnocast polling subscription (Stage 1 free function, history-depth overload).
 /// @tparam MessageT ROS message type.
 /// @tparam NodeT Node type (rclcpp::Node or agnocast::Node).
@@ -201,6 +238,10 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
 /// @return Shared pointer to the created polling subscription.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
+[[deprecated(
+  "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
+  "agnocast. Obtain a polling subscriber from the wrapper, or use "
+  "agnocast::create_take_subscription().")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const size_t qos_history_depth)
 {
@@ -220,6 +261,10 @@ typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
 /// @return Shared pointer to the created polling subscription.
 AGNOCAST_PUBLIC
 template <typename MessageT, typename NodeT>
+[[deprecated(
+  "agnocast::PollingSubscriber is planned to move to autoware_agnocast_wrapper and be removed from "
+  "agnocast. Obtain a polling subscriber from the wrapper, or use "
+  "agnocast::create_take_subscription().")]]
 typename PollingSubscriber<MessageT>::SharedPtr create_subscription(
   NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
 {
@@ -377,14 +422,15 @@ TimerBase::SharedPtr create_timer(
   const uint32_t timer_id = allocate_timer_id();
   const auto period_ns = period.to_chrono<std::chrono::nanoseconds>();
 
-  const void * callback_addr = static_cast<const void *>(&callback);
-  const char * callback_symbol = tracetools::get_symbol(callback);
+  [[maybe_unused]] const void * callback_addr = static_cast<const void *>(&callback);
+  const std::string callback_symbol = agnocast::get_callback_symbol(callback);
 
   auto timer = std::make_shared<GenericTimer<CallbackT>>(
     timer_id, period_ns, clock, std::forward<CallbackT>(callback));
 
   register_timer_info(timer_id, timer, period_ns, group, clock);
 
+#ifndef TRACETOOLS_DISABLED
   const void * node_handle;
   if constexpr (std::is_base_of_v<rclcpp::Node, NodePtrT>) {
     node_handle = static_cast<const void *>(
@@ -395,7 +441,8 @@ TimerBase::SharedPtr create_timer(
 
   TRACEPOINT(
     agnocast_timer_init, static_cast<const void *>(timer.get()), node_handle, callback_addr,
-    static_cast<const void *>(group.get()), callback_symbol, period_ns.count());
+    static_cast<const void *>(group.get()), callback_symbol.c_str(), period_ns.count());
+#endif
 
   return timer;
 }

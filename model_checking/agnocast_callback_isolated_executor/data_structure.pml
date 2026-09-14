@@ -33,5 +33,5 @@ Mutex ready_agnocast_executables_mutex_// agnocast_executor.hpp | AgnocastExecut
 chan ready_agnocast_executables = [MAX_COMPLETED_CBS] of {Callback}// agnocast_executor.hpp | AgnocastExecutor ready_agnocast_executables
 
 byte entry_num[NUM_SUBSCRIPTIONS] = 0// Simplification: This corresponds to `ioctl_receive_msg_args receive_args.ret_entry_num`. in AgnocastExecutor::receive_message(). index: callback_info_id. 
-bool epoll_added[NUM_SUBSCRIPTIONS] = false// This possesses whether the corresponding callback_info.mqdes is added to epoll or not. index: callback_info_id
-chan epoll = [MAX_COMPLETED_CBS] of {byte}// Simplification: This is directly used for publish / subscribe, and the corresponding mqueue is not modeled. msg: callback_info_id. 
+bool epoll_added[NUM_SUBSCRIPTIONS] = false// This possesses whether the corresponding callback_info.notify_eventfd is added to epoll or not. index: callback_info_id
+chan epoll = [MAX_COMPLETED_CBS] of {byte}// Simplification: This is directly used for publish / subscribe, and the corresponding eventfd is not modeled. msg: callback_info_id.

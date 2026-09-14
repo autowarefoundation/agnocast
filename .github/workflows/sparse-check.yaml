@@ -27,6 +27,8 @@ jobs:
       - name: Install sparse
         if: steps.check_changes.outputs.kmod_changed == 'true'
         run: |
+          # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
+          grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
           sudo apt-get update
           sudo apt-get install -y sparse
 

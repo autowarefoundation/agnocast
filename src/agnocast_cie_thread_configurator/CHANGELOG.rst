@@ -2,6 +2,24 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.0 (2026-09-01)
+------------------
+* refactor(agnocast_cie_thread_configurator): share the manageable CPU bound between parser and scanner (`#1589 <https://github.com/tier4/agnocast/issues/1589>`_)
+* refactor(agnocast_cie_thread_configurator): move is_kworker_comm to system_scan (`#1588 <https://github.com/tier4/agnocast/issues/1588>`_)
+* refactor(agnocast_cie_thread_configurator): replace policy strings with a SchedPolicy enum (`#1587 <https://github.com/tier4/agnocast/issues/1587>`_)
+* refactor(agnocast_cie_thread_configurator): split daemon-internal logic into a static core library (`#1586 <https://github.com/tier4/agnocast/issues/1586>`_)
+* refactor(agnocast_cie_thread_configurator): own the listener's file descriptors with UniqueFd (`#1585 <https://github.com/tier4/agnocast/issues/1585>`_)
+* refactor(agnocast_cie_thread_configurator): format int64_t thread ids with PRId64 (`#1584 <https://github.com/tier4/agnocast/issues/1584>`_)
+* chore(agnocast_cie_thread_configurator): name the IPC gtest target after its contents (`#1583 <https://github.com/tier4/agnocast/issues/1583>`_)
+* feat(agnocast_cie_thread_configurator): apply kernel thread and IRQ configs with reapply support (`#1546 <https://github.com/tier4/agnocast/issues/1546>`_)
+* feat(agnocast_cie_thread_configurator): emit kernel_threads and irqs sections in prerun template (`#1545 <https://github.com/tier4/agnocast/issues/1545>`_)
+* feat(agnocast_cie_thread_configurator): parse kernel_threads and irqs config sections (`#1544 <https://github.com/tier4/agnocast/issues/1544>`_)
+* feat(agnocast_cie_thread_configurator): add system scan utilities for kernel threads and IRQs (`#1543 <https://github.com/tier4/agnocast/issues/1543>`_)
+* fix(agnocast_cie_thread_configurator): validate and normalize affinity CPU lists (`#1538 <https://github.com/tier4/agnocast/issues/1538>`_)
+* fix(agnocast_cie_thread_configurator): take 'nice' instead of 'priority' for CFS policies (`#1529 <https://github.com/tier4/agnocast/issues/1529>`_)
+* feat(agnocast_cie_thread_configurator): support wildcard callback group ids (<node name>/*) in the config YAML (`#1454 <https://github.com/tier4/agnocast/issues/1454>`_)
+* refactor(cie_thread_configurator): remove remove_trailing_waitable (`#1472 <https://github.com/tier4/agnocast/issues/1472>`_)
+
 2.3.5 (2026-06-09)
 ------------------
 * feat(cie_thread_configurator): add pure-Rust non-ROS thread notification client (`#1371 <https://github.com/autowarefoundation/agnocast/issues/1371>`_)

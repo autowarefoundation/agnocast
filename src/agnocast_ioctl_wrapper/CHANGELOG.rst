@@ -2,6 +2,16 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.0 (2026-09-01)
+------------------
+* perf(agnocastlib)[need-minor-update]: exec the discovery agent directly instead of via ros2 run (`#1473 <https://github.com/tier4/agnocast/issues/1473>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): register renamed domain bridge rules from the YAML remap field (`#1437 <https://github.com/tier4/agnocast/issues/1437>`_)
+* feat(agnocast_kmod)[needs minor version update]: support cross-domain topic rename in the domain bridge (`#1436 <https://github.com/tier4/agnocast/issues/1436>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): claim the discovery-agent singleton via the kmod (`#1427 <https://github.com/tier4/agnocast/issues/1427>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): register domain bridge rules from YAML (`#1418 <https://github.com/tier4/agnocast/issues/1418>`_)
+* feat(agnocast_ioctl_wrapper, ros2agnocast_discovery_agent): make cross-NS discovery and bridge decisions domain-aware (`#1410 <https://github.com/tier4/agnocast/issues/1410>`_)
+* feat(agnocast_kmod, agnocast_ioctl_wrapper)[needs minor version update]: make the kmod domain-aware (topic ioctls + bridge-manager spawn) (`#1409 <https://github.com/tier4/agnocast/issues/1409>`_)
+
 2.3.5 (2026-06-09)
 ------------------
 

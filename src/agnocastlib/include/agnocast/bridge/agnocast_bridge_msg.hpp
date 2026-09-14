@@ -18,6 +18,7 @@ enum class BridgeMsgType : uint32_t {
   PubSub = 0,
   Service = 1,
   DaemonPubSub = 2,
+  DaemonService = 3,
 };
 
 struct BridgeMsgPubSubPayload
@@ -48,6 +49,15 @@ struct BridgeMsgDaemonPubSubPayload
   bool qos_is_reliable;
 };
 
+// A cross-IPC-namespace R2A service bridge lease from the per-NS discovery agent. It carries no
+// type because an Agnocast service registers none: its request topic carries
+// ServiceRequestWrapper<T>, which has no rosidl message name. Type and shadow node identity come
+// from the local Agnocast endpoint's own BridgeMsgServicePayload.
+struct BridgeMsgDaemonServicePayload
+{
+  char service_name[SERVICE_NAME_BUFFER_SIZE];
+};
+
 struct BridgeMsg
 {
   BridgeMsgType type;
@@ -55,6 +65,7 @@ struct BridgeMsg
     BridgeMsgPubSubPayload pubsub;
     BridgeMsgServicePayload service;
     BridgeMsgDaemonPubSubPayload daemon_pubsub;
+    BridgeMsgDaemonServicePayload daemon_service;
   } payload;
 };
 

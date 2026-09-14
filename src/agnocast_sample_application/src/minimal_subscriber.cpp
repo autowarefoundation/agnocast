@@ -6,6 +6,7 @@ using std::placeholders::_1;
 
 class MinimalSubscriber : public rclcpp::Node
 {
+  rclcpp::CallbackGroup::SharedPtr group_;
   agnocast::Subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_dynamic_;
 
   void callback(
@@ -17,10 +18,9 @@ class MinimalSubscriber : public rclcpp::Node
 public:
   explicit MinimalSubscriber(const rclcpp::NodeOptions & options) : Node("cie_subscriber", options)
   {
-    rclcpp::CallbackGroup::SharedPtr group =
-      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     agnocast::SubscriptionOptions agnocast_options;
-    agnocast_options.callback_group = group;
+    agnocast_options.callback_group = group_;
 
     sub_dynamic_ = agnocast::create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       this, "/my_topic", 1, std::bind(&MinimalSubscriber::callback, this, _1), agnocast_options);

@@ -58,7 +58,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_notify_guard_condition()` | ✗ | **Throws Exception** | Yes | Not needed as agnocast uses epoll instead of condition variables, but planned for loading into Component Container |
 | `get_associated_with_executor_atomic()` | ✓ | **Full Support** | - | |
 | `resolve_topic_or_service_name()` | ✓ | **Full Support** | - | Used by NodeTopics and (future) NodeServices |
-| `get_use_intra_process_default()` | ⚠ | **API Only** | No | Returns value while logging a warning. agnocast uses its own shared memory IPC, so rclcpp's intra_process_communication is not used. |
+| `get_use_intra_process_default()` | ⚠ | **API Only** | No | Returns value passed from NodeOptions. agnocast uses its own shared memory IPC, so rclcpp's intra_process_communication is not used; the node constructor warns about that once when the option is set. |
 | `get_enable_topic_statistics_default()` | ⚠ | **API Only** | Yes | Returns value passed from NodeOptions. |
 
 ---
@@ -103,7 +103,8 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `list_parameters()` | ✓ | **Full Support** | - | |
 | `add_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
 | `remove_on_set_parameters_callback()` | ✓ | **Full Support** | - | |
-| Parameter Service | ✓ | **Full Support** | - | Not yet available via the `ros2 param` command |
+| Parameter Service | ✓ | **Full Support** | - | |
+| Parameter Client | ✓ | **Partial Support** | - | `AsyncParametersClient` is supported while `SyncParametersClient` is not yet |
 
 **Other differences from rclcpp::NodeParameters**:
 
@@ -182,11 +183,11 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_client_names_and_types_by_node()` | ✗ | **Throws Exception** | No | Agnocast does not officially support Service |
 | `get_publisher_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
 | `get_subscriber_names_and_types_by_node()` | ✗ | **Throws Exception** | No | To support this, topic_name and topic_type must be managed within the kmod; however, they are currently not managed |
-| `get_node_names()` | ✗ | **Throws Exception** | Yes | To support this, the kmod must report the nodes owning an agnocast endpoint; it currently does not |
+| `get_node_names()` | ✓ | **Partial Support** | - | Returns the nodes of the caller's IPC namespace and `ROS_DOMAIN_ID` that own at least one non-bridge agnocast publisher/subscriber, plus the caller itself. DDS is not consulted, so an `rclcpp::Node` without an agnocast endpoint is not reported. Nodes are keyed on `(pid, fully qualified name)`, so duplicate names survive across processes but collapse within one, which rclcpp does not do. Beyond `MAX_NODE_NUM` (1024) nodes only the caller is reported, and an error is logged |
 | `get_node_names_with_enclaves()` | ✗ | **Throws Exception** | No | |
 | `get_node_names_and_namespaces()` | ✗ | **Throws Exception** | No | To support this, namespace must be managed within the kmod; however, they are currently not managed |
 | `count_publishers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 publishers, excluding those created by bridges. `agnocast::Node::count_publishers()` delegates here |
-| `count_subscribers()` | ✓ | **Partial Support** | - | Counts agnocast and ROS 2 subscribers, excluding those created by bridges. Agnocast subscribers in the caller's own process are not counted. `agnocast::Node::count_subscribers()` delegates here |
+| `count_subscribers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 subscribers, excluding those created by bridges. `agnocast::Node::count_subscribers()` delegates here |
 | `get_graph_guard_condition()` | ✗ | **Throws Exception** | No | |
 | `notify_graph_change()` | - | **No-op** | No | agnocast has no graph events, so there is nothing to notify. Made a no-op because rclcpp utilities call it unconditionally |
 | `notify_shutdown()` | - | **No-op** | No | Same as `notify_graph_change()` |
@@ -242,6 +243,8 @@ This provides equivalent functionality to rclcpp's `rclcpp::detail::resolve_para
 1. `parameter_overrides` (from NodeOptions::parameter_overrides())
 2. `local_args` (from NodeOptions::arguments())
 3. `global_args` (from command line)
+
+`NodeOptions::automatically_declare_parameters_from_overrides()` is honored: when enabled, resolved overrides that are not already declared are declared in the constructor.
 
 ### 3.3 Topic Name Resolution
 
@@ -303,6 +306,7 @@ The following tables compare methods that are **directly defined** in each class
 |-----|:------------:|:--------------:|-------|
 | `create_publisher<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Publisher vs agnocast::Publisher) |
 | `create_subscription<MessageT>()` | ✓ | ✓ | Return type differs (rclcpp::Subscription vs agnocast::Subscription) |
+| `create_take_subscription<MessageT>()` | ✗ | ✓ | Agnocast-only. rclcpp takes from a callback subscription, while Agnocast fixes the mode at construction |
 | `create_generic_publisher()` | ✓ | ✗ | |
 | `create_generic_subscription()` | ✓ | ✗ | |
 
@@ -340,7 +344,7 @@ The following tables compare methods that are **directly defined** in each class
 
 | API | rclcpp::Node | agnocast::Node |
 |-----|:------------:|:--------------:|
-| `get_node_names()` | ✓ | ✗ |
+| `get_node_names()` | ✓ | ✓ |
 | `get_topic_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types()` | ✓ | ✗ |
 | `get_service_names_and_types_by_node()` | ✓ | ✗ |

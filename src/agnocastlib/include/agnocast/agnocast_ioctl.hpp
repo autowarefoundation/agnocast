@@ -23,8 +23,8 @@ namespace agnocast
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define NODE_NAME_BUFFER_SIZE 256
+#define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
-#define MAX_SUBSCRIPTION_NUM_PER_PROCESS 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -51,10 +51,32 @@ struct ioctl_get_version_args
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+union ioctl_get_node_names_args {
+  struct
+  {
+    uint64_t node_name_buffer_addr;
+    uint32_t node_name_buffer_size;
+  };
+  uint32_t ret_node_num;
+};
+#pragma GCC diagnostic pop
+
+// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
+#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
+
+// Mirrors enum process_role in the kernel module.
+enum process_role {
+  PROCESS_ROLE_APPLICATION = 0,
+  PROCESS_ROLE_BRIDGE_MANAGER = 1,
+  PROCESS_ROLE_UNLINK_DAEMON = 2,
+};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union ioctl_add_process_args {
   struct
   {
-    bool is_performance_bridge_manager;
+    uint32_t role;       // enum process_role
     uint32_t domain_id;  // The process's ROS_DOMAIN_ID (0 if unset).
   };
   struct
@@ -62,7 +84,7 @@ union ioctl_add_process_args {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
     bool ret_unlink_daemon_exist;
-    bool ret_performance_bridge_daemon_exist;
+    bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
 };
@@ -81,14 +103,11 @@ union ioctl_add_subscriber_args {
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    int32_t eventfd;
   };
   struct
   {
     topic_local_id_t ret_id;
-    // Topic name to use for the publish-notification MQ: the requested topic for a plain topic, or
-    // the domain-bridge pair's canonical name for a bridged (incl. renamed) topic, so a publisher
-    // and a renamed subscriber sharing one topic_struct derive the same MQ name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -107,8 +126,6 @@ union ioctl_add_publisher_args {
   struct
   {
     topic_local_id_t ret_id;
-    // See ioctl_add_subscriber_args::ret_mq_topic_name.
-    char ret_mq_topic_name[TOPIC_NAME_BUFFER_SIZE];
   };
 };
 #pragma GCC diagnostic pop
@@ -155,16 +172,10 @@ union ioctl_publish_msg_args {
     struct name_info topic_name;
     topic_local_id_t publisher_id;
     uint64_t msg_virtual_address;
-    // Unlike ret_* fields which are returned via the union copy, subscriber IDs are written
-    // directly to this user-space buffer via copy_to_user. The caller must ensure the buffer
-    // remains valid until the ioctl returns.
-    uint64_t subscriber_ids_buffer_addr;
-    uint32_t subscriber_ids_buffer_size;
   };
   struct
   {
     int64_t ret_entry_id;
-    uint32_t ret_subscriber_num;
     uint32_t ret_released_num;
     uint64_t ret_released_addrs[MAX_RELEASE_NUM];
   };
@@ -203,6 +214,9 @@ union ioctl_get_subscriber_num_args {
     uint32_t ret_other_process_subscriber_num;
     uint32_t ret_same_process_subscriber_num;
     uint32_t ret_ros2_subscriber_num;
+    // Subscribers in the domain a bridge rule pairs this one with, counted only where the rule
+    // delivers this way round. Disjoint from the own-domain counts above.
+    uint32_t ret_other_domain_subscriber_num;
     bool ret_a2r_bridge_exist;
     bool ret_r2a_bridge_exist;
   };
@@ -223,21 +237,10 @@ union ioctl_get_publisher_num_args {
 };
 #pragma GCC diagnostic pop
 
-struct exit_subscription_mq_info
-{
-  char topic_name[TOPIC_NAME_BUFFER_SIZE];
-  topic_local_id_t subscriber_id;
-};
-
 struct ioctl_get_exit_process_args
 {
-  // input: user-space buffer for subscription MQ info
-  uint64_t subscription_mq_info_buffer_addr;
-  uint32_t subscription_mq_info_buffer_size;
-  // output
   bool ret_daemon_should_exit;
   pid_t ret_pid;
-  uint32_t ret_subscription_mq_info_num;
 };
 
 struct topic_info_ret
@@ -353,6 +356,15 @@ struct ioctl_set_ros2_publisher_num_args
   uint32_t ros2_publisher_num;
 };
 
+// Decided atomically by the kmod, which keys the singleton on the caller's IPC namespace and
+// domain, and its liveness on the calling PID: the caller must be the process that becomes the
+// agent.
+struct ioctl_add_discovery_agent_args
+{
+  uint32_t domain_id;
+  bool ret_owned_by_caller;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -362,7 +374,7 @@ struct ioctl_set_ros2_publisher_num_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOWR(0xA6, 11, struct ioctl_get_exit_process_args)
+#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -467,6 +479,8 @@ struct ioctl_remove_gpu_region_args
   _IOW(0xA6, 25, struct ioctl_set_ros2_subscriber_num_args)
 #define AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD _IOW(0xA6, 26, struct ioctl_set_ros2_publisher_num_args)
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
+#define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
+#define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 // Releases the caller's own entries that QoS depth no longer retains, reporting
@@ -488,10 +502,10 @@ union ioctl_reclaim_msgs_args {
 };
 #pragma GCC diagnostic pop
 
-#define AGNOCAST_ADD_GPU_REGION_CMD _IOWR(0xA6, 32, union ioctl_add_gpu_region_args)
-#define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 33, union ioctl_get_gpu_region_args)
-#define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 34, struct ioctl_remove_gpu_region_args)
-#define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 35, union ioctl_reclaim_msgs_args)
-#define AGNOCAST_GPU_REGION_EXISTS_CMD _IOWR(0xA6, 36, union ioctl_gpu_region_exists_args)
+#define AGNOCAST_ADD_GPU_REGION_CMD _IOWR(0xA6, 34, union ioctl_add_gpu_region_args)
+#define AGNOCAST_GET_GPU_REGION_CMD _IOWR(0xA6, 35, union ioctl_get_gpu_region_args)
+#define AGNOCAST_REMOVE_GPU_REGION_CMD _IOW(0xA6, 36, struct ioctl_remove_gpu_region_args)
+#define AGNOCAST_RECLAIM_MSGS_CMD _IOWR(0xA6, 37, union ioctl_reclaim_msgs_args)
+#define AGNOCAST_GPU_REGION_EXISTS_CMD _IOWR(0xA6, 38, union ioctl_gpu_region_exists_args)
 
 }  // namespace agnocast

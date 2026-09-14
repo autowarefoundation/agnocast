@@ -7,12 +7,12 @@ using namespace std::chrono_literals;
 
 class NoRclcppTakeSubscriber : public agnocast::Node
 {
-  agnocast::PollingSubscriber<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_;
+  agnocast::TakeSubscription<agnocast_sample_interfaces::msg::DynamicSizeArray>::SharedPtr sub_;
   agnocast::TimerBase::SharedPtr timer_;
 
   void timer_callback()
   {
-    auto message = sub_->take_data();
+    auto message = sub_->take();
     if (message) {
       RCLCPP_INFO(
         get_logger(), "I heard dynamic size array message with id: %ld, size: %zu", message->id,
@@ -23,7 +23,7 @@ class NoRclcppTakeSubscriber : public agnocast::Node
 public:
   explicit NoRclcppTakeSubscriber() : agnocast::Node("no_rclcpp_take_subscriber")
   {
-    sub_ = this->create_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
+    sub_ = this->create_take_subscription<agnocast_sample_interfaces::msg::DynamicSizeArray>(
       "/my_topic", rclcpp::QoS(rclcpp::KeepLast(1)));
 
     timer_ = this->create_wall_timer(1s, std::bind(&NoRclcppTakeSubscriber::timer_callback, this));

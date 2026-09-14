@@ -6,7 +6,6 @@
 #include "agnocast/internal/gpu_message.hpp"
 
 #include <fcntl.h>
-#include <mqueue.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>

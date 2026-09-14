@@ -14,15 +14,16 @@ static const bool IS_BRIDGE = false;
 static void setup_process(struct kunit * test, const pid_t pid)
 {
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
 static void setup_process_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
 {
   union ioctl_add_process_args add_process_args;
-  int ret =
-    agnocast_ioctl_add_process(pid, current->nsproxy->ipc_ns, false, domain_id, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -60,7 +61,7 @@ void test_case_get_topic_pub_info_no_publishers(struct kunit * test)
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, &add_sub_args);
+    IS_BRIDGE, -1, &add_sub_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
   topic_info_args.topic_info_ret_buffer_size = MAX_PUBLISHER_NUM;
