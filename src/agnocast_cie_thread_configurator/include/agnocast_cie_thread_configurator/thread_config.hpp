@@ -104,6 +104,8 @@ inline constexpr std::string_view k_unmanageable = "UNMANAGEABLE";
 // entry key (id / name / comm / irq), that callback_groups and
 // non_ros_threads require 'policy' and reject UNMANAGEABLE, and that
 // callback_groups take an optional 'domain_id' (default_domain_id otherwise).
+// Attribute integers (nice, priority, affinity, the SCHED_DEADLINE parameters
+// and irq) are decimal only ("010" is ten, "0x10" is rejected).
 // Throws std::runtime_error on validation error.
 // hardware_info / rt_throttling are validated only at startup, not here.
 ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id);
