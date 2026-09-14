@@ -21,10 +21,19 @@ namespace agnocast_cie_thread_configurator
 namespace
 {
 
+struct EntryContext
+{
+  std::string desc;  // "id=..." / "name=..." / "comm=..." fragment for messages
+  // kernel_threads/irqs are emitted from a scan, so UNMANAGEABLE counts as
+  // unset and 'policy' may be absent. The hand-written callback_groups /
+  // non_ros_threads require 'policy' and treat the sentinel as an ordinary
+  // invalid value.
+  bool scanned = false;
+};
+
 // Unset = the attribute must not be applied: YAML null / absent key (the
 // user's opt-out) or, when `allow_unmanageable` is set, the UNMANAGEABLE
-// sentinel (a kernel/tool constraint). The sentinel is scoped to the
-// kernel_threads/irqs sections; elsewhere it is an ordinary invalid value.
+// sentinel (a kernel/tool constraint).
 bool is_unset(const YAML::Node & node, bool allow_unmanageable)
 {
   if (!node || node.IsNull()) {
@@ -42,58 +51,6 @@ constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
 constexpr int k_rt_priority_max = 99;
-
-// 'nice' is required for the CFS policies (SCHED_OTHER/BATCH/IDLE);
-// parse_rt_priority is the mirror image for SCHED_FIFO/SCHED_RR. `entry_desc`
-// is the "id=..."/"name=..." fragment used in messages.
-int parse_nice(
-  const YAML::Node & entry, SchedPolicy policy, const std::string & entry_desc,
-  bool allow_unmanageable)
-{
-  const YAML::Node nice = entry["nice"];
-  if (is_unset(nice, allow_unmanageable)) {
-    throw std::runtime_error(
-      "Policy '" + std::string(to_string(policy)) + "' requires 'nice' for " + entry_desc +
-      (is_unmanageable_sentinel(nice) ? " (UNMANAGEABLE counts as unset)" : ""));
-  }
-  int value = 0;
-  try {
-    value = nice.as<int>();
-  } catch (const YAML::Exception &) {
-    throw std::runtime_error("'nice' must be an integer for " + entry_desc);
-  }
-  if (value < k_nice_min || value > k_nice_max) {
-    // setpriority(2) would silently clamp an out-of-range value to
-    // [-20, 19]; reject it here so a misunderstanding of the scale
-    // (e.g. an rt_priority-style 50) fails loudly instead.
-    throw std::runtime_error(
-      "'nice' must be in [-20, 19] for " + entry_desc + ", got " + std::to_string(value));
-  }
-  return value;
-}
-
-int parse_rt_priority(
-  const YAML::Node & entry, SchedPolicy policy, const std::string & entry_desc,
-  bool allow_unmanageable)
-{
-  const YAML::Node priority = entry["priority"];
-  if (is_unset(priority, allow_unmanageable)) {
-    throw std::runtime_error(
-      "Policy '" + std::string(to_string(policy)) + "' requires 'priority' for " + entry_desc +
-      (is_unmanageable_sentinel(priority) ? " (UNMANAGEABLE counts as unset)" : ""));
-  }
-  int value = 0;
-  try {
-    value = priority.as<int>();
-  } catch (const YAML::Exception &) {
-    throw std::runtime_error("'priority' must be an integer for " + entry_desc);
-  }
-  if (value < k_rt_priority_min || value > k_rt_priority_max) {
-    throw std::runtime_error(
-      "'priority' must be in [1, 99] for " + entry_desc + ", got " + std::to_string(value));
-  }
-  return value;
-}
 
 // yaml-cpp's as<T>() auto-detects the numeric base (YAML 1.1), so a
 // zero-padded "010" would parse as octal 8 and "0x10" as hex 16. IRQ numbers
@@ -120,53 +77,54 @@ std::optional<T> as_base10(const YAML::Node & node)
   return value;
 }
 
-SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string & entry_desc)
+// The policy's tunable ('nice' for CFS, 'priority' for FIFO/RR) is mandatory
+// once 'policy' is set. setpriority(2) would silently clamp an out-of-range
+// nice to [-20, 19], so both ranges are enforced here and a misunderstanding
+// of the scale (e.g. an rt_priority-style 50 as nice) fails loudly.
+int parse_tunable(
+  const YAML::Node & entry, const char * key, int min, int max, SchedPolicy policy,
+  const EntryContext & ctx)
 {
-  const auto parsed = parse_sched_policy(policy);
-  if (!parsed) {
+  const YAML::Node node = entry[key];
+  if (is_unset(node, ctx.scanned)) {
     throw std::runtime_error(
-      "Unknown scheduling policy '" + policy + "' for " + entry_desc +
-      ". Valid policies: " + sched_policy_names());
+      "Policy '" + std::string(to_string(policy)) + "' requires '" + key + "' for " + ctx.desc +
+      (is_unmanageable_sentinel(node) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
-  return *parsed;
+  int value = 0;
+  try {
+    value = node.as<int>();
+  } catch (const YAML::Exception &) {
+    throw std::runtime_error("'" + std::string(key) + "' must be an integer for " + ctx.desc);
+  }
+  if (value < min || value > max) {
+    throw std::runtime_error(
+      "'" + std::string(key) + "' must be in [" + std::to_string(min) + ", " + std::to_string(max) +
+      "] for " + ctx.desc + ", got " + std::to_string(value));
+  }
+  return value;
 }
 
-DeadlineParams parse_deadline_params(
-  const YAML::Node & entry, const std::string & entry_desc, bool allow_unmanageable)
+DeadlineParams parse_deadline_params(const YAML::Node & entry, const EntryContext & ctx)
 {
   // Explicit check for a clear message: these fields are always hand-written
   // (prerun never emits DEADLINE) and easy to forget.
   for (const char * key : {"runtime", "period", "deadline"}) {
     // cppcheck-suppress useStlAlgorithm
-    if (is_unset(entry[key], allow_unmanageable)) {
+    if (is_unset(entry[key], ctx.scanned)) {
       throw std::runtime_error(
-        "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for " + entry_desc);
+        "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for " + ctx.desc);
     }
   }
   const auto field = [&](const char * key) {
     const auto value = as_base10<uint64_t>(entry[key]);
     if (!value) {
       throw std::runtime_error(
-        "'" + std::string(key) + "' must be a non-negative decimal integer for " + entry_desc);
+        "'" + std::string(key) + "' must be a non-negative decimal integer for " + ctx.desc);
     }
     return *value;
   };
   return DeadlineParams{field("runtime"), field("period"), field("deadline")};
-}
-
-// callback_groups / non_ros_threads describe threads that announce
-// themselves, so 'policy' has no "leave it alone" meaning there and is
-// mandatory. kernel_threads handles an unset policy itself.
-SchedPolicy parse_required_policy(const YAML::Node & entry, const std::string & entry_desc)
-{
-  const YAML::Node policy_node = entry["policy"];
-  if (is_unset(policy_node, /*allow_unmanageable=*/false)) {
-    throw std::runtime_error("'policy' is required for " + entry_desc);
-  }
-  if (!policy_node.IsScalar()) {
-    throw std::runtime_error("'policy' must be a string for " + entry_desc);
-  }
-  return parse_policy_or_throw(policy_node.Scalar(), entry_desc);
 }
 
 // CPU_SET(3) and sched_setaffinity(2) silently drop out-of-range or
@@ -174,19 +132,16 @@ SchedPolicy parse_required_policy(const YAML::Node & entry, const std::string & 
 // machine CPU count is a valid bound because the config is always parsed on
 // the machine that applies it. The result is sorted and deduplicated so
 // downstream consumers see a canonical form.
-std::vector<int> parse_affinity(
-  const YAML::Node & entry, const std::string & entry_desc, bool allow_unmanageable)
+std::vector<int> parse_affinity(const YAML::Node & entry, const EntryContext & ctx)
 {
   const YAML::Node affinity = entry["affinity"];
   std::vector<int> cpus;
-  // Unset (absent, null, or the allowed UNMANAGEABLE sentinel) means
-  // "do not manage affinity".
-  if (is_unset(affinity, allow_unmanageable)) {
+  if (is_unset(affinity, ctx.scanned)) {
     return cpus;
   }
   if (!affinity.IsSequence()) {
     throw std::runtime_error(
-      "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + entry_desc);
+      "'affinity' must be a list of CPU numbers (e.g. [2, 3]) for " + ctx.desc);
   }
   const int max_cpu = manageable_cpu_bound();
   for (const auto & cpu_node : affinity) {
@@ -195,20 +150,66 @@ std::vector<int> parse_affinity(
       cpu = cpu_node.as<int>();
     } catch (const YAML::Exception &) {
       throw std::runtime_error(
-        "'affinity' must contain only integers for " + entry_desc + ", got '" +
+        "'affinity' must contain only integers for " + ctx.desc + ", got '" +
         (cpu_node.IsScalar() ? cpu_node.Scalar() : std::string("<non-scalar>")) + "'");
     }
     if (cpu < 0 || cpu > max_cpu) {
       throw std::runtime_error(
         "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " + std::to_string(max_cpu) +
         "] (this machine has " + std::to_string(sysconf(_SC_NPROCESSORS_CONF)) + " CPUs) for " +
-        entry_desc);
+        ctx.desc);
     }
     cpus.push_back(cpu);
   }
   std::sort(cpus.begin(), cpus.end());
   cpus.erase(std::unique(cpus.begin(), cpus.end()), cpus.end());
   return cpus;
+}
+
+// The one attribute parser behind every section, so an entry body is
+// validated the same way wherever it appears.
+SchedAttrs parse_sched_attrs(const YAML::Node & entry, const EntryContext & ctx)
+{
+  SchedAttrs attrs;
+  attrs.affinity = parse_affinity(entry, ctx);
+
+  const YAML::Node policy_node = entry["policy"];
+  if (is_unset(policy_node, ctx.scanned)) {
+    if (!ctx.scanned) {
+      throw std::runtime_error("'policy' is required for " + ctx.desc);
+    }
+    // Any policy-dependent field without 'policy' would otherwise be
+    // silently dead configuration (is_managed() == false).
+    for (const char * key : {"nice", "priority", "runtime", "period", "deadline"}) {
+      // cppcheck-suppress useStlAlgorithm
+      if (!is_unset(entry[key], ctx.scanned)) {
+        throw std::runtime_error(
+          "'" + std::string(key) + "' requires 'policy' for " + ctx.desc +
+          ": set both or leave both unset");
+      }
+    }
+    return attrs;
+  }
+  if (!policy_node.IsScalar()) {
+    throw std::runtime_error("'policy' must be a string for " + ctx.desc);
+  }
+  const auto policy = parse_sched_policy(policy_node.Scalar());
+  if (!policy) {
+    throw std::runtime_error(
+      "Unknown scheduling policy '" + policy_node.Scalar() + "' for " + ctx.desc +
+      ". Valid policies: " + sched_policy_names());
+  }
+  attrs.policy = policy;
+
+  if (*policy == SchedPolicy::Deadline) {
+    attrs.deadline = parse_deadline_params(entry, ctx);
+  } else if (is_cfs(*policy)) {
+    attrs.nice = parse_tunable(entry, "nice", k_nice_min, k_nice_max, *policy, ctx);
+  } else {
+    attrs.rt_priority =
+      parse_tunable(entry, "priority", k_rt_priority_min, k_rt_priority_max, *policy, ctx);
+  }
+  return attrs;
 }
 
 // A typo'd pattern silently treated as an exact id would never match, so any
@@ -296,19 +297,7 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     entry.id = cg["id"].as<std::string>();
     validate_callback_group_id(entry);
     entry.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
-    entry.attrs.affinity = parse_affinity(cg, "id=" + entry.id, /*allow_unmanageable=*/false);
-    const SchedPolicy policy = parse_required_policy(cg, "id=" + entry.id);
-    entry.attrs.policy = policy;
-
-    if (policy == SchedPolicy::Deadline) {
-      entry.attrs.deadline =
-        parse_deadline_params(cg, "id=" + entry.id, /*allow_unmanageable=*/false);
-    } else if (is_cfs(policy)) {
-      entry.attrs.nice = parse_nice(cg, policy, "id=" + entry.id, /*allow_unmanageable=*/false);
-    } else {
-      entry.attrs.rt_priority =
-        parse_rt_priority(cg, policy, "id=" + entry.id, /*allow_unmanageable=*/false);
-    }
+    entry.attrs = parse_sched_attrs(cg, EntryContext{"id=" + entry.id, /*scanned=*/false});
     config.callback_groups.push_back(std::move(entry));
   }
   reject_duplicates(config.callback_groups, "callback_group", [](const CallbackGroupEntry & e) {
@@ -322,20 +311,7 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     const YAML::Node nrt = non_ros_threads[i];
     NonRosThreadEntry entry;
     entry.name = nrt["name"].as<std::string>();
-    entry.attrs.affinity = parse_affinity(nrt, "name=" + entry.name, /*allow_unmanageable=*/false);
-    const SchedPolicy policy = parse_required_policy(nrt, "name=" + entry.name);
-    entry.attrs.policy = policy;
-
-    if (policy == SchedPolicy::Deadline) {
-      entry.attrs.deadline =
-        parse_deadline_params(nrt, "name=" + entry.name, /*allow_unmanageable=*/false);
-    } else if (is_cfs(policy)) {
-      entry.attrs.nice =
-        parse_nice(nrt, policy, "name=" + entry.name, /*allow_unmanageable=*/false);
-    } else {
-      entry.attrs.rt_priority =
-        parse_rt_priority(nrt, policy, "name=" + entry.name, /*allow_unmanageable=*/false);
-    }
+    entry.attrs = parse_sched_attrs(nrt, EntryContext{"name=" + entry.name, /*scanned=*/false});
     config.non_ros_threads.push_back(std::move(entry));
   }
   reject_duplicates(config.non_ros_threads, "non_ros_thread", [](const NonRosThreadEntry & e) {
@@ -372,41 +348,7 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
           "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
           "be matched reliably");
       }
-      entry.attrs.affinity = parse_affinity(kt, "comm=" + entry.comm, /*allow_unmanageable=*/true);
-
-      if (is_unset(kt["policy"], /*allow_unmanageable=*/true)) {
-        // Any policy-dependent field without 'policy' would otherwise be
-        // silently dead configuration (is_managed() == false).
-        for (const char * key : {"nice", "priority", "runtime", "period", "deadline"}) {
-          if (!is_unset(kt[key], /*allow_unmanageable=*/true)) {
-            throw std::runtime_error(
-              "'" + std::string(key) + "' requires 'policy' for comm=" + entry.comm +
-              ": set both or leave both unset");
-          }
-        }
-        config.kernel_threads.push_back(std::move(entry));
-        continue;
-      }
-
-      std::string policy_str;
-      try {
-        policy_str = kt["policy"].as<std::string>();
-      } catch (const YAML::Exception &) {
-        throw std::runtime_error("'policy' must be a string for comm=" + entry.comm);
-      }
-      const SchedPolicy policy = parse_policy_or_throw(policy_str, "comm=" + entry.comm);
-      entry.attrs.policy = policy;
-
-      if (policy == SchedPolicy::Deadline) {
-        entry.attrs.deadline =
-          parse_deadline_params(kt, "comm=" + entry.comm, /*allow_unmanageable=*/true);
-      } else if (is_cfs(policy)) {
-        entry.attrs.nice =
-          parse_nice(kt, policy, "comm=" + entry.comm, /*allow_unmanageable=*/true);
-      } else {
-        entry.attrs.rt_priority =
-          parse_rt_priority(kt, policy, "comm=" + entry.comm, /*allow_unmanageable=*/true);
-      }
+      entry.attrs = parse_sched_attrs(kt, EntryContext{"comm=" + entry.comm, /*scanned=*/true});
       config.kernel_threads.push_back(std::move(entry));
     }
   }
@@ -437,16 +379,16 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
           (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
       }
       entry.irq = *irq;
+      const std::string desc = "irq=" + std::to_string(entry.irq);
 
       if (iq["name"] && !iq["name"].IsNull()) {
         try {
           entry.name = iq["name"].as<std::string>();
         } catch (const YAML::Exception &) {
-          throw std::runtime_error("'name' must be a string for irq=" + std::to_string(entry.irq));
+          throw std::runtime_error("'name' must be a string for " + desc);
         }
       }
-      entry.affinity =
-        parse_affinity(iq, "irq=" + std::to_string(entry.irq), /*allow_unmanageable=*/true);
+      entry.affinity = parse_affinity(iq, EntryContext{desc, /*scanned=*/true});
       config.irqs.push_back(std::move(entry));
     }
   }
