@@ -2,6 +2,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "std_srvs/srv/empty.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 #include <gtest/gtest.h>
 
@@ -14,8 +15,8 @@ using namespace std::chrono_literals;
 
 class ClientTest : public ::testing::Test
 {
-  using Request = std_srvs::srv::Empty::Request;
-  using Response = std_srvs::srv::Empty::Response;
+  using Request = std_srvs::srv::SetBool::Request;
+  using Response = std_srvs::srv::SetBool::Response;
 
   std::shared_ptr<rclcpp::Node> node_;
   std::shared_ptr<agnocast::SingleThreadedAgnocastExecutor> executor_;
@@ -34,27 +35,29 @@ protected:
   void TearDown() override
   {
     executor_->cancel();
-    if (spin_thread_.joinable()) {
-      spin_thread_.join();
-    }
     if (rclcpp::ok()) {
       rclcpp::shutdown();
+    }
+    if (spin_thread_.joinable()) {
+      spin_thread_.join();
     }
   }
 
   auto create_service()
   {
     auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    return agnocast::create_service<std_srvs::srv::Empty>(
+    return agnocast::create_service<std_srvs::srv::SetBool>(
       node_.get(), "test_service",
-      [](agnocast::ipc_shared_ptr<Request> &&, agnocast::ipc_shared_ptr<Response> &&) { return; },
+      [](
+        agnocast::ipc_shared_ptr<Request> && request,
+        agnocast::ipc_shared_ptr<Response> && response) { response->success = request->data; },
       rclcpp::ServicesQoS(), cb_group);
   }
 
   auto create_client()
   {
     auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    return agnocast::create_client<std_srvs::srv::Empty>(
+    return agnocast::create_client<std_srvs::srv::SetBool>(
       node_.get(), "test_service", rclcpp::ServicesQoS(), cb_group);
   }
 };
@@ -121,6 +124,34 @@ TEST_F(ClientTest, RequestIdIsUnique)
   auto future_and_request_id1 = client->async_send_request(std::move(request1));
   EXPECT_NE(future_and_request_id1.request_id, future_and_request_id2.request_id)
     << "Request IDs should be unique";
+}
+
+TEST_F(ClientTest, AllowsMultipleClientsOnTheSameNode)
+{
+  // Arrange: create a service and two clients.
+  auto service = create_service();
+
+  auto client1 = create_client();
+  auto request1 = client1->borrow_loaned_request();
+  request1->data = true;
+
+  auto client2 = create_client();
+  auto request2 = client2->borrow_loaned_request();
+  request2->data = false;
+
+  // Act: send true for client1, false for client2.
+  auto future1 = client1->async_send_request(std::move(request1));
+  auto future2 = client2->async_send_request(std::move(request2));
+
+  // Assert: each client receives the correct response.
+  ASSERT_EQ(future1.wait_for(1s), std::future_status::ready);
+  ASSERT_EQ(future2.wait_for(1s), std::future_status::ready);
+
+  const auto & response1 = future1.get();
+  EXPECT_EQ(response1->success, true);
+
+  const auto & response2 = future2.get();
+  EXPECT_EQ(response2->success, false);
 }
 
 /* --- ClientTest: end --- */
