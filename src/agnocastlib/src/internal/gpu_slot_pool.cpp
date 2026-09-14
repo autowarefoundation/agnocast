@@ -73,19 +73,20 @@ std::unique_ptr<GpuSlotPool> GpuSlotPool::create(
   // should land in the mempool if a borrow happens to be open on this thread.
   const SuspendedBorrowWindow suspended;
 
-  const uint32_t slot_size = gpu_slot_size_for(capacity);
+  const uint32_t sized_slot = gpu_slot_size_for(capacity);
 
-  const uint32_t region_id = create_gpu_region(topic_name, publisher_id, slot_size, slot_count);
-  if (region_id == 0) return nullptr;
+  const uint32_t new_region_id =
+    create_gpu_region(topic_name, publisher_id, sized_slot, slot_count);
+  if (new_region_id == 0) return nullptr;
 
   // The region now exists -- device memory allocated, its liveness reference
   // handed to the kmod, its mapping in this process -- but nothing owns it yet,
   // and constructing the owner allocates. A throw here would strand all of that,
   // along with one of the publisher's MAX_GPU_REGION_NUM_PER_PUBLISHER slots,
   // with the id needed to release it known to nobody.
-  auto unowned = rcpputils::make_scope_exit([topic_name, publisher_id, region_id]() noexcept {
+  auto unowned = rcpputils::make_scope_exit([topic_name, publisher_id, new_region_id]() noexcept {
     try {
-      destroy_gpu_region(topic_name, publisher_id, region_id);
+      destroy_gpu_region(topic_name, publisher_id, new_region_id);
     } catch (...) {  // NOLINT(bugprone-empty-catch)
       // Runs while another exception unwinds, where terminating over a failed
       // log line would be worse than the leak the line would have reported.
@@ -93,12 +94,12 @@ std::unique_ptr<GpuSlotPool> GpuSlotPool::create(
   });
 
   auto pool = std::unique_ptr<GpuSlotPool>(
-    new GpuSlotPool(topic_name, publisher_id, region_id, slot_size, slot_count));
+    new GpuSlotPool(topic_name, publisher_id, new_region_id, sized_slot, slot_count));
   unowned.cancel();
 
   PoolTable & table = pool_table();
   const std::lock_guard<std::mutex> lock(table.mutex);
-  table.pools[region_id] = pool.get();
+  table.pools[new_region_id] = pool.get();
   return pool;
 }
 

@@ -2553,22 +2553,23 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   return ret;
 }
 
-// Monotonic: ids are never reused, so a stale id in a message resolves to
-// nothing rather than to an unrelated region.
-static atomic_t next_gpu_region_id = ATOMIC_INIT(1);
+// Ids are 32 bits on the ABI; the counter is wider only so that running out is
+// detectable. Reuse is what docs/gpu_ipc.md rules out to conclude that a stale
+// id resolves to nothing rather than to an unrelated region, and that a region
+// reported gone can never come back -- a wrapped counter would quietly break
+// both. Refusing to allocate is the only answer that keeps them true.
+static atomic64_t next_gpu_region_id = ATOMIC64_INIT(1);
 
 // Zero is reserved: it means "any" to GET and is refused by REMOVE, so a region
-// handed it would be unremovable and would answer every "any" lookup. The
-// counter is 32-bit, so it is skipped on wrap rather than assumed unreachable.
+// handed it would be unremovable and would answer every "any" lookup. It is also
+// what this returns once the id space is spent.
 static uint32_t allocate_gpu_region_id(void)
 {
-  uint32_t id;
+  const s64 id = atomic64_inc_return(&next_gpu_region_id);
 
-  do {
-    id = (uint32_t)atomic_inc_return(&next_gpu_region_id);
-  } while (id == 0);
+  if (id > U32_MAX) return 0;
 
-  return id;
+  return (uint32_t)id;
 }
 
 // Checks that the handle is the kind the declared mechanism uses: a mismatch
@@ -2640,7 +2641,16 @@ int agnocast_ioctl_add_gpu_region(
   region->mapped_size = args->mapped_size;
   memcpy(region->device_uuid, args->device_uuid, GPU_DEVICE_UUID_SIZE);
   region->handle_file = handle_file;
+
   region->region_id = allocate_gpu_region_id();
+  if (region->region_id == 0) {
+    dev_warn(
+      agnocast_device,
+      "GPU region ids are exhausted; refusing to reuse one (topic_name=%s). (%s)\n", topic_name,
+      __func__);
+    kfree(region);
+    return -ENOSPC;
+  }
 
   // Exclusive rather than shared: this inserts into the module-wide region index
   // as well as into the topic.

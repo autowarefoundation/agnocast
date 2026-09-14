@@ -310,7 +310,7 @@ public:
     }
 
     uint32_t slot_index = 0;
-    internal::GpuSlotPool * pool = acquire_gpu_slot(capacity, slot_index);
+    const internal::GpuSlotPool * pool = acquire_gpu_slot(capacity, slot_index);
     if (pool == nullptr) {
       // Every fitting region is full, which means as many messages are in flight
       // as the QoS depth allows. Ask the kmod to release what the depth no longer

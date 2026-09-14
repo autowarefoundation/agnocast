@@ -408,7 +408,9 @@ public:
         }
       }
       // After the message is done with: the mapping has to outlive every use of
-      // the payload above. A no-op for a host-only message, whose id is 0.
+      // the payload above. Unguarded on T, unlike hold_gpu_region(), because an
+      // aliasing handle can share this block with a T that is not a GPU message;
+      // the id is 0 whenever nothing was held.
       internal::unref_gpu_region(control_->gpu_region_id);
       delete control_;
     }

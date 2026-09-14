@@ -410,6 +410,13 @@ void PublisherBase::generate_gid()
 
 PublisherBase::~PublisherBase()
 {
+  // Before REMOVE_PUBLISHER below, and before the members are destroyed: the
+  // kmod keys region removal on the publisher, so a region released afterwards
+  // would be refused -- the publisher's own teardown frees its regions once its
+  // last entry is gone. Releasing them here means a region this publisher has
+  // proven idle is handed back while it can still be named.
+  gpu_pools_.clear();
+
   {
     std::lock_guard<std::mutex> lock(opened_mqs_mtx_);
     for (auto & [_, t] : opened_mqs_) {
