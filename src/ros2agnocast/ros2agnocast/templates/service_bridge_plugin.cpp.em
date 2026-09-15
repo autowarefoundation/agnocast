@@ -86,6 +86,8 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
       const std::shared_ptr<RosClient> & ros_client,
       const std::shared_ptr<std::vector<agnocast::ipc_shared_ptr<typename ServiceT::Request>>> &
         requests) {
+      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
+      // and terminating the process.
       try {
         while (!requests->empty()) {
           auto agno_req = std::move(requests->back());
@@ -127,6 +129,7 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
     node->create_client<ServiceT>(service_name, qos.get_rmw_qos_profile(), client_cb_group);
 #endif
 
+  // buffer to hold requests before the ROS 2 service becomes ready.
   auto pending_requests = std::make_shared<
     std::vector<agnocast::ipc_shared_ptr<typename ServiceT::Request>>>();
   pending_requests->reserve(kMaxPendingRequests);

@@ -406,6 +406,8 @@ ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
       const std::function<bool(const ipc_shared_ptr<void> &, const std::shared_ptr<void> &)> &
         res_copier,
       const std::shared_ptr<std::vector<ipc_shared_ptr<void>>> & requests) {
+      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
+      // and terminating the process.
       try {
         while (!requests->empty()) {
           ipc_shared_ptr<void> agno_req = std::move(requests->back());
