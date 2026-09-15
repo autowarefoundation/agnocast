@@ -6,8 +6,8 @@
 
 static const char * node_name = "/kunit_test_node";
 static const uint32_t qos_depth = 10;
-static const bool qos_is_transient_local = false;
-static const bool is_bridge = false;
+static const bool qos_is_transient_local;
+static const bool is_bridge;
 
 static void setup_one_publisher(struct kunit * test, char * topic_name)
 {
