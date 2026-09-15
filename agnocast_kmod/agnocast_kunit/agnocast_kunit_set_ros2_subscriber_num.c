@@ -6,11 +6,11 @@
 
 static const char * node_name = "/kunit_test_node";
 static const uint32_t qos_depth = 10;
-static const bool qos_is_transient_local = false;
+static const bool qos_is_transient_local;
 static const bool qos_is_reliable = true;
-static const bool is_take_sub = false;
-static const bool ignore_local_publications = false;
-static const bool is_bridge = false;
+static const bool is_take_sub;
+static const bool ignore_local_publications;
+static const bool is_bridge;
 
 static void setup_one_subscriber(struct kunit * test, char * topic_name)
 {
