@@ -84,6 +84,9 @@ AgnocastOnlyExecutor::~AgnocastOnlyExecutor()
   }
 
   SignalHandler::unregister_shutdown_event(shutdown_event_fd_);
+  if (epoll_manager_ && !epoll_manager_->remove_event(shutdown_event_fd_)) {
+    RCLCPP_WARN(logger, "Failed to remove shutdown_event_fd from epoll: %s", strerror(errno));
+  }
   close(shutdown_event_fd_);
 }
 
