@@ -47,13 +47,13 @@ constexpr int k_rt_priority_max = 99;
 // parse_rt_priority is the mirror image for SCHED_FIFO/SCHED_RR. `entry_desc`
 // is the "id=..."/"name=..." fragment used in messages.
 int parse_nice(
-  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc,
+  const YAML::Node & entry, SchedPolicy policy, const std::string & entry_desc,
   bool allow_unmanageable)
 {
   const YAML::Node nice = entry["nice"];
   if (is_unset(nice, allow_unmanageable)) {
     throw std::runtime_error(
-      "Policy '" + policy + "' requires 'nice' for " + entry_desc +
+      "Policy '" + std::string(to_string(policy)) + "' requires 'nice' for " + entry_desc +
       (is_unmanageable_sentinel(nice) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
   int value = 0;
@@ -73,13 +73,13 @@ int parse_nice(
 }
 
 int parse_rt_priority(
-  const YAML::Node & entry, const std::string & policy, const std::string & entry_desc,
+  const YAML::Node & entry, SchedPolicy policy, const std::string & entry_desc,
   bool allow_unmanageable)
 {
   const YAML::Node priority = entry["priority"];
   if (is_unset(priority, allow_unmanageable)) {
     throw std::runtime_error(
-      "Policy '" + policy + "' requires 'priority' for " + entry_desc +
+      "Policy '" + std::string(to_string(policy)) + "' requires 'priority' for " + entry_desc +
       (is_unmanageable_sentinel(priority) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
   int value = 0;
@@ -120,10 +120,10 @@ std::optional<T> as_base10(const YAML::Node & node)
   return value;
 }
 
-unsigned int parse_deadline_field(
+uint64_t parse_deadline_field(
   const YAML::Node & entry, const char * key, const std::string & entry_desc)
 {
-  const auto value = as_base10<unsigned int>(entry[key]);
+  const auto value = as_base10<uint64_t>(entry[key]);
   if (!value) {
     throw std::runtime_error(
       "'" + std::string(key) + "' must be a non-negative decimal integer for " + entry_desc);
@@ -242,19 +242,19 @@ void parse_yaml(
       }
     }
     cfg.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
-    cfg.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
-    cfg.policy = cg["policy"].as<std::string>();
-    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "id=" + cfg.thread_str);
+    cfg.attrs.affinity = parse_affinity(cg, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+    const SchedPolicy policy =
+      parse_policy_or_throw(cg["policy"].as<std::string>(), "id=" + cfg.thread_str);
+    cfg.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      cfg.runtime = cg["runtime"].as<unsigned int>();
-      cfg.period = cg["period"].as<unsigned int>();
-      cfg.deadline = cg["deadline"].as<unsigned int>();
+      cfg.attrs.deadline = DeadlineParams{
+        cg["runtime"].as<uint64_t>(), cg["period"].as<uint64_t>(), cg["deadline"].as<uint64_t>()};
     } else if (is_cfs(policy)) {
-      cfg.nice = parse_nice(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      cfg.attrs.nice = parse_nice(cg, policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
-      cfg.priority =
-        parse_rt_priority(cg, cfg.policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      cfg.attrs.rt_priority =
+        parse_rt_priority(cg, policy, "id=" + cfg.thread_str, /*allow_unmanageable=*/false);
     }
   }
 
@@ -263,20 +263,22 @@ void parse_yaml(
     auto & cfg = non_ros_threads_out[i];
 
     cfg.thread_str = nrt["name"].as<std::string>();
-    cfg.affinity = parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
-    cfg.policy = nrt["policy"].as<std::string>();
-    const SchedPolicy policy = parse_policy_or_throw(cfg.policy, "name=" + cfg.thread_str);
+    cfg.attrs.affinity =
+      parse_affinity(nrt, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+    const SchedPolicy policy =
+      parse_policy_or_throw(nrt["policy"].as<std::string>(), "name=" + cfg.thread_str);
+    cfg.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      cfg.runtime = nrt["runtime"].as<unsigned int>();
-      cfg.period = nrt["period"].as<unsigned int>();
-      cfg.deadline = nrt["deadline"].as<unsigned int>();
+      cfg.attrs.deadline = DeadlineParams{
+        nrt["runtime"].as<uint64_t>(), nrt["period"].as<uint64_t>(),
+        nrt["deadline"].as<uint64_t>()};
     } else if (is_cfs(policy)) {
-      cfg.nice =
-        parse_nice(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      cfg.attrs.nice =
+        parse_nice(nrt, policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     } else {
-      cfg.priority =
-        parse_rt_priority(nrt, cfg.policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
+      cfg.attrs.rt_priority =
+        parse_rt_priority(nrt, policy, "name=" + cfg.thread_str, /*allow_unmanageable=*/false);
     }
   }
 
@@ -304,7 +306,7 @@ void parse_yaml(
 
 bool KernelThreadConfig::is_managed() const noexcept
 {
-  return policy.has_value() || !affinity.empty();
+  return attrs.policy.has_value() || !attrs.affinity.empty();
 }
 
 bool IrqConfig::is_managed() const noexcept
@@ -349,7 +351,7 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
         "' is not manageable: kworker comms are ephemeral and mutate at runtime, so they cannot "
         "be matched reliably");
     }
-    cfg.affinity = parse_affinity(kt, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
+    cfg.attrs.affinity = parse_affinity(kt, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
 
     if (is_unset(kt["policy"], /*allow_unmanageable=*/true)) {
       // Any policy-dependent field without 'policy' would otherwise be
@@ -364,12 +366,14 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
       continue;
     }
 
+    std::string policy_str;
     try {
-      cfg.policy = kt["policy"].as<std::string>();
+      policy_str = kt["policy"].as<std::string>();
     } catch (const YAML::Exception &) {
       throw std::runtime_error("'policy' must be a string for comm=" + cfg.comm);
     }
-    const SchedPolicy policy = parse_policy_or_throw(*cfg.policy, "comm=" + cfg.comm);
+    const SchedPolicy policy = parse_policy_or_throw(policy_str, "comm=" + cfg.comm);
+    cfg.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
       // Explicit check for a clear message: these fields are always
@@ -381,14 +385,15 @@ std::vector<KernelThreadConfig> parse_kernel_threads(const YAML::Node & yaml)
         throw std::runtime_error(
           "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + cfg.comm);
       }
-      cfg.runtime = parse_deadline_field(kt, "runtime", "comm=" + cfg.comm);
-      cfg.period = parse_deadline_field(kt, "period", "comm=" + cfg.comm);
-      cfg.deadline = parse_deadline_field(kt, "deadline", "comm=" + cfg.comm);
+      cfg.attrs.deadline = DeadlineParams{
+        parse_deadline_field(kt, "runtime", "comm=" + cfg.comm),
+        parse_deadline_field(kt, "period", "comm=" + cfg.comm),
+        parse_deadline_field(kt, "deadline", "comm=" + cfg.comm)};
     } else if (is_cfs(policy)) {
-      cfg.nice = parse_nice(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
+      cfg.attrs.nice = parse_nice(kt, policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     } else {
-      cfg.priority =
-        parse_rt_priority(kt, *cfg.policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
+      cfg.attrs.rt_priority =
+        parse_rt_priority(kt, policy, "comm=" + cfg.comm, /*allow_unmanageable=*/true);
     }
   }
 

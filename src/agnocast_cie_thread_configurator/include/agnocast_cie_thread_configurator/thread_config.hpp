@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "yaml-cpp/yaml.h"
 
 #include <cstdint>
@@ -12,6 +13,26 @@
 namespace agnocast_cie_thread_configurator
 {
 
+struct DeadlineParams
+{
+  uint64_t runtime = 0;  // nsec
+  uint64_t period = 0;
+  uint64_t deadline = 0;
+};
+
+// Only the knobs of the policy's class are meaningful, namely nice for
+// OTHER/BATCH/IDLE, rt_priority for FIFO/RR and deadline for DEADLINE; the
+// parser leaves the others at their defaults. affinity is independent of the
+// policy.
+struct SchedAttrs
+{
+  std::optional<SchedPolicy> policy;  // nullopt only for an affinity-only kernel_threads entry
+  int nice = 0;                       // -20..19
+  int rt_priority = 0;                // 1..99
+  DeadlineParams deadline;
+  std::vector<int> affinity;  // sorted, deduplicated; empty = do not manage
+};
+
 // A single thread's scheduling configuration as parsed from the YAML and
 // observed at runtime. Owned by ThreadConfiguratorNode in two vectors.
 struct ThreadConfig
@@ -19,15 +40,7 @@ struct ThreadConfig
   std::string thread_str;  // callback_group_id or thread_name
   size_t domain_id = 0;
   int64_t thread_id = -1;  // -1 until announced by the target application
-  std::vector<int> affinity;
-  std::string policy;
-  int nice = 0;      // SCHED_OTHER/BATCH/IDLE only (-20..19)
-  int priority = 0;  // rt_priority; SCHED_FIFO/RR only (1..99)
-
-  // SCHED_DEADLINE only
-  unsigned int runtime = 0;
-  unsigned int period = 0;
-  unsigned int deadline = 0;
+  SchedAttrs attrs;        // attrs.policy is always set since the parser requires 'policy'
 
   // Full incoming callback_group_id -> last announced tid; wildcard
   // ("<node name>/*") entries only. For such entries `applied` means "at least
@@ -53,20 +66,12 @@ std::string extract_node_part(const std::string & callback_group_id);
 inline constexpr std::string_view k_unmanageable = "UNMANAGEABLE";
 
 // Desired attributes for every kernel thread whose comm matches at apply
-// time (comms are not unique, e.g. an nfsd pool). Unset fields (YAML null,
-// absent key, or UNMANAGEABLE) are never applied.
+// time (comms are not unique, e.g. an nfsd pool). Unset attributes (YAML
+// null, absent key, or UNMANAGEABLE) are never applied.
 struct KernelThreadConfig
 {
   std::string comm;
-  std::optional<std::string> policy;
-  int nice = 0;               // SCHED_OTHER/BATCH/IDLE only (-20..19)
-  int priority = 0;           // rt_priority; SCHED_FIFO/RR only (1..99)
-  std::vector<int> affinity;  // empty = leave alone
-
-  // SCHED_DEADLINE only
-  unsigned int runtime = 0;
-  unsigned int period = 0;
-  unsigned int deadline = 0;
+  SchedAttrs attrs;
 
   bool is_managed() const noexcept;
 };
