@@ -50,6 +50,12 @@ class AgnocastOnlyCallbackIsolatedExecutor : public AgnocastOnlyExecutor
   std::vector<std::weak_ptr<agnocast::node_interfaces::NodeBase>> registered_agnocast_nodes_
     RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
+protected:
+  rclcpp::FutureReturnCode spin_until_future_complete_impl(
+    std::chrono::nanoseconds timeout,
+    const std::function<std::future_status(std::chrono::nanoseconds wait_time)> & wait_for_future)
+    override;
+
 public:
   /// Construct the executor.
   /// @param next_exec_timeout_ms Timeout in ms for waiting on the next executable.
@@ -61,6 +67,9 @@ public:
   /// Block the calling thread and process Agnocast callbacks in a loop until cancel() is called.
   AGNOCAST_PUBLIC
   void spin() override;
+
+  AGNOCAST_PUBLIC
+  void spin_once(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1)) override;
 
   /// Request the executor to stop spinning. Causes the current or next spin() call to return.
   AGNOCAST_PUBLIC
