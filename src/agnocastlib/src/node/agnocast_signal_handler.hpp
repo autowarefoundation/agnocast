@@ -19,7 +19,9 @@ public:
   // - Installs handlers for SIGINT and SIGTERM.
   // - Starts a dedicated thread to process signals.
   // - Initializes eventfds_.
-  static void install();
+  //
+  // Returns whether this call is the one that installed them.
+  static bool install();
 
   // Uninstalls signal handlers.
   // Safe to call multiple times. If it is already uninstalled or currently

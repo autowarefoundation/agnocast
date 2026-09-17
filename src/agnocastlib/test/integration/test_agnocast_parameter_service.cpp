@@ -41,9 +41,7 @@ protected:
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
-    if (agnocast::ok()) {
-      agnocast::shutdown();
-    }
+    agnocast::shutdown();
   }
 
   std::shared_ptr<agnocast::Node> create_server_node(const rclcpp::NodeOptions & options)

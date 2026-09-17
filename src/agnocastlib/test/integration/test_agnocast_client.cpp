@@ -150,9 +150,7 @@ protected:
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
-    if (agnocast::ok()) {
-      agnocast::shutdown();
-    }
+    agnocast::shutdown();
   }
 
   auto create_client()
