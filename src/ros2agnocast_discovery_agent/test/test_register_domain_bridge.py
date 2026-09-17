@@ -20,8 +20,8 @@ class FakeAddRule:
         return self._codes.get(from_name, 0)
 
 
-def _write_config(tmp_path, text):
-    path = tmp_path / 'bridge.yaml'
+def _write_config(tmp_path, text, name='bridge.yaml'):
+    path = tmp_path / name
     path.write_text(text)
     return str(path)
 
@@ -46,6 +46,17 @@ def test_default_config_path_is_used_when_env_unset(tmp_path, monkeypatch):
 
     assert register_domain_bridge.main([]) == 0
     assert fake.calls == [('/chatter', '/chatter', 1, 2)]
+
+
+def test_unsupported_notice_is_printed_even_when_the_config_is_missing(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: FakeAddRule())
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setattr(
+        domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(tmp_path / 'absent.yaml'))
+
+    assert register_domain_bridge.main([]) == 1
+    assert register_domain_bridge.UNSUPPORTED_NOTICE in capsys.readouterr().err
 
 
 def test_registers_every_rule(tmp_path, monkeypatch):
@@ -98,3 +109,27 @@ def test_config_path_falls_back_to_env(tmp_path, monkeypatch):
     monkeypatch.setenv(CONFIG_ENV, cfg)
     assert register_domain_bridge.main([]) == 0
     assert fake.calls == [('/image', '/image', 3, 4)]
+
+
+def test_registers_the_rules_of_every_config(tmp_path, monkeypatch):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
+    first = _write_config(
+        tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n', 'a.yaml')
+    second = _write_config(
+        tmp_path, 'from_domain: 3\nto_domain: 4\ntopics:\n  image:\n', 'b.yaml')
+
+    assert register_domain_bridge.main(['--config', first, second]) == 0
+    assert fake.calls == [('/chatter', '/chatter', 1, 2), ('/image', '/image', 3, 4)]
+
+
+def test_a_broken_config_is_reported_but_the_others_still_register(tmp_path, monkeypatch, capsys):
+    fake = FakeAddRule()
+    monkeypatch.setattr(register_domain_bridge, '_load_add_rule_symbol', lambda: fake)
+    broken = _write_config(tmp_path, 'topics: [not, a, mapping]\n', 'a.yaml')
+    good = _write_config(
+        tmp_path, 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n', 'b.yaml')
+
+    assert register_domain_bridge.main(['--config', broken, good]) == 1
+    assert fake.calls == [('/chatter', '/chatter', 1, 2)]
+    assert f'cannot load {broken}' in capsys.readouterr().err

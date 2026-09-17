@@ -19,6 +19,7 @@
 #include "agnocast_kunit/agnocast_kunit_get_publisher_qos.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_num.h"
 #include "agnocast_kunit/agnocast_kunit_get_subscriber_qos.h"
+#include "agnocast_kunit/agnocast_kunit_get_topic_list.h"
 #include "agnocast_kunit/agnocast_kunit_get_topic_publisher_info.h"
 #include "agnocast_kunit/agnocast_kunit_get_topic_subscriber_info.h"
 #include "agnocast_kunit/agnocast_kunit_get_version.h"
@@ -65,6 +66,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_GET_NODE_SUBSCRIBER_TOPICS,
   TEST_CASES_GET_NODE_NAMES,
   TEST_CASES_GET_NODE_PUBLISHER_TOPICS,
+  TEST_CASES_GET_TOPIC_LIST,
   TEST_CASES_GET_TOPIC_SUBSCRIBER_INFO,
   TEST_CASES_GET_TOPIC_PUBLISHER_INFO,
   TEST_CASES_GET_VERSION,

@@ -363,7 +363,7 @@ struct ioctl_add_domain_bridge_prefix_args
 // ================================================
 // ros2cli ioctls
 
-#define MAX_TOPIC_NUM 1024
+#define MAX_TOPIC_NUM 2048
 
 union ioctl_topic_list_args {
   struct
@@ -476,7 +476,8 @@ int agnocast_ioctl_get_publisher_num(
   union ioctl_get_publisher_num_args * ioctl_ret);
 
 int agnocast_ioctl_get_topic_list(
-  const struct ipc_namespace * ipc_ns, union ioctl_topic_list_args * topic_list_args);
+  const struct ipc_namespace * ipc_ns, char * topic_name_buf, uint32_t * domain_id_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_get_node_names(
   const struct ipc_namespace * ipc_ns, const pid_t pid, char * buf, const uint32_t buf_node_num,
@@ -522,12 +523,12 @@ int agnocast_ioctl_get_topic_publisher_info(
   union ioctl_topic_info_args * topic_info_args);
 
 int agnocast_ioctl_get_node_subscriber_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_get_node_publisher_topics(
-  const struct ipc_namespace * ipc_ns, const char * node_name,
-  union ioctl_node_info_args * node_info_args);
+  const struct ipc_namespace * ipc_ns, const char * node_name, char * topic_name_buf,
+  const uint32_t buf_topic_num, uint32_t * ret_topic_num);
 
 int agnocast_ioctl_check_and_request_bridge_shutdown(
   const pid_t pid, const struct ipc_namespace * ipc_ns,

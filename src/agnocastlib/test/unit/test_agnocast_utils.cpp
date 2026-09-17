@@ -40,6 +40,8 @@ public:
   {
     captured_log.clear();
     captured_warn_count = 0;
+    const rcutils_ret_t ret = rcutils_logging_initialize();
+    EXPECT_EQ(RCUTILS_RET_OK, ret);
     previous_ = rcutils_logging_get_output_handler();
     rcutils_logging_set_output_handler(capture_log_handler);
   }

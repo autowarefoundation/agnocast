@@ -1,6 +1,6 @@
-"""Unit tests for locating and parsing the domain_bridge YAML.
+"""Unit tests for locating, loading, and parsing the domain_bridge YAMLs.
 
-These exercise path resolution and the pure parser; no kmod, DDS, or file I/O
+These exercise path resolution, the loader, and the pure parser; no kmod or DDS
 is involved.
 """
 
@@ -258,12 +258,130 @@ topics:
         parse_domain_bridge_config(text)
 
 
-def test_resolve_config_path_prefers_the_env_var(monkeypatch):
+def test_resolve_config_paths_prefers_the_env_var(monkeypatch):
     monkeypatch.setenv(domain_bridge_config.CONFIG_ENV, '/somewhere/else.yaml')
-    assert domain_bridge_config.resolve_config_path() == ('/somewhere/else.yaml', True)
+    assert domain_bridge_config.resolve_config_paths() == (['/somewhere/else.yaml'], True)
 
 
-def test_resolve_config_path_falls_back_to_the_default(monkeypatch):
+def test_resolve_config_paths_splits_the_env_var_on_the_separator(monkeypatch):
+    monkeypatch.setenv(domain_bridge_config.CONFIG_ENV, '/a.yaml:/b.yaml:/c.yaml')
+    assert domain_bridge_config.resolve_config_paths() == (
+        ['/a.yaml', '/b.yaml', '/c.yaml'], True)
+
+
+def _patch_default(monkeypatch, tmp_path):
+    """Point the default path into tmp_path and return it, drop-in directory included."""
+    default = tmp_path / 'domain_bridge.yaml'
+    monkeypatch.setattr(domain_bridge_config, 'DEFAULT_CONFIG_PATH', str(default))
+    return default
+
+
+def test_resolve_config_paths_falls_back_to_the_default(monkeypatch, tmp_path):
     monkeypatch.delenv(domain_bridge_config.CONFIG_ENV, raising=False)
-    assert domain_bridge_config.resolve_config_path() == (
-        domain_bridge_config.DEFAULT_CONFIG_PATH, False)
+    default = _patch_default(monkeypatch, tmp_path)
+    assert domain_bridge_config.resolve_config_paths() == ([str(default)], False)
+
+
+@pytest.mark.parametrize('value', [':', '::'])
+def test_resolve_config_paths_treats_an_empty_listing_as_unset(monkeypatch, tmp_path, value):
+    """A cleared or separator-only variable must not resolve to a path of ''."""
+    monkeypatch.setenv(domain_bridge_config.CONFIG_ENV, value)
+    default = _patch_default(monkeypatch, tmp_path)
+    assert domain_bridge_config.resolve_config_paths() == ([str(default)], False)
+
+
+def test_the_drop_ins_are_read_after_the_default_file(monkeypatch, tmp_path):
+    monkeypatch.delenv(domain_bridge_config.CONFIG_ENV, raising=False)
+    default = _patch_default(monkeypatch, tmp_path)
+    default.write_text('topics:\n')
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-lidar.yaml').write_text('topics:\n')
+
+    assert domain_bridge_config.resolve_config_paths() == (
+        [str(default), str(drop_in_dir / '10-lidar.yaml')], False)
+
+
+def test_the_drop_ins_are_read_in_name_order_without_the_default_file(monkeypatch, tmp_path):
+    monkeypatch.delenv(domain_bridge_config.CONFIG_ENV, raising=False)
+    _patch_default(monkeypatch, tmp_path)
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    for name in ('20-lidar.yaml', '10-base.yaml'):
+        (drop_in_dir / name).write_text('topics:\n')
+
+    paths, from_env = domain_bridge_config.resolve_config_paths()
+
+    assert paths == [str(drop_in_dir / '10-base.yaml'), str(drop_in_dir / '20-lidar.yaml')]
+    assert from_env is False
+
+
+def test_a_drop_in_that_is_not_yaml_is_ignored(monkeypatch, tmp_path):
+    monkeypatch.delenv(domain_bridge_config.CONFIG_ENV, raising=False)
+    default = _patch_default(monkeypatch, tmp_path)
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / 'base.yaml.bak').write_text('topics:\n')
+
+    assert domain_bridge_config.resolve_config_paths() == ([str(default)], False)
+
+
+def test_the_env_var_wins_over_the_drop_in_directory(monkeypatch, tmp_path):
+    listed = tmp_path / 'listed.yaml'
+    listed.write_text('topics:\n')
+    monkeypatch.setenv(domain_bridge_config.CONFIG_ENV, str(listed))
+    _patch_default(monkeypatch, tmp_path)
+    drop_in_dir = tmp_path / 'domain_bridge.d'
+    drop_in_dir.mkdir()
+    (drop_in_dir / '10-base.yaml').write_text('topics:\n')
+
+    assert domain_bridge_config.resolve_config_paths() == ([str(listed)], True)
+
+
+def _write(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text)
+    return str(path)
+
+
+def test_load_accumulates_rules_from_every_config_in_order(tmp_path):
+    first = _write(tmp_path, 'a.yaml', 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
+    second = _write(tmp_path, 'b.yaml', 'from_domain: 3\nto_domain: 4\ntopics:\n  image:\n')
+
+    results = domain_bridge_config.load_domain_bridge_rules([first, second])
+
+    assert [r.path for r in results] == [first, second]
+    assert [rule for r in results for rule in r.rules] == [
+        ('/chatter', '/chatter', 1, 2), ('/image', '/image', 3, 4)]
+    assert all(r.error is None for r in results)
+
+
+def test_load_keeps_the_domain_defaults_local_to_each_config(tmp_path):
+    """Matching domain_bridge, where 'from_domain'/'to_domain' never leak between files."""
+    with_defaults = _write(
+        tmp_path, 'a.yaml', 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
+    without = _write(tmp_path, 'b.yaml', 'topics:\n  image:\n')
+
+    results = domain_bridge_config.load_domain_bridge_rules([with_defaults, without])
+
+    assert results[1].rules == []
+    assert results[1].skipped == ['/image']
+
+
+def test_load_reports_a_broken_config_without_dropping_the_others(tmp_path):
+    broken = _write(tmp_path, 'a.yaml', 'topics: [not, a, mapping]\n')
+    good = _write(tmp_path, 'b.yaml', 'from_domain: 1\nto_domain: 2\ntopics:\n  chatter:\n')
+
+    results = domain_bridge_config.load_domain_bridge_rules([broken, good])
+
+    assert isinstance(results[0].error, ValueError)
+    assert results[0].rules == []
+    assert results[1].error is None
+    assert results[1].rules == [('/chatter', '/chatter', 1, 2)]
+
+
+def test_load_carries_a_missing_config_as_file_not_found(tmp_path):
+    """The agent logs an absent default at info and an absent listed path at warn."""
+    (result,) = domain_bridge_config.load_domain_bridge_rules([str(tmp_path / 'absent.yaml')])
+
+    assert isinstance(result.error, FileNotFoundError)

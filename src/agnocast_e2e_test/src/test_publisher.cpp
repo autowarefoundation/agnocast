@@ -31,8 +31,7 @@ class TestPublisher : public rclcpp::Node
 
   bool check_connection_counts()
   {
-    const auto total_sub_count =
-      publisher_->get_subscription_count() + publisher_->get_intra_subscription_count();
+    const auto total_sub_count = publisher_->get_subscription_count();
     if (
       total_sub_count < planned_sub_count_ ||
       this->count_publishers(topic_name_) < planned_pub_count_) {

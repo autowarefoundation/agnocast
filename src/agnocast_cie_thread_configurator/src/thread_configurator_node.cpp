@@ -165,41 +165,14 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
     id_to_non_ros_thread_config_[cfg.thread_str] = &cfg;
   }
 
-  auto cbg_qos = rclcpp::QoS(rclcpp::KeepAll()).reliable().transient_local();
-
-  non_ros_thread_listener_ =
-    std::make_unique<agnocast_cie_thread_configurator::NonRosThreadInfoListener>(
-      [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
-        this->non_ros_thread_callback(std::move(info));
-      },
-      this->get_logger());
-
-  subs_for_each_domain_.push_back(
-    this->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, default_domain_id = default_domain_id_](
-        const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->callback_group_callback(default_domain_id, msg);
-      }));
-
-  // Create nodes and subscriptions for other domain IDs
-  for (size_t domain_id : domain_ids) {
-    if (domain_id == default_domain_id_) {
-      continue;
-    }
-
-    auto node = agnocast_cie_thread_configurator::create_node_for_domain(domain_id);
-    nodes_for_each_domain_.push_back(node);
-
-    auto sub = node->create_subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>(
-      "/agnocast_cie_thread_configurator/callback_group_info", cbg_qos,
-      [this, domain_id](const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
-        this->callback_group_callback(domain_id, msg);
-      });
-    subs_for_each_domain_.push_back(sub);
-
-    RCLCPP_INFO(this->get_logger(), "Created subscription for domain ID: %zu", domain_id);
-  }
+  sources_ = std::make_unique<agnocast_cie_thread_configurator::AnnouncementSources>(
+    *this, default_domain_id_, domain_ids,
+    [this](size_t domain_id, agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg) {
+      this->callback_group_callback(domain_id, std::move(msg));
+    },
+    [this](agnocast_cie_thread_configurator::NonRosThreadInfo info) {
+      this->non_ros_thread_callback(std::move(info));
+    });
 
   reapply_service_ = this->create_service<agnocast_cie_config_msgs::srv::ReapplyConfig>(
     "~/reapply_config",
@@ -212,17 +185,8 @@ ThreadConfiguratorNode::ThreadConfiguratorNode(const rclcpp::NodeOptions & optio
 
 void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
 {
-  if (!yaml["rt_throttling"]) {
-    return;
-  }
-
-  const auto & rt_bw = yaml["rt_throttling"];
-
-  // Writing to /proc/sys/kernel/sched_rt_{period,runtime}_us requires root (uid 0).
-  // Linux capabilities (CAP_SYS_ADMIN etc.) cannot bypass the proc sysctl DAC check.
-  // Instead, we validate that the current kernel values match the config and guide the
-  // user to apply them via /etc/sysctl.d/ if they differ.
-
+  // The reader reports its own failures; check_rt_throttling records such a
+  // key with an unset actual, which is skipped below.
   auto read_sysctl = [this](const std::string & path) -> std::optional<int> {
     std::ifstream file(path);
     if (!file) {
@@ -237,53 +201,23 @@ void ThreadConfiguratorNode::validate_rt_throttling(const YAML::Node & yaml)
     return value;
   };
 
-  bool mismatch = false;
+  const auto report = agnocast_cie_thread_configurator::check_rt_throttling(yaml, read_sysctl);
 
-  if (rt_bw["period_us"]) {
-    int expected = rt_bw["period_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_period_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_period_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_period_us is already set to %d", expected);
-      }
+  for (const auto & check : report.checks) {
+    if (!check.actual.has_value()) {
+      continue;
+    }
+    if (*check.actual != check.expected) {
+      RCLCPP_ERROR(
+        this->get_logger(), "%s mismatch: expected %d, actual %d", check.key.c_str(),
+        check.expected, *check.actual);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "%s is already set to %d", check.key.c_str(), check.expected);
     }
   }
 
-  if (rt_bw["runtime_us"]) {
-    int expected = rt_bw["runtime_us"].as<int>();
-    auto actual = read_sysctl("/proc/sys/kernel/sched_rt_runtime_us");
-    if (actual.has_value()) {
-      if (actual.value() != expected) {
-        RCLCPP_ERROR(
-          this->get_logger(), "sched_rt_runtime_us mismatch: expected %d, actual %d", expected,
-          actual.value());
-        mismatch = true;
-      } else {
-        RCLCPP_INFO(this->get_logger(), "sched_rt_runtime_us is already set to %d", expected);
-      }
-    }
-  }
-
-  if (mismatch) {
-    std::string message =
-      "rt_throttling values do not match the configuration. "
-      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
-      "(or run 'sudo sysctl --system'):\n";
-
-    if (rt_bw["period_us"]) {
-      message +=
-        "  kernel.sched_rt_period_us = " + std::to_string(rt_bw["period_us"].as<int>()) + "\n";
-    }
-    if (rt_bw["runtime_us"]) {
-      message += "  kernel.sched_rt_runtime_us = " + std::to_string(rt_bw["runtime_us"].as<int>());
-    }
-
-    RCLCPP_ERROR(this->get_logger(), "%s", message.c_str());
+  if (!report.sysctl_guidance.empty()) {
+    RCLCPP_ERROR(this->get_logger(), "%s", report.sysctl_guidance.c_str());
   }
 }
 
@@ -296,42 +230,27 @@ void ThreadConfiguratorNode::validate_hardware_info(const YAML::Node & yaml)
     return;
   }
 
-  const YAML::Node & yaml_hw_info = yaml["hardware_info"];
   const auto current_hw_info = agnocast_cie_thread_configurator::get_hardware_info();
-
   if (current_hw_info.empty()) {
     RCLCPP_WARN(this->get_logger(), "No hardware info from lscpu. Skipping hardware validation.");
     return;
   }
 
-  std::vector<std::string> mismatches;
-  size_t compared_count = 0;
-
-  for (const auto & [key, current_value] : current_hw_info) {
-    if (!yaml_hw_info[key]) {
-      continue;
-    }
-
-    compared_count++;
-    std::string yaml_value = yaml_hw_info[key].as<std::string>();
-    if (yaml_value != current_value) {
-      mismatches.push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
-    }
-  }
-
-  if (!mismatches.empty()) {
-    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
-    for (const auto & mismatch : mismatches) {
-      error_msg += "  - " + mismatch + "\n";
-    }
-    throw std::runtime_error(error_msg);
-  }
-
-  if (compared_count == 0) {
+  const auto mismatches =
+    agnocast_cie_thread_configurator::check_hardware_info(yaml["hardware_info"], current_hw_info);
+  if (!mismatches.has_value()) {
     RCLCPP_WARN(
       this->get_logger(),
       "hardware_info has none of the keys reported by lscpu. Skipping hardware validation.");
     return;
+  }
+
+  if (!mismatches->empty()) {
+    std::string error_msg = "Hardware validation failed with the following mismatches:\n";
+    for (const auto & mismatch : *mismatches) {
+      error_msg += "  - " + mismatch + "\n";
+    }
+    throw std::runtime_error(error_msg);
   }
 
   RCLCPP_INFO(
@@ -349,9 +268,7 @@ ThreadConfiguratorNode::~ThreadConfiguratorNode()
 
 void ThreadConfiguratorNode::stop() noexcept
 {
-  if (non_ros_thread_listener_) {
-    non_ros_thread_listener_->stop();
-  }
+  sources_->stop();
 }
 
 void ThreadConfiguratorNode::print_all_unapplied()
@@ -775,7 +692,7 @@ bool ThreadConfiguratorNode::write_irq_affinity_file(const IrqConfig & config) c
 
 const std::vector<rclcpp::Node::SharedPtr> & ThreadConfiguratorNode::get_domain_nodes() const
 {
-  return nodes_for_each_domain_;
+  return sources_->domain_nodes();
 }
 
 void ThreadConfiguratorNode::callback_group_callback(

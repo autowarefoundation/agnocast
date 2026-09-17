@@ -8,7 +8,7 @@
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 
-#define MAX_TOPIC_NUM 1024
+#define MAX_TOPIC_NUM 2048
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define TOPIC_NAME_BUFFER_SIZE 256

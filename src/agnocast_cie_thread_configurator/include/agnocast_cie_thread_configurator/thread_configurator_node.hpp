@@ -1,6 +1,6 @@
 #pragma once
 
-#include "agnocast_cie_thread_configurator/non_ros_thread_ipc.hpp"
+#include "agnocast_cie_thread_configurator/announcement_sources.hpp"
 #include "agnocast_cie_thread_configurator/sched_policy.hpp"
 #include "agnocast_cie_thread_configurator/thread_config.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -82,11 +82,6 @@ private:
     const std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Request> request,
     std::shared_ptr<agnocast_cie_config_msgs::srv::ReapplyConfig::Response> response);
 
-  std::vector<rclcpp::Node::SharedPtr> nodes_for_each_domain_;
-  std::vector<rclcpp::Subscription<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr>
-    subs_for_each_domain_;
-  std::unique_ptr<agnocast_cie_thread_configurator::NonRosThreadInfoListener>
-    non_ros_thread_listener_;
   rclcpp::Service<agnocast_cie_config_msgs::srv::ReapplyConfig>::SharedPtr reapply_service_;
 
   std::vector<ThreadConfig> callback_group_configs_;
@@ -109,4 +104,7 @@ private:
   const std::string config_file_;
   const size_t default_domain_id_;
   std::mutex non_ros_state_mutex_;
+  // Declared last so it is destroyed first. The listener thread must be
+  // joined before any state its callback touches goes away.
+  std::unique_ptr<agnocast_cie_thread_configurator::AnnouncementSources> sources_;
 };

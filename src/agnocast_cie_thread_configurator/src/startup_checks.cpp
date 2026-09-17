@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace agnocast_cie_thread_configurator
 {
@@ -76,6 +77,67 @@ std::map<std::string, std::string> parse_lscpu_output(const std::string & output
   }
 
   return hw_info;
+}
+
+std::optional<std::vector<std::string>> check_hardware_info(
+  const YAML::Node & hw_info, const std::map<std::string, std::string> & current)
+{
+  std::optional<std::vector<std::string>> mismatches;
+
+  for (const auto & [key, current_value] : current) {
+    if (!hw_info[key]) {
+      continue;
+    }
+
+    if (!mismatches) {
+      mismatches.emplace();
+    }
+    std::string yaml_value = hw_info[key].as<std::string>();
+    if (yaml_value != current_value) {
+      mismatches->push_back(key + ": expected '" + yaml_value + "', got '" + current_value + "'");
+    }
+  }
+
+  return mismatches;
+}
+
+RtThrottlingReport check_rt_throttling(
+  const YAML::Node & yaml,
+  const std::function<std::optional<int>(const std::string & path)> & read_sysctl)
+{
+  RtThrottlingReport report;
+  if (!yaml["rt_throttling"]) {
+    return report;
+  }
+
+  const auto & rt_bw = yaml["rt_throttling"];
+  bool mismatch = false;
+
+  for (const char * yaml_key : {"period_us", "runtime_us"}) {
+    if (!rt_bw[yaml_key]) {
+      continue;
+    }
+    RtThrottlingCheck check;
+    check.key = std::string("sched_rt_") + yaml_key;
+    check.expected = rt_bw[yaml_key].as<int>();
+    check.actual = read_sysctl("/proc/sys/kernel/" + check.key);
+    if (check.actual.has_value() && *check.actual != check.expected) {
+      mismatch = true;
+    }
+    report.checks.push_back(std::move(check));
+  }
+
+  if (mismatch) {
+    report.sysctl_guidance =
+      "rt_throttling values do not match the configuration. "
+      "Please create /etc/sysctl.d/99-rt-throttling.conf with the following content and reboot "
+      "(or run 'sudo sysctl --system'):";
+    for (const auto & check : report.checks) {
+      report.sysctl_guidance += "\n  kernel." + check.key + " = " + std::to_string(check.expected);
+    }
+  }
+
+  return report;
 }
 
 }  // namespace agnocast_cie_thread_configurator
