@@ -236,6 +236,33 @@ bool has_external_ros2_subscriber(const rclcpp::Node * node, const std::string &
     });
 }
 
+Ros2GraphView::Ros2GraphView(const rclcpp::Node * node) : node_(node)
+{
+  if (node_ == nullptr) {
+    return;
+  }
+  for (const auto & [topic_name, types] : node_->get_topic_names_and_types()) {
+    static_cast<void>(types);
+    topics_with_endpoints_.insert(topic_name);
+  }
+}
+
+bool Ros2GraphView::has_external_publisher(const std::string & topic_name) const
+{
+  if (topics_with_endpoints_.count(topic_name) == 0) {
+    return false;
+  }
+  return has_external_ros2_publisher(node_, topic_name);
+}
+
+bool Ros2GraphView::has_external_subscriber(const std::string & topic_name) const
+{
+  if (topics_with_endpoints_.count(topic_name) == 0) {
+    return false;
+  }
+  return has_external_ros2_subscriber(node_, topic_name);
+}
+
 rclcpp::QoS get_service_qos(const std::string & service_name)
 {
   const std::string request_topic_name = create_service_request_topic_name(service_name);

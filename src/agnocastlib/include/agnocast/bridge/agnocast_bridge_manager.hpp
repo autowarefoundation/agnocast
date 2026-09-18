@@ -4,6 +4,7 @@
 #include "agnocast/bridge/agnocast_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/agnocast_bridge_loader.hpp"
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
+#include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "agnocast/bridge/agnocast_service_bridge.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -14,6 +15,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -54,6 +56,11 @@ private:
   std::shared_ptr<BridgeLoader> loader_;
 
   std::shared_ptr<rclcpp::Node> container_node_;
+  // Obtained once: get_graph_event() registers a new event with the node's graph
+  // listener on every call.
+  rclcpp::Event::SharedPtr graph_event_;
+  std::optional<Ros2GraphView> graph_view_;
+  std::chrono::steady_clock::time_point graph_view_deadline_{};
   std::shared_ptr<agnocast::CallbackIsolatedAgnocastExecutor> executor_;
   std::thread executor_thread_;
   std::thread worker_thread_;
@@ -80,7 +87,7 @@ private:
   void worker_loop();
 
   void parse_and_enqueue(const void * data, std::size_t size);
-  void dispatch_bridge_message(const BridgeMsg & msg);
+  void dispatch_bridge_message(const BridgeMsg & msg, const Ros2GraphView & graph);
 
   // Signals every background thread to exit: raises shutdown_requested_ (which
   // the run() and worker_loop() poll), wakes the worker sleeping on the CV,
@@ -98,16 +105,17 @@ private:
     const std::string & topic_name, const std::string & message_type, const rclcpp::QoS & qos,
     bool is_r2a);
 
-  void check_and_create_pubsub_bridges();
-  void check_and_remove_pubsub_bridges();
+  void check_and_create_pubsub_bridges(const Ros2GraphView & graph);
+  void check_and_remove_pubsub_bridges(const Ros2GraphView & graph);
   void check_and_update_service_bridges();
   void check_and_remove_request_cache();
   void check_and_request_shutdown();
 
-  bool should_create_pubsub_bridge(const std::string & topic_name, BridgeDirection direction) const;
+  bool should_create_pubsub_bridge(
+    const std::string & topic_name, BridgeDirection direction, const Ros2GraphView & graph) const;
   void create_pubsub_bridge_if_needed(
     const std::string & topic_name, RequestMap & requests, const std::string & message_type,
-    BridgeDirection direction);
+    BridgeDirection direction, const Ros2GraphView & graph);
   static void remove_invalid_requests(const std::string & topic_name, RequestMap & request_map);
 };
 
