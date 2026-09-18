@@ -47,8 +47,18 @@ constexpr PublisherRole to_publisher_role(const ServiceRole role)
                                              : PublisherRole::AgnocastOnly;
 }
 
+// Forward declaration
+namespace detail
+{
+template <typename>
+class ResponsePublisherManager;
+}  // namespace detail
+
 class ServiceBase
 {
+  template <typename>
+  friend class detail::ResponsePublisherManager;
+
 protected:
   const std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string service_name_;
@@ -74,6 +84,50 @@ public:
 
   virtual ~ServiceBase() = default;
 };
+
+namespace detail
+{
+
+// TODO(bdm-k): Implement reaping of publishers that are no longer needed (Issue #1355).
+template <typename PublisherT>
+class ResponsePublisherManager
+{
+  std::mutex mtx_;
+  std::unordered_map<std::string, typename PublisherT::SharedPtr> pubs_;
+
+public:
+  typename PublisherT::SharedPtr get_or_create_publisher_for(
+    const ServiceBase * service_base, const std::string & response_topic_name)
+  {
+    typename PublisherT::SharedPtr pub;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      auto it = pubs_.find(response_topic_name);
+      if (it == pubs_.end()) {
+        std::visit(
+          [this, service_base, &pub, &response_topic_name](auto * node) {
+            agnocast::PublisherOptions pub_options;
+            if constexpr (std::is_same_v<PublisherT, agnocast::TypeErasedPublisher>) {
+              pub = std::make_shared<PublisherT>(
+                node, response_topic_name, "", service_base->qos_, pub_options,
+                to_publisher_role(service_base->role_));
+            } else {
+              pub = std::make_shared<PublisherT>(
+                node, response_topic_name, service_base->qos_, pub_options,
+                to_publisher_role(service_base->role_));
+            }
+            pubs_[response_topic_name] = pub;
+          },
+          service_base->node_);
+      } else {
+        pub = it->second;
+      }
+    }
+    return pub;
+  }
+};
+
+}  // namespace detail
 
 /**
  * @brief Service server for zero-copy Agnocast service communication.
@@ -104,36 +158,12 @@ private:
   using ServiceResponsePublisher = Publisher<ResponseT>;
   using ServiceRequestSubscriber = Subscription<RequestT>;
 
-  std::mutex publishers_mtx_;
-  std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
+  detail::ResponsePublisherManager<ServiceResponsePublisher> publisher_manager_;
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
   // Declared before subscriber_ so that it outlives the callback that uses it.
   std::shared_ptr<ServiceEventPublisher> event_publisher_;
 #endif
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
-
-  typename ServiceResponsePublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & response_topic_name)
-  {
-    typename ServiceResponsePublisher::SharedPtr pub;
-    {
-      std::lock_guard<std::mutex> lock(publishers_mtx_);
-      auto it = publishers_.find(response_topic_name);
-      if (it == publishers_.end()) {
-        std::visit(
-          [this, &pub, &response_topic_name](auto * node) {
-            agnocast::PublisherOptions pub_options;
-            pub = std::make_shared<ServiceResponsePublisher>(
-              node, response_topic_name, qos_, pub_options, to_publisher_role(role_));
-            publishers_[response_topic_name] = pub;
-          },
-          node_);
-      } else {
-        pub = it->second;
-      }
-    }
-    return pub;
-  }
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
   void publish_request_received_event(const ipc_shared_ptr<RequestT> & request)
@@ -177,7 +207,8 @@ private:
       // The name comes from the request, so a bad one is the caller's fault.
       typename ServiceResponsePublisher::SharedPtr publisher;
       try {
-        publisher = this->get_or_create_publisher_for(request->RequestMeta::response_topic_name);
+        publisher = publisher_manager_.get_or_create_publisher_for(
+          this, request->RequestMeta::response_topic_name);
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
@@ -308,8 +339,8 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
-    auto publisher =
-      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
+    auto publisher = publisher_manager_.get_or_create_publisher_for(
+      this, internal_request->RequestMeta::response_topic_name);
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
     const auto sent_response = copy_response_if_contents(internal_response);
@@ -337,8 +368,8 @@ public:
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
-    auto publisher =
-      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
+    auto publisher = publisher_manager_.get_or_create_publisher_for(
+      this, internal_request->RequestMeta::response_topic_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
     response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
@@ -392,14 +423,10 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
   {
   };
 
-  std::mutex publishers_mtx_;
-  std::unordered_map<std::string, typename TypeErasedPublisher::SharedPtr> publishers_;
+  detail::ResponsePublisherManager<TypeErasedPublisher> publisher_manager_;
   typename Subscription<void>::SharedPtr subscriber_;
 
   ServiceTsBundle service_ts_bundle_;
-
-  typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & response_topic_name);
 
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
@@ -410,7 +437,8 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
       // The name comes from the request, so a bad one is the caller's fault.
       typename TypeErasedPublisher::SharedPtr publisher;
       try {
-        publisher = this->get_or_create_publisher_for(req_wrapper.response_topic_name());
+        publisher =
+          publisher_manager_.get_or_create_publisher_for(this, req_wrapper.response_topic_name());
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
