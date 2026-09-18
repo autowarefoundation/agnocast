@@ -63,6 +63,7 @@ protected:
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
   }
 
+  // Defined in the .cpp: agnocast::Node is only forward-declared here.
   rclcpp::Logger get_logger() const;
 
 public:
@@ -78,6 +79,7 @@ public:
  * @brief Service server for zero-copy Agnocast service communication.
  * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
  */
+AGNOCAST_PUBLIC
 template <typename ServiceT>
 class Service : public ServiceBase, public std::enable_shared_from_this<Service<ServiceT>>
 {
