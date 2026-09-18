@@ -82,16 +82,13 @@ TEST_F(NodeGraphIntegrationTest, count_publishers_drops_when_the_publisher_is_de
   EXPECT_EQ(graph_->count_publishers(topic), 0u);
 }
 
-// count_subscribers() reports ret_other_process_subscriber_num, so a subscriber living in the
-// caller's own process is not counted. This is the documented limitation, not an accident: the
-// underlying helper exists to tell a publisher how many peers receive a published message.
-TEST_F(NodeGraphIntegrationTest, count_subscribers_does_not_see_same_process_subscriber)
+TEST_F(NodeGraphIntegrationTest, count_subscribers_counts_a_same_process_subscriber)
 {
   const std::string topic = "/test_node_graph_count_sub";
 
   auto sub = node_->create_subscription<StringMsg>(
     topic, 1, [](const agnocast::ipc_shared_ptr<StringMsg> &) {});
-  EXPECT_EQ(graph_->count_subscribers(topic), 0u);
+  EXPECT_EQ(graph_->count_subscribers(topic), 1u);
 }
 
 TEST_F(NodeGraphIntegrationTest, count_publishers_resolves_a_relative_topic_name)

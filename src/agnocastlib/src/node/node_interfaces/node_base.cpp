@@ -104,6 +104,16 @@ NodeBase::NodeBase(
   if (context_ && context_->is_valid()) {
     notify_guard_condition_.emplace(context_);
   }
+
+  // Warned here rather than in get_use_intra_process_default() so that the count is one line per
+  // node that opted in, however many times the getter is called.
+  if (use_intra_process_default_) {
+    RCLCPP_WARN(
+      rclcpp::get_logger(node_name_),
+      "use_intra_process_comms setting has no effect when using Agnocast. "
+      "Agnocast uses its own zero-copy intra/inter-process communication mechanism instead of "
+      "rclcpp's intra-process communication.");
+  }
 }
 
 const char * NodeBase::get_name() const
@@ -238,12 +248,8 @@ rclcpp::GuardCondition & NodeBase::get_notify_guard_condition()
 bool NodeBase::get_use_intra_process_default() const
 {
   // Note: rclcpp's intra-process communication is not used in Agnocast.
-  // This value is propagated from NodeOptions but has no effect currently.
-  RCLCPP_WARN(
-    rclcpp::get_logger(node_name_),
-    "use_intra_process_comms setting has no effect when using Agnocast. "
-    "Agnocast uses its own zero-copy intra/inter-process communication mechanism instead of "
-    "rclcpp's intra-process communication.");
+  // This value is propagated from NodeOptions but has no effect currently. The constructor warns
+  // about that once, so this getter is silent.
   return use_intra_process_default_;
 }
 

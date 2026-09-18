@@ -58,7 +58,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_notify_guard_condition()` | ✗ | **Throws Exception** | Yes | Not needed as agnocast uses epoll instead of condition variables, but planned for loading into Component Container |
 | `get_associated_with_executor_atomic()` | ✓ | **Full Support** | - | |
 | `resolve_topic_or_service_name()` | ✓ | **Full Support** | - | Used by NodeTopics and (future) NodeServices |
-| `get_use_intra_process_default()` | ⚠ | **API Only** | No | Returns value while logging a warning. agnocast uses its own shared memory IPC, so rclcpp's intra_process_communication is not used. |
+| `get_use_intra_process_default()` | ⚠ | **API Only** | No | Returns value passed from NodeOptions. agnocast uses its own shared memory IPC, so rclcpp's intra_process_communication is not used; the node constructor warns about that once when the option is set. |
 | `get_enable_topic_statistics_default()` | ⚠ | **API Only** | Yes | Returns value passed from NodeOptions. |
 
 ---
@@ -187,7 +187,7 @@ Each interface is accessible via getter methods such as `get_node_base_interface
 | `get_node_names_with_enclaves()` | ✗ | **Throws Exception** | No | |
 | `get_node_names_and_namespaces()` | ✗ | **Throws Exception** | No | To support this, namespace must be managed within the kmod; however, they are currently not managed |
 | `count_publishers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 publishers, excluding those created by bridges. `agnocast::Node::count_publishers()` delegates here |
-| `count_subscribers()` | ✓ | **Partial Support** | - | Counts agnocast and ROS 2 subscribers, excluding those created by bridges. Agnocast subscribers in the caller's own process are not counted. `agnocast::Node::count_subscribers()` delegates here |
+| `count_subscribers()` | ✓ | **Full Support** | - | Counts agnocast and ROS 2 subscribers, excluding those created by bridges. `agnocast::Node::count_subscribers()` delegates here |
 | `get_graph_guard_condition()` | ✗ | **Throws Exception** | No | |
 | `notify_graph_change()` | - | **No-op** | No | agnocast has no graph events, so there is nothing to notify. Made a no-op because rclcpp utilities call it unconditionally |
 | `notify_shutdown()` | - | **No-op** | No | Same as `notify_graph_change()` |

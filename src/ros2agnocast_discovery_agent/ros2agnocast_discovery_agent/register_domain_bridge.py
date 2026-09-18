@@ -3,7 +3,7 @@
 Unsupported: the kmod cross-domain zero-copy path is incomplete; relay between ROS
 domains with the external ``domain_bridge`` node instead.
 
-Reads a ROS 2 ``domain_bridge`` YAML and registers each
+Reads one or more ROS 2 ``domain_bridge`` YAMLs and registers each
 ``(from_topic, to_topic, from_domain, to_domain)`` rule through the ioctl wrapper
 (``to_topic`` is the per-topic ``remap`` target, or the source name if absent).
 
@@ -16,8 +16,6 @@ discovery agent, which is observability-only and never registers rules.
 import argparse
 import ctypes
 import sys
-
-import yaml
 
 from . import domain_bridge_config
 
@@ -38,50 +36,57 @@ def _load_add_rule_symbol():
 
 
 def main(argv=None) -> int:
-    """Register every rule in the config; return non-zero if any is rejected."""
+    """Register every rule in the configs; return non-zero if any rule or config is rejected."""
     parser = argparse.ArgumentParser(
         description='Register Agnocast domain bridge rules with the kernel module. '
                     f'Unsupported: {UNSUPPORTED_NOTICE}.')
     parser.add_argument(
         '--config',
-        default=domain_bridge_config.resolve_config_path()[0],
-        help='path to the domain_bridge YAML '
-             f'(default: ${domain_bridge_config.CONFIG_ENV}, '
-             f'else {domain_bridge_config.DEFAULT_CONFIG_PATH})')
+        nargs='+',
+        default=domain_bridge_config.resolve_config_paths()[0],
+        help='paths to the domain_bridge YAMLs, applied in order '
+             f'(default: ${domain_bridge_config.CONFIG_ENV}, a '
+             f"'{domain_bridge_config.CONFIG_PATH_SEP}'-separated list, "
+             f'else {domain_bridge_config.DEFAULT_CONFIG_PATH} and '
+             f'{domain_bridge_config.default_config_dir()}/*.yaml)')
     args = parser.parse_args(argv)
 
-    # Before the config is read, so an operator sees it even on a run that registers nothing.
+    # Before the configs are read, so an operator sees it even on a run that registers nothing.
     print(f'warning: {UNSUPPORTED_NOTICE}', file=sys.stderr)
 
-    try:
-        rules, skipped = domain_bridge_config.load_domain_bridge_rules(args.config)
-    except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
-        print(f'error: cannot load {args.config}: {e}', file=sys.stderr)
-        return 1
-
-    for topic in skipped:
-        print(f'warning: skipping {topic}: no from_domain/to_domain resolved '
-              '(set them at the top level or on the topic)', file=sys.stderr)
-
-    add_rule = _load_add_rule_symbol()
-    failures = 0
-    for from_topic, to_topic, from_domain, to_domain in rules:
-        label = f'{from_topic}@{from_domain} -> {to_topic}@{to_domain}'
-        if add_rule(
-                from_topic.encode('utf-8'), to_topic.encode('utf-8'),
-                from_domain, to_domain) == 0:
-            print(f'registered: {label}')
+    rules = []
+    unreadable = 0
+    for result in domain_bridge_config.load_domain_bridge_rules(args.config):
+        if result.error is not None:
+            print(f'error: cannot load {result.path}: {result.error}', file=sys.stderr)
+            unreadable += 1
             continue
-        # The wrapper prints the specific errno to stderr just above; the usual
-        # cause is that an endpoint already exists, since a rule must precede
-        # every node in either domain.
-        failures += 1
-        print(f'error: failed to register {label}', file=sys.stderr)
+        rules.extend(result.rules)
+        for topic in result.skipped:
+            print(f'warning: skipping {topic}: no from_domain/to_domain resolved '
+                  '(set them at the top level or on the topic)', file=sys.stderr)
+
+    failures = 0
+    # Nothing to register: leave the wrapper unloaded so an unreadable config is what gets
+    # reported, not a missing library.
+    if rules:
+        add_rule = _load_add_rule_symbol()
+        for from_topic, to_topic, from_domain, to_domain in rules:
+            label = f'{from_topic}@{from_domain} -> {to_topic}@{to_domain}'
+            if add_rule(
+                    from_topic.encode('utf-8'), to_topic.encode('utf-8'),
+                    from_domain, to_domain) == 0:
+                print(f'registered: {label}')
+                continue
+            # The wrapper prints the specific errno to stderr just above; the usual
+            # cause is that an endpoint already exists, since a rule must precede
+            # every node in either domain.
+            failures += 1
+            print(f'error: failed to register {label}', file=sys.stderr)
 
     if failures:
         print(f'error: {failures} of {len(rules)} rule(s) rejected', file=sys.stderr)
-        return 1
-    return 0
+    return 1 if failures or unreadable else 0
 
 
 if __name__ == '__main__':
