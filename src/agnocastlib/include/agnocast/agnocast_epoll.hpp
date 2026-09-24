@@ -126,6 +126,15 @@ public:
   [[nodiscard]] bool add_event(int fd, EpollEventType type, EpollEventLocalID local_id) const;
 
   /**
+   * @brief Directly removes an event from the epoll instance.
+   *
+   * @param fd The file descriptor associated with the event.
+   *
+   * @return true on success, or false on failure.
+   */
+  [[nodiscard]] bool remove_event(int fd) const;
+
+  /**
    * @brief Updates the set of events monitored by epoll (e.g., adding or removing events).
    *
    * This function works together with EpollUpdateTracker. When the Executor is

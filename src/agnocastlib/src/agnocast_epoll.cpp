@@ -60,6 +60,15 @@ bool EpollManager::add_event(int fd, EpollEventType type, EpollEventLocalID loca
   return true;
 }
 
+bool EpollManager::remove_event(int fd) const
+{
+  if (epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+    RCLCPP_WARN(logger, "epoll_ctl(DEL) failed: %s", strerror(errno));
+    return false;
+  }
+  return true;
+}
+
 void EpollManager::prepare_epoll(const CallbackGroupValidator & validate_callback_group)
 {
   for (uint32_t type = 0; type < static_cast<uint32_t>(EpollEventType::NrEventType); type++) {
