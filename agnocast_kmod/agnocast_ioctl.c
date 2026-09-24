@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
+#include <linux/file.h>
+
 #ifndef KUNIT_BUILD
 // Kernel module uses global PIDs, whereas user-space and the interface between them use local PIDs.
 // Thus, PIDs must be converted from global to local before they are passed from kernel to user.
@@ -500,6 +502,8 @@ static int insert_publisher_info(
   (*new_info)->notify_ctxs = NULL;
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
+  INIT_LIST_HEAD(&(*new_info)->gpu_regions);
+  (*new_info)->gpu_region_num = 0;
   INIT_HLIST_NODE(&(*new_info)->node);
 
   // Before hash_add, so a failure needs no more undo than the free below: the fill reads only the
@@ -988,11 +992,15 @@ unlock:
   return ret;
 }
 
+// Releases the oldest unreferenced entries of one publisher beyond its QoS
+// depth, reporting their addresses so the caller can free the messages. Takes
+// the output fields rather than an args union because both a publish and a
+// reclaim need it, so the depth semantics are the same for the two.
 static int release_msgs_to_meet_depth(
-  struct topic_wrapper * wrapper, struct publisher_info * pub_info,
-  union ioctl_publish_msg_args * ioctl_ret)
+  struct topic_wrapper * wrapper, struct publisher_info * pub_info, uint32_t * ret_released_num,
+  uint64_t * ret_released_addrs)
 {
-  ioctl_ret->ret_released_num = 0;
+  *ret_released_num = 0;
 
   if (pub_info->entries_num <= pub_info->qos_depth) {
     return 0;
@@ -1034,7 +1042,7 @@ static int release_msgs_to_meet_depth(
   //   However, it is rare for more than MAX_RELEASE_NUM messages that are out of qos_depth to be
   //   unreferenced at a specific time. If this happens, as long as the publisher's qos_depth is
   //   greater than the subscriber's qos_depth, this has little effect on system behavior.
-  while (num_search_entries > 0 && ioctl_ret->ret_released_num < MAX_RELEASE_NUM) {
+  while (num_search_entries > 0 && *ret_released_num < MAX_RELEASE_NUM) {
     struct entry_node * en = container_of(node, struct entry_node, node);
     node = rb_next(node);
     if (!node) {
@@ -1053,8 +1061,8 @@ static int release_msgs_to_meet_depth(
     // This is not counted in a Queue size of QoS.
     if (agnocast_is_referenced(en)) continue;
 
-    ioctl_ret->ret_released_addrs[ioctl_ret->ret_released_num] = en->msg_virtual_address;
-    ioctl_ret->ret_released_num++;
+    ret_released_addrs[*ret_released_num] = en->msg_virtual_address;
+    (*ret_released_num)++;
 
     rb_erase(&en->node, &wrapper->topic->entries);
     kfree(en);
@@ -1122,7 +1130,8 @@ int agnocast_ioctl_publish_msg(
     goto unlock_all;
   }
 
-  ret = release_msgs_to_meet_depth(wrapper, pub_info, ioctl_ret);
+  ret = release_msgs_to_meet_depth(
+    wrapper, pub_info, &ioctl_ret->ret_released_num, ioctl_ret->ret_released_addrs);
   if (ret < 0) {
     goto unlock_all;
   }
@@ -3041,6 +3050,405 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   return ret;
 }
 
+// Ids are 32 bits on the ABI; the counter is wider only so that running out is
+// detectable. Reuse is what docs/gpu_ipc.md rules out to conclude that a stale
+// id resolves to nothing rather than to an unrelated region, and that a region
+// reported gone can never come back -- a wrapped counter would quietly break
+// both. Refusing to allocate is the only answer that keeps them true.
+static atomic64_t next_gpu_region_id = ATOMIC64_INIT(1);
+
+// Zero is reserved: it means "any" to GET and is refused by REMOVE, so a region
+// handed it would be unremovable and would answer every "any" lookup. It is also
+// what this returns once the id space is spent.
+static uint32_t allocate_gpu_region_id(void)
+{
+  const s64 id = atomic64_inc_return(&next_gpu_region_id);
+
+  if (id > U32_MAX) return 0;
+
+  return (uint32_t)id;
+}
+
+// Checks that the handle is the kind the declared mechanism uses: a mismatch
+// would otherwise surface only in the importer, which cannot report it back.
+static int validate_gpu_handle(const uint32_t backend_type, const struct file * handle_file)
+{
+  if (backend_type == AGNOCAST_GPU_BACKEND_VMM) {
+    return handle_file ? 0 : -EINVAL;
+  }
+  return -EINVAL;
+}
+
+// Only the owning process may act in a publisher's name, and only while it is
+// still that process: a publisher_info outlives a publisher that exited with
+// messages still referenced, so without the liveness check a recycled pid could
+// act in its name. The host data path pairs the two the same way (see
+// set_publisher_shm_info).
+static bool caller_owns_live_publisher(const struct publisher_info * pub_info, const pid_t pid)
+{
+  const struct process_info * pub_proc = agnocast_find_process_info(pub_info->pid);
+  return pub_info->pid == pid && pub_proc && !pub_proc->exited;
+}
+
+// `wanted_region_id` is the id read out of a message, or 0 for "any".
+static struct gpu_region_info * find_gpu_region(
+  struct publisher_info * pub_info, const uint32_t wanted_region_id)
+{
+  struct gpu_region_info * candidate;
+  list_for_each_entry(candidate, &pub_info->gpu_regions, node)
+  {
+    if (wanted_region_id == 0 || candidate->region_id == wanted_region_id) return candidate;
+  }
+  return NULL;
+}
+
+int agnocast_ioctl_add_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  union ioctl_add_gpu_region_args * args, struct file * handle_file)
+{
+  int ret = 0;
+
+  if (
+    args->slot_size == 0 || args->slot_count == 0 ||
+    (uint64_t)args->slot_size * args->slot_count > args->mapped_size) {
+    dev_warn(
+      agnocast_device, "Region geometry does not fit its mapping (topic_name=%s). (%s)\n",
+      topic_name, __func__);
+    return -EINVAL;
+  }
+
+  ret = validate_gpu_handle(args->backend_type, handle_file);
+  if (ret) {
+    dev_warn(
+      agnocast_device,
+      "Handle does not match the declared GPU mechanism (topic_name=%s, backend_type=%u). (%s)\n",
+      topic_name, args->backend_type, __func__);
+    return ret;
+  }
+
+  // Allocated before the locks are taken: a GFP_KERNEL allocation can enter
+  // direct reclaim, which under topic->rwsem would stall every publish and
+  // receive on the topic.
+  struct gpu_region_info * region = kzalloc(sizeof(struct gpu_region_info), GFP_KERNEL);
+  if (!region) return -ENOMEM;
+
+  region->backend_type = args->backend_type;
+  region->slot_size = args->slot_size;
+  region->slot_count = args->slot_count;
+  region->mapped_size = args->mapped_size;
+  memcpy(region->device_uuid, args->device_uuid, GPU_DEVICE_UUID_SIZE);
+  region->handle_file = handle_file;
+
+  region->region_id = allocate_gpu_region_id();
+  if (region->region_id == 0) {
+    dev_warn(
+      agnocast_device,
+      "GPU region ids are exhausted; refusing to reuse one (topic_name=%s). (%s)\n", topic_name,
+      __func__);
+    kfree(region);
+    return -ENOSPC;
+  }
+
+  // Exclusive rather than shared: this inserts into the module-wide region index
+  // as well as into the topic.
+  down_write(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_write(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, args->publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      args->publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  if (!caller_owns_live_publisher(pub_info, pid)) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) does not own the live publisher (id=%d) of the topic (topic_name=%s). "
+      "(%s)\n",
+      pid, args->publisher_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  if (pub_info->gpu_region_num >= MAX_GPU_REGION_NUM_PER_PUBLISHER) {
+    dev_warn(
+      agnocast_device,
+      "Publisher (id=%d) for the topic (topic_name=%s) already holds %u GPU regions. (%s)\n",
+      args->publisher_id, topic_name, pub_info->gpu_region_num, __func__);
+    ret = -ENOSPC;
+    goto unlock_all;
+  }
+
+  list_add_tail(&region->node, &pub_info->gpu_regions);
+  hash_add(gpu_region_htable, &region->global_node, region->region_id);
+  pub_info->gpu_region_num++;
+  args->ret_region_id = region->region_id;
+
+unlock_all:
+  up_write(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_write(&global_htables_rwsem);
+  if (ret != 0) {
+    // Never committed, so the caller keeps its handle reference and we drop only
+    // what was allocated here.
+    kfree(region);
+  }
+  return ret;
+}
+
+int agnocast_ioctl_get_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, const topic_local_id_t subscriber_id,
+  const uint32_t wanted_region_id, union ioctl_get_gpu_region_args * ioctl_ret,
+  struct file ** out_handle_file)
+{
+  int ret = 0;
+
+  *out_handle_file = NULL;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_read(&wrapper->topic->rwsem);
+
+  // The caller must be a subscriber of this topic, in the process it claims to
+  // be. A descriptor is the only way to reach a GPU payload -- there is no named
+  // object a bystander can open -- so this check is what stands between a peer
+  // on the topic and any other process on the machine. It is a boundary, not a
+  // sandbox: the read-only access an importer ends up with is imposed by the
+  // importing library rather than here.
+  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
+  if (!sub_info || sub_info->pid != pid) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) is not the subscriber (id=%d) of the topic (topic_name=%s). (%s)\n", pid,
+      subscriber_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // A subscriber may only reach a publisher that delivers to it. A domain bridge
+  // rule can be one-way, and a grouped topic puts both domains' endpoints in one
+  // table, so without this a subscriber could import device memory belonging to a
+  // publisher whose messages it is never allowed to receive. The host data path
+  // applies the same filter when deciding which mempools to map
+  // (set_publisher_shm_info).
+  if (!domain_delivery_allowed(
+        wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+        sub_info->is_bridge)) {
+    dev_warn(
+      agnocast_device,
+      "Publisher (id=%d, domain=%u) does not deliver to subscriber (id=%d, domain=%u) of the topic "
+      "(topic_name=%s). (%s)\n",
+      publisher_id, pub_info->domain_id, subscriber_id, sub_info->domain_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  const struct gpu_region_info * region = find_gpu_region(pub_info, wanted_region_id);
+  if (!region) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) has no GPU region %u. (%s)\n", publisher_id,
+      wanted_region_id, __func__);
+    ret = -ENOENT;
+    goto unlock_all;
+  }
+
+  // Taken while the topic lock is held so the file cannot be released between
+  // the lookup and the caller installing a descriptor for it.
+  *out_handle_file = get_file(region->handle_file);
+
+  ioctl_ret->ret_backend_type = region->backend_type;
+  ioctl_ret->ret_slot_size = region->slot_size;
+  ioctl_ret->ret_slot_count = region->slot_count;
+  ioctl_ret->ret_mapped_size = region->mapped_size;
+  memcpy(ioctl_ret->ret_device_uuid, region->device_uuid, GPU_DEVICE_UUID_SIZE);
+  ioctl_ret->ret_region_id = region->region_id;
+  ioctl_ret->ret_handle_fd = -1;
+
+unlock_all:
+  up_read(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_reclaim_msgs(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, union ioctl_reclaim_msgs_args * ioctl_ret)
+{
+  int ret = 0;
+
+  // Before any error return, because the caller reports the count whether or not
+  // this succeeds. Left unset it would be whatever the input struct it overlays
+  // held, which the caller would take as a number of addresses to free.
+  ioctl_ret->ret_released_num = 0;
+
+  down_read(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_write(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) not found in the topic (topic_name=%s). (%s)\n",
+      publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  // Only the owning process may have its messages freed on its behalf: the
+  // addresses reported here lie in the publisher's mempool and are passed
+  // straight to delete by the caller.
+  if (!caller_owns_live_publisher(pub_info, pid)) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) does not own the live publisher (id=%d) of the topic (topic_name=%s). "
+      "(%s)\n",
+      pid, publisher_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  ret = release_msgs_to_meet_depth(
+    wrapper, pub_info, &ioctl_ret->ret_released_num, ioctl_ret->ret_released_addrs);
+
+unlock_all:
+  up_write(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_read(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_gpu_region_exists(
+  const uint32_t * region_ids, const uint32_t region_num,
+  union ioctl_gpu_region_exists_args * ioctl_ret)
+{
+  if (region_num > MAX_GPU_REGION_QUERY_NUM) return -EINVAL;
+
+  uint64_t bitmap = 0;
+
+  down_read(&global_htables_rwsem);
+
+  for (uint32_t i = 0; i < region_num; i++) {
+    const struct gpu_region_info * region;
+    // Id 0 is never assigned, so it answers "gone" without a lookup.
+    if (region_ids[i] == 0) continue;
+    hash_for_each_possible(gpu_region_htable, region, global_node, region_ids[i])
+    {
+      if (region->region_id == region_ids[i]) {
+        bitmap |= 1ULL << i;
+        break;
+      }
+    }
+  }
+
+  up_read(&global_htables_rwsem);
+
+  ioctl_ret->ret_exists_bitmap = bitmap;
+  return 0;
+}
+
+int agnocast_ioctl_remove_gpu_region(
+  const char * topic_name, const struct ipc_namespace * ipc_ns, const pid_t pid,
+  const topic_local_id_t publisher_id, const uint32_t region_id)
+{
+  int ret = 0;
+
+  // "Any" has no meaning here: removing a region the caller did not name would
+  // release memory it is still writing into.
+  if (region_id == 0) return -EINVAL;
+
+  // Exclusive rather than shared: this removes from the module-wide region index
+  // as well as from the topic.
+  down_write(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    dev_dbg(agnocast_device, "Topic (topic_name=%s) not found. (%s)\n", topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_only_global;
+  }
+
+  down_write(&wrapper->topic->rwsem);
+
+  struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
+  if (!pub_info) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) for the topic (topic_name=%s) not found. (%s)\n",
+      publisher_id, topic_name, __func__);
+    ret = -EINVAL;
+    goto unlock_all;
+  }
+
+  if (!caller_owns_live_publisher(pub_info, pid)) {
+    dev_warn(
+      agnocast_device,
+      "Process (pid=%d) does not own the live publisher (id=%d) of the topic (topic_name=%s). "
+      "(%s)\n",
+      pid, publisher_id, topic_name, __func__);
+    ret = -EPERM;
+    goto unlock_all;
+  }
+
+  struct gpu_region_info * region = find_gpu_region(pub_info, region_id);
+  if (!region) {
+    dev_dbg(
+      agnocast_device, "Publisher (id=%d) has no GPU region %u. (%s)\n", publisher_id, region_id,
+      __func__);
+    ret = -ENOENT;
+    goto unlock_all;
+  }
+
+  list_del(&region->node);
+  hash_del(&region->global_node);
+  pub_info->gpu_region_num--;
+  // A subscriber that already imported the region holds its own reference and
+  // reads on; one that has not will now fail to, which is why the caller must
+  // know the region is unreferenced.
+  fput(region->handle_file);
+  kfree(region);
+
+unlock_all:
+  up_write(&wrapper->topic->rwsem);
+unlock_only_global:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
 static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
 {
   int ret = 0;
@@ -3542,6 +3950,162 @@ static long remove_subscriber_cmd(struct ioctl_remove_subscriber_args __user * a
   return ret;
 }
 
+static long add_gpu_region_cmd(union ioctl_add_gpu_region_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_add_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  // Resolved here rather than in the core, which then depends on nothing in the
+  // calling process's file table.
+  struct file * handle_file = NULL;
+  if (args.handle_fd >= 0) {
+    handle_file = fget(args.handle_fd);
+    if (!handle_file) return -EBADF;
+    // The module cannot tell a GPU memory handle from any other descriptor, but
+    // it can refuse its own device: holding that file would keep the module
+    // pinned, and it is never a memory handle.
+    const struct inode * handle_inode = file_inode(handle_file);
+    if (S_ISCHR(handle_inode->i_mode) && MAJOR(handle_inode->i_rdev) == major) {
+      fput(handle_file);
+      return -EINVAL;
+    }
+  }
+
+  const topic_local_id_t publisher_id = args.publisher_id;
+
+  ret = agnocast_ioctl_add_gpu_region(topic_name_buf, ipc_ns, pid, &args, handle_file);
+  if (ret != 0) {
+    if (handle_file) fput(handle_file);
+    return ret;
+  }
+
+  if (copy_to_user(arg, &args, sizeof(args))) {
+    // The region is registered but the caller will never learn the id it would
+    // need to remove it, so undo the registration rather than pin device memory
+    // and one of the publisher's region slots for nothing.
+    agnocast_ioctl_remove_gpu_region(topic_name_buf, ipc_ns, pid, publisher_id, args.ret_region_id);
+    return -EFAULT;
+  }
+  return 0;
+}
+
+static long get_gpu_region_cmd(union ioctl_get_gpu_region_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_get_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  const topic_local_id_t publisher_id = args.publisher_id;
+  const topic_local_id_t subscriber_id = args.subscriber_id;
+  const uint32_t wanted_region_id = args.region_id;
+
+  struct file * handle_file = NULL;
+  ret = agnocast_ioctl_get_gpu_region(
+    topic_name_buf, ipc_ns, pid, publisher_id, subscriber_id, wanted_region_id, &args,
+    &handle_file);
+  if (ret != 0) return ret;
+
+  // Two-phase, like get_exit_process: reserve the descriptor, publish the
+  // results, and only then commit the installation. A failure after fd_install
+  // would strand a descriptor the caller never learns the number of.
+  int fd = get_unused_fd_flags(O_CLOEXEC);
+  if (fd < 0) {
+    ret = fd;
+    goto put_file;
+  }
+  args.ret_handle_fd = fd;
+
+  if (copy_to_user(arg, &args, sizeof(args))) {
+    ret = -EFAULT;
+    goto put_fd;
+  }
+
+  fd_install(fd, handle_file);
+  return 0;
+
+put_fd:
+  put_unused_fd(fd);
+put_file:
+  fput(handle_file);
+  return ret;
+}
+
+static long reclaim_msgs_cmd(union ioctl_reclaim_msgs_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_reclaim_msgs_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  const topic_local_id_t publisher_id = args.publisher_id;
+
+  ret = agnocast_ioctl_reclaim_msgs(topic_name_buf, ipc_ns, pid, publisher_id, &args);
+  // Reported even on error, and nothing here can be undone: the release has
+  // already erased the entries, so an address that does not reach the caller is
+  // a message it can never free.
+  if (ret < 0 && args.ret_released_num == 0) return ret;
+
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return 0;
+}
+
+static long gpu_region_exists_cmd(union ioctl_gpu_region_exists_args __user * arg)
+{
+  union ioctl_gpu_region_exists_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  const uint32_t region_num = args.region_num;
+  if (region_num > MAX_GPU_REGION_QUERY_NUM) return -EINVAL;
+
+  uint32_t region_ids[MAX_GPU_REGION_QUERY_NUM];
+  if (region_num > 0) {
+    if (copy_from_user(
+          region_ids, (const void __user *)args.region_ids_addr,
+          region_num * sizeof(region_ids[0])))
+      return -EFAULT;
+  }
+
+  const int ret = agnocast_ioctl_gpu_region_exists(region_ids, region_num, &args);
+  if (ret < 0) return ret;
+
+  if (copy_to_user(arg, &args, sizeof(args))) return -EFAULT;
+  return 0;
+}
+
+static long remove_gpu_region_cmd(struct ioctl_remove_gpu_region_args __user * arg)
+{
+  const pid_t pid = current->tgid;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_remove_gpu_region_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  int ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_remove_gpu_region(
+    topic_name_buf, ipc_ns, pid, args.publisher_id, args.region_id);
+}
+
 static long remove_publisher_cmd(struct ioctl_remove_publisher_args __user * arg)
 {
   int ret = 0;
@@ -3799,6 +4363,16 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
         (struct ioctl_discovery_agent_should_exit_args __user *)arg);
     case AGNOCAST_ADD_DISCOVERY_AGENT_CMD:
       return add_discovery_agent_cmd((struct ioctl_add_discovery_agent_args __user *)arg);
+    case AGNOCAST_ADD_GPU_REGION_CMD:
+      return add_gpu_region_cmd((union ioctl_add_gpu_region_args __user *)arg);
+    case AGNOCAST_GET_GPU_REGION_CMD:
+      return get_gpu_region_cmd((union ioctl_get_gpu_region_args __user *)arg);
+    case AGNOCAST_REMOVE_GPU_REGION_CMD:
+      return remove_gpu_region_cmd((struct ioctl_remove_gpu_region_args __user *)arg);
+    case AGNOCAST_RECLAIM_MSGS_CMD:
+      return reclaim_msgs_cmd((union ioctl_reclaim_msgs_args __user *)arg);
+    case AGNOCAST_GPU_REGION_EXISTS_CMD:
+      return gpu_region_exists_cmd((union ioctl_gpu_region_exists_args __user *)arg);
     case AGNOCAST_DISCOVERY_AGENT_EXISTS_CMD:
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:

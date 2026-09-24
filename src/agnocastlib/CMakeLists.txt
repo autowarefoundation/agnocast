@@ -56,6 +56,7 @@ add_library(agnocast SHARED
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp src/node/agnocast_parameter_client.cpp
   src/cie_client_utils.cpp
   src/internal/service_typesupport.cpp src/internal/type_registry_writer.cpp
+  src/internal/gpu_backend.cpp src/internal/gpu_region_registry.cpp src/internal/gpu_slot_pool.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp src/node/node_interfaces/node_graph.cpp
   src/bridge/agnocast_bridge_utils.cpp src/bridge/agnocast_service_bridge.cpp
   src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp
@@ -169,7 +170,8 @@ if(BUILD_TESTING)
     test/unit/test_agnocast_bridge_uds.cpp
     test/unit/test_discovery_agent_auto_fork.cpp
     test/unit/test_bridge_node_name.cpp
-    test/unit/test_agnocast_service_event_publisher.cpp)
+    test/unit/test_agnocast_service_event_publisher.cpp
+    test/unit/test_gpu_slot_pool.cpp)
   target_include_directories(test_unit_${PROJECT_NAME} PRIVATE include src)
   target_link_libraries(test_unit_${PROJECT_NAME} agnocast)
   ament_target_dependencies(test_unit_${PROJECT_NAME} std_msgs diagnostic_msgs diagnostic_updater rosidl_typesupport_cpp)
@@ -418,5 +420,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
+ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters rcpputils tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
 ament_package()

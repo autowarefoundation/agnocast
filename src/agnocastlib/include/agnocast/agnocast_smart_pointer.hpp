@@ -3,6 +3,7 @@
 #include "agnocast/agnocast_ioctl.hpp"
 #include "agnocast/agnocast_public_api.hpp"
 #include "agnocast/agnocast_utils.hpp"
+#include "agnocast/internal/gpu_message.hpp"
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -59,7 +60,13 @@ struct control_block
   int64_t entry_id;                     // 8-byte alignment
   std::atomic<uint32_t> ref_count{1U};  // 4-byte alignment
   topic_local_id_t pubsub_id;           // 4-byte alignment
-  std::atomic<bool> valid{true};        // 1-byte alignment
+  // The GPU region this block holds a reference on, or 0 when it holds none: a
+  // host-only payload, or a publisher's own message, whose region its slot pool
+  // owns. Here rather than beside the payload handle because copies of an
+  // ipc_shared_ptr share one block, and the region must be held exactly once
+  // however many copies exist.
+  uint32_t gpu_region_id{0};      // 4-byte alignment
+  std::atomic<bool> valid{true};  // 1-byte alignment
 
   control_block(std::string topic, topic_local_id_t pubsub, int64_t entry)
   : topic_name(std::move(topic)), entry_id(entry), pubsub_id(pubsub)
@@ -146,6 +153,27 @@ class ipc_shared_ptr
     control_(
       ptr ? new detail::control_block(topic_name, pubsub_id, ENTRY_ID_NOT_ASSIGNED) : nullptr)
   {
+    hold_gpu_region();
+  }
+
+  // Keeps this process's mapping of the message's GPU region alive for as long
+  // as any handle to the message does. Nothing else can: the kmod's entry
+  // accounting is dropped by ~SubscriptionBase while userspace may still hold
+  // handles, so releasing the mapping on that alone would leave a live handle
+  // pointing into unmapped device memory. Compiled away for host-only types.
+  void hold_gpu_region() noexcept
+  {
+    if constexpr (internal::is_gpu_message_v<T>) {
+      // Received handles only: a publisher's own region is owned by its slot
+      // pool, so a reference here would buy nothing and cost a map insert on the
+      // borrow path, where it would come from the mempool.
+      if (control_ == nullptr || control_->entry_id == ENTRY_ID_NOT_ASSIGNED) return;
+      const uint32_t region_id = ptr_->data.region_id();
+      // Recorded only once the reference is held: taking it can fail, and
+      // unreferencing in reset() what was never referenced would drop a count
+      // that another live handle owns.
+      if (internal::ref_gpu_region(region_id)) control_->gpu_region_id = region_id;
+    }
   }
 
 public:
@@ -168,6 +196,7 @@ public:
     const int64_t entry_id)
   : ptr_(ptr), control_(ptr ? new detail::control_block(topic_name, pubsub_id, entry_id) : nullptr)
   {
+    hold_gpu_region();
   }
 
   ~ipc_shared_ptr() { reset(); }
@@ -377,6 +406,11 @@ public:
           std::terminate();
         }
       }
+      // After the message is done with: the mapping has to outlive every use of
+      // the payload above. Unguarded on T, unlike hold_gpu_region(), because an
+      // aliasing handle can share this block with a T that is not a GPU message;
+      // the id is 0 whenever nothing was held.
+      internal::unref_gpu_region(control_->gpu_region_id);
       delete control_;
     }
 

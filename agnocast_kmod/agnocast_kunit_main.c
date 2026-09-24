@@ -23,9 +23,11 @@
 #include "agnocast_kunit/agnocast_kunit_get_topic_publisher_info.h"
 #include "agnocast_kunit/agnocast_kunit_get_topic_subscriber_info.h"
 #include "agnocast_kunit/agnocast_kunit_get_version.h"
+#include "agnocast_kunit/agnocast_kunit_gpu_region.h"
 #include "agnocast_kunit/agnocast_kunit_init_memory_allocator.h"
 #include "agnocast_kunit/agnocast_kunit_publish_msg.h"
 #include "agnocast_kunit/agnocast_kunit_receive_msg.h"
+#include "agnocast_kunit/agnocast_kunit_reclaim_msgs.h"
 #include "agnocast_kunit/agnocast_kunit_release_sub_ref.h"
 #include "agnocast_kunit/agnocast_kunit_remove_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_remove_publisher.h"
@@ -42,11 +44,13 @@ MODULE_LICENSE("Dual BSD/GPL");
 struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_ADD_SUBSCRIBER,
   TEST_CASES_ADD_PUBLISHER,
+  TEST_CASES_GPU_REGION,
   TEST_CASES_REMOVE_SUBSCRIBER,
   TEST_CASES_REMOVE_PUBLISHER,
   TEST_CASES_RELEASE_SUB_REF,
   TEST_CASES_RECEIVE_MSG,
   TEST_CASES_PUBLISH_MSG,
+  TEST_CASES_RECLAIM_MSGS,
   TEST_CASES_TAKE_MSG,
   TEST_CASES_ADD_PROCESS,
   TEST_CASES_DISCOVERY_AGENT,
