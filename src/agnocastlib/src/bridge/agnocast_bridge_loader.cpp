@@ -383,6 +383,7 @@ ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
   const std::string & service_type, const rclcpp::QoS & qos)
 {
   constexpr size_t kMaxPendingRequests = 10;
+  constexpr auto kDrainInterval = std::chrono::milliseconds(200);
 
   auto add_request = [](
                        const std::shared_ptr<agnocast::GenericService> & service_handle,
@@ -483,15 +484,15 @@ ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
   auto agno_srv = std::make_shared<agnocast::GenericService>(
     node.get(), service_name, service_type,
     [add_request, send_requests, response_copier, ros_client, pending_requests](
-      std::shared_ptr<agnocast::GenericService> service_handle, ipc_shared_ptr<void> && agno_req) {
+      const std::shared_ptr<agnocast::GenericService> & service_handle,
+      ipc_shared_ptr<void> && agno_req) {
       add_request(service_handle, pending_requests, std::move(agno_req));
       send_requests(service_handle, ros_client, response_copier, pending_requests);
     },
     qos, srv_cbg, agnocast::ServiceRole::BridgeInternal);
 
   auto drain_requests_timer = agnocast::create_timer(
-    node, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME),
-    rclcpp::Duration(std::chrono::milliseconds(200)),
+    node, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME), rclcpp::Duration(kDrainInterval),
     [send_requests, response_copier, agno_srv, ros_client, pending_requests]() {
       send_requests(agno_srv, ros_client, response_copier, pending_requests);
     },
