@@ -283,7 +283,8 @@ topics:
     assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 1, 2)], [])
 
 
-def test_reversed_bidirectional_puts_the_reversed_leg_first():
+def test_reversed_bidirectional_still_yields_both_directions():
+    """Consumers do not depend on rule order, so only the set of directions is pinned."""
     text = """
 from_domain: 1
 to_domain: 2
@@ -293,7 +294,7 @@ topics:
     bidirectional: true
 """
     rules, _skipped = parse_domain_bridge_config(text)
-    assert rules == [('/chatter', '/chatter', 2, 1), ('/chatter', '/chatter', 1, 2)]
+    assert sorted(rules) == [('/chatter', '/chatter', 1, 2), ('/chatter', '/chatter', 2, 1)]
 
 
 def test_non_boolean_reversed_is_rejected():
