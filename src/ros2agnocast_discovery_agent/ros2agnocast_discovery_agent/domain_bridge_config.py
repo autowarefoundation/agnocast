@@ -118,7 +118,8 @@ def parse_domain_bridge_config(text):
     ``rules`` is a list of ``(from_topic, to_topic, from_domain, to_domain)``
     tuples. ``to_topic`` is the per-topic ``remap`` target (same ``domain_bridge``
     field the external node honors), or the source name when ``remap`` is absent.
-    A ``bidirectional`` topic yields two tuples, one per direction.
+    A ``reversed`` topic swaps its domain pair, keeping both topic names, as the
+    external node does. A ``bidirectional`` topic yields two tuples, one per direction.
     ``skipped`` lists the topic names dropped for lack of a resolvable domain
     pair, so the caller can surface them instead of dropping them silently.
     Topic names are returned absolute, matching how ``domain_bridge`` resolves
@@ -164,8 +165,11 @@ def parse_domain_bridge_config(text):
         from_topic = _as_topic_name(topic_name)
         to_topic = _as_topic_name(remap)
         bidirectional = _as_bool(spec.get('bidirectional', False), 'bidirectional', topic_name)
+        reversed_ = _as_bool(spec.get('reversed', False), 'reversed', topic_name)
         from_id = _as_domain_id(from_domain)
         to_id = _as_domain_id(to_domain)
+        if reversed_:
+            from_id, to_id = to_id, from_id
         rules.append((from_topic, to_topic, from_id, to_id))
         if bidirectional:
             # The external node's reverse leg swaps the domain ids and nothing else, keeping the

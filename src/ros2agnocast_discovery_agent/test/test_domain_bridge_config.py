@@ -246,6 +246,68 @@ topics:
     assert rules == [('/chatter', '/chatter', 1, 2)]
 
 
+def test_reversed_swaps_only_the_domains():
+    """Mirrors the external node, which keeps the source and remap names on a reversed topic."""
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    remap: /renamed
+    reversed: true
+"""
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/renamed', 2, 1)], [])
+
+
+def test_reversed_swaps_per_topic_domains():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    from_domain: 3
+    to_domain: 4
+    reversed: true
+"""
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 4, 3)], [])
+
+
+def test_reversed_false_keeps_the_direction():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    reversed: false
+"""
+    assert parse_domain_bridge_config(text) == ([('/chatter', '/chatter', 1, 2)], [])
+
+
+def test_reversed_bidirectional_puts_the_reversed_leg_first():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    reversed: true
+    bidirectional: true
+"""
+    rules, _skipped = parse_domain_bridge_config(text)
+    assert rules == [('/chatter', '/chatter', 2, 1), ('/chatter', '/chatter', 1, 2)]
+
+
+def test_non_boolean_reversed_is_rejected():
+    text = """
+from_domain: 1
+to_domain: 2
+topics:
+  /chatter:
+    reversed: yes please
+"""
+    with pytest.raises(ValueError):
+        parse_domain_bridge_config(text)
+
+
 def test_non_boolean_bidirectional_is_rejected():
     text = """
 from_domain: 1
