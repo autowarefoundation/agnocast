@@ -14,6 +14,8 @@ class EpollUpdateTracker;
 struct TrackerContext
 {
   std::atomic<bool> need_update{true};
+  // eventfd used to wake Executor threads blocked in epoll_wait(). Owned by EpollUpdateTracker.
+  int notify_fd{-1};
 };
 
 class EpollUpdateDispatcher
@@ -52,9 +54,17 @@ public:
   EpollUpdateTracker & operator=(EpollUpdateTracker && other) = delete;
   ~EpollUpdateTracker();
 
+  /**
+   * @brief Consume a pending update request and drain the notify eventfd.
+   *
+   * Draining is required so a level-triggered epoll_wait does not spin after wakeup.
+   */
   [[nodiscard]] bool take_update_request();
 
   [[nodiscard]] uint64_t id() const { return id_; }
+
+  /// eventfd that becomes readable when an update is requested. Register with EpollManager.
+  [[nodiscard]] int notify_fd() const;
 
 private:
   friend class EpollUpdateDispatcher;
