@@ -19,7 +19,6 @@ from ros2agnocast_discovery_agent.agent import (
     DiscoveryAgent,
     EXIT_WHEN_IDLE_ENV,
     EXIT_WHEN_IDLE_FLAG,
-    IdleExitTracker,
     NODE_NAME_BUFFER_SIZE,
     TopicInfoRet,
     _exit_when_idle_enabled,
@@ -354,20 +353,16 @@ def test_main_returns_error_when_wrapper_unavailable(monkeypatch):
 
 
 def _idle_gate_self(should_exit_ret, commit_ret):
-    """Build a duck-typed DiscoveryAgent for exercising _maybe_exit_when_idle without rclpy/kmod.
-
-    threshold=1 makes the idle tracker fire on the first idle tick, so one call reaches the gate.
-    """
+    """Build a duck-typed DiscoveryAgent for exercising _maybe_exit_when_idle without rclpy/kmod."""
     lib = MagicMock()
     lib.agnocast_discovery_agent_should_exit.return_value = should_exit_ret
     lib.agnocast_discovery_agent_commit_exit.return_value = commit_ret
     return SimpleNamespace(
-        _lib=lib, _domain_id=0, _ipc_ns_inode=1,
-        _idle_tracker=IdleExitTracker(threshold=1), get_logger=lambda: MagicMock())
+        _lib=lib, _domain_id=0, _ipc_ns_inode=1, get_logger=lambda: MagicMock())
 
 
 def test_idle_exit_commits_then_exits_when_domain_stays_empty():
-    """Grace period elapsed and the kmod commit succeeds -> the agent exits."""
+    """The domain is empty and the kmod commit succeeds -> the agent exits."""
     fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=1)
     with pytest.raises(ExternalShutdownException):
         DiscoveryAgent._maybe_exit_when_idle(fake_self)
@@ -375,10 +370,16 @@ def test_idle_exit_commits_then_exits_when_domain_stays_empty():
 
 
 def test_idle_exit_vetoed_keeps_running_when_process_races_in():
-    """The commit is vetoed (a process started during the grace period) -> keep running."""
+    """The commit is vetoed (a process raced in after the idle poll) -> keep running."""
     fake_self = _idle_gate_self(should_exit_ret=1, commit_ret=0)
     DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
     fake_self._lib.agnocast_discovery_agent_commit_exit.assert_called_once_with(0)
+
+
+def test_idle_exit_never_commits_while_domain_is_busy():
+    fake_self = _idle_gate_self(should_exit_ret=0, commit_ret=1)
+    DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
+    fake_self._lib.agnocast_discovery_agent_commit_exit.assert_not_called()
 
 
 def test_idle_exit_never_commits_on_query_error():
@@ -386,30 +387,6 @@ def test_idle_exit_never_commits_on_query_error():
     fake_self = _idle_gate_self(should_exit_ret=-1, commit_ret=1)
     DiscoveryAgent._maybe_exit_when_idle(fake_self)  # must not raise
     fake_self._lib.agnocast_discovery_agent_commit_exit.assert_not_called()
-
-
-# --- idle-exit (opt-in auto-fork cleanup) -----------------------------------
-
-def test_idle_exit_tracker_fires_after_threshold():
-    tracker = IdleExitTracker(threshold=3)
-    assert tracker.update(True) is False
-    assert tracker.update(True) is False
-    assert tracker.update(True) is True  # third consecutive idle tick
-
-
-def test_idle_exit_tracker_resets_on_activity():
-    tracker = IdleExitTracker(threshold=3)
-    tracker.update(True)
-    tracker.update(True)
-    assert tracker.update(False) is False  # a busy tick resets the count
-    assert tracker.update(True) is False   # counting restarts from zero
-    assert tracker.update(True) is False
-    assert tracker.update(True) is True
-
-
-def test_idle_exit_tracker_threshold_floor():
-    # A non-positive threshold is clamped to 1, so a single idle tick fires.
-    assert IdleExitTracker(threshold=0).update(True) is True
 
 
 def test_dispatch_issues_domain_rule_bridges_without_any_remote_agent(monkeypatch):

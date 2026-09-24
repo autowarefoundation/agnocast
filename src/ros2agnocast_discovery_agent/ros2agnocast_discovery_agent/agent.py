@@ -14,8 +14,7 @@ the kernel module (the ``add_discovery_agent`` ioctl) before starting;
 subsequent instances in the same (ns, domain) lose the claim and exit
 cleanly (code 0), leaving exactly one live agent per (ns, domain). The
 kmod is the single source of truth for agent liveness, so the idle self-exit
-is decided atomically against new processes and can never orphan a namespace
-(a process starting during the grace period keeps the agent running).
+is decided atomically against new processes and can never orphan a namespace.
 """
 
 import ctypes
@@ -63,11 +62,10 @@ TOPIC_NAME_BUFFER_SIZE = 256
 # DDS-side liveliness loss and local prune happen on the same timescale.
 REMOTE_STATE_STALE_SEC = 30.0
 # Opt-in idle-exit (--exit-when-idle CLI flag or the env var): the agent exits
-# after its (IPC NS, domain) has had no Agnocast node for EXIT_WHEN_IDLE_GRACE_SEC.
+# once its (IPC NS, domain) has no Agnocast node.
 # Off by default, so a launch-started agent runs until the launch stops it.
 EXIT_WHEN_IDLE_FLAG = '--exit-when-idle'
 EXIT_WHEN_IDLE_ENV = 'AGNOCAST_DISCOVERY_AGENT_EXIT_WHEN_IDLE'
-EXIT_WHEN_IDLE_GRACE_SEC = 30.0
 
 
 def _exit_when_idle_enabled(argv=None) -> bool:
@@ -76,26 +74,6 @@ def _exit_when_idle_enabled(argv=None) -> bool:
     if EXIT_WHEN_IDLE_FLAG in argv:
         return True
     return os.environ.get(EXIT_WHEN_IDLE_ENV, '').strip().lower() in ('1', 'true', 'yes')
-
-
-class IdleExitTracker:
-    """Reports idle after ``threshold`` consecutive idle ticks.
-
-    ``update()`` returns True on every idle tick at or beyond the threshold
-    (on every such tick, not just the first); a single non-idle tick resets the
-    count, so a brief gap (e.g. a node restarting) does not trigger an exit.
-    """
-
-    def __init__(self, threshold: int):
-        self._threshold = max(1, threshold)
-        self._idle_count = 0
-
-    def update(self, is_idle: bool) -> bool:
-        self._idle_count = self._idle_count + 1 if is_idle else 0
-        return self._idle_count >= self._threshold
-
-    def reset(self) -> None:
-        self._idle_count = 0
 
 
 class TopicInfoRet(ctypes.Structure):
@@ -417,8 +395,6 @@ class DiscoveryAgent(Node):
         if exit_when_idle is None:
             exit_when_idle = _exit_when_idle_enabled()
         self._exit_when_idle = exit_when_idle
-        self._idle_tracker = IdleExitTracker(
-            threshold=round(EXIT_WHEN_IDLE_GRACE_SEC / PUBLISH_INTERVAL_SEC))
 
         self._timer = self.create_timer(PUBLISH_INTERVAL_SEC, self._on_tick)
 
@@ -437,25 +413,19 @@ class DiscoveryAgent(Node):
             self._maybe_exit_when_idle()
 
     def _maybe_exit_when_idle(self) -> None:
-        """Exit once this (IPC NS, domain) has had no Agnocast node for the grace period.
+        """Exit once this (IPC NS, domain) has no Agnocast node.
 
-        A query error counts as "not idle", so a transient failure never exits. When the grace
-        period elapses the exit is gated on the kmod's atomic commit, which only deregisters (and
-        clears us to exit) if the domain is still empty -- so a process that started during the
-        grace period vetoes the exit and the agent keeps serving it instead of orphaning it.
+        A query error counts as "not idle", so a transient failure never exits. The exit is gated
+        on the kmod's atomic commit, which only deregisters (and clears us to exit) if the domain
+        is still empty, so a process that races in vetoes the exit instead of being orphaned.
         """
-        ret = self._lib.agnocast_discovery_agent_should_exit(self._domain_id)
-        if ret < 0:
-            self._idle_tracker.reset()
+        if self._lib.agnocast_discovery_agent_should_exit(self._domain_id) != 1:
             return
-        if self._idle_tracker.update(ret == 1):
-            if self._lib.agnocast_discovery_agent_commit_exit(self._domain_id) == 1:
-                self.get_logger().debug(
-                    f'no Agnocast node in (ipc_ns={self._ipc_ns_inode}, domain={self._domain_id}) '
-                    f'for {EXIT_WHEN_IDLE_GRACE_SEC:.0f}s; exiting.')
-                raise ExternalShutdownException()
-            # A process raced in during the grace period; the kmod vetoed the exit.
-            self._idle_tracker.reset()
+        if self._lib.agnocast_discovery_agent_commit_exit(self._domain_id) == 1:
+            self.get_logger().debug(
+                f'no Agnocast node in (ipc_ns={self._ipc_ns_inode}, domain={self._domain_id}); '
+                'exiting.')
+            raise ExternalShutdownException()
 
     def _prune_stale_remote_states(
             self, now_sec: float | None = None,
