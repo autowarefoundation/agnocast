@@ -47,9 +47,41 @@ constexpr PublisherRole to_publisher_role(const ServiceRole role)
                                              : PublisherRole::AgnocastOnly;
 }
 
-// Internal implementation - users should use agnocast::Service<ServiceT> instead.
+class ServiceBase
+{
+protected:
+  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
+  std::string service_name_;
+  const rclcpp::QoS qos_;
+  const ServiceRole role_;
+
+  template <typename NodeT>
+  explicit ServiceBase(
+    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos, ServiceRole role)
+  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
+  {
+    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
+  }
+
+  // Defined in the .cpp: agnocast::Node is only forward-declared here.
+  rclcpp::Logger get_logger() const;
+
+public:
+  /// @brief Return the resolved service name.
+  /// @return Null-terminated service name string.
+  AGNOCAST_PUBLIC
+  const char * get_service_name() const { return service_name_.c_str(); }
+
+  virtual ~ServiceBase() = default;
+};
+
+/**
+ * @brief Service server for zero-copy Agnocast service communication.
+ * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
+ */
+AGNOCAST_PUBLIC
 template <typename ServiceT>
-class BasicService : public std::enable_shared_from_this<BasicService<ServiceT>>
+class Service : public ServiceBase, public std::enable_shared_from_this<Service<ServiceT>>
 {
 private:
   // TODO(bdm-k): Consider supporting callbacks that take lvalue references.
@@ -61,7 +93,7 @@ private:
   };
   template <typename Func>
   struct is_deferred_cb : std::bool_constant<std::is_invocable_v<
-                            std::decay_t<Func>, std::shared_ptr<BasicService<ServiceT>>,
+                            std::decay_t<Func>, std::shared_ptr<Service<ServiceT>>,
                             ipc_shared_ptr<typename ServiceT::Request> &&>>
   {
   };
@@ -72,10 +104,6 @@ private:
   using ServiceResponsePublisher = Publisher<ResponseT>;
   using ServiceRequestSubscriber = Subscription<RequestT>;
 
-  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
-  std::string service_name_;
-  const rclcpp::QoS qos_;
-  const ServiceRole role_;
   std::mutex publishers_mtx_;
   std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
@@ -83,11 +111,6 @@ private:
   std::shared_ptr<ServiceEventPublisher> event_publisher_;
 #endif
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
-
-  rclcpp::Logger get_logger() const
-  {
-    return std::visit([](auto * n) { return n->get_logger(); }, node_);
-  }
 
   typename ServiceResponsePublisher::SharedPtr get_or_create_publisher_for(
     const std::string & response_topic_name)
@@ -202,9 +225,7 @@ private:
   }
 
   template <typename Func, typename NodeT>
-  void constructor_impl(
-    NodeT * node, const std::string & service_name, Func && callback,
-    rclcpp::CallbackGroup::SharedPtr group)
+  void constructor_impl(NodeT * node, Func && callback, rclcpp::CallbackGroup::SharedPtr group)
   {
     static_assert(
       is_basic_cb<Func>::value || is_deferred_cb<Func>::value,
@@ -212,8 +233,6 @@ private:
       "1. basic: (ipc_shared_ptr<ServiceT::Request>, ipc_shared_ptr<ServiceT::Response>)\n"
       "2. deferred: (std::shared_ptr<Service>, ipc_shared_ptr<ServiceT::Request>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
-
-    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
     // Must precede the subscription: its callback is runnable as soon as it is registered.
@@ -249,26 +268,26 @@ private:
   }
 
 public:
-  using SharedPtr = std::shared_ptr<BasicService<ServiceT>>;
+  using SharedPtr = std::shared_ptr<Service<ServiceT>>;
 
   template <typename Func>
-  BasicService(
+  Service(
     rclcpp::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
+  : ServiceBase(node, service_name, qos, role)
   {
-    constructor_impl(node, service_name, std::forward<Func>(callback), group);
+    constructor_impl(node, std::forward<Func>(callback), group);
   }
 
   template <typename Func>
-  BasicService(
+  Service(
     agnocast::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
+  : ServiceBase(node, service_name, qos, role)
   {
-    constructor_impl(node, service_name, std::forward<Func>(callback), group);
+    constructor_impl(node, std::forward<Func>(callback), group);
   }
 
   /**
@@ -345,8 +364,6 @@ public:
     event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
   }
 #endif
-
-  const char * get_service_name() const { return service_name_.c_str(); }
 };
 
 /**
@@ -360,7 +377,7 @@ public:
  * send_response() or cancel_response() for every response borrowed via borrow_loaned_response().
  * Otherwise, the process will terminate.
  */
-class GenericService : public std::enable_shared_from_this<GenericService>
+class GenericService : public ServiceBase, public std::enable_shared_from_this<GenericService>
 {
   template <typename Func>
   struct is_basic_cb
@@ -375,18 +392,11 @@ class GenericService : public std::enable_shared_from_this<GenericService>
   {
   };
 
-  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
-  std::string service_name_;
-  const rclcpp::QoS qos_;
-  const ServiceRole role_;
   std::mutex publishers_mtx_;
   std::unordered_map<std::string, typename TypeErasedPublisher::SharedPtr> publishers_;
   typename Subscription<void>::SharedPtr subscriber_;
 
   ServiceTsBundle service_ts_bundle_;
-
-  // Defined in the .cpp: agnocast::Node is only forward-declared here.
-  rclcpp::Logger get_logger() const;
 
   typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
     const std::string & response_topic_name);
@@ -453,8 +463,8 @@ class GenericService : public std::enable_shared_from_this<GenericService>
 
   template <typename Func, typename NodeT>
   void constructor_impl(
-    NodeT * node, const std::string & service_name, const std::string & service_type,
-    Func && callback, const rclcpp::CallbackGroup::SharedPtr & group)
+    NodeT * node, const std::string & service_type, Func && callback,
+    const rclcpp::CallbackGroup::SharedPtr & group)
   {
     static_assert(
       is_basic_cb<Func>::value || is_deferred_cb<Func>::value,
@@ -464,8 +474,6 @@ class GenericService : public std::enable_shared_from_this<GenericService>
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
 
     service_ts_bundle_ = load_service_typesupport(service_type);
-
-    service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
     SubscriptionOptions sub_options{group};
     std::string req_topic_name = create_service_request_topic_name(service_name_);
@@ -501,9 +509,9 @@ public:
     rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
+  : ServiceBase(node, service_name, qos, role)
   {
-    constructor_impl(node, service_name, service_type, std::forward<Func>(callback), group);
+    constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
 
   template <typename Func>
@@ -511,9 +519,9 @@ public:
     agnocast::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
+  : ServiceBase(node, service_name, qos, role)
   {
-    constructor_impl(node, service_name, service_type, std::forward<Func>(callback), group);
+    constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
 
   void send_response(ipc_shared_ptr<void> && request, ipc_shared_ptr<void> && response);
@@ -521,18 +529,6 @@ public:
   void cancel_response(ipc_shared_ptr<void> && request, ipc_shared_ptr<void> && response);
 
   ipc_shared_ptr<void> borrow_loaned_response(const ipc_shared_ptr<void> & request);
-
-  const char * get_service_name() const { return service_name_.c_str(); }
 };
-
-/**
- * @brief The user-facing Agnocast service server.
- * Alias for `BasicService<ServiceT>`. Use this type (not BasicService directly) when declaring
- * service server variables.
- * @tparam ServiceT The ROS service type (e.g., std_srvs::srv::SetBool).
- */
-AGNOCAST_PUBLIC
-template <typename ServiceT>
-using Service = BasicService<ServiceT>;
 
 }  // namespace agnocast

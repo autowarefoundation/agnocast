@@ -7,7 +7,7 @@
 namespace agnocast
 {
 
-rclcpp::Logger GenericService::get_logger() const
+rclcpp::Logger ServiceBase::get_logger() const
 {
   return std::visit([](auto * n) { return n->get_logger(); }, node_);
 }

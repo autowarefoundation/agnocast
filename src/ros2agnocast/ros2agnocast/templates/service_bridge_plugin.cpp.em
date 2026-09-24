@@ -58,7 +58,7 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
   rclcpp::Node::SharedPtr node, const std::string & service_name, const rclcpp::QoS & qos)
 {
   using ServiceT = @(cpp_type);
-  using AgnoService = agnocast::BasicService<ServiceT>;
+  using AgnoService = agnocast::Service<ServiceT>;
   using RosClient = rclcpp::Client<ServiceT>;
 
   constexpr size_t kMaxPendingRequests = 10;
