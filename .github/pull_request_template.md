@@ -4,12 +4,11 @@
 
 ## How was this PR tested?
 
-- [ ] Autoware
 - [ ] `bash scripts/test/e2e_test_1to1.bash` (required)
 - [ ] `bash scripts/test/e2e_test_2to2.bash` (required)
-- [ ] kunit tests (required when modifying the kernel module)
 - [ ] `bash scripts/test/run_requires_kernel_module_tests.bash` (required)
 - [ ] sample application
+- [ ] Autoware
 
 ## Notes for reviewers
 
