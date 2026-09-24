@@ -2,6 +2,12 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* fix(bridge): request buffering in A2R service bridge (`#1641 <https://github.com/tier4/agnocast/issues/1641>`_)
+* refactor(agnocastlib): introduce ServiceBase (`#1640 <https://github.com/tier4/agnocast/issues/1640>`_)
+* fix(agnocast_kmod): skip response topics and raise the topic list limit (`#1617 <https://github.com/tier4/agnocast/issues/1617>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * feat(agnocastlib): support service introspection on the server side (`#1551 <https://github.com/tier4/agnocast/issues/1551>`_)

@@ -2,6 +2,15 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* fix(agnocastlib): gate R2A service bridges on ROS 2 client demand on pre-Jazzy (`#1645 <https://github.com/tier4/agnocast/issues/1645>`_)
+* fix(bridge): request buffering in A2R service bridge (`#1641 <https://github.com/tier4/agnocast/issues/1641>`_)
+* refactor(agnocastlib): introduce ServiceBase (`#1640 <https://github.com/tier4/agnocast/issues/1640>`_)
+* fix(agnocastlib): drop the deprecation attribute from get_intra_subscription_count (`#1638 <https://github.com/tier4/agnocast/issues/1638>`_)
+* fix(agnocastlib): count same-process subscribers like rclcpp does (`#1613 <https://github.com/tier4/agnocast/issues/1613>`_)
+* refactor(agnocast_cie_thread_configurator): share the announcement wiring between the two nodes (`#1620 <https://github.com/tier4/agnocast/issues/1620>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * fix(agnocastlib): support building with TRACETOOLS_DISABLED (`#1537 <https://github.com/tier4/agnocast/issues/1537>`_)

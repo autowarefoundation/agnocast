@@ -2,6 +2,10 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* fix(agnocastlib): count same-process subscribers like rclcpp does (`#1613 <https://github.com/tier4/agnocast/issues/1613>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)

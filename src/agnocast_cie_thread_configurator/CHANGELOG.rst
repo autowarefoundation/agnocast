@@ -2,6 +2,13 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* refactor(agnocast_cie_thread_configurator): share the announcement wiring between the two nodes (`#1620 <https://github.com/tier4/agnocast/issues/1620>`_)
+* refactor(agnocast_cie_thread_configurator): extract rt_throttling validation into a testable check (`#1600 <https://github.com/tier4/agnocast/issues/1600>`_)
+* refactor(agnocast_cie_thread_configurator): extract hardware_info validation into a testable check (`#1599 <https://github.com/tier4/agnocast/issues/1599>`_)
+* refactor(agnocast_cie_thread_configurator): move the lscpu hardware-info reader into the core library (`#1598 <https://github.com/tier4/agnocast/issues/1598>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * refactor(agnocast_cie_thread_configurator): share the manageable CPU bound between parser and scanner (`#1589 <https://github.com/tier4/agnocast/issues/1589>`_)
