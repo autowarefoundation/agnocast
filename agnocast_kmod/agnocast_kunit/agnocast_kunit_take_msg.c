@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -22,23 +23,9 @@ static void setup_subscriber_impl(
   const bool is_transient_local, const uint32_t domain_id, const bool sub_is_bridge,
   topic_local_id_t * subscriber_id)
 {
-  union ioctl_add_process_args add_process_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
-      &add_process_args),
-    0);
-
-  union ioctl_add_subscriber_args add_subscriber_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
-      is_transient_local, IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, sub_is_bridge, -1,
-      &add_subscriber_args),
-    0);
-  *subscriber_id = add_subscriber_args.ret_id;
+  *subscriber_id = agnocast_kunit_setup_one_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, sub_is_bridge, -1, domain_id);
 }
 
 static void setup_one_subscriber(
@@ -63,23 +50,9 @@ static void setup_publisher_impl(
   const bool is_transient_local, const uint32_t domain_id, const bool pub_is_bridge,
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
-  union ioctl_add_process_args add_process_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      publisher_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id,
-      &add_process_args),
-    0);
-  *ret_addr = add_process_args.ret_addr;
-
-  union ioctl_add_publisher_args add_publisher_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_publisher(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, qos_depth, is_transient_local,
-      pub_is_bridge, &add_publisher_args),
-    0);
-  *publisher_id = add_publisher_args.ret_id;
+  *publisher_id = agnocast_kunit_setup_one_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, qos_depth, is_transient_local, pub_is_bridge,
+    domain_id, ret_addr);
 }
 
 static void setup_one_publisher(

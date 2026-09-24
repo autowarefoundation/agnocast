@@ -2,6 +2,7 @@
 #include "agnocast_kunit_get_subscriber_qos.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -11,21 +12,13 @@ static const pid_t SUBSCRIBER_PID = 1000;
 static const uint32_t QOS_DEPTH = 10;
 static const bool IS_BRIDGE = false;
 
-static void setup_process(struct kunit * test, const pid_t pid)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
-
 static void verify_subscriber_qos(struct kunit * test, bool is_transient, bool is_reliable)
 {
   union ioctl_add_subscriber_args add_sub_args;
   struct ioctl_get_subscriber_qos_args get_qos_args;
   int ret;
 
-  setup_process(test, SUBSCRIBER_PID);
+  agnocast_kunit_setup_process(test, SUBSCRIBER_PID, 0);
 
   ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, QOS_DEPTH, is_transient,
@@ -69,7 +62,7 @@ void test_case_sub_error_topic_not_found(struct kunit * test)
   topic_local_id_t dummy_id;
   int ret;
 
-  setup_process(test, SUBSCRIBER_PID);
+  agnocast_kunit_setup_process(test, SUBSCRIBER_PID, 0);
 
   dummy_id = 0;
 
@@ -81,7 +74,7 @@ void test_case_sub_error_topic_not_found(struct kunit * test)
 
 void test_case_error_subscriber_not_found(struct kunit * test)
 {
-  setup_process(test, SUBSCRIBER_PID);
+  agnocast_kunit_setup_process(test, SUBSCRIBER_PID, 0);
   union ioctl_add_subscriber_args add_sub_args;
   struct ioctl_get_subscriber_qos_args get_qos_args;
   int ret;
