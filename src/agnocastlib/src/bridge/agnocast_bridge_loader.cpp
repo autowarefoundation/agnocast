@@ -1,5 +1,6 @@
 #include "agnocast/bridge/agnocast_bridge_loader.hpp"
 
+#include "agnocast/agnocast.hpp"
 #include "agnocast/agnocast_client.hpp"
 #include "agnocast/agnocast_service.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
@@ -12,8 +13,11 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <sstream>
+#include <vector>
 
 namespace agnocast
 {
@@ -378,58 +382,125 @@ ServiceBridgeEntity BridgeLoader::create_a2r_service_bridge_generic(
   const rclcpp::Node::SharedPtr & node, const std::string & service_name,
   const std::string & service_type, const rclcpp::QoS & qos)
 {
+  constexpr size_t kMaxPendingRequests = 10;
+  constexpr auto kDrainInterval = std::chrono::milliseconds(200);
+
+  auto add_request = [](
+                       const std::shared_ptr<agnocast::GenericService> & service_handle,
+                       const std::shared_ptr<std::deque<ipc_shared_ptr<void>>> & requests,
+                       ipc_shared_ptr<void> && agno_req) {
+    if (requests->size() < kMaxPendingRequests) {
+      requests->push_back(std::move(agno_req));
+      return;
+    }
+    requests->pop_front();
+    requests->push_back(std::move(agno_req));
+    RCLCPP_ERROR(
+      logger,
+      "Failed to forward request in A2R service bridge for '%s' probably because the ROS 2 service "
+      "is not ready yet; dropping request (caller's future will not be resolved)",
+      service_handle->get_service_name());
+  };
+
+  auto send_requests =
+    [](
+      const std::shared_ptr<agnocast::GenericService> & service_handle,
+      const std::shared_ptr<agnocast::vendor_rclcpp::GenericClient> & ros_client,
+      const std::function<bool(const ipc_shared_ptr<void> &, const std::shared_ptr<void> &)> &
+        res_copier,
+      const std::shared_ptr<std::deque<ipc_shared_ptr<void>>> & requests) {
+      if (requests->empty()) {
+        return;
+      }
+
+      try {
+        if (!ros_client->service_is_ready()) {
+          return;
+        }
+      } catch (const std::exception & e) {
+        RCLCPP_WARN(
+          logger, "service_is_ready() failed in A2R service bridge for '%s': %s",
+          service_handle->get_service_name(), e.what());
+        return;
+      }
+
+      while (!requests->empty()) {
+        ipc_shared_ptr<void> agno_req = std::move(requests->front());
+        requests->pop_front();
+        const void * ros_req_ptr = agno_req.get();
+
+        // This try/catch prevents exceptions from async_send_request() from escaping the spin
+        // thread and terminating the process.
+        try {
+          ros_client->async_send_request(
+            ros_req_ptr, [service_handle, agno_req, res_copier](
+                           const agnocast::vendor_rclcpp::GenericClient::SharedFuture & future) {
+              const auto & ros_res = future.get();
+              auto agno_res = service_handle->borrow_loaned_response(agno_req);
+
+              if (!res_copier(agno_res, ros_res)) {
+                RCLCPP_ERROR(
+                  logger,
+                  "Serialization error occurred in generic A2R service bridge for '%s'; dropping "
+                  "response (caller's future will not be resolved)",
+                  service_handle->get_service_name());
+                auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the
+                                                   // const lambda capture.
+                service_handle->cancel_response(std::move(agno_req_movable), std::move(agno_res));
+                return;
+              }
+
+              auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                                 // lambda capture.
+              service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+            });
+        } catch (const std::exception & e) {
+          RCLCPP_WARN(
+            logger, "async_send_request() failed in A2R service bridge for '%s': %s; retrying",
+            service_handle->get_service_name(), e.what());
+          requests->push_front(std::move(agno_req));
+          break;
+        }
+      }
+    };
+
   const std::string response_type = service_type + "_Response";
+
+  auto response_copier = get_copier(response_type);
 
   // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
   // agnocast entities below are created, so they are never classified before their agnocast
   // subscriptions (created internally by the client/service) exist.
-  auto srv_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
-  auto client_cbg = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto srv_cbg = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  auto client_cbg =
+    node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto ros_client = agnocast::vendor_rclcpp::GenericClient::create_generic_client(
     node.get(), service_name, service_type, qos, client_cbg);
 
+  // buffer to hold requests before the ROS 2 service becomes ready.
+  auto pending_requests = std::make_shared<std::deque<ipc_shared_ptr<void>>>();
+
   auto agno_srv = std::make_shared<agnocast::GenericService>(
     node.get(), service_name, service_type,
-    [ros_client = std::move(ros_client), response_copier = get_copier(response_type)](
-      std::shared_ptr<agnocast::GenericService> service_handle, ipc_shared_ptr<void> && agno_req) {
-      const void * ros_req_ptr = agno_req.get();
-
-      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
-      // and terminating the process.
-      try {
-        ros_client->async_send_request(
-          ros_req_ptr,
-          [service_handle = std::move(service_handle), agno_req = std::move(agno_req),
-           response_copier](const agnocast::vendor_rclcpp::GenericClient::SharedFuture & future) {
-            const auto & ros_res = future.get();
-            auto agno_res = service_handle->borrow_loaned_response(agno_req);
-
-            if (!response_copier(agno_res, ros_res)) {
-              RCLCPP_ERROR(
-                logger,
-                "Serialization error occurred in generic A2R service bridge for '%s'; dropping "
-                "response",
-                service_handle->get_service_name());
-              auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
-                                                 // lambda capture.
-              service_handle->cancel_response(std::move(agno_req_movable), std::move(agno_res));
-              return;
-            }
-
-            auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
-                                               // lambda capture.
-            service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
-          });
-      } catch (const std::exception & e) {
-        RCLCPP_ERROR(
-          logger, "Failed to forward request in A2R service bridge for '%s': %s; dropping request",
-          service_handle->get_service_name(), e.what());
-      }
+    [add_request, send_requests, response_copier, ros_client, pending_requests](
+      const std::shared_ptr<agnocast::GenericService> & service_handle,
+      ipc_shared_ptr<void> && agno_req) {
+      add_request(service_handle, pending_requests, std::move(agno_req));
+      send_requests(service_handle, ros_client, response_copier, pending_requests);
     },
     qos, srv_cbg, agnocast::ServiceRole::BridgeInternal);
 
-  return {agno_srv, srv_cbg, client_cbg};
+  auto drain_requests_timer = agnocast::create_timer(
+    node, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME), rclcpp::Duration(kDrainInterval),
+    [send_requests, response_copier, agno_srv, ros_client, pending_requests]() {
+      send_requests(agno_srv, ros_client, response_copier, pending_requests);
+    },
+    srv_cbg);
+
+  // drain_requests_timer owns both the Agnocast service and the ROS 2 client,
+  // so it represents this A2R service bridge entity.
+  return {drain_requests_timer, srv_cbg, client_cbg};
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 

@@ -6,7 +6,10 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/version.h"
 
+#include <chrono>
+#include <deque>
 #include <utility>
+#include <vector>
 
 #include "@(header_path)"
 
@@ -56,12 +59,85 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
 {
   using ServiceT = @(cpp_type);
   using AgnoService = agnocast::Service<ServiceT>;
+  using RosClient = rclcpp::Client<ServiceT>;
+
+  constexpr size_t kMaxPendingRequests = 10;
+
+  auto add_request = [](
+                       const std::shared_ptr<AgnoService> & service_handle,
+                       const std::shared_ptr<
+                         std::deque<agnocast::ipc_shared_ptr<typename ServiceT::Request>>> & requests,
+                       agnocast::ipc_shared_ptr<typename ServiceT::Request> && agno_req) {
+    if (requests->size() < kMaxPendingRequests) {
+      requests->push_back(std::move(agno_req));
+      return;
+    }
+    requests->pop_front();
+    requests->push_back(std::move(agno_req));
+    RCLCPP_ERROR(
+      agnocast::logger,
+      "Failed to forward request in A2R service bridge for '%s' probably because the ROS 2 service "
+      "is not ready yet; dropping request (caller's future will not be resolved)",
+      service_handle->get_service_name());
+  };
+
+  auto send_requests =
+    [](
+      const std::shared_ptr<AgnoService> & service_handle,
+      const std::shared_ptr<RosClient> & ros_client,
+      const std::shared_ptr<std::deque<agnocast::ipc_shared_ptr<typename ServiceT::Request>>> &
+        requests) {
+      if (requests->empty()) {
+        return;
+      }
+
+      try {
+        if (!ros_client->service_is_ready()) {
+          return;
+        }
+      } catch (const std::exception & e) {
+        RCLCPP_WARN(
+          agnocast::logger,
+          "service_is_ready() failed in A2R service bridge for '%s': %s",
+          service_handle->get_service_name(), e.what());
+        return;
+      }
+
+      while (!requests->empty()) {
+        auto agno_req = std::move(requests->front());
+        requests->pop_front();
+        std::shared_ptr<typename ServiceT::Request> ros_req(agno_req.get(), [](void *) {});
+
+        // This try/catch prevents exceptions from async_send_request() from escaping the spin
+        // thread and terminating the process.
+        try {
+          ros_client->async_send_request(
+            ros_req, [service_handle, agno_req](const typename RosClient::SharedFuture future) {
+              const auto & ros_res = future.get();
+              auto agno_res = service_handle->borrow_loaned_response(agno_req);
+              *agno_res = *ros_res;
+              auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
+                                                 // lambda capture.
+              service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
+            });
+        } catch (const std::exception & e) {
+          RCLCPP_WARN(
+            agnocast::logger,
+            "async_send_request() failed in A2R service bridge for '%s': %s; retrying",
+            service_handle->get_service_name(), e.what());
+          requests->push_front(std::move(agno_req));
+          break;
+        }
+      }
+    };
 
   // auto_add=false: the bridge manager adds these groups to the executor explicitly, after the
   // agnocast entities below are created, so they are never classified before their agnocast
   // subscriptions (created internally by the client/service) exist.
-  auto srv_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
-  auto client_cb_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant, false);
+  auto srv_cb_group =
+    node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  auto client_cb_group =
+    node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
   auto ros_client =
 #if RCLCPP_VERSION_MAJOR >= 28
@@ -70,34 +146,30 @@ extern "C" ServiceBridgeEntity create_a2r_service_bridge_@(snake_type_name)(
     node->create_client<ServiceT>(service_name, qos.get_rmw_qos_profile(), client_cb_group);
 #endif
 
+  // buffer to hold requests before the ROS 2 service becomes ready.
+  auto pending_requests = std::make_shared<
+    std::deque<agnocast::ipc_shared_ptr<typename ServiceT::Request>>>();
+
   auto agno_srv = std::make_shared<AgnoService>(
     node.get(), service_name,
-    [ros_client](
+    [add_request, send_requests, ros_client, pending_requests](
       typename AgnoService::SharedPtr service_handle,
       agnocast::ipc_shared_ptr<typename ServiceT::Request> && agno_req) {
-      std::shared_ptr<typename ServiceT::Request> ros_req(agno_req.get(), [](void *) {});
-
-      // This try/catch prevents exceptions from async_send_request() from escaping the spin thread
-      // and terminating the process.
-      try {
-        ros_client->async_send_request(
-          ros_req, [service_handle = std::move(service_handle), agno_req = std::move(agno_req)](
-                     const typename rclcpp::Client<ServiceT>::SharedFuture future) {
-            const auto & ros_res = future.get();
-            auto agno_res = service_handle->borrow_loaned_response(agno_req);
-            *agno_res = *ros_res;
-            auto agno_req_movable = agno_req;  // Resort to pointer copying to move from the const
-                                               // lambda capture.
-            service_handle->send_response(std::move(agno_req_movable), std::move(agno_res));
-          });
-      } catch (const std::exception & e) {
-        RCLCPP_ERROR(
-          agnocast::logger,
-          "Failed to forward request in A2R service bridge for '%s': %s; dropping request",
-          service_handle->get_service_name(), e.what());
-      }
+      add_request(service_handle, pending_requests, std::move(agno_req));
+      send_requests(service_handle, ros_client, pending_requests);
     },
     qos, srv_cb_group, agnocast::ServiceRole::BridgeInternal);
 
-  return {agno_srv, srv_cb_group, client_cb_group};
+  auto drain_requests_timer = agnocast::create_timer(
+    node, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME),
+    rclcpp::Duration(std::chrono::milliseconds(200)),
+    [send_requests, agno_srv, ros_client, pending_requests]() {
+      send_requests(agno_srv, ros_client, pending_requests);
+    },
+    srv_cb_group);
+
+  // drain_requests_timer owns both the Agnocast service and the ROS 2 client,
+  // so it represents this A2R service bridge entity.
+  return {drain_requests_timer, srv_cb_group, client_cb_group};
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
