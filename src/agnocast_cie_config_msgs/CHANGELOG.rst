@@ -2,6 +2,9 @@
 Changelog for package agnocast_cie_config_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.1 (2026-09-25)
+------------------
+
 2.4.0 (2026-09-01)
 ------------------
 * feat(agnocast_cie_thread_configurator): apply kernel thread and IRQ configs with reapply support (`#1546 <https://github.com/tier4/agnocast/issues/1546>`_)

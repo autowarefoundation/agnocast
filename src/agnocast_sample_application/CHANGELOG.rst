@@ -2,6 +2,9 @@
 Changelog for package agnocast_sample_application
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.1 (2026-09-25)
+------------------
+
 2.4.0 (2026-09-01)
 ------------------
 * feat(agnocastlib): add create_take_subscription() factories (`#1581 <https://github.com/tier4/agnocast/issues/1581>`_)

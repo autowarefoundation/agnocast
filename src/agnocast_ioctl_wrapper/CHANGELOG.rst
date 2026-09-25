@@ -2,6 +2,10 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.1 (2026-09-25)
+------------------
+* fix(agnocast_kmod): skip response topics and raise the topic list limit (`#1617 <https://github.com/tier4/agnocast/issues/1617>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * perf(agnocastlib)[need-minor-update]: exec the discovery agent directly instead of via ros2 run (`#1473 <https://github.com/tier4/agnocast/issues/1473>`_)

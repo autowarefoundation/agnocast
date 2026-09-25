@@ -2,6 +2,13 @@
 Changelog for package ros2agnocast_discovery_agent
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.1 (2026-09-25)
+------------------
+* fix(ros2agnocast_discovery_agent): exit as soon as the domain is idle (`#1651 <https://github.com/tier4/agnocast/issues/1651>`_)
+* fix(ros2agnocast_discovery_agent): honor reversed in domain bridge configs (`#1650 <https://github.com/tier4/agnocast/issues/1650>`_)
+* feat(ros2agnocast_discovery_agent): read domain bridge rules from several configs (`#1624 <https://github.com/tier4/agnocast/issues/1624>`_)
+* chore(agnocast): warn that the kmod domain bridge is unsupported (`#1626 <https://github.com/tier4/agnocast/issues/1626>`_)
+
 2.4.0 (2026-09-01)
 ------------------
 * fix(ros2agnocast_discovery_agent): resolve domain bridge config topic names to absolute names (`#1578 <https://github.com/tier4/agnocast/issues/1578>`_)
