@@ -71,13 +71,20 @@ protected:
   std::string service_name_;
   const rclcpp::QoS qos_;
   const ServiceRole role_;
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  std::shared_ptr<ServiceEventPublisher> event_publisher_;
+#endif
 
   template <typename NodeT>
   explicit ServiceBase(
-    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos, ServiceRole role)
+    NodeT * node, const std::string & service_name, const std::string & service_type,
+    const rclcpp::QoS & qos, ServiceRole role)
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
   {
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    event_publisher_ = std::make_shared<ServiceEventPublisher>(node_, service_name_, service_type);
+#endif
   }
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
@@ -90,6 +97,27 @@ public:
   const char * get_service_name() const { return service_name_.c_str(); }
 
   virtual ~ServiceBase() = default;
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  /**
+   * @brief Configure service introspection.
+   * @param clock The clock to use to generate introspection timestamps.
+   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
+   * @param introspection_state The state to set introspection to.
+   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
+   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
+   * is about to be created, so disabling never rejects it.
+   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
+   * loaded. Only the first transition out of OFF loads them.
+   */
+  AGNOCAST_PUBLIC
+  void configure_introspection(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t introspection_state)
+  {
+    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+  }
+#endif
 };
 
 namespace detail
@@ -218,10 +246,6 @@ private:
   using ServiceRequestSubscriber = Subscription<RequestT>;
 
   detail::ResponsePublisherManager<ServiceResponsePublisher> publisher_manager_;
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  // Declared before subscriber_ so that it outlives the callback that uses it.
-  std::shared_ptr<ServiceEventPublisher> event_publisher_;
-#endif
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
@@ -324,12 +348,6 @@ private:
       "2. deferred: (std::shared_ptr<Service>, ipc_shared_ptr<ServiceT::Request>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    // Must precede the subscription: its callback is runnable as soon as it is registered.
-    event_publisher_ = std::make_shared<ServiceEventPublisher>(
-      node_, service_name_, rosidl_generator_traits::name<ServiceT>());
-#endif
-
     SubscriptionOptions options{group};
     std::string topic_name = create_service_request_topic_name(service_name_);
     const SubscriptionRole subscriber_role = to_subscription_role(role_);
@@ -365,7 +383,8 @@ public:
     rclcpp::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, rosidl_generator_traits::name<ServiceT>(), qos, role),
+    publisher_manager_(node)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -375,7 +394,8 @@ public:
     agnocast::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, rosidl_generator_traits::name<ServiceT>(), qos, role),
+    publisher_manager_(node)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -433,27 +453,6 @@ public:
     response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
   }
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  /**
-   * @brief Configure service introspection.
-   * @param clock The clock to use to generate introspection timestamps.
-   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
-   * @param introspection_state The state to set introspection to.
-   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
-   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
-   * is about to be created, so disabling never rejects it.
-   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
-   * loaded. Only the first transition out of OFF loads them.
-   */
-  AGNOCAST_PUBLIC
-  void configure_introspection(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t introspection_state)
-  {
-    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
-  }
-#endif
 };
 
 /**
@@ -596,7 +595,7 @@ public:
     rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, service_type, qos, role), publisher_manager_(node)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
@@ -606,7 +605,7 @@ public:
     agnocast::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, service_type, qos, role), publisher_manager_(node)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
