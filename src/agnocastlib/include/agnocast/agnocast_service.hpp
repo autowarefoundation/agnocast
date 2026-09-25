@@ -136,7 +136,12 @@ public:
           it = pubs_.erase(it);
         } else {
           generation += 1;
-          next_check_tick = tick_count_ + generation;
+          const uint32_t interval = 1u << std::min(generation, 31u);
+          if (interval > std::numeric_limits<uint32_t>::max() - tick_count_) {
+            next_check_tick = std::numeric_limits<uint32_t>::max();
+          } else {
+            next_check_tick = tick_count_ + interval;
+          }
           it->second.second =
             (static_cast<uint64_t>(generation) << 32) | static_cast<uint64_t>(next_check_tick);
           ++it;
