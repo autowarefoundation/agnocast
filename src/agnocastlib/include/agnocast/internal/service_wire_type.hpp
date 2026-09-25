@@ -120,6 +120,8 @@ public:
   {
   }
 
+  void * get() const noexcept { return request_.get(); }
+
   int64_t & seqno() { return meta_ptr_->seqno; }
   auto client_gid() -> uint8_t (&)[RMW_GID_STORAGE_SIZE] { return meta_ptr_->client_gid; }
   std::string & response_topic_name() { return meta_ptr_->response_topic_name; }
@@ -202,6 +204,8 @@ public:
   : response_(std::move(response)), meta_ptr_(get_meta_ptr(response_members, response_.get()))
   {
   }
+
+  void * get() const noexcept { return response_.get(); }
 
   int64_t & seqno() { return meta_ptr_->seqno; }
 
