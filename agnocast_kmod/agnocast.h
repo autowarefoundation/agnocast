@@ -9,6 +9,12 @@
 #define MAX_TOPIC_LOCAL_ID 4096  // Bitmap size for per-entry subscriber reference tracking
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
+/* Maximum subscriber qos_depth; a deeper request is refused. A subscriber's depth decides how long
+ * its publishers must hold entries open, so it spends memory in another process's mempool. The
+ * bound is well above what exists in practice -- the deepest subscriber in Autoware is 100
+ * (autoware_pointcloud_preprocessor's twist and odom), and 1000 across the whole tree -- so a
+ * request over it is a bug worth surfacing rather than silently narrowing. */
+#define MAX_QOS_DEPTH 4096
 /* Maximum number of entries that can be received at one ioctl. This value is heuristically set to
  * balance the number of calling ioctl and the overhead of copying data between user and kernel
  * space. */
