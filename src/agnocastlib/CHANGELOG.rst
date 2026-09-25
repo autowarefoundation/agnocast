@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.1 (2026-09-25)
+------------------
 * fix(agnocastlib): gate R2A service bridges on ROS 2 client demand on pre-Jazzy (`#1645 <https://github.com/tier4/agnocast/issues/1645>`_)
 * fix(bridge): request buffering in A2R service bridge (`#1641 <https://github.com/tier4/agnocast/issues/1641>`_)
 * refactor(agnocastlib): introduce ServiceBase (`#1640 <https://github.com/tier4/agnocast/issues/1640>`_)

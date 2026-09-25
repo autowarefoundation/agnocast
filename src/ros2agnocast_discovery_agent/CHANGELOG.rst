@@ -2,8 +2,8 @@
 Changelog for package ros2agnocast_discovery_agent
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.1 (2026-09-25)
+------------------
 * fix(ros2agnocast_discovery_agent): exit as soon as the domain is idle (`#1651 <https://github.com/tier4/agnocast/issues/1651>`_)
 * fix(ros2agnocast_discovery_agent): honor reversed in domain bridge configs (`#1650 <https://github.com/tier4/agnocast/issues/1650>`_)
 * feat(ros2agnocast_discovery_agent): read domain bridge rules from several configs (`#1624 <https://github.com/tier4/agnocast/issues/1624>`_)

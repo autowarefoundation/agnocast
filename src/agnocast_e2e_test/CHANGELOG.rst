@@ -2,8 +2,8 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.1 (2026-09-25)
+------------------
 * fix(agnocastlib): count same-process subscribers like rclcpp does (`#1613 <https://github.com/tier4/agnocast/issues/1613>`_)
 
 2.4.0 (2026-09-01)

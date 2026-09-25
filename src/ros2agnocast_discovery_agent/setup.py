@@ -4,7 +4,7 @@ package_name = 'ros2agnocast_discovery_agent'
 
 setup(
     name=package_name,
-    version='2.4.0',
+    version='2.4.1',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages',

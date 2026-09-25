@@ -2,8 +2,8 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.1 (2026-09-25)
+------------------
 * refactor(agnocast_cie_thread_configurator): share the announcement wiring between the two nodes (`#1620 <https://github.com/tier4/agnocast/issues/1620>`_)
 * refactor(agnocast_cie_thread_configurator): extract rt_throttling validation into a testable check (`#1600 <https://github.com/tier4/agnocast/issues/1600>`_)
 * refactor(agnocast_cie_thread_configurator): extract hardware_info validation into a testable check (`#1599 <https://github.com/tier4/agnocast/issues/1599>`_)
