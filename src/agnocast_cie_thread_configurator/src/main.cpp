@@ -27,33 +27,34 @@ static std::vector<int64_t> parse_domain_ids(const std::string & domains_str)
 
 int main(int argc, char * argv[])
 {
-  rclcpp::init(argc, argv);
-  std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
-
-  bool prerun_mode = false;
-  std::vector<int64_t> domain_ids;
-  std::string config_filename;
-
-  for (size_t i = 0; i < args.size(); ++i) {
-    if (args[i] == "--prerun") {
-      prerun_mode = true;
-    } else if (args[i] == "--domains" && i + 1 < args.size()) {
-      domain_ids = parse_domain_ids(args[i + 1]);
-      ++i;
-    } else if (args[i] == "--config-file" && i + 1 < args.size()) {
-      config_filename = args[i + 1];
-      ++i;
-    }
-  }
-
-  if (prerun_mode || !domain_ids.empty() || !config_filename.empty()) {
-    std::cerr << "[DEPRECATED] CLI arguments (--prerun, --domains, --config-file) are deprecated. "
-              << "Run prerun_node directly with ROS parameters or use the launch file "
-              << "(thread_configurator.launch.xml) instead." << std::endl;
-  }
-
-  // Backward-compatible CLI path: translates deprecated CLI args into ROS parameter overrides.
   try {
+    rclcpp::init(argc, argv);
+    std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
+
+    bool prerun_mode = false;
+    std::vector<int64_t> domain_ids;
+    std::string config_filename;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (args[i] == "--prerun") {
+        prerun_mode = true;
+      } else if (args[i] == "--domains" && i + 1 < args.size()) {
+        domain_ids = parse_domain_ids(args[i + 1]);
+        ++i;
+      } else if (args[i] == "--config-file" && i + 1 < args.size()) {
+        config_filename = args[i + 1];
+        ++i;
+      }
+    }
+
+    if (prerun_mode || !domain_ids.empty() || !config_filename.empty()) {
+      std::cerr
+        << "[DEPRECATED] CLI arguments (--prerun, --domains, --config-file) are deprecated. "
+        << "Run prerun_node directly with ROS parameters or use the launch file "
+        << "(thread_configurator.launch.xml) instead." << std::endl;
+    }
+
+    // Backward-compatible CLI path: translates deprecated CLI args into ROS parameter overrides.
     if (prerun_mode) {
       std::cout << "prerun mode" << std::endl;
 
@@ -95,10 +96,14 @@ int main(int argc, char * argv[])
     }
   } catch (const std::exception & e) {
     std::cerr << "[ERROR] " << e.what() << std::endl;
-    rclcpp::shutdown();
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
+    }
     return 1;
   }
 
-  rclcpp::shutdown();
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
   return 0;
 }

@@ -20,7 +20,8 @@ namespace agnocast_cie_thread_configurator
 constexpr const char * k_callback_group_info_topic =
   "/agnocast_cie_thread_configurator/callback_group_info";
 
-// Get default domain ID from ROS_DOMAIN_ID environment variable
+// Get default domain ID from ROS_DOMAIN_ID environment variable (never throws,
+// falls back to 0 on unset, empty, unparsable, or out-of-range values).
 size_t get_default_domain_id();
 
 // Create a node for a different domain
