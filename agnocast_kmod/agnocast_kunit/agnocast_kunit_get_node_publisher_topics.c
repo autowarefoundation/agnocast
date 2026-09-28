@@ -15,17 +15,13 @@ static const bool IS_BRIDGE = false;
 
 void test_case_get_node_pub_topics_exact_match(struct kunit * test)
 {
-  union ioctl_add_publisher_args add_pub_args;
   char buf[1][TOPIC_NAME_BUFFER_SIZE];
   uint32_t topic_num = UINT_MAX;
   int ret;
 
   agnocast_kunit_setup_process(test, PID, 0);
-
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
     current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
@@ -36,17 +32,13 @@ void test_case_get_node_pub_topics_exact_match(struct kunit * test)
 
 void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
 {
-  union ioctl_add_publisher_args add_pub_args;
   char buf[1][TOPIC_NAME_BUFFER_SIZE];
   uint32_t topic_num = UINT_MAX;
   int ret;
 
   agnocast_kunit_setup_process(test, PID, 0);
-
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME_WITH_SUFFIX, PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME_WITH_SUFFIX, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
     current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
@@ -57,17 +49,13 @@ void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
 
 void test_case_get_node_pub_topics_buffer_size_exceeded(struct kunit * test)
 {
-  union ioctl_add_publisher_args add_pub_args;
   char buf[1][TOPIC_NAME_BUFFER_SIZE];
   uint32_t topic_num = UINT_MAX;
   int ret;
 
   agnocast_kunit_setup_process(test, PID, 0);
-
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
     current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, 0, &topic_num);

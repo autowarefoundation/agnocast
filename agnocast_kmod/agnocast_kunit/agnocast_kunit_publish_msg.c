@@ -415,23 +415,13 @@ void test_case_publish_msg_does_not_signal_take_sub(struct kunit * test)
   setup_one_publisher(test, &publisher_id, &ret_addr);
 
   subscriber_pid++;
-  union ioctl_add_process_args add_process_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args),
-    0);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
 
   const int take_eventfd = 0;
   const int notify_eventfd = 1;
-  union ioctl_add_subscriber_args take_sub_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      topic_name, current->nsproxy->ipc_ns, node_name, subscriber_pid, qos_depth,
-      qos_is_transient_local, qos_is_reliable, true /* is_take_sub */, false, is_bridge,
-      take_eventfd, &take_sub_args),
-    0);
+  agnocast_kunit_setup_subscriber(
+    test, topic_name, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
+    true /* is_take_sub */, false, is_bridge, take_eventfd);
   add_subscriber_with_eventfd(test, subscriber_pid, notify_eventfd, false, is_bridge);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
@@ -456,12 +446,7 @@ void test_case_publish_msg_signals_large_fanout(struct kunit * test)
 
   const int subscriber_num = 100;
   subscriber_pid++;
-  union ioctl_add_process_args add_process_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args),
-    0);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
     add_subscriber_with_eventfd(test, subscriber_pid, eventfd, false, is_bridge);
   }

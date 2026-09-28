@@ -775,22 +775,17 @@ void test_case_receive_msg_no_call_again_when_only_undeliverable_entries_remain(
     0);
 
   const bool ignore_local_publications = true;
-  union ioctl_add_subscriber_args add_subscriber_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
-      is_transient_local, IS_RELIABLE, IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1,
-      &add_subscriber_args),
-    0);
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1);
 
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
 
   // Act
   int ret = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
-    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -798,8 +793,7 @@ void test_case_receive_msg_no_call_again_when_only_undeliverable_entries_remain(
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_call_again, false);
   KUNIT_EXPECT_EQ(
     test,
-    agnocast_get_latest_received_entry_id(
-      TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id),
+    agnocast_get_latest_received_entry_id(TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id),
     remote_newest_entry_id);
 }
 
@@ -838,22 +832,17 @@ void test_case_receive_msg_discarded_message_does_not_consume_qos_depth(struct k
     0);
 
   const bool ignore_local_publications = true;
-  union ioctl_add_subscriber_args add_subscriber_args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
-      is_transient_local, IS_RELIABLE, IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1,
-      &add_subscriber_args),
-    0);
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1);
 
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
 
   // Act
   int ret = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
-    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
@@ -861,8 +850,7 @@ void test_case_receive_msg_discarded_message_does_not_consume_qos_depth(struct k
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_ids[0], remote_publish_ret.ret_entry_id);
   KUNIT_EXPECT_EQ(
     test,
-    agnocast_get_latest_received_entry_id(
-      TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id),
+    agnocast_get_latest_received_entry_id(TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id),
     remote_publish_ret.ret_entry_id);
 }
 
@@ -907,31 +895,24 @@ void test_case_receive_msg_pubsub_in_same_process(struct kunit * test)
   // Arrange
   const bool is_transient_local = false;
 
-  union ioctl_add_process_args add_process_args;
   const pid_t pid = 1000;
-  int ret1 = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  union ioctl_add_subscriber_args add_subscriber_args;
   const uint32_t subscriber_qos_depth = 10;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, subscriber_qos_depth, is_transient_local,
-    IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1, &add_subscriber_args);
-  union ioctl_add_publisher_args add_publisher_args;
   const uint32_t publisher_qos_depth = 10;
-  int ret3 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, publisher_qos_depth, is_transient_local,
-    IS_BRIDGE, &add_publisher_args);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-  KUNIT_ASSERT_EQ(test, ret3, 0);
+
+  agnocast_kunit_setup_process(test, pid, 0);
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, pid, subscriber_qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, pid, publisher_qos_depth, is_transient_local, IS_BRIDGE);
 
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
 
   // Act
   int ret4 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
-    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret4, 0);
@@ -950,22 +931,13 @@ void test_case_receive_msg_2pub_in_same_process(struct kunit * test)
   setup_one_subscriber(
     test, subscriber_pid, subscriber_qos_depth, is_transient_local, &subscriber_id);
 
-  union ioctl_add_process_args add_process_args;
   const pid_t publisher_pid = 1000;
-  int ret1 = agnocast_ioctl_add_process(
-    publisher_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  union ioctl_add_publisher_args add_publisher_args1;
   const uint32_t publisher_qos_depth = 10;
-  int ret2 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, publisher_qos_depth,
-    is_transient_local, IS_BRIDGE, &add_publisher_args1);
-  union ioctl_add_publisher_args add_publisher_args2;
-  int ret3 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, publisher_qos_depth,
-    is_transient_local, IS_BRIDGE, &add_publisher_args2);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-  KUNIT_ASSERT_EQ(test, ret3, 0);
+  uint64_t ret_addr = agnocast_kunit_setup_process(test, publisher_pid, 0);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, publisher_qos_depth, is_transient_local, IS_BRIDGE);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, publisher_qos_depth, is_transient_local, IS_BRIDGE);
 
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
@@ -980,7 +952,7 @@ void test_case_receive_msg_2pub_in_same_process(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 0);
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 1);
   KUNIT_EXPECT_EQ(test, pub_shm_infos[0].pid, publisher_pid);
-  KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, add_process_args.ret_addr);
+  KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
 }
 
 void test_case_receive_msg_2sub_in_same_process(struct kunit * test)
@@ -988,25 +960,17 @@ void test_case_receive_msg_2sub_in_same_process(struct kunit * test)
   // Arrange
   const bool is_transient_local = false;
 
-  union ioctl_add_process_args add_process_args;
   const pid_t subscriber_pid = 2000;
-  int ret1 = agnocast_ioctl_add_process(
-    subscriber_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  union ioctl_add_subscriber_args add_subscriber_args1;
   const uint32_t subscriber_qos_depth1 = 10;
-  int ret2 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, subscriber_qos_depth1,
-    is_transient_local, IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
-    &add_subscriber_args1);
-  union ioctl_add_subscriber_args add_subscriber_args2;
   const uint32_t subscriber_qos_depth2 = 1;
-  int ret3 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, subscriber_qos_depth2,
-    is_transient_local, IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
-    &add_subscriber_args2);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
-  KUNIT_ASSERT_EQ(test, ret3, 0);
+
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
+  topic_local_id_t subscriber_id1 = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, subscriber_qos_depth1, is_transient_local,
+    IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
+  topic_local_id_t subscriber_id2 = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, subscriber_qos_depth2, is_transient_local,
+    IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
 
   topic_local_id_t publisher_id;
   uint64_t ret_addr;
@@ -1018,16 +982,16 @@ void test_case_receive_msg_2sub_in_same_process(struct kunit * test)
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   int ret4 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args1.ret_id, pub_shm_infos,
-    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id1, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
   KUNIT_ASSERT_EQ(test, ret4, 0);
   KUNIT_ASSERT_EQ(test, ioctl_receive_msg_ret.ret_entry_num, 0);
   KUNIT_ASSERT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 1);
 
   // Act
   int ret5 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args2.ret_id, pub_shm_infos,
-    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id2, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret5, 0);
@@ -1216,36 +1180,26 @@ void test_case_receive_msg_ignore_local_same_pid_enabled(struct kunit * test)
   const uint32_t qos_depth = 10;
   const pid_t pid = 1000;
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, qos_depth, is_transient_local, IS_BRIDGE,
-    &add_publisher_args);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  uint64_t ret_addr = agnocast_kunit_setup_process(test, pid, 0);
+  topic_local_id_t publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, pid, qos_depth, is_transient_local, IS_BRIDGE);
 
   const bool ignore_local_publications = true;
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret3 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, qos_depth, is_transient_local,
-    IS_RELIABLE, IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1, &add_subscriber_args);
-  KUNIT_ASSERT_EQ(test, ret3, 0);
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, pid, qos_depth, is_transient_local, IS_RELIABLE, IS_TAKE_SUB,
+    ignore_local_publications, IS_BRIDGE, -1);
 
   // Publish a message
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
   int ret4 = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_publisher_args.ret_id, add_process_args.ret_addr,
-    &ioctl_publish_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
   KUNIT_ASSERT_EQ(test, ret4, 0);
 
   // Act: receive_msg should not return the message from the same process
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   int ret5 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos,
     KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
 
   // Assert
@@ -1260,36 +1214,26 @@ void test_case_receive_msg_ignore_local_same_pid_disabled(struct kunit * test)
   const uint32_t qos_depth = 10;
   const pid_t pid = 1000;
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret1, 0);
-
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret2 = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, qos_depth, is_transient_local, IS_BRIDGE,
-    &add_publisher_args);
-  KUNIT_ASSERT_EQ(test, ret2, 0);
+  uint64_t ret_addr = agnocast_kunit_setup_process(test, pid, 0);
+  topic_local_id_t publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, pid, qos_depth, is_transient_local, IS_BRIDGE);
 
   const bool ignore_local_publications = false;
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret3 = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, qos_depth, is_transient_local,
-    IS_RELIABLE, IS_TAKE_SUB, ignore_local_publications, IS_BRIDGE, -1, &add_subscriber_args);
-  KUNIT_ASSERT_EQ(test, ret3, 0);
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, pid, qos_depth, is_transient_local, IS_RELIABLE, IS_TAKE_SUB,
+    ignore_local_publications, IS_BRIDGE, -1);
 
   // Publish a message
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
   int ret4 = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_publisher_args.ret_id, add_process_args.ret_addr,
-    &ioctl_publish_msg_ret);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr, &ioctl_publish_msg_ret);
   KUNIT_ASSERT_EQ(test, ret4, 0);
 
   // Act: receive_msg should return the message from the same process
   union ioctl_receive_msg_args ioctl_receive_msg_ret;
   struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   int ret5 = agnocast_ioctl_receive_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos,
     KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
 
   // Assert

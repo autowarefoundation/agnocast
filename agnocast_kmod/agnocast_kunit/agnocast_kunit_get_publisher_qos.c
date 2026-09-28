@@ -14,19 +14,15 @@ static const bool IS_BRIDGE = false;
 
 static void verify_publisher_qos(struct kunit * test, bool is_transient)
 {
-  union ioctl_add_publisher_args add_pub_args;
   struct ioctl_get_publisher_qos_args get_qos_args;
   int ret;
 
   agnocast_kunit_setup_process(test, PUBLISHER_PID, 0);
-
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, is_transient,
-    IS_BRIDGE, &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  topic_local_id_t pub_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, is_transient, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_publisher_qos(
-    TOPIC_NAME, current->nsproxy->ipc_ns, add_pub_args.ret_id, &get_qos_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, pub_id, &get_qos_args);
 
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ_MSG(test, get_qos_args.ret_depth, QOS_DEPTH, "Depth mismatch");
@@ -63,18 +59,14 @@ void test_case_pub_error_topic_not_found(struct kunit * test)
 
 void test_case_error_publisher_not_found(struct kunit * test)
 {
-  union ioctl_add_publisher_args add_pub_args;
   struct ioctl_get_publisher_qos_args get_qos_args;
   int ret;
 
   agnocast_kunit_setup_process(test, PUBLISHER_PID, 0);
+  topic_local_id_t pub_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false, IS_BRIDGE);
 
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-
-  topic_local_id_t invalid_id = add_pub_args.ret_id + 999;
+  topic_local_id_t invalid_id = pub_id + 999;
 
   ret = agnocast_ioctl_get_publisher_qos(
     TOPIC_NAME, current->nsproxy->ipc_ns, invalid_id, &get_qos_args);
