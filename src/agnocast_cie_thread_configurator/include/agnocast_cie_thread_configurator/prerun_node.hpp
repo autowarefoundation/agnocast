@@ -33,7 +33,7 @@ private:
   std::mutex domain_and_cbg_ids_mutex_;
   // non-ROS thread names. Written from the NonRosThreadInfoListener's
   // private reader thread; read by dump_yaml_config() only after
-  // main.cpp calls node->stop() (which joins the listener) and after
+  // prerun_node_main.cpp calls node->stop() (which joins the listener) and after
   // executor->spin() returns, so no mutex is needed.
   std::set<std::string> non_ros_thread_names_;
   // Declared last so it is destroyed first. The listener thread must be
