@@ -488,12 +488,20 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
   void publish_request_received_event(GenericRequestWrapper & req_wrapper);
+
+  void publish_response_sent_event(
+    GenericRequestWrapper & req_wrapper, const std::optional<std::shared_ptr<void>> & response);
+
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<std::shared_ptr<void>> copy_response_if_contents(const void * payload);
 #endif
 
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
+      ipc_shared_ptr<void> request_double(request);
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
 
@@ -523,12 +531,11 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
 
       // If the callback throws, we destroy the `response` (ipc_shared_ptr<void>) via
       // cancel_message() to prevent ipc_shared_ptr::reset() from calling std::terminate(), and then
-      // rethrow. We only need to destroy `response`, not `response_double`:
-      // (1) If `response_double` was moved from, it is empty and does not need to be destroyed.
-      // (2) If `response_double` was not moved from, it will be invalidated when `response` is
-      //     destroyed.
+      // rethrow. We only need to destroy `response`, not `response_double`; `response_double` and
+      // other ipc_shared_ptr<void> that share the same control block will be invalidated when
+      // `response` is destroyed.
       try {
-        callback(std::move(req_wrapper).take_request(), std::move(response_double));
+        callback(std::move(request_double), std::move(response_double));
       } catch (...) {
         publisher->cancel_message(std::move(response), [this](void * p) {
           GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
@@ -536,9 +543,18 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         throw;
       }
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      const std::optional<std::shared_ptr<void>> sent_response =
+        copy_response_if_contents(response.get());
+#endif
+
       publisher->publish(std::move(response), [this](void * p) {
         GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
       });
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_response_sent_event(req_wrapper, sent_response);
+#endif
 
       // Safety regarding response_double
       //   When `response` is published, all references that share its control block are
