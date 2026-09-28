@@ -44,11 +44,7 @@ static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
 {
   pid_t intra_pid = current->tgid;
 
-  union ioctl_add_process_args add_process_args;
-  int ret1 = agnocast_ioctl_add_process(
-    intra_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_TRUE(test, ret1 == 0 || ret1 == -EEXIST);
-
+  agnocast_kunit_setup_process(test, intra_pid, 0);
   agnocast_kunit_setup_subscriber(
     test, topic_name, node_name, intra_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
     is_take_sub, ignore_local_publications, is_bridge, -1);
