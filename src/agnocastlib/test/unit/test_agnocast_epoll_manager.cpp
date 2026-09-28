@@ -149,6 +149,69 @@ TEST(EpollManagerUnitTest, AddEventReturnsFalseWhenAddingDuplicateFd)
   EXPECT_EQ(close(event_fd), 0);
 }
 
+TEST(EpollManagerUnitTest, RemoveEventStopsDispatch)
+{
+  auto bundle = make_recording_sources();
+  EpollManager manager(std::move(bundle.sources));
+
+  const int event_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(event_fd, 0);
+
+  constexpr auto kType = EpollEventType::Timer;
+  constexpr EpollEventLocalID kLocalId = 42;
+  ASSERT_TRUE(manager.add_event(event_fd, kType, kLocalId));
+  ASSERT_TRUE(manager.remove_event(event_fd));
+
+  const uint64_t value = 1;
+  ASSERT_EQ(write(event_fd, &value, sizeof(value)), static_cast<ssize_t>(sizeof(value)));
+
+  manager.wait_and_handle_epoll_event(kShortTimeoutMs);
+
+  const auto * timer_handler = bundle.handlers[static_cast<uint32_t>(EpollEventType::Timer)];
+  ASSERT_NE(timer_handler, nullptr);
+  EXPECT_EQ(timer_handler->handle_count(), 0);
+
+  EXPECT_EQ(close(event_fd), 0);
+}
+
+TEST(EpollManagerUnitTest, RemoveEventReturnsFalseForUnregisteredFd)
+{
+  auto bundle = make_recording_sources();
+  EpollManager manager(std::move(bundle.sources));
+
+  const int event_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(event_fd, 0);
+
+  EXPECT_FALSE(manager.remove_event(event_fd));
+
+  EXPECT_EQ(close(event_fd), 0);
+}
+
+TEST(EpollManagerUnitTest, RemoveEventAllowsReAdd)
+{
+  auto bundle = make_recording_sources();
+  EpollManager manager(std::move(bundle.sources));
+
+  const int event_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(event_fd, 0);
+
+  ASSERT_TRUE(manager.add_event(event_fd, EpollEventType::Subscription, 1));
+  ASSERT_TRUE(manager.remove_event(event_fd));
+  ASSERT_TRUE(manager.add_event(event_fd, EpollEventType::Subscription, 2));
+
+  const uint64_t value = 1;
+  ASSERT_EQ(write(event_fd, &value, sizeof(value)), static_cast<ssize_t>(sizeof(value)));
+
+  manager.wait_and_handle_epoll_event(kDispatchTimeoutMs);
+
+  const auto * sub_handler = bundle.handlers[static_cast<uint32_t>(EpollEventType::Subscription)];
+  ASSERT_NE(sub_handler, nullptr);
+  EXPECT_EQ(sub_handler->handle_count(), 1);
+  EXPECT_EQ(sub_handler->last_local_id(), 2);
+
+  EXPECT_EQ(close(event_fd), 0);
+}
+
 TEST(EpollManagerUnitTest, AddEventReturnsFalseWhenAddingInvalidFd)
 {
   auto bundle = make_recording_sources();
