@@ -20,10 +20,8 @@ struct DeadlineParams
   uint64_t deadline = 0;
 };
 
-// Only the knobs of the policy's class are meaningful, namely nice for
-// OTHER/BATCH/IDLE, rt_priority for FIFO/RR and deadline for DEADLINE; the
-// parser leaves the others at their defaults. affinity is independent of the
-// policy.
+// Only the fields of the policy's class (see is_cfs) are set; affinity is
+// independent of the policy.
 struct SchedAttrs
 {
   std::optional<SchedPolicy> policy;  // nullopt only for an affinity-only kernel_threads entry

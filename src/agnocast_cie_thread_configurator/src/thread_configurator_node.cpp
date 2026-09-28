@@ -471,7 +471,6 @@ ThreadConfiguratorNode::SectionApplyOutcome ThreadConfiguratorNode::apply_kernel
       continue;
     }
 
-    // One desired state, applied to every matched tid.
     const SchedAttrs & attrs = config.attrs;
     for (const auto * info : matches) {
       std::string key = config.comm + ":" + std::to_string(info->tid);
