@@ -12,6 +12,15 @@ rclcpp::Logger ServiceBase::get_logger() const
   return std::visit([](auto * n) { return n->get_logger(); }, node_);
 }
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+void GenericService::publish_request_received_event(GenericRequestWrapper & req_wrapper)
+{
+  event_publisher_->publish_service_event_message(
+    service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED, req_wrapper.get(), req_wrapper.seqno(),
+    req_wrapper.client_gid());
+}
+#endif
+
 void GenericService::send_response(
   ipc_shared_ptr<void> && request, ipc_shared_ptr<void> && response)
 {
