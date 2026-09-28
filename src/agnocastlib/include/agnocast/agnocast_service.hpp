@@ -486,12 +486,21 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
 
   ServiceTsBundle service_ts_bundle_;
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  void publish_request_received_event(GenericRequestWrapper & req_wrapper);
+#endif
+
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_request_received_event(req_wrapper);
+#endif
+
       // The name comes from the request, so a bad one is the caller's fault.
       typename TypeErasedPublisher::SharedPtr publisher;
       try {
@@ -543,7 +552,14 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
   auto wrap_deferred_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
-      callback(this->shared_from_this(), std::move(request));
+      auto req_wrapper =
+        GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_request_received_event(req_wrapper);
+#endif
+
+      callback(this->shared_from_this(), std::move(req_wrapper).take_request());
     };
   }
 
