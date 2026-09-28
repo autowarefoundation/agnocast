@@ -47,10 +47,9 @@ topic_local_id_t agnocast_kunit_setup_subscriber(
 topic_local_id_t agnocast_kunit_setup_one_publisher(
   struct kunit * test, const char * topic_name, const char * node_name, const pid_t pid,
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
-  const uint32_t domain_id, uint64_t * ret_addr)
+  const uint32_t domain_id)
 {
-  uint64_t addr = agnocast_kunit_setup_process(test, pid, domain_id);
-  if (ret_addr) *ret_addr = addr;
+  agnocast_kunit_setup_process(test, pid, domain_id);
   return agnocast_kunit_setup_publisher(
     test, topic_name, node_name, pid, qos_depth, qos_is_transient_local, is_bridge);
 }

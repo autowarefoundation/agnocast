@@ -22,9 +22,9 @@ static void setup_one_publisher(
 {
   const pid_t PUBLISHER_PID = 2000;
 
-  *ret_publisher_id = agnocast_kunit_setup_one_publisher(
-    test, TOPIC_NAME, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, 0,
-    ret_addr);
+  *ret_addr = agnocast_kunit_setup_process(test, PUBLISHER_PID, 0);
+  *ret_publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PUBLISHER_PID, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE);
 }
 
 void test_case_release_sub_ref_no_topic(struct kunit * test)

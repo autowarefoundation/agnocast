@@ -61,9 +61,9 @@ static void setup_publisher_in_domain(
   struct kunit * test, const pid_t pid, const uint32_t domain_id, const bool pub_is_bridge,
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
-  *publisher_id = agnocast_kunit_setup_one_publisher(
-    test, topic_name, node_name, pid, qos_depth, qos_is_transient_local, pub_is_bridge, domain_id,
-    ret_addr);
+  *ret_addr = agnocast_kunit_setup_process(test, pid, domain_id);
+  *publisher_id = agnocast_kunit_setup_publisher(
+    test, topic_name, node_name, pid, qos_depth, qos_is_transient_local, pub_is_bridge);
 }
 
 static void setup_one_publisher(

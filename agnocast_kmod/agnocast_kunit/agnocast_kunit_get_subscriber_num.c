@@ -37,8 +37,7 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
 {
   publisher_pid++;
   agnocast_kunit_setup_one_publisher(
-    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0,
-    NULL);
+    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0);
 }
 
 static void setup_one_intra_subscriber(struct kunit * test, char * topic_name)
@@ -74,7 +73,7 @@ static void setup_current_publisher_in_domain(
 {
   agnocast_kunit_setup_one_publisher(
     test, topic_name, node_name, current->tgid, qos_depth, qos_is_transient_local, is_bridge,
-    domain_id, NULL);
+    domain_id);
 }
 
 void test_case_get_subscriber_num_normal(struct kunit * test)

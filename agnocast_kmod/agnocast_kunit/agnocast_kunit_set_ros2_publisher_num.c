@@ -15,8 +15,7 @@ static void setup_one_publisher(struct kunit * test, char * topic_name)
   publisher_pid++;
 
   agnocast_kunit_setup_one_publisher(
-    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0,
-    NULL);
+    test, topic_name, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, 0);
 }
 
 void test_case_set_ros2_publisher_num_normal(struct kunit * test)

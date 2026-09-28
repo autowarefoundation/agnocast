@@ -50,9 +50,9 @@ static void setup_publisher_impl(
   const bool is_transient_local, const uint32_t domain_id, const bool pub_is_bridge,
   topic_local_id_t * publisher_id, uint64_t * ret_addr)
 {
-  *publisher_id = agnocast_kunit_setup_one_publisher(
-    test, TOPIC_NAME, NODE_NAME, publisher_pid, qos_depth, is_transient_local, pub_is_bridge,
-    domain_id, ret_addr);
+  *ret_addr = agnocast_kunit_setup_process(test, publisher_pid, domain_id);
+  *publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, qos_depth, is_transient_local, pub_is_bridge);
 }
 
 static void setup_one_publisher(
