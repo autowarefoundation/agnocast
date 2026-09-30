@@ -7,9 +7,9 @@
 
 int main(int argc, char * argv[])
 {
-  rclcpp::init(argc, argv);
-
   try {
+    rclcpp::init(argc, argv);
+
     auto node = std::make_shared<PrerunNode>();
     auto executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
 
@@ -24,10 +24,14 @@ int main(int argc, char * argv[])
     node->dump_yaml_config(std::filesystem::current_path());
   } catch (const std::exception & e) {
     std::cerr << "[ERROR] " << e.what() << std::endl;
-    rclcpp::shutdown();
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
+    }
     return 1;
   }
 
-  rclcpp::shutdown();
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
   return 0;
 }
