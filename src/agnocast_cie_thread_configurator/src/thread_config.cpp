@@ -120,15 +120,53 @@ std::optional<T> as_base10(const YAML::Node & node)
   return value;
 }
 
-uint64_t parse_deadline_field(
-  const YAML::Node & entry, const char * key, const std::string & entry_desc)
+SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string & entry_desc)
 {
-  const auto value = as_base10<uint64_t>(entry[key]);
-  if (!value) {
+  const auto parsed = parse_sched_policy(policy);
+  if (!parsed) {
     throw std::runtime_error(
-      "'" + std::string(key) + "' must be a non-negative decimal integer for " + entry_desc);
+      "Unknown scheduling policy '" + policy + "' for " + entry_desc +
+      ". Valid policies: " + sched_policy_names());
   }
-  return *value;
+  return *parsed;
+}
+
+DeadlineParams parse_deadline_params(
+  const YAML::Node & entry, const std::string & entry_desc, bool allow_unmanageable)
+{
+  // Explicit check for a clear message: these fields are always hand-written
+  // (prerun never emits DEADLINE) and easy to forget.
+  for (const char * key : {"runtime", "period", "deadline"}) {
+    // cppcheck-suppress useStlAlgorithm
+    if (is_unset(entry[key], allow_unmanageable)) {
+      throw std::runtime_error(
+        "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for " + entry_desc);
+    }
+  }
+  const auto field = [&](const char * key) {
+    const auto value = as_base10<uint64_t>(entry[key]);
+    if (!value) {
+      throw std::runtime_error(
+        "'" + std::string(key) + "' must be a non-negative decimal integer for " + entry_desc);
+    }
+    return *value;
+  };
+  return DeadlineParams{field("runtime"), field("period"), field("deadline")};
+}
+
+// callback_groups / non_ros_threads describe threads that announce
+// themselves, so 'policy' has no "leave it alone" meaning there and is
+// mandatory. kernel_threads handles an unset policy itself.
+SchedPolicy parse_required_policy(const YAML::Node & entry, const std::string & entry_desc)
+{
+  const YAML::Node policy_node = entry["policy"];
+  if (is_unset(policy_node, /*allow_unmanageable=*/false)) {
+    throw std::runtime_error("'policy' is required for " + entry_desc);
+  }
+  if (!policy_node.IsScalar()) {
+    throw std::runtime_error("'policy' must be a string for " + entry_desc);
+  }
+  return parse_policy_or_throw(policy_node.Scalar(), entry_desc);
 }
 
 // CPU_SET(3) and sched_setaffinity(2) silently drop out-of-range or
@@ -171,17 +209,6 @@ std::vector<int> parse_affinity(
   std::sort(cpus.begin(), cpus.end());
   cpus.erase(std::unique(cpus.begin(), cpus.end()), cpus.end());
   return cpus;
-}
-
-SchedPolicy parse_policy_or_throw(const std::string & policy, const std::string & entry_desc)
-{
-  const auto parsed = parse_sched_policy(policy);
-  if (!parsed) {
-    throw std::runtime_error(
-      "Unknown scheduling policy '" + policy + "' for " + entry_desc +
-      ". Valid policies: " + sched_policy_names());
-  }
-  return *parsed;
 }
 
 // A typo'd pattern silently treated as an exact id would never match, so any
@@ -270,13 +297,12 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     validate_callback_group_id(entry);
     entry.domain_id = cg["domain_id"] ? cg["domain_id"].as<size_t>() : default_domain_id;
     entry.attrs.affinity = parse_affinity(cg, "id=" + entry.id, /*allow_unmanageable=*/false);
-    const SchedPolicy policy =
-      parse_policy_or_throw(cg["policy"].as<std::string>(), "id=" + entry.id);
+    const SchedPolicy policy = parse_required_policy(cg, "id=" + entry.id);
     entry.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      entry.attrs.deadline = DeadlineParams{
-        cg["runtime"].as<uint64_t>(), cg["period"].as<uint64_t>(), cg["deadline"].as<uint64_t>()};
+      entry.attrs.deadline =
+        parse_deadline_params(cg, "id=" + entry.id, /*allow_unmanageable=*/false);
     } else if (is_cfs(policy)) {
       entry.attrs.nice = parse_nice(cg, policy, "id=" + entry.id, /*allow_unmanageable=*/false);
     } else {
@@ -297,14 +323,12 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
     NonRosThreadEntry entry;
     entry.name = nrt["name"].as<std::string>();
     entry.attrs.affinity = parse_affinity(nrt, "name=" + entry.name, /*allow_unmanageable=*/false);
-    const SchedPolicy policy =
-      parse_policy_or_throw(nrt["policy"].as<std::string>(), "name=" + entry.name);
+    const SchedPolicy policy = parse_required_policy(nrt, "name=" + entry.name);
     entry.attrs.policy = policy;
 
     if (policy == SchedPolicy::Deadline) {
-      entry.attrs.deadline = DeadlineParams{
-        nrt["runtime"].as<uint64_t>(), nrt["period"].as<uint64_t>(),
-        nrt["deadline"].as<uint64_t>()};
+      entry.attrs.deadline =
+        parse_deadline_params(nrt, "name=" + entry.name, /*allow_unmanageable=*/false);
     } else if (is_cfs(policy)) {
       entry.attrs.nice =
         parse_nice(nrt, policy, "name=" + entry.name, /*allow_unmanageable=*/false);
@@ -374,19 +398,8 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
       entry.attrs.policy = policy;
 
       if (policy == SchedPolicy::Deadline) {
-        // Explicit check for a clear message: these fields are always
-        // hand-written (prerun never emits DEADLINE) and easy to forget.
-        if (
-          is_unset(kt["runtime"], /*allow_unmanageable=*/true) ||
-          is_unset(kt["period"], /*allow_unmanageable=*/true) ||
-          is_unset(kt["deadline"], /*allow_unmanageable=*/true)) {
-          throw std::runtime_error(
-            "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for comm=" + entry.comm);
-        }
-        entry.attrs.deadline = DeadlineParams{
-          parse_deadline_field(kt, "runtime", "comm=" + entry.comm),
-          parse_deadline_field(kt, "period", "comm=" + entry.comm),
-          parse_deadline_field(kt, "deadline", "comm=" + entry.comm)};
+        entry.attrs.deadline =
+          parse_deadline_params(kt, "comm=" + entry.comm, /*allow_unmanageable=*/true);
       } else if (is_cfs(policy)) {
         entry.attrs.nice =
           parse_nice(kt, policy, "comm=" + entry.comm, /*allow_unmanageable=*/true);
