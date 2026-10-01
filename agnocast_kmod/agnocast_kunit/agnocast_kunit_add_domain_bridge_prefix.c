@@ -2,6 +2,7 @@
 #include "agnocast_kunit_add_domain_bridge_prefix.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -11,24 +12,9 @@ static const char * PFX = "/kunit_test_add_domain_bridge_prefix_";
 static const char * PFX_A = "/kunit_test_add_domain_bridge_prefix_clientA";
 static const char * OUTSIDE = "/kunit_test_add_domain_bridge_outside";
 
-static void setup_process_in_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
-{
-  union ioctl_add_process_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &args),
-    0);
-}
-
 static void add_publisher_named(struct kunit * test, const pid_t pid, const char * topic_name)
 {
-  union ioctl_add_publisher_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, false, &args),
-    0);
+  agnocast_kunit_setup_publisher(test, topic_name, "/kunit_node", pid, 1, false, false);
 }
 
 void test_case_add_domain_bridge_prefix_normal(struct kunit * test)
@@ -90,7 +76,7 @@ void test_case_add_domain_bridge_prefix_redeclaration_is_idempotent(struct kunit
   // Arrange: a covered endpoint has joined.
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
-  setup_process_in_domain(test, 1000, 1);
+  agnocast_kunit_setup_process(test, 1000, 1);
   add_publisher_named(test, 1000, PFX_A);
 
   // Act
@@ -149,7 +135,7 @@ void test_case_add_domain_bridge_prefix_accepted_beside_an_exact_rule(struct kun
 void test_case_add_domain_bridge_prefix_accepted_with_a_topic_outside_it(struct kunit * test)
 {
   // Arrange: an endpoint has joined, but on a name the prefix does not cover.
-  setup_process_in_domain(test, 1000, 1);
+  agnocast_kunit_setup_process(test, 1000, 1);
   add_publisher_named(test, 1000, OUTSIDE);
 
   // Act
@@ -162,7 +148,7 @@ void test_case_add_domain_bridge_prefix_accepted_with_a_topic_outside_it(struct 
 void test_case_add_domain_bridge_prefix_accepted_with_a_covered_topic_elsewhere(struct kunit * test)
 {
   // Arrange: a covered name has an endpoint, but in a domain this rule does not bridge.
-  setup_process_in_domain(test, 1000, 3);
+  agnocast_kunit_setup_process(test, 1000, 3);
   add_publisher_named(test, 1000, PFX_A);
 
   // Act
@@ -229,7 +215,7 @@ void test_case_add_domain_bridge_prefix_late_reverse_direction_rejected(struct k
   // Arrange
   KUNIT_ASSERT_EQ(
     test, agnocast_ioctl_add_domain_bridge_prefix(PFX, 1, 2, current->nsproxy->ipc_ns), 0);
-  setup_process_in_domain(test, 1000, 1);
+  agnocast_kunit_setup_process(test, 1000, 1);
   add_publisher_named(test, 1000, PFX_A);
 
   // Act
@@ -242,7 +228,7 @@ void test_case_add_domain_bridge_prefix_late_reverse_direction_rejected(struct k
 void test_case_add_domain_bridge_prefix_rejected_when_covered_endpoint_exists(struct kunit * test)
 {
   // Arrange
-  setup_process_in_domain(test, 1000, 1);
+  agnocast_kunit_setup_process(test, 1000, 1);
   add_publisher_named(test, 1000, PFX_A);
 
   // Act
