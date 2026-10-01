@@ -98,3 +98,39 @@ void test_case_error_subscriber_not_found(struct kunit * test)
 
   KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
+
+// Refused rather than narrowed: agnocastlib turns the failure into an RCLCPP_ERROR and exits, so
+// the depth the subscriber asked for is never silently different from the one it gets.
+void test_case_qos_depth_above_max_is_rejected(struct kunit * test)
+{
+  union ioctl_add_subscriber_args add_sub_args;
+
+  setup_process(test, SUBSCRIBER_PID);
+
+  int ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, MAX_QOS_DEPTH + 1, false, true,
+    false, false, IS_BRIDGE, -1, &add_sub_args);
+
+  KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+}
+
+// The bound itself is honored as asked, so the check cannot be off by one.
+void test_case_qos_depth_at_max_is_kept(struct kunit * test)
+{
+  union ioctl_add_subscriber_args add_sub_args;
+  struct ioctl_get_subscriber_qos_args get_qos_args;
+  int ret;
+
+  setup_process(test, SUBSCRIBER_PID);
+
+  ret = agnocast_ioctl_add_subscriber(
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, SUBSCRIBER_PID, MAX_QOS_DEPTH, false, true,
+    false, false, IS_BRIDGE, -1, &add_sub_args);
+  KUNIT_ASSERT_EQ(test, ret, 0);
+
+  ret = agnocast_ioctl_get_subscriber_qos(
+    TOPIC_NAME, current->nsproxy->ipc_ns, add_sub_args.ret_id, &get_qos_args);
+
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_EXPECT_EQ(test, get_qos_args.ret_depth, MAX_QOS_DEPTH);
+}

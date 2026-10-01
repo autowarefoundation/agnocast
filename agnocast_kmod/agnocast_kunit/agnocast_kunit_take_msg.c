@@ -1188,3 +1188,52 @@ void test_case_take_msg_bridge_publisher_in_other_domain_delivers_nothing(struct
   KUNIT_EXPECT_EQ(test, ioctl_take_msg_ret.ret_addr, 0);
   KUNIT_EXPECT_EQ(test, ioctl_take_msg_ret.ret_pub_shm_num, 0);
 }
+
+void test_case_take_msg_drains_every_entry_when_sub_qos_depth_exceeds_pub_qos_depth(
+  struct kunit * test)
+{
+  // Arrange
+  topic_local_id_t publisher_id;
+  uint64_t ret_addr;
+  const pid_t publisher_pid = 1000;
+  setup_one_publisher(test, publisher_pid, 1, false, &publisher_id, &ret_addr);
+  topic_local_id_t subscriber_id;
+  const pid_t subscriber_pid = 2000;
+  setup_one_subscriber(test, subscriber_pid, 3, false, &subscriber_id);
+
+  int64_t entry_ids[3];
+  for (int i = 0; i < 3; i++) {
+    union ioctl_publish_msg_args ioctl_publish_msg_ret;
+    KUNIT_ASSERT_EQ(
+      test,
+      agnocast_ioctl_publish_msg(
+        TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, ret_addr + i, &ioctl_publish_msg_ret),
+      0);
+    entry_ids[i] = ioctl_publish_msg_ret.ret_entry_id;
+  }
+
+  const bool allow_same_message = false;
+
+  // Act & Assert
+  for (int i = 0; i < 3; i++) {
+    union ioctl_take_msg_args ioctl_take_msg_ret;
+    struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+    KUNIT_EXPECT_EQ(
+      test,
+      agnocast_ioctl_take_msg(
+        TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, allow_same_message, pub_shm_infos,
+        KUNIT_PUB_SHM_BUF_SIZE, &ioctl_take_msg_ret),
+      0);
+    KUNIT_EXPECT_EQ(test, ioctl_take_msg_ret.ret_entry_id, entry_ids[i]);
+  }
+
+  union ioctl_take_msg_args ioctl_take_msg_ret;
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  KUNIT_EXPECT_EQ(
+    test,
+    agnocast_ioctl_take_msg(
+      TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, allow_same_message, pub_shm_infos,
+      KUNIT_PUB_SHM_BUF_SIZE, &ioctl_take_msg_ret),
+    0);
+  KUNIT_EXPECT_EQ(test, ioctl_take_msg_ret.ret_addr, 0);
+}

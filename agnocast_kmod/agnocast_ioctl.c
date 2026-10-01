@@ -129,6 +129,19 @@ static bool domain_delivery_allowed(
   return false;
 }
 
+// Whether pub_info's publications reach sub_info at all. What a publish retains and whom it
+// signals both have to agree with what receive and take will hand over, so the three ask it here
+// rather than each spelling out the same pair of conditions.
+static bool sub_can_receive_from(
+  const struct topic_struct * topic, const struct publisher_info * pub_info,
+  const struct subscriber_info * sub_info)
+{
+  if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) return false;
+
+  return domain_delivery_allowed(
+    topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id, sub_info->is_bridge);
+}
+
 static int add_topic(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
@@ -285,11 +298,7 @@ static void rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher
   {
     // NULL exactly for take subs, which poll instead of being woken.
     if (!sub_info->notify_ctx) continue;
-    if (!domain_delivery_allowed(
-          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
-          sub_info->is_bridge))
-      continue;
-    if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+    if (!sub_can_receive_from(wrapper->topic, pub_info, sub_info)) continue;
 
     if (WARN_ON_ONCE(notify_num == pub_info->notify_capacity)) break;
     pub_info->notify_ctxs[notify_num++] = sub_info->notify_ctx;
@@ -335,6 +344,16 @@ static int insert_subscriber_info(
 {
   // rebuild_notify_list() skips take subs by testing notify_ctx alone, so the two must agree.
   WARN_ON_ONCE(is_take_sub != (notify_ctx == NULL));
+
+  if (qos_depth > MAX_QOS_DEPTH) {
+    dev_warn(
+      agnocast_device,
+      "Subscriber qos_depth (%u) for the topic (topic_name=%s) exceeds the upper "
+      "bound (MAX_QOS_DEPTH=%d), so no new subscriber can be "
+      "added. (%s)\n",
+      qos_depth, wrapper->key, MAX_QOS_DEPTH, __func__);
+    return -EINVAL;
+  }
 
   int count = agnocast_get_size_sub_info_htable(wrapper);
   if (count == MAX_SUBSCRIBER_NUM) {
@@ -988,19 +1007,52 @@ unlock:
   return ret;
 }
 
+// sub_info_htable is shared by the two domains a bridge rule pairs, so only a subscriber this
+// publisher can reach counts. And what one needs is its lag, not its declared depth: nothing at or
+// below latest_received_entry_id is handed over again, since receive_msg_core() starts one past it
+// and take_msg breaks below it. The lag counts the topic's entries while the depth bounds this
+// publisher's, so it over-estimates on a multi-publisher topic -- the safe direction.
+//
+// Caller holds global_htables_rwsem (read), which excludes subscriber join and leave, and
+// wrapper->topic->rwsem (write), which excludes the receive and take that advance
+// latest_received_entry_id.
+static uint32_t retention_depth(
+  struct topic_wrapper * wrapper, const struct publisher_info * pub_info)
+{
+  uint32_t depth = pub_info->qos_depth;
+  const int64_t newest_entry_id = wrapper->topic->current_entry_id - 1;
+
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (!sub_can_receive_from(wrapper->topic, pub_info, sub_info)) continue;
+
+    const int64_t lag = newest_entry_id - sub_info->latest_received_entry_id;
+    if (lag <= 0) continue;
+
+    const uint32_t wanted =
+      (lag < (int64_t)sub_info->qos_depth) ? (uint32_t)lag : sub_info->qos_depth;
+    if (wanted > depth) depth = wanted;
+  }
+
+  return depth;
+}
+
 static int release_msgs_to_meet_depth(
   struct topic_wrapper * wrapper, struct publisher_info * pub_info,
   union ioctl_publish_msg_args * ioctl_ret)
 {
   ioctl_ret->ret_released_num = 0;
 
-  if (pub_info->entries_num <= pub_info->qos_depth) {
+  const uint32_t depth = retention_depth(wrapper, pub_info);
+
+  if (pub_info->entries_num <= depth) {
     return 0;
   }
 
-  const uint32_t leak_warn_threshold = (pub_info->qos_depth <= 100)
-                                         ? 100 + pub_info->qos_depth
-                                         : pub_info->qos_depth * 2;  // This is rough value.
+  const uint32_t leak_warn_threshold =
+    (depth <= 100) ? 100 + depth : depth * 2;  // This is rough value.
   if (pub_info->entries_num > leak_warn_threshold) {
     dev_warn(
       agnocast_device,
@@ -1020,8 +1072,8 @@ static int release_msgs_to_meet_depth(
     return -ENODATA;
   }
 
-  // Number of entries exceeding qos_depth
-  uint32_t num_search_entries = pub_info->entries_num - pub_info->qos_depth;
+  // Number of entries exceeding the retention depth
+  uint32_t num_search_entries = pub_info->entries_num - depth;
 
   // NOTE:
   //   The searched message is either deleted or, if a reference count remains, is not deleted.
@@ -1030,10 +1082,8 @@ static int release_msgs_to_meet_depth(
   //
   // HACK:
   //   The current implementation only releases a maximum of MAX_RELEASE_NUM messages at a time, and
-  //   if there are more messages to release, qos_depth is temporarily not met.
-  //   However, it is rare for more than MAX_RELEASE_NUM messages that are out of qos_depth to be
-  //   unreferenced at a specific time. If this happens, as long as the publisher's qos_depth is
-  //   greater than the subscriber's qos_depth, this has little effect on system behavior.
+  //   if there are more messages to release, the retention depth is temporarily exceeded. That
+  //   costs memory only: what a subscriber is handed is bounded by its own window either way.
   while (num_search_entries > 0 && ioctl_ret->ret_released_num < MAX_RELEASE_NUM) {
     struct entry_node * en = container_of(node, struct entry_node, node);
     node = rb_next(node);
@@ -1064,8 +1114,8 @@ static int release_msgs_to_meet_depth(
     dev_dbg(
       agnocast_device,
       "Release oldest message in the publisher_info (id=$%d) of the topic "
-      "(topic_name=%s) with qos_depth=%d. (%s)\n",
-      pub_info->id, wrapper->key, pub_info->qos_depth, __func__);
+      "(topic_name=%s) with retention depth=%d. (%s)\n",
+      pub_info->id, wrapper->key, depth, __func__);
   }
 
   return 0;
@@ -1169,13 +1219,7 @@ static int is_entry_deliverable(
     return 0;
   }
 
-  if (sub_info->ignore_local_publications && (sub_info->pid == pub_info->pid)) {
-    return 0;
-  }
-
-  return domain_delivery_allowed(
-    wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
-    sub_info->is_bridge);
+  return sub_can_receive_from(wrapper->topic, pub_info, sub_info);
 }
 
 static int receive_msg_core(
