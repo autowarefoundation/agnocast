@@ -32,6 +32,7 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
     my_pid_, &ready_agnocast_executables_mutex_, &ready_agnocast_executables_);
   sources[static_cast<uint32_t>(EpollEventType::Shutdown)] =
     std::make_unique<ShutdownEventHandler>();
+  sources[static_cast<uint32_t>(EpollEventType::Update)] = std::make_unique<UpdateEventHandler>();
 
   epoll_manager_ = std::make_unique<EpollManager>(std::move(sources));
 
@@ -42,6 +43,12 @@ AgnocastOnlyExecutor::AgnocastOnlyExecutor()
 
   if (!epoll_manager_->add_event(shutdown_event_fd_, EpollEventType::Shutdown, 0)) {
     RCLCPP_ERROR(logger, "epoll_ctl for shutdown_event_fd failed: %s", strerror(errno));
+    close(shutdown_event_fd_);
+    exit(EXIT_FAILURE);
+  }
+
+  if (!epoll_manager_->add_event(epoll_update_tracker_.notify_fd(), EpollEventType::Update, 0)) {
+    RCLCPP_ERROR(logger, "epoll_ctl for epoll update notify_fd failed: %s", strerror(errno));
     close(shutdown_event_fd_);
     exit(EXIT_FAILURE);
   }

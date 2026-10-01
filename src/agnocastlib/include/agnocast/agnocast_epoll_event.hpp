@@ -19,6 +19,7 @@ enum class EpollEventType : uint32_t {
   Timer,
   Clock,
   Shutdown,
+  Update,
   NrEventType,
 
   Dummy = 0xFFFFFFFF,
