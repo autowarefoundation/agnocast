@@ -1,4 +1,5 @@
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/internal/qos_parameters.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/typesupport_helpers.hpp"
@@ -93,9 +94,9 @@ void SubscriptionBase::init_base(
   const bool override_qos = !options.qos_overriding_options.get_policy_kinds().empty();
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr node_parameters =
     override_qos ? node->get_node_parameters_interface() : nullptr;
-  actual_qos_ = override_qos ? rclcpp::detail::declare_qos_parameters(
+  actual_qos_ = override_qos ? internal::declare_qos_parameters(
                                  options.qos_overriding_options, node_parameters, topic_name_, qos,
-                                 rclcpp::detail::SubscriptionQosParametersTraits{})
+                                 internal::QosOverrideEntity::Subscription)
                              : qos;
 
   validate_subscription_qos(actual_qos_);
