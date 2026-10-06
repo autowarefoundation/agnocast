@@ -4,6 +4,11 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
+#include <rclcpp/serialized_message.hpp>
+#include <rosidl_runtime_cpp/message_initialization.hpp>
+
+#include <rmw/rmw.h>
+
 #include <chrono>
 #include <cstring>
 
@@ -80,6 +85,61 @@ bool wait_for_service_nanoseconds(
   return false;
 }
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+std::optional<std::shared_ptr<void>> GenericClient::copy_request_if_contents(const void * payload)
+{
+  if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
+    return std::nullopt;
+  }
+
+  const auto * request_ts = service_ts_bundle_.service_ts->request_typesupport;
+
+  rclcpp::SerializedMessage serialized;
+  if (rmw_serialize(payload, request_ts, &serialized.get_rcl_serialized_message()) != RMW_RET_OK) {
+    std::visit(
+      [](auto * n) {
+        RCLCPP_ERROR(
+          n->get_logger(),
+          "rmw_serialize() failed; only publishing metadata for this REQUEST_SENT service event");
+      },
+      node_);
+    return std::nullopt;
+  }
+
+  std::shared_ptr<void> copied(
+    ::operator new(service_ts_bundle_.request_members->size_of_), [this](void * p) {
+      this->service_ts_bundle_.request_members->fini_function(p);
+      ::operator delete(p);
+    });
+  service_ts_bundle_.request_members->init_function(
+    copied.get(), rosidl_runtime_cpp::MessageInitialization::SKIP);
+
+  if (
+    rmw_deserialize(&serialized.get_rcl_serialized_message(), request_ts, copied.get()) !=
+    RMW_RET_OK) {
+    std::visit(
+      [](auto * n) {
+        RCLCPP_ERROR(
+          n->get_logger(),
+          "rmw_deserialize() failed; only publishing metadata for this REQUEST_SENT service "
+          "event");
+      },
+      node_);
+    return std::nullopt;
+  }
+
+  return copied;
+}
+
+void GenericClient::publish_request_sent_event(
+  const int64_t seqno, const std::optional<std::shared_ptr<void>> & request)
+{
+  event_publisher_->publish_service_event_message(
+    service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? request->get() : nullptr, seqno,
+    get_gid().data);
+}
+#endif
+
 GenericClient::GenericClient(
   rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
   const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
@@ -113,38 +173,18 @@ GenericClient::SharedFutureAndRequestId GenericClient::async_send_request(
   ipc_shared_ptr<void> && request, std::function<void(SharedFuture)> && callback)
 {
   SharedFuture shared_future;
-  auto generic_request_wrapper =
-    GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
-  int64_t seqno = generic_request_wrapper.seqno();
-
-  {
-    std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-    auto it = seqno2_response_call_info_.try_emplace(seqno, std::move(callback)).first;
-    shared_future = it->second.shared_future.value();
-  }
-
-  publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
-    GenericRequestWrapper::free(p, this->service_ts_bundle_.request_members);
-  });
+  const int64_t seqno = send_request_impl(
+    std::move(request), ResponseCallInfo(std::move(callback)),
+    [&shared_future](ResponseCallInfo & info) { shared_future = info.shared_future.value(); });
   return {std::move(shared_future), seqno};
 }
 
 GenericClient::FutureAndRequestId GenericClient::async_send_request(ipc_shared_ptr<void> && request)
 {
   Future future;
-  auto generic_request_wrapper =
-    GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
-  int64_t seqno = generic_request_wrapper.seqno();
-
-  {
-    std::lock_guard<std::mutex> lock(seqno2_response_call_info_mtx_);
-    auto it = seqno2_response_call_info_.try_emplace(seqno).first;
-    future = it->second.promise.get_future();
-  }
-
-  publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
-    GenericRequestWrapper::free(p, this->service_ts_bundle_.request_members);
-  });
+  const int64_t seqno = send_request_impl(
+    std::move(request), ResponseCallInfo(),
+    [&future](ResponseCallInfo & info) { future = info.promise.get_future(); });
   return {std::move(future), seqno};
 }
 
