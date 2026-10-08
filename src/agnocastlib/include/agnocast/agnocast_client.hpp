@@ -8,6 +8,7 @@
 #include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+#include "agnocast/internal/future_and_request_id.hpp"
 #include "agnocast/internal/service_typesupport.hpp"
 #include "agnocast/internal/service_wire_type.hpp"
 #include "agnocast/node/agnocast_context.hpp"
@@ -166,9 +167,9 @@ public:
   /// Return type of async_send_request() (no-callback overload). Contains a Future and the request
   /// ID. Access the future via the `future` member and the request ID via `request_id`.
   AGNOCAST_PUBLIC
-  struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
+  struct FutureAndRequestId : internal::FutureAndRequestId<Future>
   {
-    using rclcpp::detail::FutureAndRequestId<Future>::FutureAndRequestId;
+    using internal::FutureAndRequestId<Future>::FutureAndRequestId;
     /// Convert to a SharedFutureAndRequestId by sharing the underlying future.
     AGNOCAST_PUBLIC
     SharedFuture share() noexcept { return this->future.share(); }
@@ -177,9 +178,9 @@ public:
   /// request ID. Access the shared future via the `future` member and the request ID via
   /// `request_id`.
   AGNOCAST_PUBLIC
-  struct SharedFutureAndRequestId : rclcpp::detail::FutureAndRequestId<SharedFuture>
+  struct SharedFutureAndRequestId : internal::FutureAndRequestId<SharedFuture>
   {
-    using rclcpp::detail::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
+    using internal::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
   };
 
 private:
@@ -423,14 +424,14 @@ public:
   using Future = std::future<ipc_shared_ptr<void>>;
   using SharedFuture = std::shared_future<ipc_shared_ptr<void>>;
 
-  struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
+  struct FutureAndRequestId : internal::FutureAndRequestId<Future>
   {
-    using rclcpp::detail::FutureAndRequestId<Future>::FutureAndRequestId;
+    using internal::FutureAndRequestId<Future>::FutureAndRequestId;
     SharedFuture share() noexcept { return this->future.share(); }
   };
-  struct SharedFutureAndRequestId : rclcpp::detail::FutureAndRequestId<SharedFuture>
+  struct SharedFutureAndRequestId : internal::FutureAndRequestId<SharedFuture>
   {
-    using rclcpp::detail::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
+    using internal::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
   };
 
 private:
