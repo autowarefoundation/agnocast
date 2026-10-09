@@ -621,6 +621,25 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
+  // Create an (unused) memfd and register it with the kernel module. This is a
+  // temporary measure to accommodate the new kmod interface.
+  int memfd = memfd_create("agnocast_shm", MFD_CLOEXEC);
+  if (memfd < 0) {
+    RCLCPP_ERROR(logger, "memfd_create failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  struct ioctl_register_process_shm_args register_process_shm_args = {};
+  register_process_shm_args.memfd = memfd;
+  if (ioctl(agnocast_fd, AGNOCAST_REGISTER_PROCESS_SHM_CMD, &register_process_shm_args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_REGISTER_PROCESS_SHM_CMD failed: %s", strerror(errno));
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  close(memfd);
+
   struct initialize_agnocast_result result = {};
   result.mempool_ptr = mempool_ptr;
   result.mempool_size = add_process_args.ret_shm_size;

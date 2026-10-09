@@ -35,6 +35,7 @@ using topic_local_id_t = int32_t;
 struct publisher_shm_info
 {
   pid_t pid;
+  int32_t memfd;
   uint64_t shm_addr;
   uint64_t shm_size;
 };

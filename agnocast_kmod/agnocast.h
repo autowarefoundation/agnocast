@@ -20,12 +20,24 @@
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
+
 struct publisher_shm_info
 {
   pid_t pid;  // Must be a local PID, not a global PID
+  int32_t memfd;
   uint64_t shm_addr;
   uint64_t shm_size;
 };
+
+// Kernel-only counterpart to publisher_shm_info that carries the memfd file pointer.
+struct publisher_shm_info_internal
+{
+  pid_t pid;
+  struct file * memf;
+  uint64_t shm_addr;
+  uint64_t shm_size;
+};
+
 struct name_info
 {
   const char * ptr;
@@ -456,7 +468,7 @@ int agnocast_ioctl_release_message_entry_reference(
 
 int agnocast_ioctl_receive_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
-  const topic_local_id_t subscriber_id, struct publisher_shm_info * pub_shm_infos,
+  const topic_local_id_t subscriber_id, struct publisher_shm_info_internal * pub_shm_infos,
   uint32_t pub_shm_infos_size, union ioctl_receive_msg_args * ioctl_ret);
 
 int agnocast_ioctl_publish_msg(
@@ -466,7 +478,7 @@ int agnocast_ioctl_publish_msg(
 int agnocast_ioctl_take_msg(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, bool allow_same_message,
-  struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
+  struct publisher_shm_info_internal * pub_shm_infos, uint32_t pub_shm_infos_size,
   union ioctl_take_msg_args * ioctl_ret);
 
 int agnocast_ioctl_add_process(
