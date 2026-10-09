@@ -735,7 +735,12 @@ static int set_publisher_shm_info(
       continue;
     }
 
-    int ret = reference_memory(proc_info->mempool_entry, subscriber_pid);
+    struct file * memf = NULL;
+    int ret = reference_memory(proc_info->mempool_entry, subscriber_pid, &memf);
+    if (memf) {
+      fput(memf);
+    }
+
     if (ret < 0) {
       if (ret == -EEXIST) {
         continue;
@@ -905,6 +910,37 @@ int agnocast_ioctl_add_process(
 
 unlock:
   up_write(&global_htables_rwsem);
+  return ret;
+}
+
+int agnocast_ioctl_register_process_shm(const pid_t pid, const int32_t memfd)
+{
+  int ret;
+
+  struct file * memf = fget(memfd);
+  if (!memf) {
+    return -EBADF;
+  }
+
+  down_read(&global_htables_rwsem);
+
+  struct process_info * proc_info = agnocast_find_process_info(pid);
+  if (!proc_info) {
+    dev_warn(agnocast_device, "Process (pid=%d) does not exist. (%s)\n", pid, __func__);
+    fput(memf);
+    ret = -EINVAL;
+    goto unlock;
+  }
+
+  ret = register_memory_file(proc_info->mempool_entry, memf);
+  if (ret < 0) {
+    dev_warn(
+      agnocast_device, "Process (pid=%d) failed to register memory file. (%s)\n", pid, __func__);
+    goto unlock;
+  }
+
+unlock:
+  up_read(&global_htables_rwsem);
   return ret;
 }
 
@@ -3014,6 +3050,14 @@ static long add_process_cmd(union ioctl_add_process_args __user * arg)
   return ret;
 }
 
+static long register_process_shm_cmd(struct ioctl_register_process_shm_args __user * arg)
+{
+  struct ioctl_register_process_shm_args args;
+  if (copy_from_user(&args, arg, sizeof(args))) return -EFAULT;
+
+  return agnocast_ioctl_register_process_shm(current->tgid, args.memfd);
+}
+
 static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 {
   int ret = 0;
@@ -3803,6 +3847,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return discovery_agent_exists_cmd((struct ioctl_discovery_agent_exists_args __user *)arg);
     case AGNOCAST_ADD_DOMAIN_BRIDGE_PREFIX_CMD:
       return add_domain_bridge_prefix_cmd((struct ioctl_add_domain_bridge_prefix_args __user *)arg);
+    case AGNOCAST_REGISTER_PROCESS_SHM_CMD:
+      return register_process_shm_cmd((struct ioctl_register_process_shm_args __user *)arg);
     default:
       return -EINVAL;
   }

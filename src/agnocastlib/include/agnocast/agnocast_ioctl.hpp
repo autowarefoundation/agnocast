@@ -365,6 +365,11 @@ struct ioctl_add_discovery_agent_args
   bool ret_owned_by_caller;
 };
 
+struct ioctl_register_process_shm_args
+{
+  int32_t memfd;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -391,5 +396,6 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+#define AGNOCAST_REGISTER_PROCESS_SHM_CMD _IOW(0xA6, 34, struct ioctl_register_process_shm_args)
 
 }  // namespace agnocast

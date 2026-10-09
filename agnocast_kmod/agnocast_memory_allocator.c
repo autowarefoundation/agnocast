@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_memory_allocator.h"
 
+#include <linux/file.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -112,6 +113,7 @@ int init_memory_allocator(void)
   for (int i = 0; i < mempool_num; i++) {
     mempool_entries[i].addr = addr;
     mempool_entries[i].mapped_num = 0;
+    mempool_entries[i].memf = NULL;
     INIT_LIST_HEAD(&mempool_entries[i].mapped_pid_head);
     addr += mempool_size_bytes;
   }
@@ -150,7 +152,24 @@ struct mempool_entry * assign_memory(const pid_t pid)
   return result;
 }
 
-int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
+int register_memory_file(struct mempool_entry * mempool_entry, struct file * memf)
+{
+  unsigned long flags;
+  int ret = 0;
+
+  spin_lock_irqsave(&mempool_lock, flags);
+  if (mempool_entry->memf) {
+    fput(memf);
+    ret = -EEXIST;
+  } else {
+    mempool_entry->memf = memf;
+  }
+  spin_unlock_irqrestore(&mempool_lock, flags);
+
+  return ret;
+}
+
+int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid, struct file ** memf)
 {
   struct mapped_pid_entry * new_entry;
   struct mapped_pid_entry * entry;
@@ -164,6 +183,14 @@ int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
   new_entry->pid = pid;
 
   spin_lock_irqsave(&mempool_lock, flags);
+
+  if (!mempool_entry->memf) {
+    // The writable process did not register a memory file (implementation error).
+    spin_unlock_irqrestore(&mempool_lock, flags);
+    kfree(new_entry);
+    return -ENOENT;
+  }
+
   list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
   {
     if (entry->pid == pid) {
@@ -172,8 +199,11 @@ int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
       return -EEXIST;
     }
   }
+
   list_add(&new_entry->list, &mempool_entry->mapped_pid_head);
   mempool_entry->mapped_num++;
+  *memf = mempool_entry->memf;
+
   spin_unlock_irqrestore(&mempool_lock, flags);
 
   return 0;
@@ -187,14 +217,24 @@ void free_memory(const pid_t pid)
 
   spin_lock_irqsave(&mempool_lock, flags);
   for (int i = 0; i < mempool_num; i++) {
+    struct file * memf = NULL;
+
     list_for_each_entry_safe(entry, tmp, &mempool_entries[i].mapped_pid_head, list)
     {
       if (entry->pid == pid) {
         list_del(&entry->list);
         kfree(entry);
         mempool_entries[i].mapped_num--;
+        if (mempool_entries[i].mapped_num == 0) {
+          memf = mempool_entries[i].memf;
+          mempool_entries[i].memf = NULL;
+        }
         break;
       }
+    }
+
+    if (memf) {
+      fput(memf);
     }
   }
   spin_unlock_irqrestore(&mempool_lock, flags);
@@ -208,12 +248,20 @@ void exit_memory_allocator(void)
 
   spin_lock_irqsave(&mempool_lock, flags);
   for (int i = 0; i < mempool_num; i++) {
+    struct file * memf;
+
     list_for_each_entry_safe(entry, tmp, &mempool_entries[i].mapped_pid_head, list)
     {
       list_del(&entry->list);
       kfree(entry);
     }
     mempool_entries[i].mapped_num = 0;
+    memf = mempool_entries[i].memf;
+    mempool_entries[i].memf = NULL;
+
+    if (memf) {
+      fput(memf);
+    }
   }
   spin_unlock_irqrestore(&mempool_lock, flags);
 }

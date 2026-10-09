@@ -6,6 +6,7 @@
 
 #include <linux/device.h>
 #include <linux/eventfd.h>
+#include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/hashtable.h>
 #include <linux/kernel.h>
