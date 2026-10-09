@@ -198,8 +198,11 @@ public:
     // ROS subscribers without connectivity issues.
     ros_pub_ = parent_node->create_publisher<MessageT>(
       topic_name, rclcpp::QoS(DEFAULT_QOS_DEPTH).reliable().transient_local());
+    // auto_add=false: the bridge manager adds this group to the executor explicitly, after the
+    // subscription below is created, so the executor's monitoring loop never classifies it while
+    // it is still empty.
     agno_cb_group_ =
-      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+      parent_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
 
     agnocast::SubscriptionOptions agno_opts;
     agno_opts.ignore_local_publications = true;

@@ -276,6 +276,11 @@ bool StandardBridgeManager::activate_pubsub_bridge(const DirectedPubsubBridgeRef
           logger_, "Failed to update ROS 2 subscriber count for topic '%s'.", topic_name.c_str());
       }
     }
+    if (!is_r2a) {
+      if (auto cb_group = bridge->get_callback_group()) {
+        executor_->add_callback_group(cb_group, container_node_->get_node_base_interface());
+      }
+    }
     active_pubsub_bridges_[topic_name_with_direction] = bridge;
 
     return true;
@@ -536,6 +541,12 @@ void StandardBridgeManager::check_active_pubsub_bridges()
     // preventing use-after-free when the subscriber's reference bits are cleared by the kernel.
     auto cb_group = bridge->get_callback_group();
     if (cb_group) {
+      // Mirror the add at creation (A2R groups only; remove_callback_group() exits the process for
+      // a group the executor does not hold). Remove before stop so the monitoring loop cannot
+      // re-spawn the group mid-teardown.
+      if (!is_r2a) {
+        executor_->remove_callback_group(cb_group);
+      }
       executor_->stop_callback_group(cb_group);
     }
 
