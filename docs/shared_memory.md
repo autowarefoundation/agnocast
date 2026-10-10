@@ -1,48 +1,45 @@
+# Agnocast Shared Memory Design Document
 
-## What is shared memory in Linux?
+## Shared Memory Related Operations
 
-See official man page: <https://man7.org/linux/man-pages/man7/shm_overview.7.html>
+### Initialization of a process
 
-## How shared memory is used in Agnocast?
+Agnocast processes invoke `AGNOCAST_ADD_PROCESS_CMD` ioctl during the initialization phase. The
+ioctl returns a virtual memory range allocated for the process to map **writable** shared memory.
 
-### Basic usage
+The process then creates an anonymous file via the `memfd_create` system call and maps it into the
+virtual memory range. Specifically, the following seals are applied to the anonymous file before
+mapping:
 
-- A publisher opens a shared memory with a writable privilege.
-- A subscriber opens the shared memory with a read-only privilege which the corresponding publisher opened.
+```cpp
+int seals = F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_FUTURE_WRITE;
+```
 
-### Detailed usage
+This prevents the file from being resized or modified by other processes. Note that other processes
+or subscribers only need read permissions to the shared memory.
 
-There are three invocations for shared memory related procedures.
+Next, the process registers the anonymous file with the kernel module using the
+`AGNOCAST_REGISTER_PROCESS_SHM_CMD` ioctl. Inside the kernel module, the ioctl obtains a
+`struct file *` reference to the anonymous file and stores it for future subscribers.
 
-#### Initialization of a process
+### Reception of published messages
 
-Each process linked with Agnocast opens a shared memory, which is writable only for the process.
-When a process first calls malloc or other memory related functions, Agnocast starts and the shared memory is opened in the following steps:
+When a subscriber receives a message, it uses the `AGNOCAST_RECEIVE_MSG_CMD` ioctl. In addition to
+the message metadata, the ioctl also returns information about the shared memory that needs to be
+mapped into the subscriber process's virtual memory.
 
-1. get an allocatable area through `AGNOCAST_ADD_PROCESS_CMD` ioctl.
-2. open a writable shared memory on the allocatable area, with `shm_open`, `ftruncate` and `mmap` system calls.
+```cpp
+struct publisher_shm_info
+{
+  int32_t memfd;
+  uint64_t shm_addr;
+  uint64_t shm_size;
+};
+```
 
-#### Creation of a publisher
-
-When a process calls `create_publisher` for a topic `T`, the shared memory of the process should be mapped by processes which have a subscription for `T`.
-Thus the following procedures are executed:
-
-1. The publisher process gets the information about subscribers already registered for the topic `T` through `AGNOCAST_ADD_PUBLISHER_CMD` ioctl.
-2. The kernel module returns the new publisher's shared memory information to each subscriber on its next `AGNOCAST_RECEIVE_MSG_CMD` or `AGNOCAST_TAKE_MSG_CMD` ioctl.
-3. The subscriber process maps the publisher's shared memory area with a read-only privilege.
-
-#### Creation of a subscriber
-
-When a process calls `create_subscription` for topic `T`, then the process maps the corresponding publisher's shared memory area with a read-only privilege in the following steps:
-
-1. get the information about the publishers for the topic `T` through `AGNOCAST_ADD_SUBSCRIBER_CMD` ioctl.
-2. map the publisher's shared memories with a read-only privilege.
-
-### Naming rule and restrictions
-
-In Agnocast, there is exactly one writable process and there are some read-only processes for a shared memory.
-Suppose the writable process's id is `pid`, then the shared memory is named as "/agnocast@pid".
-The name should start with '/' and should not include '/' any more.
+The information includes the file descriptor `memfd` referring to the shared memory, the virtual
+memory address `shm_addr` to map the shared memory, and the shared memory size `shm_size`. The
+subscriber processes the received messages only after mapping the shared memory.
 
 ## Memory allocation for shared memory
 

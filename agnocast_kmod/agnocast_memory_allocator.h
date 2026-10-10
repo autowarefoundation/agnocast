@@ -4,8 +4,6 @@
 #include <linux/list.h>
 #include <linux/types.h>
 
-// TODO(bdm-k): complete this doc.
-//
 // Lifecycle of mempool entries:
 //   During kernel module initialization, init_memory_allocator() initializes
 //   all the entries. The `addr` field is set to the entry's memory range start,
@@ -13,7 +11,15 @@
 //
 //   When a process joins, an empty entry is allocated to it: its PID is added
 //   to the `mapped_pid_head` list, and `mapped_num` is set to 1. The process
-//   then registers its memfd to set `memf`.
+//   then registers its anonymous file (memfd) to set `memf`.
+//
+//   When a subscriber process has to map the publisher process's anonymous
+//   file, reference_memory() is called. The function adds the subscriber
+//   process's PID to the `mapped_pid_head` list and increments `mapped_num`.
+//
+//   The PID list and reference count ensure that the anonymous file is mapped
+//   only once per process and that fput() releases the file once all processes
+//   that have it mapped have exited.
 
 // Default is 4096, can be overridden by insmod parameter mempool_num
 extern int mempool_num;
