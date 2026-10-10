@@ -1,29 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
-#ifndef KUNIT_BUILD
-// Kernel module uses global PIDs, whereas user-space and the interface between them use local PIDs.
-// Thus, PIDs must be converted from global to local before they are passed from kernel to user.
-static pid_t convert_pid_to_local(pid_t global_pid)
-{
-  rcu_read_lock();
-
-  struct pid * pid_struct = find_pid_ns(global_pid, &init_pid_ns);
-  if (!pid_struct) {
-    dev_warn(
-      agnocast_device, "Cannot convert global pid=%d to local pid (%s)\n", global_pid, __func__);
-    rcu_read_unlock();
-    return -1;
-  }
-
-  const pid_t local_pid = pid_vnr(pid_struct);
-
-  rcu_read_unlock();
-
-  return local_pid;
-}
-#endif
-
 static bool ipc_eq(const struct ipc_namespace * ipc_ns1, const struct ipc_namespace * ipc_ns2)
 {
   return ipc_ns1 == ipc_ns2;
@@ -594,11 +571,7 @@ static struct entry_node * find_message_entry(
 }
 
 // Forward declaration
-static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns);
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
+static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
 
 // Release subscriber reference from message entry (set boolean flag to false).
 // Called when subscriber's last ipc_shared_ptr reference is destroyed.
@@ -731,7 +704,7 @@ static int set_publisher_shm_info(
     }
 
     const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
+    if (!proc_info) {
       continue;
     }
 
@@ -836,23 +809,7 @@ static bool has_alive_bridge_manager(const struct ipc_namespace * ipc_ns, const 
   {
     if (
       ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
-// abruptly still reads as alive until the worker drains its pid, so a process registering in that
-// window is not told to spawn a replacement.
-static bool has_alive_unlink_daemon(const struct ipc_namespace * ipc_ns)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER) {
       return true;
     }
   }
@@ -865,21 +822,10 @@ int agnocast_ioctl_add_process(
 {
   int ret = 0;
 
-  if (
-    role != PROCESS_ROLE_APPLICATION && role != PROCESS_ROLE_BRIDGE_MANAGER &&
-    role != PROCESS_ROLE_UNLINK_DAEMON) {
+  if (role != PROCESS_ROLE_APPLICATION && role != PROCESS_ROLE_BRIDGE_MANAGER) {
     dev_warn(
       agnocast_device, "Process (pid=%d) has an unknown role (%u). (%s)\n", pid, (uint32_t)role,
       __func__);
-    return -EINVAL;
-  }
-
-  // AGNOCAST_DOMAIN_ID_NONE marks the daemon as belonging to no domain, so no other process may
-  // hold it. The daemon's own domain_id is assigned below regardless of what it sends.
-  if (role != PROCESS_ROLE_UNLINK_DAEMON && domain_id == AGNOCAST_DOMAIN_ID_NONE) {
-    dev_warn(
-      agnocast_device, "Process (pid=%d) cannot use the reserved domain_id (%u). (%s)\n", pid,
-      domain_id, __func__);
     return -EINVAL;
   }
 
@@ -890,16 +836,12 @@ int agnocast_ioctl_add_process(
     ret = -EINVAL;
     goto unlock;
   }
-  ioctl_ret->ret_unlink_daemon_exist = has_alive_unlink_daemon(ipc_ns);
   ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ipc_ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ipc_ns, domain_id) != NULL);
 
   // Deciding under the write lock add_process already holds is what stops two daemons starting
   // at once from both registering.
   if (role == PROCESS_ROLE_BRIDGE_MANAGER && ioctl_ret->ret_bridge_daemon_exist) {
-    goto unlock;
-  }
-  if (role == PROCESS_ROLE_UNLINK_DAEMON && ioctl_ret->ret_unlink_daemon_exist) {
     goto unlock;
   }
 
@@ -909,14 +851,8 @@ int agnocast_ioctl_add_process(
     goto unlock;
   }
 
-  new_proc_info->exited = false;
   new_proc_info->role = role;
   new_proc_info->global_pid = pid;
-#ifndef KUNIT_BUILD
-  new_proc_info->local_pid = convert_pid_to_local(pid);
-#else
-  new_proc_info->local_pid = pid;
-#endif
   new_proc_info->mempool_entry = assign_memory(pid);
   if (!new_proc_info->mempool_entry) {
     dev_warn(agnocast_device, "Process (pid=%d) failed to allocate memory. (%s)\n", pid, __func__);
@@ -926,8 +862,7 @@ int agnocast_ioctl_add_process(
   }
 
   new_proc_info->ipc_ns = ipc_ns;
-  new_proc_info->domain_id =
-    (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
+  new_proc_info->domain_id = domain_id;
 
   INIT_HLIST_NODE(&new_proc_info->node);
   uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
@@ -1229,7 +1164,7 @@ static int is_entry_deliverable(
   }
 
   const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-  if (!proc_info || proc_info->exited) {
+  if (!proc_info) {
     return 0;
   }
 
@@ -1675,70 +1610,6 @@ int agnocast_ioctl_get_publisher_num(
   return 0;
 }
 
-// Two-phase ioctl for exit process cleanup:
-//   Phase 1 (agnocast_ioctl_get_exit_process): report the exited pid, leaving proc_info in place.
-//   Phase 2 (agnocast_commit_exit_process): free proc_info.
-//
-// Splitting the two lets the dispatch handler copy ret_pid out with no lock held, and only commit
-// once that copy succeeded: a failed copy returns -EFAULT before Phase 2, so the entry is not
-// dropped kernel-side.
-pid_t agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret)
-{
-  ioctl_ret->ret_pid = -1;
-  ioctl_ret->ret_daemon_should_exit = false;
-  pid_t global_pid = -1;
-
-  down_read(&global_htables_rwsem);
-
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
-      continue;
-    }
-
-    ioctl_ret->ret_pid = proc_info->local_pid;
-    global_pid = proc_info->global_pid;
-    break;
-  }
-
-  up_read(&global_htables_rwsem);
-  return global_pid;
-}
-
-void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
-  bool * ret_daemon_should_exit)
-{
-  down_write(&global_htables_rwsem);
-
-  if (global_pid >= 0) {
-    struct process_info * proc_info = agnocast_find_process_info(global_pid);
-    if (proc_info) {
-      hash_del_rcu(&proc_info->node);
-      kfree_rcu(proc_info, rcu_head);
-    }
-  }
-
-  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ipc_ns) == 0);
-
-  // Deregistering only on death would leave a window where a starting process is told a daemon
-  // exists and skips spawning its replacement. Restricted to the idle poll because that is the
-  // only call whose flag poll_for_unlink() acts on; the drain loop discards the rest.
-  if (*ret_daemon_should_exit && global_pid < 0 && caller_pid >= 0) {
-    struct process_info * caller_info = agnocast_find_process_info(caller_pid);
-    if (caller_info && caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      hash_del_rcu(&caller_info->node);
-      kfree_rcu(caller_info, rcu_head);
-      free_memory(caller_pid);
-    }
-  }
-
-  up_write(&global_htables_rwsem);
-}
-
 // Intentionally namespace-scoped, not caller-domain-scoped: this returns every
 // domain's topics, each stamped with its domain_id, rather than filtering to the
 // caller's ROS_DOMAIN_ID. get_topic_*_info takes a domain input and filters here;
@@ -1844,8 +1715,7 @@ static int add_unique_node(struct node_name_collector * col, const char * name, 
 // Caller holds global_htables_rwsem.
 static bool owner_is_alive(const pid_t pid)
 {
-  const struct process_info * proc_info = agnocast_find_process_info(pid);
-  return proc_info && !proc_info->exited;
+  return agnocast_find_process_info(pid) != NULL;
 }
 
 // Collects the nodes owning an endpoint of one topic. Caller holds global_htables_rwsem.
@@ -2338,10 +2208,7 @@ int agnocast_ioctl_remove_subscriber(
     hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
     {
       if (pub_info->id == en->publisher_id) {
-        const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-        if (!proc_info || proc_info->exited) {
-          publisher_exited = true;
-        }
+        publisher_exited = !agnocast_find_process_info(pub_info->pid);
         break;
       }
     }
@@ -2873,54 +2740,14 @@ unlock:
   return ret;
 }
 
-// Counting the unlink daemon would keep it from ever deciding the namespace is done.
-static int get_process_num_except_unlink_daemon(const struct ipc_namespace * ipc_ns)
+static int get_process_num_in_domain(const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
 {
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
   hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
   {
-    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Like get_process_num_in_domain_except_unlink_daemon() but also excludes processes that have
-// exited and are still pending cleanup. The discovery agent tracks live endpoints, so an exited
-// entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
-// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
-// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      !proc_info->exited && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+    if (ipc_eq(ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id) {
       count++;
     }
   }
@@ -2966,14 +2793,13 @@ int agnocast_ioctl_discovery_agent_should_exit(
 {
   if (!commit) {
     down_read(&global_htables_rwsem);
-    *ret_should_exit =
-      (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0);
+    *ret_should_exit = (get_process_num_in_domain(ipc_ns, domain_id) == 0);
     up_read(&global_htables_rwsem);
     return 0;
   }
 
   down_write(&global_htables_rwsem);
-  if (get_alive_process_num_in_domain_except_unlink_daemon(ipc_ns, domain_id) == 0) {
+  if (get_process_num_in_domain(ipc_ns, domain_id) == 0) {
     agnocast_remove_discovery_agent_by_pid(pid);
     *ret_should_exit = true;
   } else {
@@ -3037,7 +2863,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   // A bridge manager is per (ipc_ns, domain), so it must shut down once its
   // own domain is empty -- counting the whole namespace would keep it alive while an
   // unrelated domain is busy. The manager itself is the remaining process (count == 1).
-  if (get_process_num_in_domain_except_unlink_daemon(ipc_ns, get_process_domain_id(pid)) <= 1) {
+  if (get_process_num_in_domain(ipc_ns, get_process_domain_id(pid)) <= 1) {
     struct process_info * proc_info = agnocast_find_process_info(pid);
     if (proc_info) {
       proc_info->role = PROCESS_ROLE_APPLICATION;
@@ -3313,31 +3139,6 @@ static long get_publisher_num_cmd(union ioctl_get_publisher_num_args __user * ar
   ret = agnocast_ioctl_get_publisher_num(topic_name_buf, ipc_ns, &get_publisher_num_args);
   if (copy_to_user(arg, &get_publisher_num_args, sizeof(get_publisher_num_args))) return -EFAULT;
   return ret;
-}
-
-static long get_exit_process_cmd(struct ioctl_get_exit_process_args __user * arg)
-{
-  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
-
-  struct ioctl_get_exit_process_args get_exit_process_args = {};
-
-  const pid_t global_pid = agnocast_ioctl_get_exit_process(ipc_ns, &get_exit_process_args);
-
-  // Copy ret_pid to user-space BEFORE commit.
-  // ret_daemon_should_exit is not yet known and will be patched after commit.
-  if (copy_to_user(arg, &get_exit_process_args, sizeof(get_exit_process_args))) return -EFAULT;
-
-  // Commit: free proc_info. Safe because user-space already has ret_pid.
-  bool daemon_should_exit = false;
-  agnocast_commit_exit_process(ipc_ns, global_pid, current->tgid, &daemon_should_exit);
-
-  // Patch ret_daemon_should_exit. Not fatal: when a pid was returned, its proc_info has already
-  // been committed, so -EFAULT would make the daemon exit while discarding the ret_pid whose shm
-  // needs unlinking; the flag is advisory and re-derived on the next poll.
-  if (copy_to_user(&arg->ret_daemon_should_exit, &daemon_should_exit, sizeof(daemon_should_exit))) {
-    dev_warn(agnocast_device, "Failed to report the daemon exit flag. (%s)\n", __func__);
-  }
-  return 0;
 }
 
 static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
@@ -3835,8 +3636,6 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_subscriber_num_cmd((union ioctl_get_subscriber_num_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_NUM_CMD:
       return get_publisher_num_cmd((union ioctl_get_publisher_num_args __user *)arg);
-    case AGNOCAST_GET_EXIT_PROCESS_CMD:
-      return get_exit_process_cmd((struct ioctl_get_exit_process_args __user *)arg);
     case AGNOCAST_GET_TOPIC_LIST_CMD:
       return get_topic_list_cmd((union ioctl_topic_list_args __user *)arg);
     case AGNOCAST_GET_NODE_NAMES_CMD:
@@ -3957,9 +3756,7 @@ int agnocast_get_alive_proc_num(void)
   int bkt_proc_info;
   hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
   {
-    if (!proc_info->exited) {
-      count++;
-    }
+    count++;
   }
   return count;
 }
@@ -3977,22 +3774,6 @@ int agnocast_get_discovery_agent_num(void)
   }
   up_read(&global_htables_rwsem);
   return count;
-}
-
-bool agnocast_is_proc_exited(const pid_t pid)
-{
-  struct process_info * proc_info;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
-  {
-    if (proc_info->global_pid == pid) {
-      if (proc_info->exited) {
-        return true;
-      } else {
-        return false;
-      }
-    }
-  }
-  return false;
 }
 
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns)

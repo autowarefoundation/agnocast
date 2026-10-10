@@ -57,13 +57,9 @@ union ioctl_get_node_names_args {
   uint32_t ret_node_num;
 };
 
-// The unlink daemon has no domain of its own.
-#define AGNOCAST_DOMAIN_ID_NONE U32_MAX
-
 enum process_role {
   PROCESS_ROLE_APPLICATION = 0,
   PROCESS_ROLE_BRIDGE_MANAGER = 1,
-  PROCESS_ROLE_UNLINK_DAEMON = 2,
 };
 
 union ioctl_add_process_args {
@@ -76,7 +72,6 @@ union ioctl_add_process_args {
   {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
-    bool ret_unlink_daemon_exist;
     bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
@@ -203,12 +198,6 @@ union ioctl_get_publisher_num_args {
     bool ret_r2a_bridge_exist;
     bool ret_a2r_bridge_exist;
   };
-};
-
-struct ioctl_get_exit_process_args
-{
-  bool ret_daemon_should_exit;
-  pid_t ret_pid;
 };
 
 struct ioctl_get_subscriber_qos_args
@@ -352,7 +341,6 @@ struct ioctl_register_process_shm_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -572,14 +560,6 @@ int agnocast_ioctl_add_discovery_agent(
 int agnocast_ioctl_discovery_agent_exists(
   const struct ipc_namespace * ipc_ns, const uint32_t domain_id, bool * ret_exists);
 
-// Returns the exited process's global pid, or -1 if the namespace has none.
-pid_t agnocast_ioctl_get_exit_process(
-  const struct ipc_namespace * ipc_ns, struct ioctl_get_exit_process_args * ioctl_ret);
-
-void agnocast_commit_exit_process(
-  const struct ipc_namespace * ipc_ns, pid_t global_pid, pid_t caller_pid,
-  bool * ret_daemon_should_exit);
-
 void agnocast_process_exit_cleanup(const pid_t pid);
 
 void agnocast_enqueue_exit_pid(const pid_t pid);
@@ -594,7 +574,6 @@ int agnocast_increment_message_entry_rc(
   const int64_t entry_id);
 int agnocast_get_alive_proc_num(void);
 int agnocast_get_discovery_agent_num(void);
-bool agnocast_is_proc_exited(const pid_t pid);
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns);
 int64_t agnocast_get_latest_received_entry_id(
   const char * topic_name, const struct ipc_namespace * ipc_ns,

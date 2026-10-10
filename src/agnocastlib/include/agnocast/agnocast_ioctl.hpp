@@ -61,14 +61,10 @@ union ioctl_get_node_names_args {
 };
 #pragma GCC diagnostic pop
 
-// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
-#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
-
 // Mirrors enum process_role in the kernel module.
 enum process_role {
   PROCESS_ROLE_APPLICATION = 0,
   PROCESS_ROLE_BRIDGE_MANAGER = 1,
-  PROCESS_ROLE_UNLINK_DAEMON = 2,
 };
 
 #pragma GCC diagnostic push
@@ -83,7 +79,6 @@ union ioctl_add_process_args {
   {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
-    bool ret_unlink_daemon_exist;
     bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
@@ -237,12 +232,6 @@ union ioctl_get_publisher_num_args {
 };
 #pragma GCC diagnostic pop
 
-struct ioctl_get_exit_process_args
-{
-  bool ret_daemon_should_exit;
-  pid_t ret_pid;
-};
-
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
@@ -379,7 +368,6 @@ struct ioctl_register_process_shm_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)

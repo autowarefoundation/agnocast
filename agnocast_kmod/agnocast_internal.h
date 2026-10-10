@@ -81,10 +81,8 @@ static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
 
 struct process_info
 {
-  bool exited;
   enum process_role role;
   pid_t global_pid;
-  pid_t local_pid;
   struct mempool_entry * mempool_entry;
   const struct ipc_namespace * ipc_ns;
   // The process's ROS_DOMAIN_ID (0 if unset), fixed for the process's lifetime.
@@ -254,9 +252,7 @@ extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
 
 // The discovery agent's liveness, owned by the kmod so the fork gate and the
 // singleton claim share one source of truth (no userspace flock). Hashed by pid
-// (removal and is_agnocast_pid() are by pid); a (ns, domain) lookup scans. Unlike
-// process_info there is no `exited` flag: the entry is removed the moment the
-// agent exits, so "registered" always means "alive".
+// (removal and is_agnocast_pid() are by pid); a (ns, domain) lookup scans.
 struct discovery_agent_info
 {
   pid_t pid;

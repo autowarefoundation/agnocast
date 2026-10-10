@@ -33,8 +33,6 @@ namespace agnocast
 {
 
 int agnocast_fd = -1;
-std::vector<int> shm_fds;
-std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
 // mmap_mtx serves two distinct purposes. Both require it to be held across the whole
 // receive/take ioctl *and* the shared-memory mapping that follows it, so it must stay
@@ -181,49 +179,6 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
     reinterpret_cast<void *>(add_process_args.ret_addr),
     add_process_args.ret_shm_size,
   };
-}
-
-void poll_for_unlink()
-{
-  // Register so the kernel module can tell a live daemon from a dead one. No domain_id: the
-  // kernel module records this daemon as belonging to none.
-  union ioctl_add_process_args add_process_args = {};
-  add_process_args.role = PROCESS_ROLE_UNLINK_DAEMON;
-  if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
-  // Another daemon won the race and registered first; this one has nothing to do.
-  if (add_process_args.ret_unlink_daemon_exist) {
-    close(agnocast_fd);
-    exit(EXIT_SUCCESS);
-  }
-
-  while (true) {
-    sleep(1);
-
-    struct ioctl_get_exit_process_args get_exit_process_args = {};
-    do {
-      if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
-        RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
-      }
-
-      if (get_exit_process_args.ret_pid > 0) {
-        const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
-        shm_unlink(shm_name.c_str());
-      }
-    } while (get_exit_process_args.ret_pid > 0);
-
-    if (get_exit_process_args.ret_daemon_should_exit) {
-      break;
-    }
-  }
-
-  exit(0);
 }
 
 void poll_for_bridge_manager()
@@ -536,13 +491,7 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
-  // add_process_args is a union, so ADD_PROCESS overwrites domain_id with its ret_* fields.
   const uint32_t domain_id = get_ros_domain_id();
-  if (domain_id == AGNOCAST_DOMAIN_ID_NONE) {
-    RCLCPP_ERROR(logger, "ROS_DOMAIN_ID=%u is reserved by Agnocast", domain_id);
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
 
   union ioctl_add_process_args add_process_args = {};
   add_process_args.role = PROCESS_ROLE_APPLICATION;
@@ -556,12 +505,6 @@ struct initialize_agnocast_result initialize_agnocast(
   bool should_spawn_bridge = false;
   auto bridge_mode = get_bridge_mode();
 
-  // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
-  // ret_unlink_daemon_exist is only an early-out hint: poll_for_unlink() makes the singleton
-  // decision when it registers.
-  if (!add_process_args.ret_unlink_daemon_exist) {
-    spawn_daemon_process([]() { poll_for_unlink(); });
-  }
   if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
@@ -615,29 +558,5 @@ struct initialize_agnocast_result initialize_agnocast(
   result.mempool_size = add_process_args.ret_shm_size;
   return result;
 }
-
-static void shutdown_agnocast()
-{
-  std::lock_guard<std::mutex> lock(shm_fds_mtx);
-  for (int fd : shm_fds) {
-    if (close(fd) == -1) {
-      perror("[ERROR] [Agnocast] close shm_fd failed");
-    }
-  }
-}
-
-class Cleanup
-{
-public:
-  Cleanup(const Cleanup &) = delete;
-  Cleanup & operator=(const Cleanup &) = delete;
-  Cleanup(Cleanup &&) = delete;
-  Cleanup & operator=(Cleanup &&) = delete;
-
-  Cleanup() = default;
-  ~Cleanup() { shutdown_agnocast(); }
-};
-
-static Cleanup cleanup;
 
 }  // namespace agnocast

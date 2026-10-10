@@ -421,6 +421,7 @@ public:
         const uint64_t addr = pub_shm_infos[i].shm_addr;
         const uint64_t size = pub_shm_infos[i].shm_size;
         map_read_only_area(memfd, addr, size);
+        // memfd is closed during the call to map_read_only_area()
       }
     }
 
