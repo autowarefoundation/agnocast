@@ -23,7 +23,6 @@ typedef int32_t topic_local_id_t;
 
 struct publisher_shm_info
 {
-  pid_t pid;  // Must be a local PID, not a global PID
   int32_t memfd;
   uint64_t shm_addr;
   uint64_t shm_size;

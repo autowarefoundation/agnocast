@@ -281,12 +281,11 @@ impl AgnocastSharedMemory {
         let mempool_ptr = 0x121000000000 as *mut c_void;
 
         let shm_fd = unsafe {
-            libc::shm_open(
-                CStr::from_bytes_with_nul(b"/agnocast_test\0")
+            libc::memfd_create(
+                CStr::from_bytes_with_nul(b"agnocast_test\0")
                     .unwrap()
                     .as_ptr(),
-                libc::O_CREAT | libc::O_RDWR,
-                0o600,
+                libc::MFD_CLOEXEC,
             )
         };
         assert!(shm_fd != -1);
@@ -305,15 +304,6 @@ impl AgnocastSharedMemory {
             )
         };
         assert!(mmap_ptr != libc::MAP_FAILED);
-
-        let result = unsafe {
-            libc::shm_unlink(
-                CStr::from_bytes_with_nul(b"/agnocast_test\0")
-                    .unwrap()
-                    .as_ptr(),
-            )
-        };
-        assert!(result != -1);
 
         let start = mempool_ptr as usize;
         let end = start + mempool_size;

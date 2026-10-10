@@ -7,6 +7,7 @@
 #include <ament_index_cpp/get_package_prefix.hpp>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -68,78 +69,57 @@ std::mutex mmap_mtx;
 // RELEASE_SUB_REF_CMD deliberately stays outside this mutex, to keep the ipc_shared_ptr
 // destructor path from contending on the receive fast path.
 
-void * map_area(
-  const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)
+int map_writable_area(const uint64_t shm_addr, const uint64_t shm_size)
 {
-  const std::string shm_name = create_shm_name(pid);
-
-  int oflag = writable ? O_CREAT | O_EXCL | O_RDWR : O_RDONLY;
-  const int shm_mode = 0666;
-  int shm_fd = shm_open(shm_name.c_str(), oflag, shm_mode);
-  if (shm_fd == -1) {
-    RCLCPP_ERROR(logger, "shm_open failed: %s", strerror(errno));
+  int memfd = memfd_create("agnocast_shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (memfd < 0) {
+    RCLCPP_ERROR(logger, "memfd_create failed: %s", strerror(errno));
     close(agnocast_fd);
-    return nullptr;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(shm_fds_mtx);
-    shm_fds.push_back(shm_fd);
-  }
-
-  auto cleanup_shm_fd = [&]() {
-    {
-      std::lock_guard<std::mutex> lock(shm_fds_mtx);
-      shm_fds.erase(std::remove(shm_fds.begin(), shm_fds.end(), shm_fd), shm_fds.end());
-    }
-    close(shm_fd);
-    if (writable) {
-      shm_unlink(shm_name.c_str());
-    }
-  };
-
-  if (writable) {
-    if (ftruncate(shm_fd, static_cast<off_t>(shm_size)) == -1) {
-      RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
-      cleanup_shm_fd();
-      close(agnocast_fd);
-      return nullptr;
-    }
-
-    const int new_shm_mode = 0444;
-    if (fchmod(shm_fd, new_shm_mode) == -1) {
-      RCLCPP_ERROR(logger, "fchmod failed: %s", strerror(errno));
-      cleanup_shm_fd();
-      close(agnocast_fd);
-      return nullptr;
-    }
-  }
-
-  int prot = writable ? PROT_READ | PROT_WRITE : PROT_READ;
-  void * ret = mmap(
-    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, shm_fd,
-    0);
-
-  if (ret == MAP_FAILED) {
-    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
-    cleanup_shm_fd();
-    close(agnocast_fd);
-    return nullptr;
-  }
-
-  return ret;
-}
-
-void * map_writable_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size)
-{
-  return map_area(pid, shm_addr, shm_size, true);
-}
-
-void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size)
-{
-  if (map_area(pid, shm_addr, shm_size, false) == nullptr) {
     exit(EXIT_FAILURE);
   }
+
+  if (ftruncate(memfd, static_cast<off_t>(shm_size)) == -1) {
+    RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  int prot = PROT_READ | PROT_WRITE;
+  void * mapped_addr = mmap(
+    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, 0);
+  if (mapped_addr == MAP_FAILED) {
+    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  // Seal the memfd: prevent resizing, and block writes except through existing
+  // mappings.
+  int seals = F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_FUTURE_WRITE;
+  if (fcntl(memfd, F_ADD_SEALS, seals) == -1) {
+    RCLCPP_ERROR(logger, "fcntl(F_ADD_SEALS) failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  return memfd;
+}
+
+void map_read_only_area(int32_t memfd, const uint64_t shm_addr, const uint64_t shm_size)
+{
+  int prot = PROT_READ;
+  void * mapped_addr = mmap(
+    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, 0);
+  if (mapped_addr == MAP_FAILED) {
+    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
+    close(memfd);
+    exit(EXIT_FAILURE);
+  }
+
+  close(memfd);
 }
 
 // Initializes the child allocator for bridge functionality.
@@ -186,15 +166,19 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
     exit(EXIT_SUCCESS);
   }
 
-  void * mempool_ptr =
-    map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
-
-  if (mempool_ptr == nullptr) {
-    throw std::runtime_error("map_writable_area failed.");
+  int memfd = map_writable_area(add_process_args.ret_addr, add_process_args.ret_shm_size);
+  struct ioctl_register_process_shm_args register_process_shm_args = {};
+  register_process_shm_args.memfd = memfd;
+  if (ioctl(agnocast_fd, AGNOCAST_REGISTER_PROCESS_SHM_CMD, &register_process_shm_args) < 0) {
+    throw std::runtime_error(
+      std::string("AGNOCAST_REGISTER_PROCESS_SHM_CMD failed: ") + strerror(errno));
   }
+  // Closing memfd here does not destroy the mapping created in map_writable_area().
+  close(memfd);
 
+  // map_writable_area() uses MAP_FIXED_NOREPLACE, so the mapping is at ret_addr.
   return {
-    mempool_ptr,
+    reinterpret_cast<void *>(add_process_args.ret_addr),
     add_process_args.ret_shm_size,
   };
 }
@@ -614,34 +598,20 @@ struct initialize_agnocast_result initialize_agnocast(
     }
   }
 
-  void * mempool_ptr =
-    map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
-  if (mempool_ptr == nullptr) {
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
-  // Create an (unused) memfd and register it with the kernel module. This is a
-  // temporary measure to accommodate the new kmod interface.
-  int memfd = memfd_create("agnocast_shm", MFD_CLOEXEC);
-  if (memfd < 0) {
-    RCLCPP_ERROR(logger, "memfd_create failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
+  int memfd = map_writable_area(add_process_args.ret_addr, add_process_args.ret_shm_size);
   struct ioctl_register_process_shm_args register_process_shm_args = {};
   register_process_shm_args.memfd = memfd;
   if (ioctl(agnocast_fd, AGNOCAST_REGISTER_PROCESS_SHM_CMD, &register_process_shm_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_REGISTER_PROCESS_SHM_CMD failed: %s", strerror(errno));
+    close(memfd);
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
-
+  // Closing memfd here does not destroy the mapping created in map_writable_area().
   close(memfd);
 
   struct initialize_agnocast_result result = {};
-  result.mempool_ptr = mempool_ptr;
+  result.mempool_ptr = reinterpret_cast<void *>(add_process_args.ret_addr);
   result.mempool_size = add_process_args.ret_shm_size;
   return result;
 }

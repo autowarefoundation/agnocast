@@ -757,16 +757,6 @@ static int set_publisher_shm_info(
       return -ENOBUFS;
     }
 
-#ifndef KUNIT_BUILD
-    const pid_t local_pid = convert_pid_to_local(pub_info->pid);
-    if (local_pid == -1) {
-      return -ESRCH;
-    }
-    pub_shm_infos[publisher_num].pid = local_pid;
-#else
-    pub_shm_infos[publisher_num].pid = pub_info->pid;
-#endif
-
     pub_shm_infos[publisher_num].memf = memf;
     pub_shm_infos[publisher_num].shm_addr = proc_info->mempool_entry->addr;
     pub_shm_infos[publisher_num].shm_size = mempool_size_bytes;
@@ -803,7 +793,6 @@ static int export_publisher_shm_info_to_user(
 
   for (uint32_t i = 0; i < pub_shm_size; ++i) {
     struct publisher_shm_info user_info;
-    user_info.pid = pub_shm_infos[i].pid;
     user_info.shm_addr = pub_shm_infos[i].shm_addr;
     user_info.shm_size = pub_shm_infos[i].shm_size;
     user_info.memfd = memfds[i];

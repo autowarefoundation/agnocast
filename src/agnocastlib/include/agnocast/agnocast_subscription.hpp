@@ -24,7 +24,7 @@ class Node;
 
 extern std::mutex mmap_mtx;
 
-void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size);
+void map_read_only_area(int32_t memfd, const uint64_t shm_addr, const uint64_t shm_size);
 
 // Get the default callback group from an agnocast::Node for tracepoint use.
 // Defined in .cpp to avoid circular inclusion between agnocast_subscription.hpp and
@@ -417,10 +417,10 @@ public:
       }
 
       for (uint32_t i = 0; i < take_args.ret_pub_shm_num; i++) {
-        const pid_t pid = pub_shm_infos[i].pid;
+        const int32_t memfd = pub_shm_infos[i].memfd;
         const uint64_t addr = pub_shm_infos[i].shm_addr;
         const uint64_t size = pub_shm_infos[i].shm_size;
-        map_read_only_area(pid, addr, size);
+        map_read_only_area(memfd, addr, size);
       }
     }
 
