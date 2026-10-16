@@ -34,7 +34,7 @@ constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
 using topic_local_id_t = int32_t;
 struct publisher_shm_info
 {
-  pid_t pid;
+  int32_t memfd;
   uint64_t shm_addr;
   uint64_t shm_size;
 };
@@ -61,14 +61,10 @@ union ioctl_get_node_names_args {
 };
 #pragma GCC diagnostic pop
 
-// Mirrors AGNOCAST_DOMAIN_ID_NONE in the kernel module.
-#define AGNOCAST_DOMAIN_ID_NONE UINT32_MAX
-
 // Mirrors enum process_role in the kernel module.
 enum process_role {
   PROCESS_ROLE_APPLICATION = 0,
   PROCESS_ROLE_BRIDGE_MANAGER = 1,
-  PROCESS_ROLE_UNLINK_DAEMON = 2,
 };
 
 #pragma GCC diagnostic push
@@ -83,7 +79,6 @@ union ioctl_add_process_args {
   {
     uint64_t ret_addr;
     uint64_t ret_shm_size;
-    bool ret_unlink_daemon_exist;
     bool ret_bridge_daemon_exist;
     bool ret_discovery_agent_exist;
   };
@@ -237,12 +232,6 @@ union ioctl_get_publisher_num_args {
 };
 #pragma GCC diagnostic pop
 
-struct ioctl_get_exit_process_args
-{
-  bool ret_daemon_should_exit;
-  pid_t ret_pid;
-};
-
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
@@ -365,6 +354,11 @@ struct ioctl_add_discovery_agent_args
   bool ret_owned_by_caller;
 };
 
+struct ioctl_register_process_shm_args
+{
+  int32_t memfd;
+};
+
 #define AGNOCAST_GET_VERSION_CMD _IOR(0xA6, 1, struct ioctl_get_version_args)
 #define AGNOCAST_ADD_PROCESS_CMD _IOWR(0xA6, 2, union ioctl_add_process_args)
 #define AGNOCAST_ADD_SUBSCRIBER_CMD _IOWR(0xA6, 3, union ioctl_add_subscriber_args)
@@ -374,7 +368,6 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_RECEIVE_MSG_CMD _IOWR(0xA6, 8, union ioctl_receive_msg_args)
 #define AGNOCAST_TAKE_MSG_CMD _IOWR(0xA6, 9, union ioctl_take_msg_args)
 #define AGNOCAST_GET_SUBSCRIBER_NUM_CMD _IOWR(0xA6, 10, union ioctl_get_subscriber_num_args)
-#define AGNOCAST_GET_EXIT_PROCESS_CMD _IOR(0xA6, 11, struct ioctl_get_exit_process_args)
 #define AGNOCAST_GET_SUBSCRIBER_QOS_CMD _IOWR(0xA6, 12, struct ioctl_get_subscriber_qos_args)
 #define AGNOCAST_GET_PUBLISHER_QOS_CMD _IOWR(0xA6, 13, struct ioctl_get_publisher_qos_args)
 #define AGNOCAST_ADD_BRIDGE_CMD _IOWR(0xA6, 14, struct ioctl_add_bridge_args)
@@ -391,5 +384,6 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+#define AGNOCAST_REGISTER_PROCESS_SHM_CMD _IOW(0xA6, 34, struct ioctl_register_process_shm_args)
 
 }  // namespace agnocast

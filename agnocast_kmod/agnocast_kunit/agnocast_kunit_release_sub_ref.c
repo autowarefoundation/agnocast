@@ -24,12 +24,13 @@ static void setup_one_publisher(
   union ioctl_add_process_args add_process_args;
   int ret1 = agnocast_ioctl_add_process(
     PUBLISHER_PID, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+  KUNIT_ASSERT_EQ(test, agnocast_register_publisher_memf(PUBLISHER_PID, NULL), 0);
+
   union ioctl_add_publisher_args add_publisher_args;
   int ret2 = agnocast_ioctl_add_publisher(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PUBLISHER_PID, QOS_DEPTH,
     QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret1, 0);
   KUNIT_ASSERT_EQ(test, ret2, 0);
 
   *ret_addr = add_process_args.ret_addr;
@@ -237,7 +238,7 @@ void test_case_increment_rc_already_referenced(struct kunit * test)
     &add_subscriber_args);
   KUNIT_ASSERT_EQ(test, ret3, 0);
 
-  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  struct publisher_shm_info_internal pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   union ioctl_receive_msg_args receive_msg_args;
   int ret4 = agnocast_ioctl_receive_msg(
     TOPIC_NAME, current->nsproxy->ipc_ns, add_subscriber_args.ret_id, pub_shm_infos,

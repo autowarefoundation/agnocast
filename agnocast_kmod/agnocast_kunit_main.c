@@ -11,7 +11,6 @@
 #include "agnocast_kunit/agnocast_kunit_do_exit.h"
 #include "agnocast_kunit/agnocast_kunit_domain_bridge.h"
 #include "agnocast_kunit/agnocast_kunit_exit_free_data.h"
-#include "agnocast_kunit/agnocast_kunit_get_exit_process.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_names.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_publisher_topics.h"
 #include "agnocast_kunit/agnocast_kunit_get_node_subscriber_topics.h"
@@ -72,7 +71,6 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_GET_VERSION,
   TEST_CASES_INIT_MEMORY_ALLOCATOR,
   TEST_CASES_EXIT_FREE_DATA,
-  TEST_CASES_GET_EXIT_PROCESS,
   {},
 };
 

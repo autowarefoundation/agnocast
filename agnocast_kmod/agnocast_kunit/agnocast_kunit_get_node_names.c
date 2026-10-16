@@ -250,8 +250,8 @@ void test_case_get_node_names_buffer_too_small(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
 }
 
-// A publisher whose process exited outlives it while a subscriber still references its entries, so
-// without a liveness check a node that crashed and restarted would be reported twice.
+// A publisher_info can outlive its process while a subscriber still references its entries, so the
+// node-name collection must filter out stale publishers who are now dead.
 void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
 {
   char buf[2][NODE_NAME_BUFFER_SIZE];
@@ -278,9 +278,7 @@ void test_case_get_node_names_excludes_an_exited_process(struct kunit * test)
     0);
   agnocast_enqueue_exit_pid(current->tgid);
   msleep(20);
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(current->tgid));
-  KUNIT_ASSERT_TRUE(
-    test, agnocast_is_in_publisher_htable(TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id));
+  KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 1);
 
   // Act
   int ret = agnocast_ioctl_get_node_names(

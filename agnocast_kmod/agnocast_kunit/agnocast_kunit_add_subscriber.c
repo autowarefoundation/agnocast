@@ -83,7 +83,6 @@ void test_case_add_subscriber_normal(struct kunit * test)
   const uint32_t qos_depth = 1;
   setup_process(test, subscriber_pid);
   KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 1);
-  KUNIT_ASSERT_FALSE(test, agnocast_is_proc_exited(subscriber_pid));
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(

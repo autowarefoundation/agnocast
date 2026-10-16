@@ -53,7 +53,6 @@ Talks:
 - [For Users](#for-users)
 - [For Developers](#for-developers)
 - [Debug](#debug)
-- [Troubleshooting](#troubleshooting)
 - [Documents](#documents)
 
 ## Supported Environments
@@ -185,19 +184,6 @@ make CFLAGS_agnocast.o="-DDEBUG"
 ```
 
 Refer to the [Linux kernel documentation](https://www.kernel.org/doc/Documentation/kbuild/makefiles.txt) on kbuild for more information about compilation flags.
-
-## Troubleshooting
-
-### Shared memory cleanup
-
-Agnocast spawns a background daemon process that automatically cleans up shared memory when processes exit. It is forked by any Agnocast process that finds no daemon running, so the first process in an IPC namespace starts one, and so does the next process to start after the daemon is gone. The daemon inherits the parent's process name, so broad kill commands like `killall` or `kill -9 $(pgrep -f ...)` may accidentally kill it along with application processes; cleanup then stops until an Agnocast process starts again, which spawns a replacement and unlinks what was left behind in the meantime.
-
-If shared memory is left behind, you can remove it manually:
-
-```bash
-# Remove leftover shared memory
-rm /dev/shm/agnocast@*
-```
 
 ## Documents
 

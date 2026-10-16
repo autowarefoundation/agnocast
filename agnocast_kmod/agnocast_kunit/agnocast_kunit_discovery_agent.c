@@ -209,37 +209,3 @@ void test_case_discovery_agent_exists_ioctl(struct kunit * test)
     test, agnocast_ioctl_discovery_agent_exists(current->nsproxy->ipc_ns, 18, &exists), 0);
   KUNIT_EXPECT_FALSE(test, exists);  // a different domain
 }
-
-// An exited-but-not-yet-drained process must not veto the commit: it lingers in proc_info_htable
-// until the unlink daemon reaps it, but get_alive_process_num_in_domain() skips ->exited entries,
-// so the domain reads empty and the agent is allowed to exit.
-void test_case_discovery_agent_commit_ignores_exited_process(struct kunit * test)
-{
-  KUNIT_ASSERT_EQ(test, agnocast_get_discovery_agent_num(), 0);
-
-  const pid_t agent_pid = pid++;
-  struct ioctl_add_discovery_agent_args reg;
-  KUNIT_ASSERT_EQ(
-    test, agnocast_ioctl_add_discovery_agent(agent_pid, current->nsproxy->ipc_ns, 19, &reg), 0);
-
-  const pid_t app_pid = pid++;
-  union ioctl_add_process_args app;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      app_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 19, &app),
-    0);
-
-  agnocast_enqueue_exit_pid(app_pid);
-  msleep(20);  // let exit_worker_thread mark it exited (still present, not yet drained)
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(app_pid));
-
-  bool should_exit = false;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_discovery_agent_should_exit(
-      agent_pid, current->nsproxy->ipc_ns, 19, true, &should_exit),
-    0);
-  KUNIT_EXPECT_TRUE(test, should_exit);                          // exited process does not veto
-  KUNIT_EXPECT_EQ(test, agnocast_get_discovery_agent_num(), 0);  // agent deregistered
-}

@@ -172,10 +172,9 @@ void test_case_remove_subscriber_triggers_gc(struct kunit * test)
     agnocast_increment_message_entry_rc(TOPIC_NAME, current->nsproxy->ipc_ns, sub_id, entry_id);
   KUNIT_ASSERT_EQ(test, ret, 0);
 
-  agnocast_enqueue_exit_pid(pub_pid);
-  msleep(10);  // wait exit
+  agnocast_process_exit_cleanup(pub_pid);
 
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(pub_pid));
+  KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), 1);
   KUNIT_ASSERT_TRUE(
     test, agnocast_is_in_topic_entries(TOPIC_NAME, current->nsproxy->ipc_ns, entry_id));
 

@@ -6,7 +6,6 @@
 #include "agnocast_kunit_eventfd.h"
 
 #include <kunit/test.h>
-#include <linux/delay.h>
 
 static char * topic_name = "/kunit_test_topic";
 static char * node_name = "/kunit_test_node";
@@ -590,9 +589,8 @@ void test_case_publish_msg_stops_signaling_removed_subscriber(struct kunit * tes
   KUNIT_EXPECT_EQ(test, signal_count_of(kept_eventfd), 1);
 }
 
-// A subscriber also has to leave the notify lists when its process exits, which reaches the unlink
-// through the exit handler instead of REMOVE_SUBSCRIBER. Leaving it behind would make the next
-// publish signal a released context.
+// Process-exit cleanup must unlink a subscriber from notify lists just like REMOVE_SUBSCRIBER;
+// leaving it behind would make the next publish signal a released context.
 void test_case_publish_msg_stops_signaling_exited_subscriber(struct kunit * test)
 {
   // Arrange
@@ -607,9 +605,7 @@ void test_case_publish_msg_stops_signaling_exited_subscriber(struct kunit * test
   const pid_t exiting_pid = subscriber_pid;  // the helper advanced it to the pid it used
   setup_one_subscriber_with_eventfd(test, kept_eventfd, false);
 
-  agnocast_enqueue_exit_pid(exiting_pid);
-  msleep(20);
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
+  agnocast_process_exit_cleanup(exiting_pid);
 
   // Act
   union ioctl_publish_msg_args ioctl_publish_msg_ret = {0};
@@ -662,9 +658,8 @@ void test_case_publish_msg_address_above_mempool(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_entries_num(topic_name, current->nsproxy->ipc_ns), 0);
 }
 
-// A publisher outlives its process when a subscriber still references one of its entries: the
-// exit handler keeps publisher_info alive, but the daemon reaps process_info. Publishing on that
-// stale id must be rejected rather than dereferencing the missing mempool.
+// A publisher outlives its process when a subscriber still references one of its entries.
+// Publishing on that stale id must be rejected rather than dereferencing the missing process info.
 void test_case_publish_msg_no_process(struct kunit * test)
 {
   // Arrange
@@ -688,20 +683,8 @@ void test_case_publish_msg_no_process(struct kunit * test)
       topic_name, current->nsproxy->ipc_ns, subscriber_id, first_publish_ret.ret_entry_id),
     0);
 
-  // The referenced entry keeps publisher_info alive through the exit handler.
-  agnocast_enqueue_exit_pid(exiting_pid);
-  msleep(20);
-  KUNIT_ASSERT_TRUE(test, agnocast_is_proc_exited(exiting_pid));
-
-  // The unlink daemon then reaps process_info, leaving the publisher without one.
-  struct ioctl_get_exit_process_args get_exit_args;
-  memset(&get_exit_args, 0, sizeof(get_exit_args));
-  const pid_t global_pid =
-    agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &get_exit_args);
-  KUNIT_ASSERT_EQ(test, global_pid, exiting_pid);
-  KUNIT_ASSERT_EQ(test, get_exit_args.ret_pid, exiting_pid);
-  bool daemon_should_exit = false;
-  agnocast_commit_exit_process(current->nsproxy->ipc_ns, global_pid, -1, &daemon_should_exit);
+  // The referenced entry keeps publisher_info alive while cleanup removes process_info.
+  agnocast_process_exit_cleanup(exiting_pid);
 
   union ioctl_publish_msg_args ioctl_publish_msg_ret;
 

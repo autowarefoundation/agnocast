@@ -463,13 +463,17 @@ void test_case_domain_bridge_shm_info_skips_undelivered_publisher(struct kunit *
 
   setup_process_in_domain(test, current->tgid, 1);
   const topic_local_id_t sub_id = add_subscriber_for(test, current->tgid);
-  setup_process_in_domain(test, 1000, 1);
+
+  const uint64_t domain1_pub_addr = setup_process_in_domain(test, 1000, 1);
+  KUNIT_ASSERT_EQ(test, agnocast_register_publisher_memf(1000, NULL), 0);
   add_publisher_for(test, 1000);
+
   setup_process_in_domain(test, 1001, 2);
+  KUNIT_ASSERT_EQ(test, agnocast_register_publisher_memf(1001, NULL), 0);
   add_publisher_for(test, 1001);
 
   union ioctl_receive_msg_args receive_args;
-  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  struct publisher_shm_info_internal pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_receive_msg(
@@ -478,7 +482,7 @@ void test_case_domain_bridge_shm_info_skips_undelivered_publisher(struct kunit *
     0);
 
   KUNIT_EXPECT_EQ(test, receive_args.ret_pub_shm_num, (uint32_t)1);
-  KUNIT_EXPECT_EQ(test, pub_shm_infos[0].pid, (pid_t)1000);
+  KUNIT_EXPECT_EQ(test, pub_shm_infos[0].shm_addr, domain1_pub_addr);
 }
 
 // A rename rule pairs two differently-named cells onto one shared topic_struct:

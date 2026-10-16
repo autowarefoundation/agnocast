@@ -27,11 +27,7 @@ extern "C" struct initialize_agnocast_result initialize_agnocast(
   // 8GB: same as kernel module default
   constexpr uint64_t shm_size = 8ULL * 1024ULL * 1024ULL * 1024ULL;
 
-  const std::string shm_name = "/agnocast_heaphook_test@" + std::to_string(getpid());
-
-  int oflag = O_CREAT | O_RDWR;
-  const int shm_mode = 0666;
-  shm_fd = shm_open(shm_name.c_str(), oflag, shm_mode);
+  shm_fd = memfd_create("agnocast_shm_heaphook_test", MFD_CLOEXEC);
   if (shm_fd == -1) {
     return {nullptr, 0};
   }
@@ -52,11 +48,5 @@ extern "C" struct initialize_agnocast_result initialize_agnocast(
   return {ret, shm_size};
 }
 #pragma GCC diagnostic pop
-
-void shutdown_agnocast()
-{
-  close(shm_fd);
-  shm_unlink(("/agnocast_heaphook_test@" + std::to_string(getpid())).c_str());
-}
 
 }  // namespace agnocast

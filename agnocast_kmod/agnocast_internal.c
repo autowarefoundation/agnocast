@@ -77,10 +77,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
-          if (!pub_proc_info || pub_proc_info->exited) {
-            publisher_exited = true;
-          }
+          publisher_exited = !agnocast_find_process_info(pub_info->pid);
           break;
         }
       }
@@ -349,14 +346,8 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     return;
   }
 
-  // No daemon can drain the daemon's own entry, so for this role registered means alive.
-  if (proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-    hash_del_rcu(&proc_info->node);
-    kfree_rcu(proc_info, rcu_head);
-  } else {
-    // This proc_info will be removed from proc_info_htable later by the unlink daemon.
-    proc_info->exited = true;
-  }
+  hash_del_rcu(&proc_info->node);
+  kfree_rcu(proc_info, rcu_head);
 
   free_memory(pid);
 

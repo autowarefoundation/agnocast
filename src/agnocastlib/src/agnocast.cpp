@@ -7,6 +7,7 @@
 #include <ament_index_cpp/get_package_prefix.hpp>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -32,8 +33,6 @@ namespace agnocast
 {
 
 int agnocast_fd = -1;
-std::vector<int> shm_fds;
-std::mutex shm_fds_mtx;
 std::mutex mmap_mtx;
 // mmap_mtx serves two distinct purposes. Both require it to be held across the whole
 // receive/take ioctl *and* the shared-memory mapping that follows it, so it must stay
@@ -68,78 +67,57 @@ std::mutex mmap_mtx;
 // RELEASE_SUB_REF_CMD deliberately stays outside this mutex, to keep the ipc_shared_ptr
 // destructor path from contending on the receive fast path.
 
-void * map_area(
-  const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size, const bool writable)
+int map_writable_area(const uint64_t shm_addr, const uint64_t shm_size)
 {
-  const std::string shm_name = create_shm_name(pid);
-
-  int oflag = writable ? O_CREAT | O_EXCL | O_RDWR : O_RDONLY;
-  const int shm_mode = 0666;
-  int shm_fd = shm_open(shm_name.c_str(), oflag, shm_mode);
-  if (shm_fd == -1) {
-    RCLCPP_ERROR(logger, "shm_open failed: %s", strerror(errno));
+  int memfd = memfd_create("agnocast_shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (memfd < 0) {
+    RCLCPP_ERROR(logger, "memfd_create failed: %s", strerror(errno));
     close(agnocast_fd);
-    return nullptr;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(shm_fds_mtx);
-    shm_fds.push_back(shm_fd);
-  }
-
-  auto cleanup_shm_fd = [&]() {
-    {
-      std::lock_guard<std::mutex> lock(shm_fds_mtx);
-      shm_fds.erase(std::remove(shm_fds.begin(), shm_fds.end(), shm_fd), shm_fds.end());
-    }
-    close(shm_fd);
-    if (writable) {
-      shm_unlink(shm_name.c_str());
-    }
-  };
-
-  if (writable) {
-    if (ftruncate(shm_fd, static_cast<off_t>(shm_size)) == -1) {
-      RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
-      cleanup_shm_fd();
-      close(agnocast_fd);
-      return nullptr;
-    }
-
-    const int new_shm_mode = 0444;
-    if (fchmod(shm_fd, new_shm_mode) == -1) {
-      RCLCPP_ERROR(logger, "fchmod failed: %s", strerror(errno));
-      cleanup_shm_fd();
-      close(agnocast_fd);
-      return nullptr;
-    }
-  }
-
-  int prot = writable ? PROT_READ | PROT_WRITE : PROT_READ;
-  void * ret = mmap(
-    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, shm_fd,
-    0);
-
-  if (ret == MAP_FAILED) {
-    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
-    cleanup_shm_fd();
-    close(agnocast_fd);
-    return nullptr;
-  }
-
-  return ret;
-}
-
-void * map_writable_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size)
-{
-  return map_area(pid, shm_addr, shm_size, true);
-}
-
-void map_read_only_area(const pid_t pid, const uint64_t shm_addr, const uint64_t shm_size)
-{
-  if (map_area(pid, shm_addr, shm_size, false) == nullptr) {
     exit(EXIT_FAILURE);
   }
+
+  if (ftruncate(memfd, static_cast<off_t>(shm_size)) == -1) {
+    RCLCPP_ERROR(logger, "ftruncate failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  int prot = PROT_READ | PROT_WRITE;
+  const void * mapped_addr = mmap(
+    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, 0);
+  if (mapped_addr == MAP_FAILED) {
+    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  // Seal the memfd: prevent resizing, and block writes except through existing
+  // mappings.
+  int seals = F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_FUTURE_WRITE;
+  if (fcntl(memfd, F_ADD_SEALS, seals) == -1) {
+    RCLCPP_ERROR(logger, "fcntl(F_ADD_SEALS) failed: %s", strerror(errno));
+    close(memfd);
+    close(agnocast_fd);
+    exit(EXIT_FAILURE);
+  }
+
+  return memfd;
+}
+
+void map_read_only_area(int32_t memfd, const uint64_t shm_addr, const uint64_t shm_size)
+{
+  int prot = PROT_READ;
+  const void * mapped_addr = mmap(
+    reinterpret_cast<void *>(shm_addr), shm_size, prot, MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, 0);
+  if (mapped_addr == MAP_FAILED) {
+    RCLCPP_ERROR(logger, "mmap failed: %s", strerror(errno));
+    close(memfd);
+    exit(EXIT_FAILURE);
+  }
+
+  close(memfd);
 }
 
 // Initializes the child allocator for bridge functionality.
@@ -186,60 +164,21 @@ initialize_agnocast_result acquire_agnocast_resources_for_bridge()
     exit(EXIT_SUCCESS);
   }
 
-  void * mempool_ptr =
-    map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
-
-  if (mempool_ptr == nullptr) {
-    throw std::runtime_error("map_writable_area failed.");
+  int memfd = map_writable_area(add_process_args.ret_addr, add_process_args.ret_shm_size);
+  struct ioctl_register_process_shm_args register_process_shm_args = {};
+  register_process_shm_args.memfd = memfd;
+  if (ioctl(agnocast_fd, AGNOCAST_REGISTER_PROCESS_SHM_CMD, &register_process_shm_args) < 0) {
+    throw std::runtime_error(
+      std::string("AGNOCAST_REGISTER_PROCESS_SHM_CMD failed: ") + strerror(errno));
   }
+  // Closing memfd here does not destroy the mapping created in map_writable_area().
+  close(memfd);
 
+  // map_writable_area() uses MAP_FIXED_NOREPLACE, so the mapping is at ret_addr.
   return {
-    mempool_ptr,
+    reinterpret_cast<void *>(add_process_args.ret_addr),
     add_process_args.ret_shm_size,
   };
-}
-
-void poll_for_unlink()
-{
-  // Register so the kernel module can tell a live daemon from a dead one. No domain_id: the
-  // kernel module records this daemon as belonging to none.
-  union ioctl_add_process_args add_process_args = {};
-  add_process_args.role = PROCESS_ROLE_UNLINK_DAEMON;
-  if (ioctl(agnocast_fd, AGNOCAST_ADD_PROCESS_CMD, &add_process_args) < 0) {
-    RCLCPP_ERROR(logger, "AGNOCAST_ADD_PROCESS_CMD failed: %s", strerror(errno));
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
-
-  // Another daemon won the race and registered first; this one has nothing to do.
-  if (add_process_args.ret_unlink_daemon_exist) {
-    close(agnocast_fd);
-    exit(EXIT_SUCCESS);
-  }
-
-  while (true) {
-    sleep(1);
-
-    struct ioctl_get_exit_process_args get_exit_process_args = {};
-    do {
-      if (ioctl(agnocast_fd, AGNOCAST_GET_EXIT_PROCESS_CMD, &get_exit_process_args) < 0) {
-        RCLCPP_ERROR(logger, "AGNOCAST_GET_EXIT_PROCESS_CMD failed: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
-      }
-
-      if (get_exit_process_args.ret_pid > 0) {
-        const std::string shm_name = create_shm_name(get_exit_process_args.ret_pid);
-        shm_unlink(shm_name.c_str());
-      }
-    } while (get_exit_process_args.ret_pid > 0);
-
-    if (get_exit_process_args.ret_daemon_should_exit) {
-      break;
-    }
-  }
-
-  exit(0);
 }
 
 void poll_for_bridge_manager()
@@ -552,13 +491,7 @@ struct initialize_agnocast_result initialize_agnocast(
     exit(EXIT_FAILURE);
   }
 
-  // add_process_args is a union, so ADD_PROCESS overwrites domain_id with its ret_* fields.
   const uint32_t domain_id = get_ros_domain_id();
-  if (domain_id == AGNOCAST_DOMAIN_ID_NONE) {
-    RCLCPP_ERROR(logger, "ROS_DOMAIN_ID=%u is reserved by Agnocast", domain_id);
-    close(agnocast_fd);
-    exit(EXIT_FAILURE);
-  }
 
   union ioctl_add_process_args add_process_args = {};
   add_process_args.role = PROCESS_ROLE_APPLICATION;
@@ -572,12 +505,6 @@ struct initialize_agnocast_result initialize_agnocast(
   bool should_spawn_bridge = false;
   auto bridge_mode = get_bridge_mode();
 
-  // Create a shm_unlink daemon process if it doesn't exist in its ipc namespace.
-  // ret_unlink_daemon_exist is only an early-out hint: poll_for_unlink() makes the singleton
-  // decision when it registers.
-  if (!add_process_args.ret_unlink_daemon_exist) {
-    spawn_daemon_process([]() { poll_for_unlink(); });
-  }
   if (bridge_mode == BridgeMode::On && !add_process_args.ret_bridge_daemon_exist) {
     should_spawn_bridge = true;
   }
@@ -614,41 +541,22 @@ struct initialize_agnocast_result initialize_agnocast(
     }
   }
 
-  void * mempool_ptr =
-    map_writable_area(getpid(), add_process_args.ret_addr, add_process_args.ret_shm_size);
-  if (mempool_ptr == nullptr) {
+  int memfd = map_writable_area(add_process_args.ret_addr, add_process_args.ret_shm_size);
+  struct ioctl_register_process_shm_args register_process_shm_args = {};
+  register_process_shm_args.memfd = memfd;
+  if (ioctl(agnocast_fd, AGNOCAST_REGISTER_PROCESS_SHM_CMD, &register_process_shm_args) < 0) {
+    RCLCPP_ERROR(logger, "AGNOCAST_REGISTER_PROCESS_SHM_CMD failed: %s", strerror(errno));
+    close(memfd);
     close(agnocast_fd);
     exit(EXIT_FAILURE);
   }
+  // Closing memfd here does not destroy the mapping created in map_writable_area().
+  close(memfd);
 
   struct initialize_agnocast_result result = {};
-  result.mempool_ptr = mempool_ptr;
+  result.mempool_ptr = reinterpret_cast<void *>(add_process_args.ret_addr);
   result.mempool_size = add_process_args.ret_shm_size;
   return result;
 }
-
-static void shutdown_agnocast()
-{
-  std::lock_guard<std::mutex> lock(shm_fds_mtx);
-  for (int fd : shm_fds) {
-    if (close(fd) == -1) {
-      perror("[ERROR] [Agnocast] close shm_fd failed");
-    }
-  }
-}
-
-class Cleanup
-{
-public:
-  Cleanup(const Cleanup &) = delete;
-  Cleanup & operator=(const Cleanup &) = delete;
-  Cleanup(Cleanup &&) = delete;
-  Cleanup & operator=(Cleanup &&) = delete;
-
-  Cleanup() = default;
-  ~Cleanup() { shutdown_agnocast(); }
-};
-
-static Cleanup cleanup;
 
 }  // namespace agnocast
