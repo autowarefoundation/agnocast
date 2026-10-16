@@ -159,7 +159,30 @@ protected:
   {
     return agnocast::create_client<std_srvs::srv::Empty>(node_.get(), "test_service");
   }
+
+  auto create_service()
+  {
+    return agnocast::create_service<std_srvs::srv::Empty>(
+      node_.get(), "test_service",
+      [](agnocast::ipc_shared_ptr<Request> &&, agnocast::ipc_shared_ptr<Response> &&) { return; });
+  }
 };
+
+TEST_F(AgnocastNodeClientTest, AsyncSendRequestReturnsResponse)
+{
+  // Arrange
+  auto service = create_service();
+  auto client = create_client();
+
+  ASSERT_TRUE(client->wait_for_service(1s));
+
+  // Act
+  auto request = client->borrow_loaned_request();
+  auto future_and_request_id = client->async_send_request(std::move(request));
+
+  // Assert
+  ASSERT_EQ(std::future_status::ready, future_and_request_id.future.wait_for(1s));
+}
 
 TEST_F(AgnocastNodeClientTest, WaitForServiceReturnsOnShutdown)
 {
