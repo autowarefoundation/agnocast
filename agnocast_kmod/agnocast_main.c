@@ -43,8 +43,10 @@ static int agnocast_init(void)
 
 static void agnocast_exit(void)
 {
-  agnocast_exit_kthread();
+  // Unregister (and synchronize) the tracepoint first so no probe can enqueue into the pid queue
+  // after the worker is gone; agnocast_exit_free_data() then covers any pids left undrained.
   agnocast_exit_exit_hook();
+  agnocast_exit_kthread();
 
   agnocast_exit_free_data();
   cleanup_memory_allocator();
