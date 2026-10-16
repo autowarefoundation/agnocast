@@ -16,4 +16,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2"
-rlsf = "0.2"
+rlsf = {version="0.2", features=["unstable"]}
