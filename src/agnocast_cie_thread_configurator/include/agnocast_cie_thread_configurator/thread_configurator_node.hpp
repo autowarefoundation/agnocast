@@ -19,11 +19,32 @@
 
 class ThreadConfiguratorNode : public rclcpp::Node
 {
-  using ThreadConfig = agnocast_cie_thread_configurator::ThreadConfig;
-  using KernelThreadConfig = agnocast_cie_thread_configurator::KernelThreadConfig;
-  using IrqConfig = agnocast_cie_thread_configurator::IrqConfig;
+  using CallbackGroupEntry = agnocast_cie_thread_configurator::CallbackGroupEntry;
+  using NonRosThreadEntry = agnocast_cie_thread_configurator::NonRosThreadEntry;
+  using KernelThreadEntry = agnocast_cie_thread_configurator::KernelThreadEntry;
+  using IrqEntry = agnocast_cie_thread_configurator::IrqEntry;
   using SchedAttrs = agnocast_cie_thread_configurator::SchedAttrs;
   using SchedPolicy = agnocast_cie_thread_configurator::SchedPolicy;
+
+  // A YAML entry plus what has been observed at runtime for it. Owned in the
+  // two vectors below, which the id_to_*/node_to_* maps index into.
+  struct TrackedCallbackGroup
+  {
+    CallbackGroupEntry entry;
+    int64_t thread_id = -1;  // -1 until announced; stays -1 for wildcard entries
+    // Full incoming callback_group_id -> last announced tid; wildcard
+    // ("<node name>/*") entries only. For such entries `applied` means "at
+    // least one matched instance has been configured". std::map for
+    // deterministic iteration order in the reapply response arrays.
+    std::map<std::string, int64_t> matched_tids;
+    bool applied = false;  // true once issue_syscalls() has succeeded
+  };
+  struct TrackedNonRosThread
+  {
+    NonRosThreadEntry entry;
+    int64_t thread_id = -1;  // -1 until announced
+    bool applied = false;    // true once issue_syscalls() has succeeded
+  };
 
   // Concurrency:
   // - callback_group_configs_ / id_to_callback_group_config_ /
@@ -74,7 +95,7 @@ private:
   SectionApplyOutcome apply_irq_configs() const;
   // Sole logging point for the write path: emits errno-specific guidance on
   // any open/write/short-write failure (returning false) and the success line.
-  bool write_irq_affinity_file(const IrqConfig & config) const;
+  bool write_irq_affinity_file(const IrqEntry & config) const;
   void callback_group_callback(
     size_t domain_id, const agnocast_cie_config_msgs::msg::CallbackGroupInfo::SharedPtr msg);
   void non_ros_thread_callback(agnocast_cie_thread_configurator::NonRosThreadInfo info);
@@ -85,18 +106,18 @@ private:
 
   rclcpp::Service<agnocast_cie_config_msgs::srv::ReapplyConfig>::SharedPtr reapply_service_;
 
-  std::vector<ThreadConfig> callback_group_configs_;
-  // (domain_id, callback_group_id) -> ThreadConfig*, exact entries only
-  std::map<std::pair<size_t, std::string>, ThreadConfig *> id_to_callback_group_config_;
-  // (domain_id, wildcard_prefix) -> ThreadConfig*, wildcard ("<node>/*") entries only
-  std::map<std::pair<size_t, std::string>, ThreadConfig *> node_to_wildcard_config_;
+  std::vector<TrackedCallbackGroup> callback_group_configs_;
+  // (domain_id, callback_group_id) -> exact entries only
+  std::map<std::pair<size_t, std::string>, TrackedCallbackGroup *> id_to_callback_group_config_;
+  // (domain_id, wildcard_prefix) -> wildcard ("<node>/*") entries only
+  std::map<std::pair<size_t, std::string>, TrackedCallbackGroup *> node_to_wildcard_config_;
 
-  std::vector<ThreadConfig> non_ros_thread_configs_;
-  // thread_name -> ThreadConfig*
-  std::map<std::string, ThreadConfig *> id_to_non_ros_thread_config_;
+  std::vector<TrackedNonRosThread> non_ros_thread_configs_;
+  // thread_name -> entry
+  std::map<std::string, TrackedNonRosThread *> id_to_non_ros_thread_config_;
 
-  std::vector<KernelThreadConfig> kernel_thread_configs_;
-  std::vector<IrqConfig> irq_configs_;
+  std::vector<KernelThreadEntry> kernel_thread_configs_;
+  std::vector<IrqEntry> irq_configs_;
 
   std::atomic<int> unapplied_num_{0};
   std::atomic<int> cgroup_num_{0};

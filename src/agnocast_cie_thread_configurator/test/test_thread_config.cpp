@@ -21,23 +21,18 @@ YAML::Node yaml_from_str(const char * s)
   return YAML::Load(s);
 }
 
+acie::ParsedConfig parse(const YAML::Node & yaml)
+{
+  return acie::parse_config(yaml, kTestDefaultDomain);
+}
+
 // EXPECT_THROW alone cannot tell WHICH validation fired (every failure path
 // derives from std::runtime_error), so the negative tests also match a
 // distinguishing fragment of the message.
-void expect_kernel_threads_error(const char * yaml, const std::string & fragment)
+void expect_error(const char * yaml, const std::string & fragment)
 {
   try {
-    acie::parse_kernel_threads(yaml_from_str(yaml));
-    FAIL() << "expected std::runtime_error";
-  } catch (const std::runtime_error & e) {
-    EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
-  }
-}
-
-void expect_irqs_error(const char * yaml, const std::string & fragment)
-{
-  try {
-    acie::parse_irqs(yaml_from_str(yaml));
+    parse(yaml_from_str(yaml));
     FAIL() << "expected std::runtime_error";
   } catch (const std::runtime_error & e) {
     EXPECT_NE(std::string(e.what()).find(fragment), std::string::npos) << e.what();
@@ -45,18 +40,17 @@ void expect_irqs_error(const char * yaml, const std::string & fragment)
 }
 }  // namespace
 
-// ---------- parse_yaml ----------
+// ---------- callback_groups / non_ros_threads ----------
 
-TEST(ParseYaml, ParsesEmptyConfig)
+TEST(ParseConfig, ParsesEmptyConfig)
 {
   auto y = yaml_from_str("callback_groups: []\nnon_ros_threads: []\n");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  EXPECT_TRUE(cb.empty());
-  EXPECT_TRUE(nrt.empty());
+  const auto config = parse(y);
+  EXPECT_TRUE(config.callback_groups.empty());
+  EXPECT_TRUE(config.non_ros_threads.empty());
 }
 
-TEST(ParseYaml, ParsesCallbackGroupSchedFifo)
+TEST(ParseConfig, ParsesCallbackGroupSchedFifo)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -67,20 +61,17 @@ callback_groups:
     affinity: [0, 1]
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].thread_str, "my_cbg");
-  EXPECT_EQ(cb[0].domain_id, 3u);
-  EXPECT_EQ(cb[0].attrs.policy, acie::SchedPolicy::Fifo);
-  EXPECT_EQ(cb[0].attrs.rt_priority, 50);
-  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{0, 1}));
-  EXPECT_EQ(cb[0].thread_id, -1);
-  EXPECT_FALSE(cb[0].applied);
-  EXPECT_FALSE(cb[0].is_wildcard());
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].id, "my_cbg");
+  EXPECT_EQ(config.callback_groups[0].domain_id, 3u);
+  EXPECT_EQ(config.callback_groups[0].attrs.policy, acie::SchedPolicy::Fifo);
+  EXPECT_EQ(config.callback_groups[0].attrs.rt_priority, 50);
+  EXPECT_EQ(config.callback_groups[0].attrs.affinity, (std::vector<int>{0, 1}));
+  EXPECT_FALSE(config.callback_groups[0].is_wildcard());
 }
 
-TEST(ParseYaml, ParsesNiceForCfsPolicies)
+TEST(ParseConfig, ParsesNiceForCfsPolicies)
 {
   for (const char * policy : {"SCHED_OTHER", "SCHED_BATCH", "SCHED_IDLE"}) {
     auto y = yaml_from_str(("callback_groups:\n"
@@ -93,15 +84,14 @@ TEST(ParseYaml, ParsesNiceForCfsPolicies)
                             "    affinity: []\n"
                             "non_ros_threads: []\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt)) << policy;
-    ASSERT_EQ(cb.size(), 1u);
-    EXPECT_EQ(cb[0].attrs.nice, -10) << policy;
-    EXPECT_EQ(cb[0].attrs.rt_priority, 0) << policy;
+    const auto config = parse(y);
+    ASSERT_EQ(config.callback_groups.size(), 1u);
+    EXPECT_EQ(config.callback_groups[0].attrs.nice, -10) << policy;
+    EXPECT_EQ(config.callback_groups[0].attrs.rt_priority, 0) << policy;
   }
 }
 
-TEST(ParseYaml, IgnoresStrayKeyOfTheOtherPolicyClass)
+TEST(ParseConfig, IgnoresStrayKeyOfTheOtherPolicyClass)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -119,16 +109,15 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 2u);
-  EXPECT_EQ(cb[0].attrs.nice, -5);
-  EXPECT_EQ(cb[0].attrs.rt_priority, 0);
-  EXPECT_EQ(cb[1].attrs.rt_priority, 50);
-  EXPECT_EQ(cb[1].attrs.nice, 0);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 2u);
+  EXPECT_EQ(config.callback_groups[0].attrs.nice, -5);
+  EXPECT_EQ(config.callback_groups[0].attrs.rt_priority, 0);
+  EXPECT_EQ(config.callback_groups[1].attrs.rt_priority, 50);
+  EXPECT_EQ(config.callback_groups[1].attrs.nice, 0);
 }
 
-TEST(ParseYaml, RejectsMissingNiceOnSchedOther)
+TEST(ParseConfig, RejectsMissingNiceOnSchedOther)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -138,11 +127,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsNiceOutOfRange)
+TEST(ParseConfig, RejectsNiceOutOfRange)
 {
   for (const char * bad_nice : {"-21", "20", "50"}) {
     auto y = yaml_from_str(("callback_groups:\n"
@@ -155,13 +143,11 @@ TEST(ParseYaml, RejectsNiceOutOfRange)
                             "    affinity: []\n"
                             "non_ros_threads: []\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
-      << "nice=" << bad_nice;
+    EXPECT_THROW(parse(y), std::runtime_error) << "nice=" << bad_nice;
   }
 }
 
-TEST(ParseYaml, TreatsNullNiceAsMissing)
+TEST(ParseConfig, TreatsNullNiceAsMissing)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -172,16 +158,15 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
   try {
-    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    parse(y);
     FAIL() << "expected std::runtime_error";
   } catch (const std::runtime_error & e) {
     EXPECT_NE(std::string(e.what()).find("requires 'nice'"), std::string::npos) << e.what();
   }
 }
 
-TEST(ParseYaml, ReportsEntryOnNonIntegerNice)
+TEST(ParseConfig, ReportsEntryOnNonIntegerNice)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -192,9 +177,8 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
   try {
-    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    parse(y);
     FAIL() << "expected std::runtime_error";
   } catch (const std::runtime_error & e) {
     const std::string what = e.what();
@@ -203,7 +187,7 @@ non_ros_threads: []
   }
 }
 
-TEST(ParseYaml, ReportsEntryOnNonIntegerRtPriority)
+TEST(ParseConfig, ReportsEntryOnNonIntegerRtPriority)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -214,9 +198,8 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
   try {
-    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    parse(y);
     FAIL() << "expected std::runtime_error";
   } catch (const std::runtime_error & e) {
     const std::string what = e.what();
@@ -225,7 +208,7 @@ non_ros_threads: []
   }
 }
 
-TEST(ParseYaml, RejectsMissingPriorityOnRtPolicy)
+TEST(ParseConfig, RejectsMissingPriorityOnRtPolicy)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -235,11 +218,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsRtPriorityOutOfRange)
+TEST(ParseConfig, RejectsRtPriorityOutOfRange)
 {
   for (const char * bad_priority : {"0", "100", "-1"}) {
     auto y = yaml_from_str(("callback_groups:\n"
@@ -252,13 +234,11 @@ TEST(ParseYaml, RejectsRtPriorityOutOfRange)
                             "    affinity: []\n"
                             "non_ros_threads: []\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
-      << "priority=" << bad_priority;
+    EXPECT_THROW(parse(y), std::runtime_error) << "priority=" << bad_priority;
   }
 }
 
-TEST(ParseYaml, FallsBackToDefaultDomainId)
+TEST(ParseConfig, FallsBackToDefaultDomainId)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -268,13 +248,12 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].domain_id, kTestDefaultDomain);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].domain_id, kTestDefaultDomain);
 }
 
-TEST(ParseYaml, ParsesSchedDeadline)
+TEST(ParseConfig, ParsesSchedDeadline)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -287,16 +266,15 @@ callback_groups:
     affinity: [0]
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].attrs.policy, acie::SchedPolicy::Deadline);
-  EXPECT_EQ(cb[0].attrs.deadline.runtime, 1000000u);
-  EXPECT_EQ(cb[0].attrs.deadline.period, 5000000u);
-  EXPECT_EQ(cb[0].attrs.deadline.deadline, 5000000u);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].attrs.policy, acie::SchedPolicy::Deadline);
+  EXPECT_EQ(config.callback_groups[0].attrs.deadline.runtime, 1000000u);
+  EXPECT_EQ(config.callback_groups[0].attrs.deadline.period, 5000000u);
+  EXPECT_EQ(config.callback_groups[0].attrs.deadline.deadline, 5000000u);
 }
 
-TEST(ParseYaml, AcceptsDeadlineParamsBeyond32Bits)
+TEST(ParseConfig, AcceptsDeadlineParamsBeyond32Bits)
 {
   // sched_attr carries nanoseconds in 64-bit fields; a 5 s period exceeds
   // 2^32 ns.
@@ -311,13 +289,12 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].attrs.deadline.period, 5000000000u);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].attrs.deadline.period, 5000000000u);
 }
 
-TEST(ParseYaml, RejectsUnknownPolicyOnCallbackGroup)
+TEST(ParseConfig, RejectsUnknownPolicyOnCallbackGroup)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -328,11 +305,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsUnknownPolicyOnNonRosThread)
+TEST(ParseConfig, RejectsUnknownPolicyOnNonRosThread)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups: []
@@ -342,14 +318,13 @@ non_ros_threads:
     priority: 0
     affinity: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsSchedDeadlineMissingRuntimeField)
+TEST(ParseConfig, RejectsSchedDeadlineMissingRuntimeField)
 {
-  // SCHED_DEADLINE requires runtime/period/deadline. parse_yaml calls
-  // .as<unsigned int>() on a missing node, which makes yaml-cpp throw
+  // SCHED_DEADLINE requires runtime/period/deadline. parse_config calls
+  // .as<uint64_t>() on a missing node, which makes yaml-cpp throw
   // YAML::TypedBadConversion (a subclass of YAML::Exception, which is
   // a subclass of std::runtime_error). The test catches the most general
   // shape so it does not couple to the precise yaml-cpp exception type.
@@ -361,11 +336,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, ParsesNonRosThread)
+TEST(ParseConfig, ParsesNonRosThread)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups: []
@@ -375,44 +349,14 @@ non_ros_threads:
     priority: 30
     affinity: [0]
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(nrt.size(), 1u);
-  EXPECT_EQ(nrt[0].thread_str, "worker");
-  EXPECT_EQ(nrt[0].attrs.policy, acie::SchedPolicy::Rr);
-  EXPECT_EQ(nrt[0].attrs.rt_priority, 30);
+  const auto config = parse(y);
+  ASSERT_EQ(config.non_ros_threads.size(), 1u);
+  EXPECT_EQ(config.non_ros_threads[0].name, "worker");
+  EXPECT_EQ(config.non_ros_threads[0].attrs.policy, acie::SchedPolicy::Rr);
+  EXPECT_EQ(config.non_ros_threads[0].attrs.rt_priority, 30);
 }
 
-TEST(ParseYaml, ClearsOutputVectorsOnReparse)
-{
-  auto y1 = yaml_from_str(R"YAML(
-callback_groups:
-  - id: alpha
-    domain_id: 0
-    policy: SCHED_OTHER
-    nice: 0
-    affinity: []
-non_ros_threads: []
-)YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  acie::parse_yaml(y1, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-
-  auto y2 = yaml_from_str(R"YAML(
-callback_groups:
-  - id: beta
-    domain_id: 0
-    policy: SCHED_OTHER
-    nice: 0
-    affinity: []
-non_ros_threads: []
-)YAML");
-  acie::parse_yaml(y2, kTestDefaultDomain, cb, nrt);
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].thread_str, "beta");
-}
-
-TEST(ParseYaml, RejectsDuplicateCallbackGroupKey)
+TEST(ParseConfig, RejectsDuplicateCallbackGroupKey)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -428,11 +372,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, AllowsSameIdInDifferentDomains)
+TEST(ParseConfig, AllowsSameIdInDifferentDomains)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -448,12 +391,11 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 2u);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 2u);
 }
 
-TEST(ParseYaml, RejectsDuplicateNonRosThreadName)
+TEST(ParseConfig, RejectsDuplicateNonRosThreadName)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups: []
@@ -467,13 +409,12 @@ non_ros_threads:
     nice: 0
     affinity: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
 // ---------- wildcard ("<node name>/*") callback-group ids ----------
 
-TEST(ParseYaml, ParsesWildcardCallbackGroupId)
+TEST(ParseConfig, ParsesWildcardCallbackGroupId)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -484,16 +425,14 @@ callback_groups:
     affinity: [0]
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_TRUE(cb[0].is_wildcard());
-  EXPECT_EQ(cb[0].wildcard_prefix(), "/perception/lidar_node");
-  EXPECT_EQ(cb[0].thread_str, "/perception/lidar_node/*");  // kept as written
-  EXPECT_TRUE(cb[0].matched_tids.empty());
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_TRUE(config.callback_groups[0].is_wildcard());
+  EXPECT_EQ(config.callback_groups[0].wildcard_prefix(), "/perception/lidar_node");
+  EXPECT_EQ(config.callback_groups[0].id, "/perception/lidar_node/*");  // kept as written
 }
 
-TEST(ParseYaml, RejectsWildcardWithEmptyNodePart)
+TEST(ParseConfig, RejectsWildcardWithEmptyNodePart)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -504,11 +443,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsStrayAsteriskInId)
+TEST(ParseConfig, RejectsStrayAsteriskInId)
 {
   for (const char * bad_id :
        {"/node*", "/node/**", "/node/*x", "/a/*/b", "*", "/node/*@Waitable"}) {
@@ -522,13 +460,11 @@ TEST(ParseYaml, RejectsStrayAsteriskInId)
                             "    affinity: []\n"
                             "non_ros_threads: []\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
-      << "id=" << bad_id;
+    EXPECT_THROW(parse(y), std::runtime_error) << "id=" << bad_id;
   }
 }
 
-TEST(ParseYaml, RejectsAtSignInWildcardPrefix)
+TEST(ParseConfig, RejectsAtSignInWildcardPrefix)
 {
   // A full callback-group id copied from the template with "/*" appended.
   auto y = yaml_from_str(R"YAML(
@@ -540,11 +476,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, RejectsDuplicateWildcardKey)
+TEST(ParseConfig, RejectsDuplicateWildcardKey)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -560,11 +495,10 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseYaml, AllowsSameWildcardInDifferentDomains)
+TEST(ParseConfig, AllowsSameWildcardInDifferentDomains)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -580,12 +514,11 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 2u);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 2u);
 }
 
-TEST(ParseYaml, AllowsExactAndWildcardForSameNode)
+TEST(ParseConfig, AllowsExactAndWildcardForSameNode)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -601,14 +534,13 @@ callback_groups:
     affinity: []
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 2u);
-  EXPECT_TRUE(cb[0].is_wildcard());
-  EXPECT_FALSE(cb[1].is_wildcard());
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 2u);
+  EXPECT_TRUE(config.callback_groups[0].is_wildcard());
+  EXPECT_FALSE(config.callback_groups[1].is_wildcard());
 }
 
-TEST(ParseYaml, NonRosThreadNameEndingInSlashStarStaysExact)
+TEST(ParseConfig, NonRosThreadNameEndingInSlashStarStaysExact)
 {
   // Wildcards are a callback_groups-only feature; non_ros_threads names are
   // opaque strings matched exactly, even when they happen to end in "/*".
@@ -620,15 +552,14 @@ non_ros_threads:
     nice: 0
     affinity: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(nrt.size(), 1u);
-  EXPECT_EQ(nrt[0].thread_str, "worker/*");
+  const auto config = parse(y);
+  ASSERT_EQ(config.non_ros_threads.size(), 1u);
+  EXPECT_EQ(config.non_ros_threads[0].name, "worker/*");
 }
 
 // ---------- affinity validation ----------
 
-TEST(ParseYaml, NormalizesAffinityToSortedUnique)
+TEST(ParseConfig, NormalizesAffinityToSortedUnique)
 {
   // parse_affinity bounds values by the machine CPU count, so only CPUs 0
   // and 1 are used to keep this test valid on small CI machines.
@@ -645,15 +576,14 @@ non_ros_threads:
     nice: 0
     affinity: [1, 1, 0]
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{0, 1}));
-  ASSERT_EQ(nrt.size(), 1u);
-  EXPECT_EQ(nrt[0].attrs.affinity, (std::vector<int>{0, 1}));
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].attrs.affinity, (std::vector<int>{0, 1}));
+  ASSERT_EQ(config.non_ros_threads.size(), 1u);
+  EXPECT_EQ(config.non_ros_threads[0].attrs.affinity, (std::vector<int>{0, 1}));
 }
 
-TEST(ParseYaml, TreatsAbsentOrNullAffinityAsUnmanaged)
+TEST(ParseConfig, TreatsAbsentOrNullAffinityAsUnmanaged)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -668,14 +598,13 @@ callback_groups:
     affinity: ~
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 2u);
-  EXPECT_TRUE(cb[0].attrs.affinity.empty());
-  EXPECT_TRUE(cb[1].attrs.affinity.empty());
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 2u);
+  EXPECT_TRUE(config.callback_groups[0].attrs.affinity.empty());
+  EXPECT_TRUE(config.callback_groups[1].attrs.affinity.empty());
 }
 
-TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
+TEST(ParseConfig, RejectsAffinityCpuOutOfRange)
 {
   // CPU_SET(3) / sched_setaffinity(2) would silently ignore all of these,
   // shrinking the mask without any error report. The valid CPU 0 in front
@@ -694,13 +623,11 @@ TEST(ParseYaml, RejectsAffinityCpuOutOfRange)
                             "\n"
                             "non_ros_threads: []\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
-      << "affinity=" << bad_affinity;
+    EXPECT_THROW(parse(y), std::runtime_error) << "affinity=" << bad_affinity;
   }
 }
 
-TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
+TEST(ParseConfig, AcceptsHighestValidAffinityCpu)
 {
   // Pins the accept side of the [0, min(CPU_SETSIZE, num_cpus)) boundary.
   const int max_cpu =
@@ -715,13 +642,12 @@ TEST(ParseYaml, AcceptsHighestValidAffinityCpu)
                           "]\n"
                           "non_ros_threads: []\n")
                            .c_str());
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].attrs.affinity, (std::vector<int>{max_cpu}));
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].attrs.affinity, (std::vector<int>{max_cpu}));
 }
 
-TEST(ParseYaml, RejectsScalarAffinity)
+TEST(ParseConfig, RejectsScalarAffinity)
 {
   // A scalar iterates zero times and would otherwise silently mean
   // "no affinity".
@@ -734,13 +660,11 @@ TEST(ParseYaml, RejectsScalarAffinity)
                             "    affinity: " +
                             std::string(bad_affinity) + "\n")
                              .c_str());
-    std::vector<acie::ThreadConfig> cb, nrt;
-    EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error)
-      << "affinity=" << bad_affinity;
+    EXPECT_THROW(parse(y), std::runtime_error) << "affinity=" << bad_affinity;
   }
 }
 
-TEST(ParseYaml, ReportsEntryOnNonIntegerAffinityElement)
+TEST(ParseConfig, ReportsEntryOnNonIntegerAffinityElement)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -751,9 +675,8 @@ callback_groups:
     affinity: [0, all]
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
   try {
-    acie::parse_yaml(y, kTestDefaultDomain, cb, nrt);
+    parse(y);
     FAIL() << "expected std::runtime_error";
   } catch (const std::runtime_error & e) {
     const std::string what = e.what();
@@ -773,13 +696,13 @@ TEST(ExtractNodePart, SplitsAtFirstAtSign)
   EXPECT_EQ(acie::extract_node_part(""), "");
 }
 
-// ---------- parse_kernel_threads ----------
+// ---------- kernel_threads ----------
 
 TEST(ParseKernelThreads, MissingOrNullSectionYieldsEmpty)
 {
-  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("callback_groups: []\n")).empty());
-  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: ~\n")).empty());
-  EXPECT_TRUE(acie::parse_kernel_threads(yaml_from_str("kernel_threads: []\n")).empty());
+  EXPECT_TRUE(parse(yaml_from_str("callback_groups: []\n")).kernel_threads.empty());
+  EXPECT_TRUE(parse(yaml_from_str("kernel_threads: ~\n")).kernel_threads.empty());
+  EXPECT_TRUE(parse(yaml_from_str("kernel_threads: []\n")).kernel_threads.empty());
 }
 
 TEST(ParseKernelThreads, ParsesPolicyPriorityAffinity)
@@ -792,7 +715,7 @@ kernel_threads:
     priority: 10
     affinity: [0, 1]
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].comm, "agnocast_exit_w");
   EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Fifo);
@@ -810,7 +733,7 @@ kernel_threads:
     nice: -10
     affinity: ~
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Other);
   EXPECT_EQ(result[0].attrs.nice, -10);
@@ -827,7 +750,7 @@ kernel_threads:
     priority: ~
     affinity: ~
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_FALSE(result[0].attrs.policy.has_value());
   EXPECT_TRUE(result[0].attrs.affinity.empty());
@@ -844,7 +767,7 @@ kernel_threads:
     priority: UNMANAGEABLE
     affinity: UNMANAGEABLE
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_FALSE(result[0].attrs.policy.has_value());
   EXPECT_TRUE(result[0].attrs.affinity.empty());
@@ -860,7 +783,7 @@ kernel_threads:
     priority: ~
     affinity: [1]
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_FALSE(result[0].attrs.policy.has_value());
   EXPECT_EQ(result[0].attrs.affinity, (std::vector<int>{1}));
@@ -876,7 +799,7 @@ kernel_threads:
     priority: ~
     affinity: [1, 0, 1]
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].attrs.affinity, (std::vector<int>{0, 1}));
 }
@@ -885,7 +808,7 @@ TEST(ParseKernelThreads, RejectsScalarAndOutOfRangeAffinity)
 {
   // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
   // silently mean "leave alone".
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: nfsd
@@ -894,7 +817,7 @@ kernel_threads:
     affinity: 0-3
 )YAML",
     "'affinity' must be a list");
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: nfsd
@@ -914,7 +837,7 @@ kernel_threads:
     priority: 5
     affinity: UNMANAGEABLE
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   ASSERT_TRUE(result[0].attrs.policy.has_value());
   EXPECT_TRUE(result[0].attrs.affinity.empty());
@@ -932,7 +855,7 @@ kernel_threads:
     deadline: 5000000
     affinity: ~
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].attrs.policy, acie::SchedPolicy::Deadline);
   EXPECT_EQ(result[0].attrs.deadline.runtime, 1000000u);
@@ -951,7 +874,7 @@ kernel_threads:
     deadline: 5000000000
     affinity: ~
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].attrs.deadline.period, 5000000000u);
 }
@@ -962,7 +885,7 @@ TEST(ParseKernelThreads, LowercaseSentinelIsNotRecognized)
   // must fall through to the normal validation (here: unknown policy). No
   // other attribute key is set, so a case-insensitive sentinel match would
   // parse cleanly and fail the test.
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -974,7 +897,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsMissingOrEmptyComm)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - policy: ~
@@ -982,7 +905,7 @@ kernel_threads:
     affinity: ~
 )YAML",
     "is missing a non-empty 'comm'");
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: ""
@@ -995,7 +918,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsNonStringComm)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: [a, b]
@@ -1008,7 +931,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsKworkerComm)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: kworker/0:0H-events_highpri
@@ -1031,7 +954,7 @@ kernel_threads:
     priority: ~
     affinity: [0]
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].comm, "agnocast_exit_worker");
   EXPECT_TRUE(result[0].is_managed());
@@ -1039,7 +962,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsDuplicateComm)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: nfsd
@@ -1056,7 +979,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsUnknownPolicy)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1069,7 +992,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsPriorityWithoutPolicy)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1082,7 +1005,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsNiceWithoutPolicy)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1097,7 +1020,7 @@ TEST(ParseKernelThreads, RejectsCfsPolicyWithoutNice)
 {
   // As in callback_groups, a CFS policy takes 'nice'; 'priority' does not
   // satisfy the requirement.
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1110,7 +1033,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsOutOfRangeNiceAndRtPriority)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: nfsd
@@ -1119,7 +1042,7 @@ kernel_threads:
     affinity: ~
 )YAML",
     "'nice' must be in [-20, 19]");
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: nfsd
@@ -1132,7 +1055,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsPolicyWithoutPriority)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1143,7 +1066,7 @@ kernel_threads:
     "requires 'priority'");
   // The sentinel counts as unset exactly like null does, and the message
   // says so because the key is visibly present.
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: rcu_preempt
@@ -1159,7 +1082,7 @@ TEST(ParseKernelThreads, RejectsDeadlineFieldsWithoutPolicy)
   // The full SCHED_DEADLINE triple with 'policy' forgotten would otherwise
   // parse cleanly as unmanaged, the same silently dead configuration the
   // nice/priority guard rejects.
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: dl_thread
@@ -1174,7 +1097,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsSchedDeadlineMissingFields)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: dl_thread
@@ -1187,7 +1110,7 @@ kernel_threads:
 
 TEST(ParseKernelThreads, RejectsMalformedSchedDeadlineFields)
 {
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: dl_thread
@@ -1198,7 +1121,7 @@ kernel_threads:
     affinity: ~
 )YAML",
     "'runtime' must be a non-negative decimal integer for comm=dl_thread");
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: dl_thread
@@ -1210,7 +1133,7 @@ kernel_threads:
 )YAML",
     "'period' must be a non-negative decimal integer for comm=dl_thread");
   // yaml-cpp would read "0x10" as 16; only plain decimal digits are valid.
-  expect_kernel_threads_error(
+  expect_error(
     R"YAML(
 kernel_threads:
   - comm: dl_thread
@@ -1236,7 +1159,7 @@ kernel_threads:
     deadline: 5000000
     affinity: ~
 )YAML");
-  const auto result = acie::parse_kernel_threads(y);
+  const auto result = parse(y).kernel_threads;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].attrs.deadline.runtime, 500000u);
 }
@@ -1244,24 +1167,24 @@ kernel_threads:
 TEST(ParseKernelThreads, RejectsNonListSection)
 {
   // A scalar or map section would otherwise silently parse as empty.
-  expect_kernel_threads_error("kernel_threads: oops\n", "'kernel_threads' must be a list");
-  expect_kernel_threads_error("kernel_threads:\n  comm: nfsd\n", "'kernel_threads' must be a list");
+  expect_error("kernel_threads: oops\n", "'kernel_threads' must be a list");
+  expect_error("kernel_threads:\n  comm: nfsd\n", "'kernel_threads' must be a list");
 }
 
 TEST(ParseKernelThreads, RejectsScalarListEntry)
 {
   // A plausible shorthand (a list of bare comms) must fail with the entry
   // diagnostic, not a raw yaml-cpp BadSubscript.
-  expect_kernel_threads_error("kernel_threads: [nfsd]\n", "entry #0 must be a mapping");
+  expect_error("kernel_threads: [nfsd]\n", "entry #0 must be a mapping");
 }
 
-// ---------- parse_irqs ----------
+// ---------- irqs ----------
 
 TEST(ParseIrqs, MissingOrNullSectionYieldsEmpty)
 {
-  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("callback_groups: []\n")).empty());
-  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: ~\n")).empty());
-  EXPECT_TRUE(acie::parse_irqs(yaml_from_str("irqs: []\n")).empty());
+  EXPECT_TRUE(parse(yaml_from_str("callback_groups: []\n")).irqs.empty());
+  EXPECT_TRUE(parse(yaml_from_str("irqs: ~\n")).irqs.empty());
+  EXPECT_TRUE(parse(yaml_from_str("irqs: []\n")).irqs.empty());
 }
 
 TEST(ParseIrqs, ParsesFilledAffinityAndName)
@@ -1272,7 +1195,7 @@ irqs:
     name: nvidia
     affinity: [1, 0]
 )YAML");
-  const auto result = acie::parse_irqs(y);
+  const auto result = parse(y).irqs;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].irq, 103);
   EXPECT_EQ(result[0].name, "nvidia");
@@ -1291,7 +1214,7 @@ irqs:
     name: i8042
     affinity: ~
 )YAML");
-  const auto result = acie::parse_irqs(y);
+  const auto result = parse(y).irqs;
   ASSERT_EQ(result.size(), 2u);
   EXPECT_FALSE(result[0].is_managed());
   EXPECT_FALSE(result[1].is_managed());
@@ -1304,7 +1227,7 @@ irqs:
   - irq: 42
     affinity: [1]
 )YAML");
-  const auto result = acie::parse_irqs(y);
+  const auto result = parse(y).irqs;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_TRUE(result[0].name.empty());
   EXPECT_TRUE(result[0].is_managed());
@@ -1312,21 +1235,21 @@ irqs:
 
 TEST(ParseIrqs, RejectsMissingOrNegativeOrNonIntIrq)
 {
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - name: orphan
     affinity: ~
 )YAML",
     "is missing a non-negative integer 'irq'");
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: -1
     affinity: ~
 )YAML",
     "'irq' must be a non-negative decimal integer, got '-1'");
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: not_a_number
@@ -1344,7 +1267,7 @@ irqs:
   - irq: 010
     affinity: ~
 )YAML");
-  const auto result = acie::parse_irqs(y);
+  const auto result = parse(y).irqs;
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].irq, 10);
 }
@@ -1352,7 +1275,7 @@ irqs:
 TEST(ParseIrqs, RejectsHexIrq)
 {
   // yaml-cpp would read "0x10" as 16; only plain decimal digits are valid.
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: 0x10
@@ -1363,7 +1286,7 @@ irqs:
 
 TEST(ParseIrqs, RejectsDuplicateIrq)
 {
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: 5
@@ -1378,14 +1301,14 @@ TEST(ParseIrqs, RejectsScalarAndOutOfRangeAffinity)
 {
   // A scalar (e.g. a cpu-list string copied from a scan) would otherwise
   // silently mean "leave alone".
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: 10
     affinity: 0-3
 )YAML",
     "'affinity' must be a list");
-  expect_irqs_error(
+  expect_error(
     R"YAML(
 irqs:
   - irq: 10
@@ -1396,20 +1319,20 @@ irqs:
 
 TEST(ParseIrqs, RejectsNonListSection)
 {
-  expect_irqs_error("irqs: oops\n", "'irqs' must be a list");
-  expect_irqs_error("irqs:\n  irq: 5\n", "'irqs' must be a list");
+  expect_error("irqs: oops\n", "'irqs' must be a list");
+  expect_error("irqs:\n  irq: 5\n", "'irqs' must be a list");
 }
 
 TEST(ParseIrqs, RejectsScalarListEntry)
 {
   // A plausible shorthand (a list of bare IRQ numbers) must fail with the
   // entry diagnostic, not a raw yaml-cpp BadSubscript.
-  expect_irqs_error("irqs: [42]\n", "entry #0 must be a mapping");
+  expect_error("irqs: [42]\n", "entry #0 must be a mapping");
 }
 
-// ---------- new sections vs parse_yaml ----------
+// ---------- all sections ----------
 
-TEST(ParseYaml, IgnoresKernelThreadsAndIrqsSections)
+TEST(ParseConfig, ParsesAllFourSectionsIntoTheirVectors)
 {
   auto y = yaml_from_str(R"YAML(
 callback_groups:
@@ -1418,7 +1341,11 @@ callback_groups:
     policy: SCHED_OTHER
     nice: 0
     affinity: []
-non_ros_threads: []
+non_ros_threads:
+  - name: worker
+    policy: SCHED_RR
+    priority: 30
+    affinity: [0]
 kernel_threads:
   - comm: agnocast_exit_w
     policy: SCHED_FIFO
@@ -1429,14 +1356,32 @@ irqs:
     name: nvidia
     affinity: [0, 1]
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  ASSERT_NO_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt));
-  ASSERT_EQ(cb.size(), 1u);
-  EXPECT_EQ(cb[0].thread_str, "my_cbg");
-  EXPECT_TRUE(nrt.empty());
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].id, "my_cbg");
+  ASSERT_EQ(config.non_ros_threads.size(), 1u);
+  EXPECT_EQ(config.non_ros_threads[0].name, "worker");
+  EXPECT_EQ(config.non_ros_threads[0].attrs.policy, acie::SchedPolicy::Rr);
+  EXPECT_EQ(config.non_ros_threads[0].attrs.rt_priority, 30);
+  ASSERT_EQ(config.kernel_threads.size(), 1u);
+  EXPECT_EQ(config.kernel_threads[0].comm, "agnocast_exit_w");
+  ASSERT_EQ(config.irqs.size(), 1u);
+  EXPECT_EQ(config.irqs[0].irq, 103);
 }
 
-TEST(ParseYaml, UnmanageableSentinelIsNotRecognized)
+TEST(ParseConfig, MissingOrNullSectionsYieldEmpty)
+{
+  for (const char * yaml :
+       {"{}\n", "callback_groups: ~\nnon_ros_threads: ~\nkernel_threads: ~\nirqs: ~\n"}) {
+    const auto config = parse(yaml_from_str(yaml));
+    EXPECT_TRUE(config.callback_groups.empty()) << yaml;
+    EXPECT_TRUE(config.non_ros_threads.empty()) << yaml;
+    EXPECT_TRUE(config.kernel_threads.empty()) << yaml;
+    EXPECT_TRUE(config.irqs.empty()) << yaml;
+  }
+}
+
+TEST(ParseConfig, UnmanageableSentinelIsNotRecognized)
 {
   // The sentinel is scoped to kernel_threads/irqs (the tool writes it there);
   // in the hand-written sections it must fail like any other invalid value,
@@ -1449,8 +1394,7 @@ callback_groups:
     affinity: UNMANAGEABLE
 non_ros_threads: []
 )YAML");
-  std::vector<acie::ThreadConfig> cb, nrt;
-  EXPECT_THROW(acie::parse_yaml(y, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y), std::runtime_error);
 
   auto y2 = yaml_from_str(R"YAML(
 callback_groups: []
@@ -1460,5 +1404,5 @@ non_ros_threads:
     nice: UNMANAGEABLE
     affinity: ~
 )YAML");
-  EXPECT_THROW(acie::parse_yaml(y2, kTestDefaultDomain, cb, nrt), std::runtime_error);
+  EXPECT_THROW(parse(y2), std::runtime_error);
 }
