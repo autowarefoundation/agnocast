@@ -85,6 +85,159 @@ struct ResponseCallInfo
   }
 };
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+
+class ClientIntrospection
+{
+  std::unique_ptr<ServiceEventPublisher> event_publisher_;
+
+public:
+  void init(
+    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
+    const std::string & service_type)
+  {
+    event_publisher_ = std::make_unique<ServiceEventPublisher>(node, service_name, service_type);
+  }
+
+  void configure(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t introspection_state)
+  {
+    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+  }
+
+  template <typename ServiceT, typename RequestT>
+  std::optional<typename ServiceT::Request> copy_request_if_contents(
+    const ipc_shared_ptr<RequestT> & request)
+  {
+    if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
+      return std::nullopt;
+    }
+    return static_cast<const typename ServiceT::Request &>(*request);
+  }
+
+  std::optional<std::shared_ptr<void>> copy_request_if_contents(
+    const void * payload, ServiceTsBundle & service_ts_bundle, const rclcpp::Logger & logger)
+  {
+    if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
+      return std::nullopt;
+    }
+
+    const auto * request_ts = service_ts_bundle.service_ts->request_typesupport;
+
+    rclcpp::SerializedMessage serialized;
+    if (
+      rmw_serialize(payload, request_ts, &serialized.get_rcl_serialized_message()) != RMW_RET_OK) {
+      RCLCPP_ERROR(
+        logger,
+        "rmw_serialize() failed; only publishing metadata for this REQUEST_SENT service event");
+      rmw_reset_error();
+      return std::nullopt;
+    }
+
+    // Allocate and initialize memory for the copy.
+    auto * members = service_ts_bundle.request_members;
+    void * copied_raw = ::operator new(members->size_of_);
+    members->init_function(copied_raw, rosidl_runtime_cpp::MessageInitialization::SKIP);
+    std::shared_ptr<void> copied(copied_raw, [members](void * p) {
+      members->fini_function(p);
+      ::operator delete(p);
+    });
+
+    if (
+      rmw_deserialize(&serialized.get_rcl_serialized_message(), request_ts, copied.get()) !=
+      RMW_RET_OK) {
+      RCLCPP_ERROR(
+        logger,
+        "rmw_deserialize() failed; only publishing metadata for this REQUEST_SENT service event");
+      rmw_reset_error();
+      return std::nullopt;
+    }
+
+    return copied;
+  }
+
+  template <typename ServiceT>
+  void publish_request_sent_event(
+    const int64_t seqno, const std::optional<typename ServiceT::Request> & request,
+    const rmw_gid_t & gid)
+  {
+    event_publisher_->publish_service_event_message(
+      service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? &*request : nullptr, seqno,
+      gid.data);
+  }
+
+  void publish_request_sent_event(
+    const int64_t seqno, const std::optional<std::shared_ptr<void>> & request,
+    const rmw_gid_t & gid)
+  {
+    event_publisher_->publish_service_event_message(
+      service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? request->get() : nullptr, seqno,
+      gid.data);
+  }
+
+  template <typename ResponseT>
+  void publish_response_received_event(
+    const ipc_shared_ptr<ResponseT> & response, const rmw_gid_t & gid)
+  {
+    event_publisher_->publish_service_event_message(
+      service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED, response.get(),
+      response->ResponseMeta::seqno, gid.data);
+  }
+
+  void publish_response_received_event(
+    const GenericResponseWrapper & generic_response_wrapper, const rmw_gid_t & gid)
+  {
+    event_publisher_->publish_service_event_message(
+      service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED, generic_response_wrapper.get(),
+      generic_response_wrapper.seqno(), gid.data);
+  }
+};
+
+#else
+
+class ClientIntrospection
+{
+public:
+  void init(
+    std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &)
+  {
+  }
+
+  template <typename ServiceT, typename RequestT>
+  std::optional<typename ServiceT::Request> copy_request_if_contents(
+    const ipc_shared_ptr<RequestT> &)
+  {
+    return std::nullopt;
+  }
+
+  std::optional<std::shared_ptr<void>> copy_request_if_contents(
+    const void *, ServiceTsBundle &, const rclcpp::Logger &)
+  {
+    return std::nullopt;
+  }
+
+  template <typename ServiceT>
+  void publish_request_sent_event(
+    const int64_t, const std::optional<typename ServiceT::Request> &, const rmw_gid_t &)
+  {
+  }
+
+  void publish_request_sent_event(
+    const int64_t, const std::optional<std::shared_ptr<void>> &, const rmw_gid_t &)
+  {
+  }
+
+  template <typename ResponseT>
+  void publish_response_received_event(const ipc_shared_ptr<ResponseT> &, const rmw_gid_t &)
+  {
+  }
+
+  void publish_response_received_event(const GenericResponseWrapper &, const rmw_gid_t &) {}
+};
+
+#endif  // AGNOCAST_HAS_SERVICE_INTROSPECTION
+
 }  // namespace detail
 
 class ClientBase
@@ -96,9 +249,7 @@ protected:
   std::string service_name_;
   std::string response_topic_name_;
   std::function<bool()> check_context_ok_;
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  std::unique_ptr<ServiceEventPublisher> event_publisher_;
-#endif
+  detail::ClientIntrospection introspection_;
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
   rclcpp::Logger get_logger() const;
@@ -120,9 +271,7 @@ protected:
       }
     };
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    event_publisher_ = std::make_unique<ServiceEventPublisher>(node_, service_name_, service_type);
-#endif
+    introspection_.init(node_, service_name_, service_type);
   }
 
 public:
@@ -167,7 +316,7 @@ public:
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t introspection_state)
   {
-    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+    introspection_.configure(clock, qos_service_event_pub, introspection_state);
   }
 #endif
 
@@ -226,27 +375,6 @@ private:
   typename ServiceRequestPublisher::SharedPtr publisher_;
   typename ServiceResponseSubscriber::SharedPtr subscriber_;
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
-  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
-  std::optional<typename ServiceT::Request> copy_request_if_contents(
-    const ipc_shared_ptr<RequestT> & request)
-  {
-    if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
-      return std::nullopt;
-    }
-    return static_cast<const typename ServiceT::Request &>(*request);
-  }
-
-  void publish_request_sent_event(
-    const int64_t seqno, const std::optional<typename ServiceT::Request> & request)
-  {
-    event_publisher_->publish_service_event_message(
-      service_msgs::msg::ServiceEventInfo::REQUEST_SENT, request ? &*request : nullptr, seqno,
-      get_gid().data);
-  }
-#endif
-
   template <typename Func>
   int64_t send_request_impl(
     ipc_shared_ptr<typename ServiceT::Request> && request, ResponseCallInfo && call_info,
@@ -261,15 +389,11 @@ private:
         seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
     }
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    const auto sent_request = copy_request_if_contents(internal_request);
-#endif
+    const auto sent_request = introspection_.copy_request_if_contents<ServiceT>(internal_request);
 
     publisher_->publish(std::move(internal_request));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    publish_request_sent_event(seqno, sent_request);
-#endif
+    introspection_.publish_request_sent_event<ServiceT>(seqno, sent_request, get_gid());
 
     return seqno;
   }
@@ -308,13 +432,7 @@ private:
       /* --- critical section end --- */
       lock.unlock();
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      // Must precede the move into the promise, which leaves `response` empty.
-      event_publisher_->publish_service_event_message(
-        service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED,
-        static_cast<const typename ServiceT::Response *>(response.get()),
-        response->ResponseMeta::seqno, get_gid().data);
-#endif
+      introspection_.publish_response_received_event(response, get_gid());
 
       info.promise.set_value(ipc_shared_ptr<typename ServiceT::Response>(std::move(response)));
       if (info.callback.has_value()) {
@@ -442,15 +560,6 @@ private:
 
   ServiceTsBundle service_ts_bundle_;
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
-  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
-  std::optional<std::shared_ptr<void>> copy_request_if_contents(const void * payload);
-
-  void publish_request_sent_event(
-    const int64_t seqno, const std::optional<std::shared_ptr<void>> & request);
-#endif
-
   template <typename Func>
   int64_t send_request_impl(
     ipc_shared_ptr<void> && request, ResponseCallInfo && call_info, Func && take_future)
@@ -465,18 +574,15 @@ private:
         seqno2_response_call_info_.try_emplace(seqno, std::move(call_info)).first->second);
     }
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
     const std::optional<std::shared_ptr<void>> sent_request =
-      copy_request_if_contents(generic_request_wrapper.get());
-#endif
+      introspection_.copy_request_if_contents(
+        generic_request_wrapper.get(), service_ts_bundle_, get_logger());
 
     publisher_->publish(std::move(generic_request_wrapper).take_request(), [this](void * p) {
       GenericRequestWrapper::free(p, this->service_ts_bundle_.request_members);
     });
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    publish_request_sent_event(seqno, sent_request);
-#endif
+    introspection_.publish_request_sent_event(seqno, sent_request, get_gid());
 
     return seqno;
   }
@@ -520,11 +626,7 @@ private:
       /* --- critical section end --- */
       lock.unlock();
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      event_publisher_->publish_service_event_message(
-        service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED, generic_response_wrapper.get(),
-        response_seqno, get_gid().data);
-#endif
+      introspection_.publish_response_received_event(generic_response_wrapper, get_gid());
 
       info.promise.set_value(std::move(generic_response_wrapper).take_response());
       if (info.callback.has_value()) {
