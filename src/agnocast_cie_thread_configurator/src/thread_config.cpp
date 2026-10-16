@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -47,26 +48,33 @@ bool is_unmanageable_sentinel(const YAML::Node & node)
   return node && node.IsScalar() && node.Scalar() == k_unmanageable;
 }
 
+std::string scalar_or_placeholder(const YAML::Node & node)
+{
+  return node.IsScalar() ? node.Scalar() : std::string("<non-scalar>");
+}
+
 constexpr int k_nice_min = -20;
 constexpr int k_nice_max = 19;
 constexpr int k_rt_priority_min = 1;
 constexpr int k_rt_priority_max = 99;
 
-// yaml-cpp's as<T>() auto-detects the numeric base (YAML 1.1), so a
-// zero-padded "010" would parse as octal 8 and "0x10" as hex 16. IRQ numbers
-// and SCHED_DEADLINE parameters are hand-aligned columns where zero-padding
-// is plausible, so accept digits only and parse base-10, matching the
+// Decimal digits only, with a leading '-' for signed T. yaml-cpp's as<T>()
+// auto-detects the base (YAML 1.1), so a zero-padded "010" would parse as
+// octal 8 and "0x10" as hex 16; IRQ numbers and SCHED_DEADLINE parameters are
+// hand-aligned columns where zero-padding is plausible. This matches the
 // is_all_digits() + from_chars() path the system scanners use.
 template <typename T>
-std::optional<T> as_base10(const YAML::Node & node)
+std::optional<T> as_decimal(const YAML::Node & node)
 {
   if (!node || !node.IsScalar()) {
     return std::nullopt;
   }
   const std::string & s = node.Scalar();
-  if (s.empty() || !std::all_of(s.begin(), s.end(), [](unsigned char c) {
-        return std::isdigit(c) != 0;
-      })) {
+  const size_t digits_begin = (std::is_signed_v<T> && !s.empty() && s[0] == '-') ? 1 : 0;
+  if (
+    s.size() == digits_begin || !std::all_of(
+                                  s.begin() + static_cast<std::ptrdiff_t>(digits_begin), s.end(),
+                                  [](unsigned char c) { return std::isdigit(c) != 0; })) {
     return std::nullopt;
   }
   T value{};
@@ -91,18 +99,18 @@ int parse_tunable(
       "Policy '" + std::string(to_string(policy)) + "' requires '" + key + "' for " + ctx.desc +
       (is_unmanageable_sentinel(node) ? " (UNMANAGEABLE counts as unset)" : ""));
   }
-  int value = 0;
-  try {
-    value = node.as<int>();
-  } catch (const YAML::Exception &) {
-    throw std::runtime_error("'" + std::string(key) + "' must be an integer for " + ctx.desc);
+  const auto value = as_decimal<int>(node);
+  if (!value) {
+    throw std::runtime_error(
+      "'" + std::string(key) + "' must be a decimal integer for " + ctx.desc + ", got '" +
+      scalar_or_placeholder(node) + "'");
   }
-  if (value < min || value > max) {
+  if (*value < min || *value > max) {
     throw std::runtime_error(
       "'" + std::string(key) + "' must be in [" + std::to_string(min) + ", " + std::to_string(max) +
-      "] for " + ctx.desc + ", got " + std::to_string(value));
+      "] for " + ctx.desc + ", got " + std::to_string(*value));
   }
-  return value;
+  return *value;
 }
 
 DeadlineParams parse_deadline_params(const YAML::Node & entry, const EntryContext & ctx)
@@ -117,7 +125,7 @@ DeadlineParams parse_deadline_params(const YAML::Node & entry, const EntryContex
     }
   }
   const auto field = [&](const char * key) {
-    const auto value = as_base10<uint64_t>(entry[key]);
+    const auto value = as_decimal<uint64_t>(entry[key]);
     if (!value) {
       throw std::runtime_error(
         "'" + std::string(key) + "' must be a non-negative decimal integer for " + ctx.desc);
@@ -145,21 +153,19 @@ std::vector<int> parse_affinity(const YAML::Node & entry, const EntryContext & c
   }
   const int max_cpu = manageable_cpu_bound();
   for (const auto & cpu_node : affinity) {
-    int cpu = 0;
-    try {
-      cpu = cpu_node.as<int>();
-    } catch (const YAML::Exception &) {
+    const auto cpu = as_decimal<int>(cpu_node);
+    if (!cpu) {
       throw std::runtime_error(
-        "'affinity' must contain only integers for " + ctx.desc + ", got '" +
-        (cpu_node.IsScalar() ? cpu_node.Scalar() : std::string("<non-scalar>")) + "'");
+        "'affinity' must contain only decimal integers for " + ctx.desc + ", got '" +
+        scalar_or_placeholder(cpu_node) + "'");
     }
-    if (cpu < 0 || cpu > max_cpu) {
+    if (*cpu < 0 || *cpu > max_cpu) {
       throw std::runtime_error(
-        "'affinity' CPU " + std::to_string(cpu) + " must be in [0, " + std::to_string(max_cpu) +
+        "'affinity' CPU " + std::to_string(*cpu) + " must be in [0, " + std::to_string(max_cpu) +
         "] (this machine has " + std::to_string(sysconf(_SC_NPROCESSORS_CONF)) + " CPUs) for " +
         ctx.desc);
     }
-    cpus.push_back(cpu);
+    cpus.push_back(*cpu);
   }
   std::sort(cpus.begin(), cpus.end());
   cpus.erase(std::unique(cpus.begin(), cpus.end()), cpus.end());
@@ -369,14 +375,15 @@ ParsedConfig parse_config(const YAML::Node & yaml, size_t default_domain_id)
       if (!iq.IsMap()) {
         throw std::runtime_error(entry_pos + " must be a mapping (e.g. '- irq: ...')");
       }
-      if (!iq["irq"] || iq["irq"].IsNull()) {
+      const YAML::Node irq_node = iq["irq"];
+      if (!irq_node || irq_node.IsNull()) {
         throw std::runtime_error(entry_pos + " is missing a non-negative integer 'irq'");
       }
-      const auto irq = as_base10<int>(iq["irq"]);
-      if (!irq) {
+      const auto irq = as_decimal<int>(irq_node);
+      if (!irq || *irq < 0) {
         throw std::runtime_error(
           entry_pos + ": 'irq' must be a non-negative decimal integer, got '" +
-          (iq["irq"].IsScalar() ? iq["irq"].Scalar() : std::string("<non-scalar>")) + "'");
+          scalar_or_placeholder(irq_node) + "'");
       }
       entry.irq = *irq;
       const std::string desc = "irq=" + std::to_string(entry.irq);

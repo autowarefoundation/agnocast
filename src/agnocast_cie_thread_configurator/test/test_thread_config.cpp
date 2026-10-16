@@ -191,15 +191,20 @@ TEST(ParseSchedAttrs, RejectsMissingOrNullPriorityOnRtPolicy)
   }
 }
 
-TEST(ParseSchedAttrs, RejectsNonIntegerNiceAndPriority)
+TEST(ParseSchedAttrs, RejectsNonDecimalNiceAndPriority)
 {
+  // yaml-cpp's as<int>() would read "0x10" as 16; only decimal digits (with
+  // an optional sign) are valid.
   for (const auto & section : kThreadSections) {
     expect_error(
       section.header + std::string("    policy: SCHED_OTHER\n    nice: low\n"),
-      std::string("'nice' must be an integer for ") + section.desc);
+      std::string("'nice' must be a decimal integer for ") + section.desc + ", got 'low'");
+    expect_error(
+      section.header + std::string("    policy: SCHED_OTHER\n    nice: 0x5\n"),
+      std::string("'nice' must be a decimal integer for ") + section.desc + ", got '0x5'");
     expect_error(
       section.header + std::string("    policy: SCHED_FIFO\n    priority: high\n"),
-      std::string("'priority' must be an integer for ") + section.desc);
+      std::string("'priority' must be a decimal integer for ") + section.desc + ", got 'high'");
   }
 }
 
@@ -337,6 +342,15 @@ TEST(ParseSchedAttrs, NormalizesAffinityToSortedUnique)
   EXPECT_EQ(config.irqs.at(0).affinity, (std::vector<int>{0, 1}));
 }
 
+TEST(ParseSchedAttrs, ParsesZeroPaddedAffinityCpuAsBase10)
+{
+  for (const auto & section : kThreadSections) {
+    const auto attrs =
+      attrs_of(section, "    policy: SCHED_FIFO\n    priority: 50\n    affinity: [01]\n");
+    EXPECT_EQ(attrs.affinity, (std::vector<int>{1})) << section.desc;
+  }
+}
+
 TEST(ParseSchedAttrs, TreatsAbsentOrNullAffinityAsUnmanaged)
 {
   for (const auto & section : kThreadSections) {
@@ -395,13 +409,18 @@ TEST(ParseSchedAttrs, RejectsScalarAffinity)
   expect_error("irqs:\n  - irq: 5\n    affinity: 0-3\n", "'affinity' must be a list");
 }
 
-TEST(ParseSchedAttrs, RejectsNonIntegerAffinityElement)
+TEST(ParseSchedAttrs, RejectsNonDecimalAffinityElement)
 {
   for (const auto & section : kThreadSections) {
     expect_error(
       section.header +
         std::string("    policy: SCHED_FIFO\n    priority: 50\n    affinity: [0, all]\n"),
-      std::string("'affinity' must contain only integers for ") + section.desc + ", got 'all'");
+      std::string("'affinity' must contain only decimal integers for ") + section.desc +
+        ", got 'all'");
+    expect_error(
+      section.header +
+        std::string("    policy: SCHED_FIFO\n    priority: 50\n    affinity: [0x1]\n"),
+      "got '0x1'");
   }
 }
 
@@ -492,13 +511,13 @@ TEST(ParseCallbackGroups, UnmanageableSentinelIsNotRecognized)
     "'affinity' must be a list");
   expect_error(
     "callback_groups:\n  - id: my_cbg\n    policy: SCHED_OTHER\n    nice: UNMANAGEABLE\n",
-    "'nice' must be an integer for id=my_cbg");
+    "'nice' must be a decimal integer for id=my_cbg, got 'UNMANAGEABLE'");
   expect_error(
     "callback_groups:\n  - id: my_cbg\n    policy: UNMANAGEABLE\n",
     "Unknown scheduling policy 'UNMANAGEABLE'");
   expect_error(
     "non_ros_threads:\n  - name: my_thread\n    policy: SCHED_OTHER\n    nice: UNMANAGEABLE\n",
-    "'nice' must be an integer for name=my_thread");
+    "'nice' must be a decimal integer for name=my_thread, got 'UNMANAGEABLE'");
 }
 
 // ---------- wildcard ("<node name>/*") callback-group ids ----------
