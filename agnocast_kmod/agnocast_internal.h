@@ -310,7 +310,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 // pid_queue_lock is a raw_spinlock_t and worker_wait an swait queue because
 // agnocast_enqueue_exit_pid() runs in tracepoint context, where sleeping locks are forbidden on
 // PREEMPT_RT (spinlock_t, including the one embedded in wait_queue_head, becomes a sleeping
-// rt_mutex there).
+// rt_mutex there). No taker runs in IRQ context, so the plain lock variants (without _irqsave)
+// suffice.
 extern raw_spinlock_t pid_queue_lock;
 extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;

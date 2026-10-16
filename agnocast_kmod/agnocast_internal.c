@@ -250,12 +250,11 @@ void agnocast_process_exit(void * data, struct task_struct * task)
 
 void agnocast_enqueue_exit_pid(const pid_t pid)
 {
-  unsigned long flags;
   uint32_t next;
 
   bool need_wakeup = false;
 
-  raw_spin_lock_irqsave(&pid_queue_lock, flags);
+  raw_spin_lock(&pid_queue_lock);
 
   next = (queue_tail + 1) & EXIT_QUEUE_MASK;
 
@@ -268,7 +267,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
     need_wakeup = true;
   }
 
-  raw_spin_unlock_irqrestore(&pid_queue_lock, flags);
+  raw_spin_unlock(&pid_queue_lock);
 
   if (need_wakeup) {
     swake_up_one(&worker_wait);
