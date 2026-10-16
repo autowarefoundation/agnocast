@@ -321,22 +321,88 @@ non_ros_threads:
   EXPECT_THROW(parse(y), std::runtime_error);
 }
 
-TEST(ParseConfig, RejectsSchedDeadlineMissingRuntimeField)
+TEST(ParseConfig, RejectsSchedDeadlineMissingFields)
 {
-  // SCHED_DEADLINE requires runtime/period/deadline. parse_config calls
-  // .as<uint64_t>() on a missing node, which makes yaml-cpp throw
-  // YAML::TypedBadConversion (a subclass of YAML::Exception, which is
-  // a subclass of std::runtime_error). The test catches the most general
-  // shape so it does not couple to the precise yaml-cpp exception type.
-  auto y = yaml_from_str(R"YAML(
+  expect_error(
+    R"YAML(
 callback_groups:
   - id: dl_cbg
     domain_id: 0
     policy: SCHED_DEADLINE
     affinity: []
-non_ros_threads: []
+)YAML",
+    "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for id=dl_cbg");
+  expect_error(
+    R"YAML(
+non_ros_threads:
+  - name: dl_worker
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+)YAML",
+    "SCHED_DEADLINE requires 'runtime', 'period' and 'deadline' for name=dl_worker");
+}
+
+TEST(ParseConfig, RejectsMalformedSchedDeadlineFields)
+{
+  // Same rules as kernel_threads: non-negative decimal digits only.
+  expect_error(
+    R"YAML(
+callback_groups:
+  - id: dl_cbg
+    policy: SCHED_DEADLINE
+    runtime: -5
+    period: 5000000
+    deadline: 5000000
+)YAML",
+    "'runtime' must be a non-negative decimal integer for id=dl_cbg");
+  // yaml-cpp would read "0x10" as 16; only plain decimal digits are valid.
+  expect_error(
+    R"YAML(
+non_ros_threads:
+  - name: dl_worker
+    policy: SCHED_DEADLINE
+    runtime: 1000000
+    period: 5000000
+    deadline: 0x10
+)YAML",
+    "'deadline' must be a non-negative decimal integer for name=dl_worker");
+}
+
+TEST(ParseConfig, ParsesZeroPaddedDeadlineFieldAsBase10)
+{
+  // yaml-cpp's base auto-detection would read "0500000" as octal; a
+  // zero-padded column must mean decimal.
+  auto y = yaml_from_str(R"YAML(
+callback_groups:
+  - id: dl_cbg
+    policy: SCHED_DEADLINE
+    runtime: 0500000
+    period: 5000000
+    deadline: 5000000
 )YAML");
-  EXPECT_THROW(parse(y), std::runtime_error);
+  const auto config = parse(y);
+  ASSERT_EQ(config.callback_groups.size(), 1u);
+  EXPECT_EQ(config.callback_groups[0].attrs.deadline.runtime, 500000u);
+}
+
+TEST(ParseConfig, RequiresPolicy)
+{
+  // Unlike kernel_threads, an announced thread's entry has no "leave the
+  // policy alone" meaning, so a missing or null policy is an error.
+  expect_error(
+    "callback_groups:\n  - id: my_cbg\n    nice: 0\n", "'policy' is required for id=my_cbg");
+  expect_error(
+    "callback_groups:\n  - id: my_cbg\n    policy: ~\n    nice: 0\n",
+    "'policy' is required for id=my_cbg");
+  expect_error(
+    "non_ros_threads:\n  - name: worker\n    nice: 0\n", "'policy' is required for name=worker");
+}
+
+TEST(ParseConfig, RejectsNonStringPolicy)
+{
+  expect_error(
+    "callback_groups:\n  - id: my_cbg\n    policy: [a, b]\n",
+    "'policy' must be a string for id=my_cbg");
 }
 
 TEST(ParseConfig, ParsesNonRosThread)
