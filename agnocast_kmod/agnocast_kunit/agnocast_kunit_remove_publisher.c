@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "../agnocast_memory_allocator.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -19,39 +20,24 @@ static const bool IS_BRIDGE = false;
 
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
-  union ioctl_add_process_args ioctl_ret;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &ioctl_ret);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
-  return ioctl_ret.ret_addr;
+  return agnocast_kunit_setup_process(test, pid, 0);
 }
 
 static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t publisher_pid)
 {
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  const topic_local_id_t publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE);
   KUNIT_ASSERT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
-
-  return add_publisher_args.ret_id;
+  return publisher_id;
 }
 
 static topic_local_id_t setup_one_subscriber(struct kunit * test, const pid_t subscriber_pid)
 {
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  const topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
   KUNIT_ASSERT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
-
-  return add_subscriber_args.ret_id;
+  return subscriber_id;
 }
 
 static uint64_t setup_one_entry(

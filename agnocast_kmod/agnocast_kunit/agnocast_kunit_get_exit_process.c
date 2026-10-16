@@ -2,6 +2,7 @@
 #include "agnocast_kunit_get_exit_process.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -12,14 +13,6 @@ static const pid_t PID = 1000;
 // the flag unconditionally, including on an idle poll where Phase 1 found nothing and passes
 // global_pid == -1. These cases pin that down so gating the derivation behind global_pid >= 0
 // cannot silently strand the daemon.
-
-static void setup_one_process(struct kunit * test, const pid_t pid)
-{
-  union ioctl_add_process_args ioctl_ret;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &ioctl_ret);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
 
 void test_case_get_exit_process_idle_poll_empty_namespace(struct kunit * test)
 {
@@ -42,7 +35,7 @@ void test_case_get_exit_process_idle_poll_empty_namespace(struct kunit * test)
 void test_case_get_exit_process_idle_poll_process_remains(struct kunit * test)
 {
   // Arrange
-  setup_one_process(test, PID);
+  agnocast_kunit_setup_process(test, PID, 0);
   struct ioctl_get_exit_process_args get_exit_process_args = {};
 
   // Act
@@ -61,7 +54,7 @@ void test_case_get_exit_process_idle_poll_process_remains(struct kunit * test)
 void test_case_get_exit_process_commit_last_process(struct kunit * test)
 {
   // Arrange
-  setup_one_process(test, PID);
+  agnocast_kunit_setup_process(test, PID, 0);
   agnocast_process_exit_cleanup(PID);
 
   // Act

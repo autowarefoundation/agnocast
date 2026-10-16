@@ -2,6 +2,7 @@
 #include "agnocast_kunit_get_topic_subscriber_info.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -11,35 +12,15 @@ static const pid_t PID = 1000;
 static const uint32_t QOS_DEPTH = 1;
 static const bool IS_BRIDGE = false;
 
-static void setup_process(struct kunit * test, const pid_t pid)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
-
-static void setup_process_domain(struct kunit * test, const pid_t pid, const uint32_t domain_id)
-{
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
-}
-
 // Normal case: one subscriber exists, should return count == 1
 void test_case_get_topic_sub_info_one_subscriber(struct kunit * test)
 {
-  union ioctl_add_subscriber_args add_sub_args;
   union ioctl_topic_info_args topic_info_args = {0};
   int ret;
 
-  setup_process(test, PID);
-
-  ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, -1, &add_sub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_process(test, PID, 0);
+  agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, false, false, false, IS_BRIDGE, -1);
 
   // copy_to_user inside agnocast_ioctl_get_topic_subscriber_info returns -EFAULT in KUnit
   // (kernel thread) context, but reaching it confirms the subscriber was counted.
@@ -53,16 +34,12 @@ void test_case_get_topic_sub_info_one_subscriber(struct kunit * test)
 // No subscribers on the topic (topic exists via publisher, but no subscriber)
 void test_case_get_topic_sub_info_no_subscribers(struct kunit * test)
 {
-  union ioctl_add_publisher_args add_pub_args;
   union ioctl_topic_info_args topic_info_args = {0};
   int ret;
 
-  setup_process(test, PID);
-
-  ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE,
-    &add_pub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_process(test, PID, 0);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   topic_info_args.topic_info_ret_buffer_size = MAX_SUBSCRIBER_NUM;
   ret = agnocast_ioctl_get_topic_subscriber_info(
@@ -88,14 +65,11 @@ void test_case_get_topic_sub_info_topic_not_found(struct kunit * test)
 void test_case_get_topic_sub_info_selects_by_domain(struct kunit * test)
 {
   const pid_t pid_d1 = 1001;
-  union ioctl_add_subscriber_args add_sub_args;
   int ret;
 
-  setup_process_domain(test, pid_d1, 1);
-  ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid_d1, QOS_DEPTH, false, false, false, false,
-    IS_BRIDGE, -1, &add_sub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_process(test, pid_d1, 1);
+  agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, pid_d1, QOS_DEPTH, false, false, false, false, IS_BRIDGE, -1);
 
   // domain 1: the topic exists -> the subscriber is counted (copy_to_user
   // fails with -EFAULT in KUnit context, but reaching it confirms the count).
