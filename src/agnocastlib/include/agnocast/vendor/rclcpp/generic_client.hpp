@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "agnocast/internal/future_and_request_id.hpp"
 #include "agnocast/internal/service_typesupport.hpp"
 
 #include <rclcpp/client.hpp>
@@ -47,14 +48,14 @@ public:
 
   using CallbackType = std::function<void(SharedFuture)>;
 
-  struct FutureAndRequestId : rclcpp::detail::FutureAndRequestId<Future>
+  struct FutureAndRequestId : agnocast::internal::FutureAndRequestId<Future>
   {
-    using rclcpp::detail::FutureAndRequestId<Future>::FutureAndRequestId;
+    using agnocast::internal::FutureAndRequestId<Future>::FutureAndRequestId;
     SharedFuture share() noexcept { return this->future.share(); }
   };
-  struct SharedFutureAndRequestId : rclcpp::detail::FutureAndRequestId<SharedFuture>
+  struct SharedFutureAndRequestId : agnocast::internal::FutureAndRequestId<SharedFuture>
   {
-    using rclcpp::detail::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
+    using agnocast::internal::FutureAndRequestId<SharedFuture>::FutureAndRequestId;
   };
 
   GenericClient(

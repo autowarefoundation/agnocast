@@ -6,7 +6,6 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rcpputils/shared_library.hpp"
