@@ -17,13 +17,22 @@
 class AgnocastOnlyDummyNode : public agnocast::Node
 {
 public:
-  AgnocastOnlyDummyNode() : agnocast::Node("agnocast_only_dummy_node")
+  AgnocastOnlyDummyNode() : agnocast::Node("agnocast_only_dummy_node", node_options())
   {
     callback_group_1_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     callback_group_2_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   }
 
 private:
+  static rclcpp::NodeOptions node_options()
+  {
+    rclcpp::NodeOptions options;
+    // Parameter services create reaper callback groups; exclude them so this test reports only
+    // the dummy node's default and explicitly created callback groups.
+    options.start_parameter_services(false);
+    return options;
+  }
+
   rclcpp::CallbackGroup::SharedPtr callback_group_1_;
   rclcpp::CallbackGroup::SharedPtr callback_group_2_;
 };
