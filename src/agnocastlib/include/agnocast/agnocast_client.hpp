@@ -15,6 +15,10 @@
 #include "rclcpp/node_interfaces/node_base_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <rclcpp/serialized_message.hpp>
+
+#include <rmw/rmw.h>
+
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
 #include <service_msgs/msg/service_event_info.hpp>
 #endif
@@ -107,6 +111,8 @@ public:
     event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
   }
 
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
   template <typename ServiceT, typename RequestT>
   std::optional<typename ServiceT::Request> copy_request_if_contents(
     const ipc_shared_ptr<RequestT> & request)
@@ -118,7 +124,7 @@ public:
   }
 
   std::optional<std::shared_ptr<void>> copy_request_if_contents(
-    const void * payload, ServiceTsBundle & service_ts_bundle, const rclcpp::Logger & logger)
+    const void * payload, const ServiceTsBundle & service_ts_bundle, const rclcpp::Logger & logger)
   {
     if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
       return std::nullopt;
@@ -213,7 +219,7 @@ public:
   }
 
   std::optional<std::shared_ptr<void>> copy_request_if_contents(
-    const void *, ServiceTsBundle &, const rclcpp::Logger &)
+    const void *, const ServiceTsBundle &, const rclcpp::Logger &)
   {
     return std::nullopt;
   }
@@ -256,9 +262,7 @@ protected:
   rclcpp::Logger get_logger() const;
 
   template <typename NodeT>
-  void init_base(
-    NodeT * node, const std::string & service_name,
-    [[maybe_unused]] const std::string & service_type)
+  void init_base(NodeT * node, const std::string & service_name, const std::string & service_type)
   {
     node_ = node;
     node_name_ = node->get_fully_qualified_name();
