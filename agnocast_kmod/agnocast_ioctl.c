@@ -739,23 +739,6 @@ static int link_subscriber_to_publishers(
   return 0;
 }
 
-static int link_publisher_to_subscribers(
-  const struct topic_wrapper * wrapper, const pid_t pub_pid, const bool pub_is_bridge)
-{
-  struct subscriber_info * sub_info;
-  int bkt;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt, sub_info, node)
-  {
-    struct mempool_entry * pool = pool_to_map(
-      wrapper->topic, pub_pid, wrapper->domain_id, pub_is_bridge, sub_info->pid,
-      sub_info->domain_id, sub_info->is_bridge);
-    if (!pool) continue;
-    int ret = reference_memory(pool, sub_info->pid);
-    if (ret < 0 && ret != -EEXIST) return ret;
-  }
-  return 0;
-}
-
 // Reads nothing that topic->rwsem guards, so receive and take call it after the topic unlock.
 // Caller holds global_htables_rwsem (read). Only global write changes the publisher table, links
 // pools, or sets need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one subscriber,
@@ -1011,9 +994,19 @@ int agnocast_ioctl_add_publisher(
     goto unlock;
   }
 
-  ret = link_publisher_to_subscribers(wrapper, publisher_pid, is_bridge);
-  if (ret < 0) {
-    goto unlock;
+  // Link each subscriber to the new publisher's pool and set need_mmap_update to notify it
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, publisher_pid, wrapper->domain_id, is_bridge, sub_info->pid,
+      sub_info->domain_id, sub_info->is_bridge);
+    if (pool) {
+      ret = reference_memory(pool, sub_info->pid);
+      if (ret < 0 && ret != -EEXIST) goto unlock;
+    }
+    sub_info->need_mmap_update = true;
   }
 
   struct publisher_info * pub_info;
@@ -1024,14 +1017,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-
-  // set true to subscriber_info.need_mmap_update to notify
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    sub_info->need_mmap_update = true;
-  }
 
 unlock:
   up_write(&global_htables_rwsem);
