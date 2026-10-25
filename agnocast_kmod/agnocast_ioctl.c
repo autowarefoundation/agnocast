@@ -1998,44 +1998,22 @@ static uint32_t fill_publisher_info(
   return num;
 }
 
-// kvcalloc and copy_to_user can sleep, so both run with global_htables_rwsem released. The topic
-// can gain endpoints meanwhile, so the walk repeats until the buffer holds all of them. Every
-// buffer comes zeroed from kvcalloc and is filled at most once, so no stale bytes reach user space.
-static int get_topic_info(
-  const char * topic_name, const struct ipc_namespace * ipc_ns,
-  union ioctl_topic_info_args * topic_info_args,
-  uint32_t (*fill)(const struct topic_wrapper *, struct topic_info_ret *, uint32_t))
+// Copies the `num` entries of `topic_info_mem` to the caller's buffer and frees `topic_info_mem`.
+// Caller does not hold global_htables_rwsem, because copy_to_user can sleep on a page fault.
+static int copy_topic_info_to_user(
+  union ioctl_topic_info_args * topic_info_args, struct topic_info_ret * topic_info_mem,
+  const uint32_t num, const char * kind, const char * topic_name)
 {
-  const uint32_t domain_id = topic_info_args->domain_id;
   const uint32_t buffer_size = topic_info_args->topic_info_ret_buffer_size;
   struct topic_info_ret __user * user_buffer =
     (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
-  struct topic_info_ret * topic_info_mem = NULL;
-  uint32_t capacity = 0;
-  uint32_t num;
   int ret = 0;
-
-  topic_info_args->ret_topic_info_ret_num = 0;
-
-  for (;;) {
-    down_read(&global_htables_rwsem);
-    const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, domain_id);
-    num = wrapper ? fill(wrapper, topic_info_mem, capacity) : 0;
-    up_read(&global_htables_rwsem);
-
-    if (num <= capacity || num > buffer_size) break;
-
-    kvfree(topic_info_mem);
-    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
-    if (!topic_info_mem) return -ENOMEM;
-    capacity = num;
-  }
 
   if (num > buffer_size) {
     dev_warn(
       agnocast_device,
-      "%s count exceeds limit: num=%u, topic_info_ret_buffer_size=%u (topic_name=%s)\n",
-      fill == fill_subscriber_info ? "Subscriber" : "Publisher", num, buffer_size, topic_name);
+      "%s count exceeds limit: num=%u, topic_info_ret_buffer_size=%u (topic_name=%s)\n", kind, num,
+      buffer_size, topic_name);
     ret = -ENOBUFS;
   } else if (copy_to_user(user_buffer, topic_info_mem, sizeof(*topic_info_mem) * num)) {
     ret = -EFAULT;
@@ -2047,18 +2025,64 @@ static int get_topic_info(
   return ret;
 }
 
+// kvcalloc and copy_to_user can sleep, so both run with global_htables_rwsem released. The topic
+// can gain endpoints meanwhile, so the walk repeats until the buffer holds all of them. Every
+// buffer comes zeroed from kvcalloc and is filled at most once, so no stale bytes reach user space.
 int agnocast_ioctl_get_topic_subscriber_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  return get_topic_info(topic_name, ipc_ns, topic_info_args, fill_subscriber_info);
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
+  topic_info_args->ret_topic_info_ret_num = 0;
+
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_subscriber_info(wrapper, topic_info_mem, capacity) : 0;
+    up_read(&global_htables_rwsem);
+
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
+
+    kvfree(topic_info_mem);
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
+  }
+
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Subscriber", topic_name);
 }
 
+// The publisher counterpart of agnocast_ioctl_get_topic_subscriber_info().
 int agnocast_ioctl_get_topic_publisher_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  return get_topic_info(topic_name, ipc_ns, topic_info_args, fill_publisher_info);
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
+  topic_info_args->ret_topic_info_ret_num = 0;
+
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_publisher_info(wrapper, topic_info_mem, capacity) : 0;
+    up_read(&global_htables_rwsem);
+
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
+
+    kvfree(topic_info_mem);
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
+  }
+
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Publisher", topic_name);
 }
 
 int agnocast_ioctl_get_subscriber_qos(
