@@ -88,6 +88,28 @@ TEST_F(CreateCallbackGroupIdTest, AgnocastTimerOnly)
   EXPECT_EQ(id, "/test_node@Timer(1000000000)");
 }
 
+TEST_F(CreateCallbackGroupIdTest, AgnocastTimersInSeparateGroups)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  auto group_a = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto timer_a = agnocast::create_timer(
+    node_, clock, rclcpp::Duration(std::chrono::seconds(1)), []() {}, group_a);
+  auto group_b = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto timer_b = agnocast::create_timer(
+    node_, clock, rclcpp::Duration(std::chrono::seconds(2)), []() {}, group_b);
+
+  std::vector<std::string> agnocast_topics;
+
+  // Act
+  auto id_a = agnocast::create_callback_group_id(group_a, node_, agnocast_topics);
+  auto id_b = agnocast::create_callback_group_id(group_b, node_, agnocast_topics);
+
+  // Assert: each ID contains only the timer of its own group
+  EXPECT_EQ(id_a, "/test_node@Timer(1000000000)");
+  EXPECT_EQ(id_b, "/test_node@Timer(2000000000)");
+}
+
 TEST_F(CreateCallbackGroupIdTest, MultipleEntriesSorted)
 {
   // Arrange: create subscriptions in reverse alphabetical order

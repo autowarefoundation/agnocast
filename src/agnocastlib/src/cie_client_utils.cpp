@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <string>
 
@@ -73,14 +72,8 @@ std::string create_callback_group_id(
     }
   }
 
-  {
-    std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
-    for (const auto & [id, timer_info] : id2_timer_info) {
-      if (timer_info && timer_info->callback_group == group) {
-        entries.push_back(
-          "Timer(" + std::to_string(timer_info->period_ns.load(std::memory_order_relaxed)) + ")");
-      }
-    }
+  for (const auto period : get_agnocast_timer_periods_by_group(group)) {
+    entries.push_back("Timer(" + std::to_string(period) + ")");
   }
 
   std::sort(entries.begin(), entries.end());

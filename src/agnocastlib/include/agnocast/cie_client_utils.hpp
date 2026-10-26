@@ -12,7 +12,6 @@
 namespace agnocast
 {
 
-// Caution: Do not call while holding id2_timer_info_mtx
 std::string create_callback_group_id(
   const rclcpp::CallbackGroup::SharedPtr & group,
   const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node,
