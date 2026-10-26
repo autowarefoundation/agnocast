@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -72,9 +73,10 @@ std::string create_callback_group_id(
     }
   }
 
-  for (const auto period : get_agnocast_timer_periods_by_group(group)) {
-    entries.push_back("Timer(" + std::to_string(period) + ")");
-  }
+  const auto periods = get_agnocast_timer_periods_by_group(group);
+  std::transform(
+    periods.begin(), periods.end(), std::back_inserter(entries),
+    [](const int64_t period) { return "Timer(" + std::to_string(period) + ")"; });
 
   std::sort(entries.begin(), entries.end());
 
