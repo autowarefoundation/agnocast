@@ -38,6 +38,21 @@
 namespace agnocast::vendor_rclcpp
 {
 
+// Adapted from rclcpp/include/rclcpp/any_service_callback.hpp.
+template <typename T, typename = void>
+struct can_be_nullptr : std::false_type
+{
+};
+
+// Some lambdas define a comparison with nullptr, but we see a warning that they can never be null
+// when using it. We also test if `T &` can be assigned to `nullptr` to avoid the issue.
+template <typename T>
+struct can_be_nullptr<
+  T, std::void_t<decltype(std::declval<T>() == nullptr), decltype(std::declval<T &>() = nullptr)>>
+: std::true_type
+{
+};
+
 class GenericService;
 
 class GenericServiceCallback
@@ -52,7 +67,7 @@ public:
   template <typename Func>
   GenericServiceCallback(Func && callback)
   {
-    if constexpr (::rclcpp::detail::can_be_nullptr<std::decay_t<Func>>::value) {
+    if constexpr (can_be_nullptr<std::decay_t<Func>>::value) {
       if (!callback) {
         throw std::invalid_argument("GenericServiceCallback cannot be initialized with nullptr");
       }
