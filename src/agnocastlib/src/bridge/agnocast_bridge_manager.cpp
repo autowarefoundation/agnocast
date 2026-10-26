@@ -6,6 +6,7 @@
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
+#include "agnocast/cie_client_utils.hpp"
 #include "rclcpp/version.h"
 
 #include <sys/prctl.h>
@@ -357,6 +358,7 @@ void BridgeManager::activate_daemon_forced_bridge(
     if (!result.entity_handle) {
       return;
     }
+    set_bridge_direction(result.callback_group, is_r2a);
 
     if (is_r2a) {
       if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
@@ -631,6 +633,7 @@ void BridgeManager::create_pubsub_bridge_if_needed(
     }
 
     if (result.entity_handle) {
+      set_bridge_direction(result.callback_group, is_r2a);
       if (is_r2a) {
         if (!update_ros2_publisher_num(container_node_.get(), topic_name)) {
           RCLCPP_ERROR(
