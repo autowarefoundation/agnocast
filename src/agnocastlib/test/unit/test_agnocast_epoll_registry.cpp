@@ -286,3 +286,109 @@ TEST_F(SubscriptionPrepareEpollTest, a_destroyed_subscription_does_not_block_a_r
   // Assert
   EXPECT_TRUE(is_registered(epoll_fd_, new_fd));
 }
+
+// =============================================================================
+// TimerEventHandler / ClockEventHandler::prepare_epoll
+// =============================================================================
+
+class TimerPrepareEpollTest : public EpollFdTest
+{
+protected:
+  void TearDown() override
+  {
+    {
+      std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+      agnocast::id2_timer_info.clear();
+    }
+    EpollFdTest::TearDown();
+  }
+
+  std::shared_ptr<agnocast::TimerInfo> register_timer(
+    uint32_t timer_id, rcl_clock_type_t clock_type, std::shared_ptr<agnocast::TimerBase> & timer)
+  {
+    auto clock = std::make_shared<rclcpp::Clock>(clock_type);
+    const auto period = std::chrono::milliseconds(100);
+    timer = std::make_shared<agnocast::GenericTimer<std::function<void()>>>(
+      timer_id, period, clock, std::function<void()>{[]() {}});
+    agnocast::register_timer_info(timer_id, timer, period, nullptr, clock);
+
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    return agnocast::id2_timer_info.at(timer_id);
+  }
+
+  std::mutex ready_mutex_;
+  std::vector<agnocast::AgnocastExecutable> ready_executables_;
+};
+
+TEST_F(TimerPrepareEpollTest, timer_fd_follows_whether_the_timer_is_managed)
+{
+  // Arrange
+  std::shared_ptr<agnocast::TimerBase> timer;
+  auto info = register_timer(10, RCL_STEADY_TIME, timer);
+  ASSERT_GE(info->timer_fd, 0);
+  agnocast::TimerEventHandler handler(getpid(), &ready_mutex_, &ready_executables_);
+
+  // Act & Assert
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  EXPECT_TRUE(is_registered(epoll_fd_, info->timer_fd));
+
+  handler.prepare_epoll(epoll_fd_, manages_none());
+  EXPECT_FALSE(is_registered(epoll_fd_, info->timer_fd));
+}
+
+TEST_F(TimerPrepareEpollTest, clock_eventfd_follows_whether_the_timer_is_managed)
+{
+  // Arrange
+  std::shared_ptr<agnocast::TimerBase> timer;
+  auto info = register_timer(11, RCL_ROS_TIME, timer);
+  ASSERT_GE(info->clock_eventfd, 0);
+  agnocast::ClockEventHandler handler(getpid(), &ready_mutex_, &ready_executables_);
+
+  // Act & Assert
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  EXPECT_TRUE(is_registered(epoll_fd_, info->clock_eventfd));
+
+  handler.prepare_epoll(epoll_fd_, manages_none());
+  EXPECT_FALSE(is_registered(epoll_fd_, info->clock_eventfd));
+}
+
+TEST_F(TimerPrepareEpollTest, timer_and_clock_handlers_register_only_their_own_fd)
+{
+  // Arrange
+  std::shared_ptr<agnocast::TimerBase> timer;
+  auto info = register_timer(12, RCL_ROS_TIME, timer);
+  ASSERT_GE(info->timer_fd, 0);
+  ASSERT_GE(info->clock_eventfd, 0);
+  agnocast::TimerEventHandler timer_handler(getpid(), &ready_mutex_, &ready_executables_);
+  agnocast::ClockEventHandler clock_handler(getpid(), &ready_mutex_, &ready_executables_);
+
+  // Act
+  timer_handler.prepare_epoll(epoll_fd_, manages_all());
+
+  // Assert
+  EXPECT_TRUE(is_registered(epoll_fd_, info->timer_fd));
+  EXPECT_FALSE(is_registered(epoll_fd_, info->clock_eventfd));
+
+  clock_handler.prepare_epoll(epoll_fd_, manages_all());
+  EXPECT_TRUE(is_registered(epoll_fd_, info->clock_eventfd));
+}
+
+TEST_F(TimerPrepareEpollTest, a_destroyed_timer_object_is_removed)
+{
+  // Arrange — keep the TimerInfo alive so its timer_fd stays open after the timer object dies.
+  std::shared_ptr<agnocast::TimerBase> timer;
+  auto info = register_timer(13, RCL_STEADY_TIME, timer);
+  agnocast::TimerEventHandler handler(getpid(), &ready_mutex_, &ready_executables_);
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  ASSERT_TRUE(is_registered(epoll_fd_, info->timer_fd));
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info[13]->timer.reset();
+  }
+
+  // Act
+  handler.prepare_epoll(epoll_fd_, manages_all());
+
+  // Assert
+  EXPECT_FALSE(is_registered(epoll_fd_, info->timer_fd));
+}

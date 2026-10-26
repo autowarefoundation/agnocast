@@ -86,7 +86,9 @@ public:
   [[nodiscard]] virtual EpollEventType get_type() const = 0;
 
   /**
-   * @brief Configures event-specific settings, such as adding events to epoll.
+   * @brief Brings the events of this type monitored by epoll in line with the current entities:
+   * adds the entities newly under this Executor's management and removes the ones no longer under
+   * it.
    *
    * @param epoll_fd The file descriptor for the epoll instance.
    * @param validate_callback_group A function that takes a callback group and

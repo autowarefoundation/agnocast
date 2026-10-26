@@ -255,7 +255,6 @@ void register_timer_info(
   timer_info->next_call_time_ns.store(now_ns + period.count(), std::memory_order_relaxed);
   timer_info->period_ns.store(period.count(), std::memory_order_relaxed);
   timer_info->callback_group = callback_group;
-  timer_info->need_epoll_update = true;
   timer_info->clock = clock;
 
   if (is_ros_time) {
@@ -280,14 +279,6 @@ void register_timer_info(
   set_timer_info(*timer, timer_info);
 
   setup_time_jump_callback(timer_info, clock);
-
-  if (timer_info->timer_fd >= 0) {
-    timer_info->timer_fd_need_update = true;
-  }
-
-  if (timer_info->clock_eventfd >= 0) {
-    timer_info->clock_eventfd_need_update = true;
-  }
 
   {
     std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
@@ -376,36 +367,17 @@ void TimerEventHandler::prepare_epoll(
 {
   std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
 
-  for (auto & it : id2_timer_info) {
-    const uint32_t timer_id = it.first;
-    TimerInfo & timer_info = *it.second;
-
-    if (!timer_info.need_epoll_update) {
-      continue;
-    }
-
-    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
-      continue;
-    }
-
-    std::shared_lock fd_lock(timer_info.fd_mutex);
+  for (const auto & [timer_id, timer_info] : id2_timer_info) {
+    const bool should_monitor =
+      !timer_info->timer.expired() && validate_callback_group(timer_info->callback_group);
 
     // Register timerfd (wall clock based firing)
-    if (timer_info.timer_fd >= 0 && timer_info.timer_fd_need_update) {
-      struct epoll_event clock_ev = {};
-      clock_ev.events = EPOLLIN;
-      clock_ev.data.u64 = pack_epoll_data(EpollEventType::Timer, timer_id);
-      if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.timer_fd, &clock_ev) == -1) {
-        RCLCPP_ERROR(logger, "epoll_ctl failed for timer: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
-      }
-      timer_info.timer_fd_need_update = false;
-    }
-
-    timer_info.need_epoll_update =
-      timer_info.timer_fd_need_update || timer_info.clock_eventfd_need_update;
+    std::shared_lock fd_lock(timer_info->fd_mutex);
+    registry_.sync(epoll_fd, EpollEventType::Timer, timer_id, timer_info->timer_fd, should_monitor);
   }
+
+  registry_.forget_unless(
+    [](const EpollEventLocalID timer_id) { return id2_timer_info.count(timer_id) > 0; });
 }
 
 void TimerEventHandler::handle(EpollEventLocalID event_local_id)
@@ -472,36 +444,18 @@ void ClockEventHandler::prepare_epoll(
 {
   std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
 
-  for (auto & it : id2_timer_info) {
-    const uint32_t timer_id = it.first;
-    TimerInfo & timer_info = *it.second;
-
-    if (!timer_info.need_epoll_update) {
-      continue;
-    }
-
-    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
-      continue;
-    }
-
-    std::shared_lock fd_lock(timer_info.fd_mutex);
+  for (const auto & [timer_id, timer_info] : id2_timer_info) {
+    const bool should_monitor =
+      !timer_info->timer.expired() && validate_callback_group(timer_info->callback_group);
 
     // Register clock_eventfd for ROS_TIME timers (simulation time support)
-    if (timer_info.clock_eventfd >= 0 && timer_info.clock_eventfd_need_update) {
-      struct epoll_event ev = {};
-      ev.events = EPOLLIN;
-      ev.data.u64 = pack_epoll_data(EpollEventType::Clock, timer_id);
-      if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_info.clock_eventfd, &ev) == -1) {
-        RCLCPP_ERROR(logger, "epoll_ctl failed for clock_eventfd: %s", strerror(errno));
-        close(agnocast_fd);
-        exit(EXIT_FAILURE);
-      }
-      timer_info.clock_eventfd_need_update = false;
-    }
-
-    timer_info.need_epoll_update =
-      timer_info.timer_fd_need_update || timer_info.clock_eventfd_need_update;
+    std::shared_lock fd_lock(timer_info->fd_mutex);
+    registry_.sync(
+      epoll_fd, EpollEventType::Clock, timer_id, timer_info->clock_eventfd, should_monitor);
   }
+
+  registry_.forget_unless(
+    [](const EpollEventLocalID timer_id) { return id2_timer_info.count(timer_id) > 0; });
 }
 
 void ClockEventHandler::handle(EpollEventLocalID event_local_id)
