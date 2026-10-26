@@ -73,6 +73,28 @@ public:
 };
 
 /**
+ * @brief Wakes the Executor when EpollUpdateTracker requests an epoll set update.
+ *
+ * The eventfd is drained in EpollUpdateTracker::take_update_request(); this handler only exists so
+ * the Update event type has a valid slot in EventHandlerArray.
+ */
+class UpdateEventHandler : public EpollEventHandler
+{
+public:
+  UpdateEventHandler() = default;
+
+  [[nodiscard]] EpollEventType get_type() const override { return EpollEventType::Update; }
+
+  void prepare_epoll(int epoll_fd, const CallbackGroupValidator & validate_callback_group) override
+  {
+    (void)epoll_fd;
+    (void)validate_callback_group;
+  }
+
+  void handle(EpollEventLocalID /*event_local_id*/) override {}
+};
+
+/**
  * @brief Dummy handler used to fill unused slots in the EventHandlerArray.
  * Logs a warning if an event notification is unexpectedly received.
  * Since EpollManager requires every slot in the EventHandlerArray to be populated with a valid
