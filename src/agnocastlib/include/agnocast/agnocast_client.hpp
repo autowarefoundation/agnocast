@@ -437,6 +437,7 @@ private:
       /* --- critical section end --- */
       lock.unlock();
 
+      // Must precede the move into the promise, which leaves `response` empty.
       introspection_.publish_response_received_event(response, get_gid());
 
       info.promise.set_value(ipc_shared_ptr<typename ServiceT::Response>(std::move(response)));
@@ -631,6 +632,7 @@ private:
       /* --- critical section end --- */
       lock.unlock();
 
+      // Must precede the move into the promise, which leaves `response` empty.
       introspection_.publish_response_received_event(generic_response_wrapper, get_gid());
 
       info.promise.set_value(std::move(generic_response_wrapper).take_response());
