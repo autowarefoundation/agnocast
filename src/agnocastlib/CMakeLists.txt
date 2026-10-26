@@ -33,6 +33,7 @@ if(rclcpp_VERSION_MAJOR GREATER_EQUAL 21)
 endif()
 find_package(agnocast_cie_config_msgs REQUIRED)
 find_package(agnocast_cie_thread_configurator REQUIRED)
+find_package(agnocast_ioctl_wrapper REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(message_filters REQUIRED)
@@ -74,6 +75,7 @@ target_link_libraries(agnocast
 target_include_directories(agnocast PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  ${agnocast_ioctl_wrapper_INCLUDE_DIRS}
   ${rcl_yaml_param_parser_INCLUDE_DIRS}
   ${tracetools_INCLUDE_DIRS}
   ${LTTNGUST_INCLUDE_DIRS}
@@ -419,5 +421,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
+ament_export_dependencies(agnocast_cie_thread_configurator agnocast_cie_config_msgs agnocast_ioctl_wrapper message_filters tf2 tf2_ros tf2_msgs geometry_msgs diagnostic_msgs diagnostic_updater)
 ament_package()
