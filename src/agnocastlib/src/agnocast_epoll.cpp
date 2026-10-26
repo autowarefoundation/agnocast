@@ -13,6 +13,45 @@
 namespace agnocast
 {
 
+bool EpollRegistry::sync(
+  int epoll_fd, EpollEventType type, EpollEventLocalID local_id, int fd, bool should_monitor)
+{
+  auto it = fds_.find(local_id);
+  if (it != fds_.end() && it->second != fd) {
+    fds_.erase(it);
+    it = fds_.end();
+  }
+
+  if (should_monitor && fd >= 0) {
+    if (it != fds_.end()) {
+      return false;
+    }
+
+    struct epoll_event ev = {};
+    ev.events = EPOLLIN;
+    ev.data.u64 = pack_epoll_data(type, local_id);
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+      RCLCPP_ERROR(
+        logger, "epoll_ctl(ADD) failed (type=%u, local_id=%u): %s", static_cast<uint32_t>(type),
+        local_id, strerror(errno));
+      close(agnocast_fd);
+      exit(EXIT_FAILURE);
+    }
+    fds_.emplace(local_id, fd);
+    return true;
+  }
+
+  if (it != fds_.end()) {
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+      RCLCPP_WARN(
+        logger, "epoll_ctl(DEL) failed (type=%u, local_id=%u): %s", static_cast<uint32_t>(type),
+        local_id, strerror(errno));
+    }
+    fds_.erase(it);
+  }
+  return false;
+}
+
 void DummyEventHandler::handle(EpollEventLocalID event_local_id)
 {
   RCLCPP_WARN(
