@@ -38,6 +38,16 @@ int make_eventfd()
   return eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
 }
 
+CallbackGroupValidator manages_all()
+{
+  return [](const rclcpp::CallbackGroup::SharedPtr &) { return true; };
+}
+
+CallbackGroupValidator manages_none()
+{
+  return [](const rclcpp::CallbackGroup::SharedPtr &) { return false; };
+}
+
 class EpollFdTest : public ::testing::Test
 {
 protected:
@@ -158,4 +168,121 @@ TEST_F(EpollRegistryTest, forget_unless_drops_registrations_without_deleting_the
   EXPECT_TRUE(registry.sync(epoll_fd_, EpollEventType::Subscription, 1, fd, true));
 
   close(fd);
+}
+
+// =============================================================================
+// SubscriptionEventHandler::prepare_epoll
+// =============================================================================
+
+class SubscriptionPrepareEpollTest : public EpollFdTest
+{
+protected:
+  void TearDown() override
+  {
+    {
+      std::lock_guard<std::mutex> lock(agnocast::id2_callback_info_mtx);
+      agnocast::id2_callback_info.clear();
+    }
+    for (const int fd : fds_) {
+      close(fd);
+    }
+    EpollFdTest::TearDown();
+  }
+
+  int add_callback_info(uint32_t callback_info_id)
+  {
+    const int fd = make_eventfd();
+    EXPECT_GE(fd, 0);
+    fds_.push_back(fd);
+
+    agnocast::CallbackInfo info;
+    info.topic_name = "/test";
+    info.is_transient_local = false;
+    info.notify_eventfd = fd;
+
+    std::lock_guard<std::mutex> lock(agnocast::id2_callback_info_mtx);
+    agnocast::id2_callback_info[callback_info_id] = std::move(info);
+    return fd;
+  }
+
+  agnocast::SubscriptionEventHandler make_handler()
+  {
+    return agnocast::SubscriptionEventHandler(getpid(), &ready_mutex_, &ready_executables_);
+  }
+
+  std::vector<int> fds_;
+  std::mutex ready_mutex_;
+  std::vector<agnocast::AgnocastExecutable> ready_executables_;
+};
+
+TEST_F(SubscriptionPrepareEpollTest, removes_a_subscription_that_is_no_longer_managed)
+{
+  // Arrange
+  const int fd = add_callback_info(1);
+  auto handler = make_handler();
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  ASSERT_TRUE(is_registered(epoll_fd_, fd));
+
+  // Act — e.g. the callback group was removed from the Executor.
+  handler.prepare_epoll(epoll_fd_, manages_none());
+
+  // Assert
+  EXPECT_FALSE(is_registered(epoll_fd_, fd));
+}
+
+TEST_F(SubscriptionPrepareEpollTest, adds_a_subscription_again_once_it_is_managed_again)
+{
+  // Arrange
+  const int fd = add_callback_info(1);
+  auto handler = make_handler();
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  handler.prepare_epoll(epoll_fd_, manages_none());
+
+  // Act
+  handler.prepare_epoll(epoll_fd_, manages_all());
+
+  // Assert
+  EXPECT_TRUE(is_registered(epoll_fd_, fd));
+}
+
+TEST_F(SubscriptionPrepareEpollTest, each_handler_registers_into_its_own_epoll)
+{
+  // Arrange — two Executors, e.g. a callback group moved from one to the other.
+  const int fd = add_callback_info(1);
+  auto first = make_handler();
+  auto second = make_handler();
+  const int second_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+  ASSERT_GE(second_epoll_fd, 0);
+  first.prepare_epoll(epoll_fd_, manages_all());
+
+  // Act
+  first.prepare_epoll(epoll_fd_, manages_none());
+  second.prepare_epoll(second_epoll_fd, manages_all());
+
+  // Assert
+  EXPECT_FALSE(is_registered(epoll_fd_, fd));
+  EXPECT_TRUE(is_registered(second_epoll_fd, fd));
+
+  close(second_epoll_fd);
+}
+
+TEST_F(SubscriptionPrepareEpollTest, a_destroyed_subscription_does_not_block_a_reused_fd)
+{
+  // Arrange — mirror ~Subscription(): erase the entry, then close its eventfd.
+  auto handler = make_handler();
+  const int old_fd = add_callback_info(1);
+  handler.prepare_epoll(epoll_fd_, manages_all());
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_callback_info_mtx);
+    agnocast::id2_callback_info.erase(1);
+  }
+  close(old_fd);
+  fds_.clear();
+
+  // Act — the new eventfd usually gets the same number as the closed one.
+  const int new_fd = add_callback_info(2);
+  handler.prepare_epoll(epoll_fd_, manages_all());
+
+  // Assert
+  EXPECT_TRUE(is_registered(epoll_fd_, new_fd));
 }
