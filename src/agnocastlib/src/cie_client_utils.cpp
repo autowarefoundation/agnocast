@@ -1,6 +1,7 @@
 #include "agnocast/cie_client_utils.hpp"
 
 #include "agnocast/agnocast_publisher.hpp"
+#include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "agnocast_cie_thread_configurator/cie_thread_configurator.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -94,6 +95,11 @@ std::string create_callback_group_id(
       entries.push_back("Subscription(" + topic + ")");
     }
   }
+
+  const auto periods = get_agnocast_timer_periods_by_group(group);
+  std::transform(
+    periods.begin(), periods.end(), std::back_inserter(entries),
+    [](const int64_t period) { return "Timer(" + std::to_string(period) + ")"; });
 
   std::sort(entries.begin(), entries.end());
 
