@@ -7,11 +7,63 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <unordered_map>
 
 namespace agnocast
 {
 
 using CallbackGroupValidator = std::function<bool(const rclcpp::CallbackGroup::SharedPtr &)>;
+
+/**
+ * @brief Records which fds an EpollEventHandler has added to its epoll instance, keyed by the
+ * local ID of the entity that owns each fd.
+ *
+ * Every Executor owns its own handlers, so a registry describes the registrations of one epoll
+ * instance. In prepare_epoll(), a handler calls sync() for every existing entity and then
+ * forget_unless() to drop the entities that no longer exist.
+ */
+class EpollRegistry
+{
+public:
+  /**
+   * @brief Adds or removes the registration of an entity so that it matches should_monitor.
+   *
+   * A registration whose fd differs from the given fd is forgotten without EPOLL_CTL_DEL: that
+   * fd has been closed, which already removed it from epoll, and its number may have been reused
+   * by another entity. An entity that closes its fd must therefore set it to -1 rather than
+   * replace it with a new one, since the new fd may get the same number and be mistaken for the
+   * registered one.
+   *
+   * @param epoll_fd The file descriptor for the epoll instance.
+   * @param type The category of the event.
+   * @param local_id The local ID of the entity.
+   * @param fd The entity's current fd, or -1 if it has none. Must be open while this runs.
+   * @param should_monitor Whether this epoll instance should monitor the entity.
+   *
+   * @return true if the entity was newly added to epoll.
+   */
+  bool sync(
+    int epoll_fd, EpollEventType type, EpollEventLocalID local_id, int fd, bool should_monitor);
+
+  /**
+   * @brief Forgets the registrations of entities for which is_alive returns false, without
+   * EPOLL_CTL_DEL. Their owners close their fds, which removes them from epoll.
+   */
+  template <typename IsAlive>
+  void forget_unless(IsAlive is_alive)
+  {
+    for (auto it = fds_.begin(); it != fds_.end();) {
+      if (is_alive(it->first)) {
+        ++it;
+      } else {
+        it = fds_.erase(it);
+      }
+    }
+  }
+
+private:
+  std::unordered_map<EpollEventLocalID, int> fds_;
+};
 
 /**
  * @brief Abstract base class implemented for each type of event (e.g., Timer, Subscription,
