@@ -21,8 +21,8 @@ topic_local_id_t agnocast_kunit_setup_publisher(
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, node_name, pid, qos_depth, qos_is_transient_local,
-      is_bridge, &add_publisher_args),
+      topic_name, current->nsproxy->ipc_ns, node_name, "", false, pid, qos_depth,
+      qos_is_transient_local, is_bridge, &add_publisher_args),
     0);
   return add_publisher_args.ret_id;
 }
@@ -37,9 +37,9 @@ topic_local_id_t agnocast_kunit_setup_subscriber(
   KUNIT_ASSERT_EQ(
     test,
     agnocast_ioctl_add_subscriber(
-      topic_name, current->nsproxy->ipc_ns, node_name, pid, qos_depth, qos_is_transient_local,
-      qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, eventfd,
-      &add_subscriber_args),
+      topic_name, current->nsproxy->ipc_ns, node_name, "", false, pid, qos_depth,
+      qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
+      eventfd, &add_subscriber_args),
     0);
   return add_subscriber_args.ret_id;
 }

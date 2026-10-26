@@ -7,18 +7,27 @@
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 #include "agnocast/cie_client_utils.hpp"
+#include "agnocast/vendor/rclcpp/generic_service.hpp"
 #include "rclcpp/version.h"
 
+#include <dirent.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fstream>
+#include <iterator>
 #include <mutex>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace agnocast
 {
@@ -37,6 +46,17 @@ BridgeManager::BridgeManager()
   rclcpp::InitOptions init_options{};
   init_options.shutdown_on_signal = false;
   rclcpp::init(0, nullptr, init_options);
+
+  const char * show_env = std::getenv("AGNOCAST_BRIDGE_SHOW");
+  show_enabled_ = (show_env != nullptr && std::string(show_env) == "1");
+  const char * model_env = std::getenv("AGNOCAST_BRIDGE_EXEC_MODEL");
+  if (model_env != nullptr && std::string(model_env) == "grouped") {
+    exec_model_ = ExecModel::Grouped;
+  }
+  const char * stats_env = std::getenv("AGNOCAST_BRIDGE_SHOW_STATS");
+  if (stats_env != nullptr) {
+    show_stats_path_ = stats_env;
+  }
 }
 
 BridgeManager::~BridgeManager()
@@ -129,6 +149,11 @@ void BridgeManager::worker_loop()
       break;
     }
     check_and_update_service_bridges();
+
+    if (shutting_down()) {
+      break;
+    }
+    sync_shown_parts();
 
     check_and_remove_request_cache();
     check_and_request_shutdown();
@@ -253,6 +278,10 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
 
       sb_item.handle_request(payload);
       active_service_bridges_.emplace(service_name, std::move(sb_item));
+
+      if (show_enabled_ && payload.direction == BridgeDirection::ROS2_TO_AGNOCAST) {
+        show_service(payload);
+      }
       break;
     }
     case BridgeMsgType::PubSub: {
@@ -689,6 +718,333 @@ void BridgeManager::remove_invalid_requests(
     } catch (...) {
       req_it = request_map.erase(req_it);
     }
+  }
+}
+
+namespace
+{
+
+struct ListedTopic
+{
+  std::string name;
+  uint32_t domain_id;
+};
+
+std::vector<ListedTopic> list_agnocast_topics()
+{
+  std::vector<char> names(static_cast<size_t>(MAX_TOPIC_NUM) * TOPIC_NAME_BUFFER_SIZE);
+  std::vector<uint32_t> domains(MAX_TOPIC_NUM);
+  union ioctl_topic_list_args args = {};
+  args.topic_name_buffer_addr = reinterpret_cast<uint64_t>(names.data());
+  args.domain_id_buffer_addr = reinterpret_cast<uint64_t>(domains.data());
+  args.topic_name_buffer_size = MAX_TOPIC_NUM;
+  std::vector<ListedTopic> topics;
+  if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_LIST_CMD, &args) < 0) {
+    return topics;
+  }
+  topics.reserve(args.ret_topic_num);
+  for (uint32_t i = 0; i < args.ret_topic_num; i++) {
+    const char * name = names.data() + static_cast<size_t>(i) * TOPIC_NAME_BUFFER_SIZE;
+    topics.push_back({std::string(name, strnlen(name, TOPIC_NAME_BUFFER_SIZE)), domains[i]});
+  }
+  return topics;
+}
+
+// Called only from the worker thread. The buffer is kept and grown on -ENOBUFS, so the usual few
+// endpoints per topic do not cost a buffer sized for the per-topic maximum.
+std::vector<topic_endpoint_ret> get_topic_endpoints(const std::string & topic_name, uint32_t domain)
+{
+  constexpr size_t MAX_ENDPOINT_NUM = MAX_PUBLISHER_NUM + MAX_SUBSCRIBER_NUM;
+  static std::vector<topic_endpoint_ret> buffer(64);
+  for (;;) {
+    union ioctl_topic_endpoints_args args = {};
+    args.topic_name = {topic_name.c_str(), topic_name.size()};
+    args.endpoint_ret_buffer_addr = reinterpret_cast<uint64_t>(buffer.data());
+    args.endpoint_ret_buffer_size = static_cast<uint32_t>(buffer.size());
+    args.domain_id = domain;
+    if (ioctl(agnocast_fd, AGNOCAST_GET_TOPIC_ENDPOINTS_CMD, &args) == 0) {
+      return {buffer.begin(), buffer.begin() + args.ret_endpoint_num};
+    }
+    if (errno != ENOBUFS || buffer.size() >= MAX_ENDPOINT_NUM) {
+      return {};
+    }
+    buffer.resize(std::min(buffer.size() * 4, MAX_ENDPOINT_NUM));
+  }
+}
+
+int count_dir_entries(const char * path)
+{
+  DIR * dir = opendir(path);
+  if (dir == nullptr) {
+    return -1;
+  }
+  int num = 0;
+  while (const struct dirent * entry = readdir(dir)) {
+    if (entry->d_name[0] != '.') {
+      num++;
+    }
+  }
+  closedir(dir);
+  return num;
+}
+
+long read_rss_kb()
+{
+  std::ifstream statm("/proc/self/statm");
+  long size = 0;
+  long resident = 0;
+  statm >> size >> resident;
+  return resident * (sysconf(_SC_PAGESIZE) / 1024);
+}
+
+}  // namespace
+
+std::shared_ptr<rclcpp::Node> BridgeManager::find_or_create_shadow_node(
+  const std::string & full_node_name)
+{
+  auto identity = split_full_node_name(full_node_name);
+  auto it = shadow_nodes_.find(identity);
+  if (it != shadow_nodes_.end()) {
+    if (auto node = it->second.lock()) {
+      return node;
+    }
+  }
+
+  rclcpp::NodeOptions options;
+  options.start_parameter_services(false);
+  options.start_parameter_event_publisher(false);
+  options.enable_rosout(false);
+  options.use_global_arguments(false);
+  auto node = std::make_shared<rclcpp::Node>(identity.second, identity.first, options);
+  shadow_nodes_[identity] = node;
+  register_shadow_rcl_node(identity, node->get_node_base_interface()->get_shared_rcl_node_handle());
+  return node;
+}
+
+// PerPart: one group, and so one CIE thread, per part.
+// Grouped: the owner's one group, which every owner's group shares a CIE thread with.
+rclcpp::CallbackGroup::SharedPtr BridgeManager::create_shown_part_group(
+  const std::shared_ptr<rclcpp::Node> & owner)
+{
+  if (exec_model_ == ExecModel::Grouped) {
+    auto & owner_group = owner_groups_[owner.get()];
+    if (!owner_group.group) {
+      owner_group.group =
+        owner->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+      set_shared_executor_key(owner_group.group, "agnocast_bridge_dds_default");
+    }
+    return owner_group.group;
+  }
+
+  auto group = owner->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  set_bridge_direction(group, true);
+  return group;
+}
+
+// Called once the part's entity exists: CIE decides the executor kind from the group's contents.
+void BridgeManager::attach_shown_part_group(const ShownPart & part)
+{
+  if (!part.group) {
+    return;
+  }
+  if (exec_model_ == ExecModel::Grouped) {
+    auto & owner_group = owner_groups_[part.owner.get()];
+    if (owner_group.part_num++ > 0) {
+      return;
+    }
+  }
+  executor_->add_callback_group(part.group, part.owner->get_node_base_interface());
+}
+
+void BridgeManager::detach_shown_part_group(const ShownPart & part)
+{
+  if (!part.group) {
+    return;
+  }
+  if (exec_model_ == ExecModel::Grouped) {
+    auto it = owner_groups_.find(part.owner.get());
+    if (it == owner_groups_.end() || --it->second.part_num > 0) {
+      return;
+    }
+    executor_->remove_callback_group(part.group);
+    executor_->detach_shared_callback_group(part.group);
+    owner_groups_.erase(it);
+    return;
+  }
+  executor_->remove_callback_group(part.group);
+  executor_->stop_callback_group(part.group);
+}
+
+void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
+{
+  const std::string service_name = static_cast<const char *>(payload.service_name);
+  const std::string service_type = static_cast<const char *>(payload.service_type);
+  if (shown_services_.count(service_name) > 0) {
+    return;
+  }
+
+  try {
+    ShownPart part;
+    if (payload.create_shadow_node) {
+      const std::string ns = static_cast<const char *>(payload.shadow_node_namespace);
+      const std::string name = static_cast<const char *>(payload.shadow_node_name);
+      part.owner = find_or_create_shadow_node((ns == "/" ? "" : ns) + "/" + name);
+    } else {
+      part.owner = container_node_;
+    }
+    part.group = create_shown_part_group(part.owner);
+    part.server = agnocast::vendor_rclcpp::GenericService::create_generic_service(
+      part.owner.get(), service_name, service_type,
+      [this](
+        const std::shared_ptr<agnocast::vendor_rclcpp::GenericService> &,
+        const std::shared_ptr<rmw_request_id_t> &, const std::shared_ptr<void> &) {
+        shown_server_request_count_.fetch_add(1, std::memory_order_relaxed);
+      },
+      rclcpp::ServicesQoS(), part.group);
+    attach_shown_part_group(part);
+    shown_services_.emplace(service_name, std::move(part));
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(logger_, "Failed to show service '%s': %s", service_name.c_str(), e.what());
+  }
+}
+
+void BridgeManager::sync_shown_parts()
+{
+  if (!show_enabled_) {
+    return;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const uint32_t own_domain = static_cast<uint32_t>(
+    container_node_->get_node_base_interface()->get_context()->get_domain_id());
+
+  std::set<ShownKey> seen;
+  for (const auto & topic : list_agnocast_topics()) {
+    if (topic.domain_id != own_domain || topic.name.rfind("/AGNOCAST_SRV_", 0) == 0) {
+      continue;
+    }
+
+    for (const auto & ep : get_topic_endpoints(topic.name, topic.domain_id)) {
+      const std::string type_name(ep.type_name, strnlen(ep.type_name, TYPE_NAME_BUFFER_SIZE));
+      if (ep.is_bridge || type_name.empty()) {
+        continue;
+      }
+
+      ShownKey key{topic.name, ep.id, ep.is_publisher};
+      seen.insert(key);
+      if (shown_pubsub_.count(key) > 0 || failed_pubsub_.count(key) > 0) {
+        continue;
+      }
+
+      const std::string node_name(ep.node_name, strnlen(ep.node_name, NODE_NAME_BUFFER_SIZE));
+      try {
+        ShownPart part;
+        part.owner = ep.is_rclcpp_node ? container_node_ : find_or_create_shadow_node(node_name);
+        const size_t depth = std::max<uint32_t>(ep.qos_depth, 1);
+        if (ep.is_publisher) {
+          rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+          qos.reliable();
+          if (ep.qos_is_transient_local) {
+            qos.transient_local();
+          }
+          part.writer = part.owner->create_generic_publisher(topic.name, type_name, qos);
+        } else {
+          rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+          if (ep.qos_is_reliable) {
+            qos.reliable();
+          } else {
+            qos.best_effort();
+          }
+          if (ep.qos_is_transient_local) {
+            qos.transient_local();
+          }
+          part.group = create_shown_part_group(part.owner);
+          rclcpp::SubscriptionOptions options;
+          options.callback_group = part.group;
+          options.ignore_local_publications = true;
+          part.reader = part.owner->create_generic_subscription(
+            topic.name, type_name, qos,
+            [this](std::shared_ptr<rclcpp::SerializedMessage>) {
+              shown_reader_msg_count_.fetch_add(1, std::memory_order_relaxed);
+            },
+            options);
+          attach_shown_part_group(part);
+        }
+        shown_pubsub_.emplace(key, std::move(part));
+      } catch (const std::exception & e) {
+        RCLCPP_WARN(
+          logger_, "Failed to show %s of '%s' (type '%s', node '%s'): %s",
+          ep.is_publisher ? "publisher" : "subscriber", topic.name.c_str(), type_name.c_str(),
+          node_name.c_str(), e.what());
+        failed_pubsub_.emplace(key, e.what());
+      }
+    }
+  }
+
+  for (auto it = shown_pubsub_.begin(); it != shown_pubsub_.end();) {
+    if (seen.count(it->first) > 0) {
+      ++it;
+      continue;
+    }
+    detach_shown_part_group(it->second);
+    it = shown_pubsub_.erase(it);
+  }
+  for (auto it = failed_pubsub_.begin(); it != failed_pubsub_.end();) {
+    it = (seen.count(it->first) > 0) ? std::next(it) : failed_pubsub_.erase(it);
+  }
+
+  for (auto it = shown_services_.begin(); it != shown_services_.end();) {
+    std::string reason;
+    if (is_agnocast_service_alive(it->first, reason)) {
+      ++it;
+      continue;
+    }
+    detach_shown_part_group(it->second);
+    it = shown_services_.erase(it);
+  }
+
+  report_shown_parts(std::chrono::steady_clock::now() - start);
+}
+
+void BridgeManager::report_shown_parts(std::chrono::steady_clock::duration sync_time)
+{
+  size_t writers = 0;
+  size_t readers = 0;
+  for (const auto & [key, part] : shown_pubsub_) {
+    (part.writer ? writers : readers)++;
+  }
+  // Threads are logged too: CIE spawns a group's thread on its next monitoring pass, after the
+  // part.
+  const size_t part_num = shown_pubsub_.size() + shown_services_.size() + failed_pubsub_.size();
+  const int thread_num = count_dir_entries("/proc/self/task");
+  if (part_num == last_logged_part_num_ && thread_num == last_logged_thread_num_) {
+    return;
+  }
+  last_logged_part_num_ = part_num;
+  last_logged_thread_num_ = thread_num;
+
+  size_t shadows = 0;
+  for (const auto & [identity, weak_node] : shadow_nodes_) {
+    shadows += weak_node.expired() ? 0 : 1;
+  }
+  const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+  const auto sync_ms = std::chrono::duration_cast<std::chrono::milliseconds>(sync_time).count();
+  char line[512];
+  snprintf(
+    line, sizeof(line),
+    "{\"t_ns\":%lld,\"model\":\"%s\",\"writers\":%zu,\"readers\":%zu,\"servers\":%zu,"
+    "\"failed\":%zu,\"shadows\":%zu,\"threads\":%d,\"fds\":%d,\"rss_kb\":%ld,\"sync_ms\":%lld,"
+    "\"reader_msgs\":%llu,\"server_reqs\":%llu}",
+    static_cast<long long>(now_ns), exec_model_ == ExecModel::PerPart ? "per_part" : "grouped",
+    writers, readers, shown_services_.size(), failed_pubsub_.size(), shadows, thread_num,
+    count_dir_entries("/proc/self/fd"), read_rss_kb(), static_cast<long long>(sync_ms),
+    static_cast<unsigned long long>(shown_reader_msg_count_.load(std::memory_order_relaxed)),
+    static_cast<unsigned long long>(shown_server_request_count_.load(std::memory_order_relaxed)));
+  RCLCPP_INFO(logger_, "show: %s", line);
+  if (!show_stats_path_.empty()) {
+    std::ofstream out(show_stats_path_, std::ios::app);
+    out << line << '\n';
   }
 }
 

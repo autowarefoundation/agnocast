@@ -76,6 +76,11 @@ public:
   /// If group_ptr is nullptr or not found, this is a no-op.
   void stop_callback_group(const rclcpp::CallbackGroup::SharedPtr & group_ptr);
 
+  // For a group that shares a child executor (see set_shared_executor_key()): takes it out of that
+  // executor and leaves the thread running for the other groups. Use instead of
+  // stop_callback_group(), after remove_callback_group().
+  void detach_shared_callback_group(const rclcpp::CallbackGroup::SharedPtr & group_ptr);
+
   /// Add a callback group to this executor.
   /// @param group_ptr Callback group to add.
   /// @param node_ptr Node the group belongs to.

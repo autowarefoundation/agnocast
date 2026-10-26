@@ -42,7 +42,7 @@ void increment_borrowed_publisher_num()
 
 topic_local_id_t initialize_publisher(
   const std::string &, const std::string &, const rclcpp::QoS & qos, const bool,
-  const std::string &)
+  const std::string &, const bool)
 {
   initialize_publisher_mock_last_qos_depth = qos.depth();
   return 0;  // Dummy value

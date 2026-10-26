@@ -12,10 +12,12 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -73,6 +75,52 @@ private:
   std::unordered_map<std::string, DaemonForcedRequest> daemon_forced_a2r_;
 
   std::unordered_map<std::string, ServiceBridgeItem> active_service_bridges_;
+
+  // PoC (stage 1): advertise every Agnocast endpoint on the ROS 2 graph up front, reading the
+  // endpoints from the kernel module. Enabled by AGNOCAST_BRIDGE_SHOW=1. Nothing is relayed by
+  // these parts; the existing on-demand bridges above keep carrying the data.
+  enum class ExecModel { PerPart, Grouped };
+
+  struct ShownPart
+  {
+    std::shared_ptr<rclcpp::Node> owner;
+    rclcpp::PublisherBase::SharedPtr writer;
+    rclcpp::SubscriptionBase::SharedPtr reader;
+    rclcpp::ServiceBase::SharedPtr server;
+    rclcpp::CallbackGroup::SharedPtr group;
+  };
+
+  // (topic name, endpoint id, is_publisher)
+  using ShownKey = std::tuple<std::string, topic_local_id_t, bool>;
+
+  bool show_enabled_ = false;
+  ExecModel exec_model_ = ExecModel::PerPart;
+  std::string show_stats_path_;
+  std::map<ShownKey, ShownPart> shown_pubsub_;
+  std::map<ShownKey, std::string> failed_pubsub_;
+  std::map<std::string, ShownPart> shown_services_;
+  std::map<std::pair<std::string, std::string>, std::weak_ptr<rclcpp::Node>> shadow_nodes_;
+  std::atomic<uint64_t> shown_reader_msg_count_ = 0;
+  std::atomic<uint64_t> shown_server_request_count_ = 0;
+  // Grouped: a group belongs to its node, so each owner gets one group, shared by all its parts and
+  // run, together with every other owner's group, by one CIE thread.
+  struct OwnerGroup
+  {
+    rclcpp::CallbackGroup::SharedPtr group;
+    size_t part_num = 0;
+  };
+  std::map<const rclcpp::Node *, OwnerGroup> owner_groups_;
+  size_t last_logged_part_num_ = 0;
+  int last_logged_thread_num_ = -1;
+
+  void sync_shown_parts();
+  void show_service(const BridgeMsgServicePayload & payload);
+  std::shared_ptr<rclcpp::Node> find_or_create_shadow_node(const std::string & full_node_name);
+  rclcpp::CallbackGroup::SharedPtr create_shown_part_group(
+    const std::shared_ptr<rclcpp::Node> & owner);
+  void attach_shown_part_group(const ShownPart & part);
+  void detach_shown_part_group(const ShownPart & part);
+  void report_shown_parts(std::chrono::steady_clock::duration sync_time);
 
   void start_ros_execution();
   void start_worker_thread();

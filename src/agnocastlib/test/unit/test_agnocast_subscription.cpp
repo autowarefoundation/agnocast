@@ -19,7 +19,7 @@ namespace agnocast
 // ~SubscriptionBase() issues no ioctl either.
 void SubscriptionBase::initialize(
   const rclcpp::QoS &, const bool, const bool, SubscriptionRole, const std::string &,
-  const std::string &)
+  const std::string &, const bool)
 {
 }
 }  // namespace agnocast

@@ -4,8 +4,23 @@
 #include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <map>
+#include <mutex>
+#include <string>
+#include <utility>
+
 namespace agnocast
 {
+
+namespace
+{
+// Child executors shared by groups with the same key, per CallbackIsolatedAgnocastExecutor. Kept
+// outside the class so that its layout, which applications compile against, does not change.
+std::mutex shared_child_executors_mtx;
+std::map<
+  std::pair<const void *, std::string>, std::weak_ptr<rclcpp::executors::SingleThreadedExecutor>>
+  shared_child_executors;
+}  // namespace
 
 CallbackIsolatedAgnocastExecutor::CallbackIsolatedAgnocastExecutor(
   const rclcpp::ExecutorOptions & options, int next_exec_timeout_ms,
@@ -73,6 +88,33 @@ void CallbackIsolatedAgnocastExecutor::spin()
       const rclcpp::CallbackGroup::SharedPtr & group,
       const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node) {
       std::shared_ptr<rclcpp::Executor> executor;
+
+      const auto shared_key = agnocast::get_shared_executor_key(group);
+      if (shared_key) {
+        std::lock_guard<std::mutex> lock{shared_child_executors_mtx};
+        auto & weak_shared = shared_child_executors[std::make_pair(this, *shared_key)];
+        if (auto shared = weak_shared.lock()) {
+          shared->add_callback_group(group, node);
+          return;
+        }
+        auto created = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+        created->add_callback_group(group, node);
+        weak_shared = created;
+        executor = created;
+        child_callback_groups_.push_back(group);
+        weak_child_executors_.push_back(executor);
+        child_threads_.emplace_back([executor, callback_group_id = *shared_key, &client_publisher,
+                                     &client_publisher_mutex]() {
+          auto tid = static_cast<pid_t>(syscall(SYS_gettid));
+          {
+            std::lock_guard<std::mutex> lock{client_publisher_mutex};
+            agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
+          }
+          executor->spin();
+        });
+        return;
+      }
+
       auto agnocast_topics = agnocast::get_agnocast_topics_by_group(group);
       auto callback_group_id = agnocast::create_callback_group_id(group, node, agnocast_topics);
 
@@ -465,6 +507,26 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
     } else {
       thread_to_join.join();
     }
+  }
+}
+
+void CallbackIsolatedAgnocastExecutor::detach_shared_callback_group(
+  const rclcpp::CallbackGroup::SharedPtr & group_ptr)
+{
+  const auto shared_key = agnocast::get_shared_executor_key(group_ptr);
+  if (!group_ptr || !shared_key) {
+    return;
+  }
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> shared;
+  {
+    std::lock_guard<std::mutex> lock{shared_child_executors_mtx};
+    const auto it = shared_child_executors.find(std::make_pair(this, *shared_key));
+    if (it != shared_child_executors.end()) {
+      shared = it->second.lock();
+    }
+  }
+  if (shared && group_ptr->get_associated_with_executor_atomic().load()) {
+    shared->remove_callback_group(group_ptr);
   }
 }
 

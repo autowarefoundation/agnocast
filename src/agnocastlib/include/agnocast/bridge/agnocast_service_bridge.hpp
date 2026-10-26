@@ -18,6 +18,12 @@
 namespace agnocast
 {
 
+// Lets a node created elsewhere in the bridge manager serve as the shadow node of that identity, so
+// a service bridge reuses it instead of creating a second node with the same name.
+void register_shadow_rcl_node(
+  const std::pair<std::string, std::string> & identity,
+  const std::shared_ptr<rcl_node_t> & rcl_node);
+
 struct ServiceBridgeDeps
 {
   rclcpp::Node::SharedPtr container_node;

@@ -328,10 +328,11 @@ void agnocast_unlink_subscriber_info(
 }
 
 static int insert_subscriber_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
-  const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
-  struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * type_name,
+  const bool is_rclcpp_node, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool qos_is_reliable, const bool is_take_sub,
+  bool ignore_local_publications, const bool is_bridge, struct eventfd_ctx * notify_ctx,
+  struct subscriber_info ** new_info)
 {
   // rebuild_notify_list() skips take subs by testing notify_ctx alone, so the two must agree.
   WARN_ON_ONCE(is_take_sub != (notify_ctx == NULL));
@@ -368,11 +369,19 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
+  char * type_name_copy = kstrdup(type_name ? type_name : "", GFP_KERNEL);
+  if (!type_name_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   // Last failure point: reserving while nothing is committed yet is what lets the rebuild below be
   // infallible, and leaves the id counters untouched on failure.
   if (notify_ctx) {
     int reserve_ret = reserve_all_notify_ctxs(wrapper, notifiable_subscriber_num(wrapper) + 1);
     if (reserve_ret < 0) {
+      kfree(type_name_copy);
       kfree(node_name_copy);
       kfree(*new_info);
       // The caller releases notify_ctx on the error path, so it must not be released here.
@@ -395,6 +404,8 @@ static int insert_subscriber_info(
     (*new_info)->latest_received_entry_id = wrapper->topic->current_entry_id++;
   }
   (*new_info)->node_name = node_name_copy;
+  (*new_info)->type_name = type_name_copy;
+  (*new_info)->is_rclcpp_node = is_rclcpp_node;
   (*new_info)->is_take_sub = is_take_sub;
   (*new_info)->ignore_local_publications = ignore_local_publications;
   (*new_info)->need_mmap_update = true;
@@ -450,9 +461,9 @@ static struct publisher_info * find_publisher_info(
 }
 
 static int insert_publisher_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t publisher_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
-  struct publisher_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * type_name,
+  const bool is_rclcpp_node, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool is_bridge, struct publisher_info ** new_info)
 {
   int count = agnocast_get_size_pub_info_htable(wrapper);
   if (count == MAX_PUBLISHER_NUM) {
@@ -486,6 +497,13 @@ static int insert_publisher_info(
     return -ENOMEM;
   }
 
+  char * type_name_copy = kstrdup(type_name ? type_name : "", GFP_KERNEL);
+  if (!type_name_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
@@ -493,6 +511,8 @@ static int insert_publisher_info(
   (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = publisher_pid;
   (*new_info)->node_name = node_name_copy;
+  (*new_info)->type_name = type_name_copy;
+  (*new_info)->is_rclcpp_node = is_rclcpp_node;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
@@ -914,9 +934,10 @@ unlock:
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret)
+  const char * type_name, const bool is_rclcpp_node, const pid_t subscriber_pid,
+  const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
+  const bool is_take_sub, const bool ignore_local_publications, const bool is_bridge,
+  const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret)
 {
   int ret;
   struct eventfd_ctx * notify_ctx = NULL;
@@ -939,8 +960,9 @@ int agnocast_ioctl_add_subscriber(
 
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
-    wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
-    is_take_sub, ignore_local_publications, is_bridge, notify_ctx, &sub_info);
+    wrapper, node_name, type_name, is_rclcpp_node, subscriber_pid, qos_depth,
+    qos_is_transient_local, qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge,
+    notify_ctx, &sub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -957,8 +979,9 @@ unlock:
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret)
+  const char * type_name, const bool is_rclcpp_node, const pid_t publisher_pid,
+  const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret)
 {
   int ret;
 
@@ -972,7 +995,8 @@ int agnocast_ioctl_add_publisher(
 
   struct publisher_info * pub_info;
   ret = insert_publisher_info(
-    wrapper, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, &pub_info);
+    wrapper, node_name, type_name, is_rclcpp_node, publisher_pid, qos_depth, qos_is_transient_local,
+    is_bridge, &pub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -2085,6 +2109,99 @@ int agnocast_ioctl_get_topic_publisher_info(
   return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Publisher", topic_name);
 }
 
+// Caller holds global_htables_rwsem. Fills at most `capacity` entries and returns how many exist.
+static uint32_t fill_topic_endpoints(
+  const struct topic_wrapper * wrapper, struct topic_endpoint_ret * buf, const uint32_t capacity)
+{
+  uint32_t num = 0;
+
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_endpoint_ret * ep = &buf[num];
+      ep->id = pub_info->id;
+      ep->is_publisher = true;
+      ep->qos_depth = pub_info->qos_depth;
+      ep->qos_is_transient_local = pub_info->qos_is_transient_local;
+      ep->qos_is_reliable = true;
+      ep->is_bridge = pub_info->is_bridge;
+      ep->is_rclcpp_node = pub_info->is_rclcpp_node;
+      strscpy(ep->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      strscpy(ep->type_name, pub_info->type_name, TYPE_NAME_BUFFER_SIZE);
+    }
+    num++;
+  }
+
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_endpoint_ret * ep = &buf[num];
+      ep->id = sub_info->id;
+      ep->is_publisher = false;
+      ep->qos_depth = sub_info->qos_depth;
+      ep->qos_is_transient_local = sub_info->qos_is_transient_local;
+      ep->qos_is_reliable = sub_info->qos_is_reliable;
+      ep->is_bridge = sub_info->is_bridge;
+      ep->is_rclcpp_node = sub_info->is_rclcpp_node;
+      strscpy(ep->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      strscpy(ep->type_name, sub_info->type_name, TYPE_NAME_BUFFER_SIZE);
+    }
+    num++;
+  }
+
+  return num;
+}
+
+// Same retry shape as agnocast_ioctl_get_topic_subscriber_info(): allocation and copy_to_user can
+// sleep, so both run with global_htables_rwsem released.
+int agnocast_ioctl_get_topic_endpoints(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  union ioctl_topic_endpoints_args * endpoints_args)
+{
+  struct topic_endpoint_ret * endpoint_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+  int ret = 0;
+
+  const uint32_t buffer_size = endpoints_args->endpoint_ret_buffer_size;
+  struct topic_endpoint_ret __user * user_buffer =
+    (struct topic_endpoint_ret __user *)endpoints_args->endpoint_ret_buffer_addr;
+  const uint32_t domain_id = endpoints_args->domain_id;
+
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, domain_id);
+    num = wrapper ? fill_topic_endpoints(wrapper, endpoint_mem, capacity) : 0;
+    up_read(&global_htables_rwsem);
+
+    if (num <= capacity || num > buffer_size) break;
+
+    kvfree(endpoint_mem);
+    endpoint_mem = kvcalloc(num, sizeof(*endpoint_mem), GFP_KERNEL);
+    if (!endpoint_mem) return -ENOMEM;
+    capacity = num;
+  }
+
+  if (num > buffer_size) {
+    ret = -ENOBUFS;
+  } else if (num > 0 && copy_to_user(user_buffer, endpoint_mem, sizeof(*endpoint_mem) * num)) {
+    ret = -EFAULT;
+  } else {
+    endpoints_args->ret_endpoint_num = num;
+  }
+
+  kvfree(endpoint_mem);
+  return ret;
+}
+
 int agnocast_ioctl_get_subscriber_qos(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id, struct ioctl_get_subscriber_qos_args * args)
@@ -2979,10 +3096,15 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &sub_args.node_name);
   if (ret) return ret;
 
+  char type_name_buf[TYPE_NAME_BUFFER_SIZE];
+  ret = copy_name_from_user(type_name_buf, sizeof(type_name_buf), &sub_args.type_name);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_subscriber(
-    topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
-    sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, sub_args.eventfd, &sub_args);
+    topic_name_buf, ipc_ns, node_name_buf, type_name_buf, sub_args.is_rclcpp_node, pid,
+    sub_args.qos_depth, sub_args.qos_is_transient_local, sub_args.qos_is_reliable,
+    sub_args.is_take_sub, sub_args.ignore_local_publications, sub_args.is_bridge, sub_args.eventfd,
+    &sub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
@@ -3006,9 +3128,13 @@ static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &pub_args.node_name);
   if (ret) return ret;
 
+  char type_name_buf[TYPE_NAME_BUFFER_SIZE];
+  ret = copy_name_from_user(type_name_buf, sizeof(type_name_buf), &pub_args.type_name);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_publisher(
-    topic_name_buf, ipc_ns, node_name_buf, pid, pub_args.qos_depth, pub_args.qos_is_transient_local,
-    pub_args.is_bridge, &pub_args);
+    topic_name_buf, ipc_ns, node_name_buf, type_name_buf, pub_args.is_rclcpp_node, pid,
+    pub_args.qos_depth, pub_args.qos_is_transient_local, pub_args.is_bridge, &pub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &pub_args, sizeof(pub_args))) return -EFAULT;
   }
@@ -3410,6 +3536,25 @@ static long get_topic_subscriber_info_cmd(union ioctl_topic_info_args __user * a
   return ret;
 }
 
+static long get_topic_endpoints_cmd(union ioctl_topic_endpoints_args __user * arg)
+{
+  int ret = 0;
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  union ioctl_topic_endpoints_args endpoints_args;
+  if (copy_from_user(&endpoints_args, arg, sizeof(endpoints_args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &endpoints_args.topic_name);
+  if (ret) return ret;
+
+  ret = agnocast_ioctl_get_topic_endpoints(topic_name_buf, ipc_ns, &endpoints_args);
+  if (ret == 0) {
+    if (copy_to_user(arg, &endpoints_args, sizeof(endpoints_args))) return -EFAULT;
+  }
+  return ret;
+}
+
 static long get_topic_publisher_info_cmd(union ioctl_topic_info_args __user * arg)
 {
   int ret = 0;
@@ -3719,6 +3864,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_topic_subscriber_info_cmd((union ioctl_topic_info_args __user *)arg);
     case AGNOCAST_GET_TOPIC_PUBLISHER_INFO_CMD:
       return get_topic_publisher_info_cmd((union ioctl_topic_info_args __user *)arg);
+    case AGNOCAST_GET_TOPIC_ENDPOINTS_CMD:
+      return get_topic_endpoints_cmd((union ioctl_topic_endpoints_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_QOS_CMD:
       return get_subscriber_qos_cmd((struct ioctl_get_subscriber_qos_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_QOS_CMD:

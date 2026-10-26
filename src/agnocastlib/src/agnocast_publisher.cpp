@@ -14,6 +14,7 @@
 #include <sys/types.h>
 
 #include <new>
+#include <type_traits>
 
 namespace agnocast
 {
@@ -52,7 +53,7 @@ void decrement_borrowed_publisher_num()
 
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge, const std::string & type_name)
+  const bool is_bridge, const std::string & type_name, const bool is_rclcpp_node)
 {
   validate_ld_preload();
 
@@ -66,9 +67,11 @@ topic_local_id_t initialize_publisher(
   union ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {topic_name.c_str(), topic_name.size()};
   pub_args.node_name = {node_name.c_str(), node_name.size()};
+  pub_args.type_name = {type_name.c_str(), type_name.size()};
   pub_args.qos_depth = qos.depth();
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;
+  pub_args.is_rclcpp_node = is_rclcpp_node;
   if (ioctl(agnocast_fd, AGNOCAST_ADD_PUBLISHER_CMD, &pub_args) < 0) {
     RCLCPP_ERROR(logger, "AGNOCAST_ADD_PUBLISHER_CMD failed: %s", strerror(errno));
     close(agnocast_fd);
@@ -162,7 +165,9 @@ void PublisherBase::init_base(
 
   const bool is_bridge = (role == PublisherRole::BridgeInternal);
   const std::string node_name = node->get_fully_qualified_name();
-  id_ = initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name);
+  constexpr bool is_rclcpp_node = std::is_same_v<NodeT, rclcpp::Node>;
+  id_ =
+    initialize_publisher(topic_name_, node_name, actual_qos_, is_bridge, type_name, is_rclcpp_node);
   generate_gid();
 
   if (role == PublisherRole::Default) {

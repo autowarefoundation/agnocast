@@ -25,6 +25,7 @@ namespace agnocast
 #define NODE_NAME_BUFFER_SIZE 256
 #define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
+#define TYPE_NAME_BUFFER_SIZE 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -97,12 +98,14 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    bool is_rclcpp_node;
     int32_t eventfd;
   };
   struct
@@ -119,9 +122,11 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;
+    bool is_rclcpp_node;
   };
   struct
   {
@@ -391,5 +396,45 @@ struct ioctl_add_discovery_agent_args
 #define AGNOCAST_NOTIFY_BRIDGE_SHUTDOWN_CMD _IO(0xA6, 27)
 #define AGNOCAST_ADD_DISCOVERY_AGENT_CMD _IOWR(0xA6, 30, struct ioctl_add_discovery_agent_args)
 #define AGNOCAST_GET_NODE_NAMES_CMD _IOWR(0xA6, 33, union ioctl_get_node_names_args)
+
+struct topic_endpoint_ret
+{
+  topic_local_id_t id;
+  bool is_publisher;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+  bool is_bridge;
+  bool is_rclcpp_node;
+  uint32_t qos_depth;
+  char node_name[NODE_NAME_BUFFER_SIZE];
+  char type_name[TYPE_NAME_BUFFER_SIZE];
+};
+
+union ioctl_topic_endpoints_args {
+  struct
+  {
+    struct name_info topic_name;
+    uint64_t endpoint_ret_buffer_addr;
+    uint32_t endpoint_ret_buffer_size;
+    uint32_t domain_id;
+  };
+  uint32_t ret_endpoint_num;
+};
+
+#define AGNOCAST_GET_TOPIC_ENDPOINTS_CMD _IOWR(0xA6, 34, union ioctl_topic_endpoints_args)
+
+#define MAX_TOPIC_NUM 2048
+
+union ioctl_topic_list_args {
+  struct
+  {
+    uint64_t topic_name_buffer_addr;
+    uint64_t domain_id_buffer_addr;
+    uint32_t topic_name_buffer_size;
+  };
+  uint32_t ret_topic_num;
+};
+
+#define AGNOCAST_GET_TOPIC_LIST_CMD _IOWR(0xA6, 20, union ioctl_topic_list_args)
 
 }  // namespace agnocast

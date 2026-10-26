@@ -21,14 +21,15 @@ static int add_pubsub_pair(
 {
   union ioctl_add_publisher_args add_publisher_args;
   int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
-    IS_BRIDGE, &add_publisher_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, pub_pid, qos_depth,
+    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
   if (ret < 0) return ret;
 
   union ioctl_add_subscriber_args add_subscriber_args;
   return agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, sub_pid, qos_depth, QOS_IS_TRANSIENT_LOCAL,
-    QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1, &add_subscriber_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, sub_pid, qos_depth,
+    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
+    &add_subscriber_args);
 }
 
 // A publisher and subscriber with the same topic name but different ROS_DOMAIN_ID
@@ -72,7 +73,7 @@ void test_case_add_subscriber_normal(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 
@@ -104,7 +105,7 @@ void test_case_add_subscriber_acquires_notify_context(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     eventfd, &add_subscriber_args);
 
@@ -130,7 +131,7 @@ void test_case_add_subscriber_take_sub_acquires_no_notify_context(struct kunit *
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, true /* is_take_sub */, IGNORE_LOCAL_PUBLICATIONS,
     IS_BRIDGE, eventfd, &add_subscriber_args);
 
@@ -154,7 +155,7 @@ void test_case_add_subscriber_invalid_eventfd(struct kunit * test)
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     AGNOCAST_KUNIT_EVENTFD_BAD_FD, &add_subscriber_args);
 
@@ -176,7 +177,7 @@ void test_case_add_subscriber_releases_notify_context_on_failure(struct kunit * 
   for (uint32_t i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
     union ioctl_add_subscriber_args filler_args;
     agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
       QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
       -1, &filler_args);
   }
@@ -186,7 +187,7 @@ void test_case_add_subscriber_releases_notify_context_on_failure(struct kunit * 
   union ioctl_add_subscriber_args add_subscriber_args;
   const int eventfd = 0;
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
     eventfd, &add_subscriber_args);
 
@@ -209,14 +210,14 @@ void test_case_add_subscriber_too_many_subscribers(struct kunit * test)
   for (uint32_t i = 0; i < MAX_SUBSCRIBER_NUM; i++) {
     union ioctl_add_subscriber_args add_subscriber_args;
     agnocast_ioctl_add_subscriber(
-      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+      TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
       QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
       -1, &add_subscriber_args);
   }
 
   // Act
   int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, qos_depth,
+    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, "", false, subscriber_pid, qos_depth,
     QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
     &add_subscriber_args);
 

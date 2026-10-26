@@ -23,7 +23,7 @@ const void * get_node_base_address(Node * node);
 // These are cut out of the class for information hiding.
 topic_local_id_t initialize_publisher(
   const std::string & topic_name, const std::string & node_name, const rclcpp::QoS & qos,
-  const bool is_bridge, const std::string & type_name);
+  const bool is_bridge, const std::string & type_name, const bool is_rclcpp_node);
 union ioctl_publish_msg_args publish_core(
   [[maybe_unused]] const void * publisher_handle, /* for CARET */ const std::string & topic_name,
   const topic_local_id_t publisher_id, const uint64_t msg_virtual_address);

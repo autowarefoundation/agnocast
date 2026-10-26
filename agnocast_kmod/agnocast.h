@@ -17,6 +17,7 @@
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
 #define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
+#define TYPE_NAME_BUFFER_SIZE 256   // Maximum length of message type name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
@@ -76,12 +77,14 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
     bool is_take_sub;
     bool ignore_local_publications;
     bool is_bridge;
+    bool is_rclcpp_node;
     int32_t eventfd;  // eventfd created by userspace, passed to the kernel for publish notification
   };
   struct
@@ -95,9 +98,11 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;
+    bool is_rclcpp_node;
   };
   struct
   {
@@ -416,6 +421,34 @@ union ioctl_topic_info_args {
 #define AGNOCAST_GET_NODE_SUBSCRIBER_TOPICS_CMD _IOWR(0xA6, 23, union ioctl_node_info_args)
 #define AGNOCAST_GET_NODE_PUBLISHER_TOPICS_CMD _IOWR(0xA6, 24, union ioctl_node_info_args)
 
+// One endpoint of a topic, as the bridge manager reads it. Unlike topic_info_ret it carries the id,
+// so the bridge can key its parts by endpoint, and the message type, so it needs no registration.
+struct topic_endpoint_ret
+{
+  topic_local_id_t id;
+  bool is_publisher;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+  bool is_bridge;
+  bool is_rclcpp_node;
+  uint32_t qos_depth;
+  char node_name[NODE_NAME_BUFFER_SIZE];
+  char type_name[TYPE_NAME_BUFFER_SIZE];
+};
+
+union ioctl_topic_endpoints_args {
+  struct
+  {
+    struct name_info topic_name;
+    uint64_t endpoint_ret_buffer_addr;
+    uint32_t endpoint_ret_buffer_size;
+    uint32_t domain_id;
+  };
+  uint32_t ret_endpoint_num;
+};
+
+#define AGNOCAST_GET_TOPIC_ENDPOINTS_CMD _IOWR(0xA6, 34, union ioctl_topic_endpoints_args)
+
 // ================================================
 // public macros and functions in agnocast_main.c
 
@@ -435,14 +468,20 @@ void agnocast_exit_device(void);
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
+  const char * type_name, const bool is_rclcpp_node, const pid_t subscriber_pid,
+  const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
+  const bool is_take_sub, const bool ignore_local_publications, const bool is_bridge,
+  const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
+
+int agnocast_ioctl_get_topic_endpoints(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  union ioctl_topic_endpoints_args * endpoints_args);
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
+  const char * type_name, const bool is_rclcpp_node, const pid_t publisher_pid,
+  const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret);
 
 int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,

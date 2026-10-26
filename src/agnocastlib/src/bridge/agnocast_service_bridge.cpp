@@ -23,6 +23,13 @@ std::map<std::pair<std::string, std::string>, std::weak_ptr<rcl_node_t>> g_shado
 namespace agnocast
 {
 
+void register_shadow_rcl_node(
+  const std::pair<std::string, std::string> & identity,
+  const std::shared_ptr<rcl_node_t> & rcl_node)
+{
+  g_shadow_nodes[identity] = rcl_node;
+}
+
 void ServiceBridgeItem::set_error_string(const char * error_string)
 {
   error_string_ = error_string;
