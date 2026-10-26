@@ -125,7 +125,7 @@ void apply_string_qos_override(
   const rclcpp::ParameterValue & parameter_value, const char * kind_name, FromStr from_str,
   PolicyT unknown, Apply apply)
 {
-  const std::string policy_string = parameter_value.get<std::string>();
+  const std::string & policy_string = parameter_value.get<std::string>();
   const PolicyT policy_value = from_str(policy_string.c_str());
   if (policy_value == unknown) {
     throw std::invalid_argument(
