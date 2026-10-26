@@ -10,7 +10,10 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <iterator>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 
@@ -18,6 +21,27 @@ namespace agnocast
 {
 
 constexpr size_t CIE_QOS_DEPTH = 5000;
+
+namespace
+{
+std::mutex bridge_directions_mtx;
+// owner_less keys a destroyed group by its control block, so a new group at the same address
+// never inherits its entry.
+std::map<std::weak_ptr<rclcpp::CallbackGroup>, bool, std::owner_less<>> bridge_directions;
+}  // namespace
+
+void set_bridge_direction(const rclcpp::CallbackGroup::SharedPtr & group, bool is_r2a)
+{
+  if (!group) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(bridge_directions_mtx);
+  // Drop the entries of removed bridges, so that the map does not grow as bridges come and go.
+  for (auto it = bridge_directions.begin(); it != bridge_directions.end();) {
+    it = it->first.expired() ? bridge_directions.erase(it) : std::next(it);
+  }
+  bridge_directions[group] = is_r2a;
+}
 
 std::string create_callback_group_id(
   const rclcpp::CallbackGroup::SharedPtr & group,
@@ -77,6 +101,14 @@ std::string create_callback_group_id(
   ss << ns << node->get_name();
   for (const auto & entry : entries) {
     ss << "@" << entry;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(bridge_directions_mtx);
+    auto it = bridge_directions.find(group);
+    if (it != bridge_directions.end()) {
+      ss << (it->second ? "@BridgeR2A" : "@BridgeA2R");
+    }
   }
 
   return ss.str();

@@ -1,4 +1,5 @@
 #include "agnocast/agnocast_single_threaded_executor.hpp"
+#include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/cie_client_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/component_manager.hpp"
@@ -158,7 +159,7 @@ void ComponentManagerCallbackIsolated::start_executor_for_callback_group(
 
   std::shared_ptr<rclcpp::Executor> executor;
 
-  if (agnocast_topics.empty()) {
+  if (agnocast_topics.empty() && !agnocast::group_has_agnocast_timer(callback_group)) {
     auto rclcpp_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
     rclcpp_executor->add_callback_group(callback_group, node);
     executor = std::move(rclcpp_executor);

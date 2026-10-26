@@ -169,6 +169,29 @@ TEST_F(CreateCallbackGroupIdTest, MixedAgnocastAndRclcppSorted)
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)@Subscription(/topic_b)");
 }
 
+TEST_F(CreateCallbackGroupIdTest, BridgeGroupsOfOneTopicShowDirection)
+{
+  // Arrange: an R2A bridge group holds an rclcpp subscription, an A2R bridge group holds an
+  // Agnocast subscription on the same topic.
+  auto group_r2a = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions sub_options;
+  sub_options.callback_group = group_r2a;
+  auto sub = node_->create_subscription<std_msgs::msg::Bool>(
+    "/topic_a", 10, [](const std::shared_ptr<const std_msgs::msg::Bool>) {}, sub_options);
+  agnocast::set_bridge_direction(group_r2a, true);
+
+  auto group_a2r = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  agnocast::set_bridge_direction(group_a2r, false);
+
+  // Act
+  auto id_r2a = agnocast::create_callback_group_id(group_r2a, node_, {});
+  auto id_a2r = agnocast::create_callback_group_id(group_a2r, node_, {"/topic_a"});
+
+  // Assert
+  EXPECT_EQ(id_r2a, "/test_node@Subscription(/topic_a)@BridgeR2A");
+  EXPECT_EQ(id_a2r, "/test_node@Subscription(/topic_a)@BridgeA2R");
+}
+
 TEST_F(CreateCallbackGroupIdTest, NodeBaseInterfaceOverload)
 {
   // Arrange

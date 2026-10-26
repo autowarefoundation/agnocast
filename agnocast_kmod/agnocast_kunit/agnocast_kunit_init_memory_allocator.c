@@ -9,7 +9,7 @@
 // Helper to save and restore module parameters around each test.
 // Tests call init_memory_allocator() with modified globals, then
 // cleanup_memory_allocator() to free, and finally restore the originals
-// so the suite-wide allocator (re-initialized in agnocast_test_exit) is unaffected.
+// so the suite-wide allocator (re-initialized at the end of the test) is unaffected.
 
 struct saved_params
 {
@@ -36,6 +36,9 @@ void test_case_init_memory_allocator_non_default(struct kunit * test)
 {
   struct saved_params saved;
   save_params(&saved);
+
+  // init_memory_allocator() would overwrite the suite-wide allocator and leak it, so free it first.
+  cleanup_memory_allocator();
 
   // Use small non-default values
   mempool_num = 2;

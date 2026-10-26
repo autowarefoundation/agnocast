@@ -25,6 +25,10 @@ std::string create_callback_group_id(
   return create_callback_group_id(group, node->get_node_base_interface(), agnocast_topics);
 }
 
+// Marks `group` as a bridge group, so that its callback group ID ends with "@BridgeR2A" or
+// "@BridgeA2R". Without the marker, the R2A and A2R groups of one topic get the same ID.
+void set_bridge_direction(const rclcpp::CallbackGroup::SharedPtr & group, bool is_r2a);
+
 // Caution: Do not call in parallel
 // Caution: Must be called after rclcpp::init() called
 rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr

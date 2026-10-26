@@ -75,6 +75,13 @@ class TestComponentContainerCIE(unittest.TestCase):
             process=component_container
         )
 
+    def test_agnocast_timer_fires(self, proc_output, component_container):
+        proc_output.assertWaitFor(
+            'Agnocast timer fired',
+            timeout=10.0,
+            process=component_container
+        )
+
     def test_thread_configurator_receives_callback_info(self, proc_output, thread_configurator):
         filtered_output_text = "".join(
             line
