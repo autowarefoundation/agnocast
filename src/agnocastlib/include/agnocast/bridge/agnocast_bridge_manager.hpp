@@ -1,6 +1,8 @@
 #pragma once
 
 #include "agnocast/agnocast_callback_isolated_executor.hpp"
+#include "agnocast/agnocast_publisher.hpp"
+#include "agnocast/agnocast_subscription.hpp"
 #include "agnocast/bridge/agnocast_bridge_ipc_event_loop.hpp"
 #include "agnocast/bridge/agnocast_bridge_loader.hpp"
 #include "agnocast/bridge/agnocast_bridge_msg.hpp"
@@ -15,11 +17,13 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace agnocast
 {
@@ -84,10 +88,18 @@ private:
   struct ShownPart
   {
     std::shared_ptr<rclcpp::Node> owner;
-    rclcpp::PublisherBase::SharedPtr writer;
+    std::shared_ptr<rclcpp::GenericPublisher> writer;
     rclcpp::SubscriptionBase::SharedPtr reader;
-    rclcpp::ServiceBase::SharedPtr server;
+    std::shared_ptr<void> server;
     rclcpp::CallbackGroup::SharedPtr group;
+    // Stage 2: the kmod-side parts that carry the data.
+    std::string type_name;
+    uint32_t qos_depth = 1;
+    bool qos_is_transient_local = false;
+    std::shared_ptr<agnocast::GenericSubscription> receiver;  // I, routed from the publisher
+    std::shared_ptr<agnocast::GenericPublisher> sender;       // T, routed to the subscriber
+    rclcpp::CallbackGroup::SharedPtr relay_group;
+    bool relay_paused = false;
   };
 
   // (topic name, endpoint id, is_publisher)
@@ -110,6 +122,11 @@ private:
     size_t part_num = 0;
   };
   std::map<const rclcpp::Node *, OwnerGroup> owner_groups_;
+  // Grouped, kmod side: every receiver is in this one group of the container node, run by one CIE
+  // thread. A receiver leaving it is paused first and dropped on the next sync, so that a receive
+  // already queued on that thread finds it paused rather than gone (review high-3).
+  rclcpp::CallbackGroup::SharedPtr relay_shared_group_;
+  std::vector<std::shared_ptr<agnocast::GenericSubscription>> retiring_receivers_;
   size_t last_logged_part_num_ = 0;
   int last_logged_thread_num_ = -1;
 
@@ -120,6 +137,11 @@ private:
   void profile_event(const std::string & ev, const std::string & fields);
 
   void sync_shown_parts();
+  void sync_relays(const std::string & topic_name, const std::vector<ShownKey> & keys);
+  rclcpp::CallbackGroup::SharedPtr create_relay_group();
+  void attach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group);
+  void detach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group);
+  std::set<std::string> own_node_names() const;
   void show_service(const BridgeMsgServicePayload & payload);
   std::shared_ptr<rclcpp::Node> find_or_create_shadow_node(const std::string & full_node_name);
   rclcpp::CallbackGroup::SharedPtr create_shown_part_group(

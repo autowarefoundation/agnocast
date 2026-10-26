@@ -77,6 +77,18 @@ void SubscriptionBase::initialize(
   id_ = add_subscriber_args.ret_id;
   notify_eventfd_ = efd;
 
+  if (role == SubscriptionRole::BridgeInternal && take_next_bridge_subscription_paused()) {
+    struct ioctl_set_bridge_route_args route_args = {};
+    route_args.topic_name = {topic_name_.c_str(), topic_name_.size()};
+    route_args.id = id_;
+    route_args.peer_id = -1;
+    route_args.is_publisher = false;
+    route_args.paused = true;
+    if (ioctl(agnocast_fd, AGNOCAST_SET_BRIDGE_ROUTE_CMD, &route_args) < 0) {
+      RCLCPP_ERROR(logger, "AGNOCAST_SET_BRIDGE_ROUTE_CMD failed: %s", strerror(errno));
+    }
+  }
+
   if (role == SubscriptionRole::Default) {
     if (!type_name.empty()) {
       register_pubsub_bridge_by_type_name(
@@ -131,19 +143,9 @@ uint32_t get_publisher_count_core(const std::string & topic_name)
     exit(EXIT_FAILURE);
   }
 
-  uint32_t count = args.ret_publisher_num;
-  // If an R2A bridge exists, exclude the agnocast publisher created by the bridge
-  if (args.ret_r2a_bridge_exist && count > 0) {
-    count--;
-  }
-
-  uint32_t ros2_count = args.ret_ros2_publisher_num;
-  // If an A2R bridge exists, exclude the ROS 2 publisher created by the bridge
-  if (args.ret_a2r_bridge_exist && ros2_count > 0) {
-    ros2_count--;
-  }
-
-  return count + ros2_count;
+  // The kmod leaves bridge publishers out, and the bridge manager writes only the ROS 2 publishers
+  // outside itself.
+  return args.ret_publisher_num + args.ret_ros2_publisher_num;
 }
 
 void close_notify_eventfd(int notify_eventfd)

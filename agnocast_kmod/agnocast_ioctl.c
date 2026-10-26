@@ -236,6 +236,19 @@ static uint32_t notifiable_subscriber_num(const struct topic_wrapper * wrapper)
   return num;
 }
 
+// Bridge routes and pauses, the same for waking and for handing out messages.
+static bool bridge_route_allows(
+  const struct publisher_info * pub_info, const struct subscriber_info * sub_info)
+{
+  if (sub_info->paused) return false;
+  if (sub_info->source_publisher_id >= 0 && sub_info->source_publisher_id != pub_info->id)
+    return false;
+  if (
+    pub_info->destination_subscriber_id >= 0 && pub_info->destination_subscriber_id != sub_info->id)
+    return false;
+  return true;
+}
+
 // Caller holds global_htables_rwsem (write), so the swap below cannot race a publish: those hold
 // the read side for their whole duration. The current list is carried across, so that a caller who
 // fails partway through reserving has invalidated no one's list and owes no undo.
@@ -290,6 +303,7 @@ static void rebuild_notify_list(struct topic_wrapper * wrapper, struct publisher
           sub_info->is_bridge))
       continue;
     if (sub_info->ignore_local_publications && sub_info->pid == pub_info->pid) continue;
+    if (!bridge_route_allows(pub_info, sub_info)) continue;
 
     if (WARN_ON_ONCE(notify_num == pub_info->notify_capacity)) break;
     pub_info->notify_ctxs[notify_num++] = sub_info->notify_ctx;
@@ -410,6 +424,8 @@ static int insert_subscriber_info(
   (*new_info)->ignore_local_publications = ignore_local_publications;
   (*new_info)->need_mmap_update = true;
   (*new_info)->is_bridge = is_bridge;
+  (*new_info)->source_publisher_id = -1;
+  (*new_info)->paused = false;
   (*new_info)->notify_ctx = notify_ctx;
   INIT_HLIST_NODE(&(*new_info)->node);
   uint32_t hash_val = hash_min(new_id, SUB_INFO_HASH_BITS);
@@ -517,6 +533,7 @@ static int insert_publisher_info(
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
   (*new_info)->is_bridge = is_bridge;
+  (*new_info)->destination_subscriber_id = -1;
   (*new_info)->notify_ctxs = NULL;
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
@@ -1213,6 +1230,10 @@ static int is_entry_deliverable(
     return 0;
   }
 
+  if (!bridge_route_allows(pub_info, sub_info)) {
+    return 0;
+  }
+
   return domain_delivery_allowed(
     wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
     sub_info->is_bridge);
@@ -1274,7 +1295,11 @@ static int receive_msg_core(
       continue;
     }
 
-    ret = add_subscriber_reference(en, subscriber_id, false);
+    // A resumed bridge subscriber may still hold an entry it is handed again; it already has it.
+    ret = add_subscriber_reference(en, subscriber_id, sub_info->is_bridge);
+    if (ret == -EALREADY && sub_info->is_bridge) {
+      continue;
+    }
     if (ret < 0) {
       return ret;
     }
@@ -1500,8 +1525,11 @@ int agnocast_ioctl_get_subscriber_num(
       }
       continue;
     }
+    // Bridge subscribers are not counted: a topic can have several of them (one per bridged
+    // publisher), and none of them is a subscriber the application should see.
     if (sub_info->is_bridge) {
       ioctl_ret->ret_a2r_bridge_exist = true;
+      continue;
     }
     if (sub_info->pid == pid) {
       intra_count++;
@@ -1598,10 +1626,12 @@ int agnocast_ioctl_get_publisher_num(
     if (pub_info->domain_id != wrapper->domain_id) {
       continue;
     }
-    publisher_num++;
+    // Bridge publishers are not counted, for the same reason as in get_subscriber_num.
     if (pub_info->is_bridge) {
       ioctl_ret->ret_r2a_bridge_exist = true;
+      continue;
     }
+    publisher_num++;
   }
   ioctl_ret->ret_publisher_num = publisher_num;
 
@@ -2107,6 +2137,54 @@ int agnocast_ioctl_get_topic_publisher_info(
   }
 
   return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Publisher", topic_name);
+}
+
+// Takes global_htables_rwsem for write: the change reaches the notify lists, which only global write
+// may rebuild.
+int agnocast_ioctl_set_bridge_route(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const struct ioctl_set_bridge_route_args * route_args)
+{
+  int ret = 0;
+
+  down_write(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    ret = -EINVAL;
+    goto unlock;
+  }
+
+  if (route_args->is_publisher) {
+    struct publisher_info * pub_info = find_publisher_info(wrapper, route_args->id);
+    if (!pub_info || !pub_info->is_bridge) {
+      ret = -EINVAL;
+      goto unlock;
+    }
+    pub_info->destination_subscriber_id = route_args->peer_id;
+    rebuild_notify_list(wrapper, pub_info);
+  } else {
+    struct subscriber_info * sub_info = find_subscriber_info(wrapper, route_args->id);
+    if (!sub_info || !sub_info->is_bridge) {
+      ret = -EINVAL;
+      goto unlock;
+    }
+    const bool resuming = sub_info->paused && !route_args->paused;
+    sub_info->source_publisher_id = route_args->peer_id;
+    sub_info->paused = route_args->paused;
+    if (resuming) {
+      if (sub_info->qos_is_transient_local) {
+        sub_info->latest_received_entry_id = -1;
+      } else {
+        sub_info->latest_received_entry_id = wrapper->topic->current_entry_id++;
+      }
+    }
+    rebuild_all_notify_lists(wrapper);
+  }
+
+unlock:
+  up_write(&global_htables_rwsem);
+  return ret;
 }
 
 // Caller holds global_htables_rwsem. Fills at most `capacity` entries and returns how many exist.
@@ -3536,6 +3614,20 @@ static long get_topic_subscriber_info_cmd(union ioctl_topic_info_args __user * a
   return ret;
 }
 
+static long set_bridge_route_cmd(struct ioctl_set_bridge_route_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_set_bridge_route_args route_args;
+  if (copy_from_user(&route_args, arg, sizeof(route_args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  long ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &route_args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_set_bridge_route(topic_name_buf, ipc_ns, &route_args);
+}
+
 static long get_topic_endpoints_cmd(union ioctl_topic_endpoints_args __user * arg)
 {
   int ret = 0;
@@ -3866,6 +3958,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_topic_publisher_info_cmd((union ioctl_topic_info_args __user *)arg);
     case AGNOCAST_GET_TOPIC_ENDPOINTS_CMD:
       return get_topic_endpoints_cmd((union ioctl_topic_endpoints_args __user *)arg);
+    case AGNOCAST_SET_BRIDGE_ROUTE_CMD:
+      return set_bridge_route_cmd((struct ioctl_set_bridge_route_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_QOS_CMD:
       return get_subscriber_qos_cmd((struct ioctl_get_subscriber_qos_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_QOS_CMD:

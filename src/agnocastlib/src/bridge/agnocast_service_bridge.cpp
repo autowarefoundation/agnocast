@@ -451,6 +451,9 @@ void ServiceBridgeItem::check_and_update_pending(const ServiceBridgeDeps & deps)
   // (5)'s precondition, not (5) itself; it also excludes (3) and (2), hence the unconditional
   // return.
   if (may_start_r2a_bridge_ && agno_service_exists()) {
+    if (deps.r2a_shown) {
+      return;
+    }
     // Before the client check on purpose: the node must be resolvable for that client to appear.
     if (!acquire_shadow_node()) {
       RCLCPP_WARN(

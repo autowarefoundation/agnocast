@@ -32,6 +32,23 @@ FILE * g_profile_fp = nullptr;
 pid_t g_profile_pid = 0;
 }  // namespace
 
+namespace
+{
+thread_local bool g_next_bridge_subscription_paused = false;
+}  // namespace
+
+void set_next_bridge_subscription_paused(bool paused)
+{
+  g_next_bridge_subscription_paused = paused;
+}
+
+bool take_next_bridge_subscription_paused()
+{
+  const bool paused = g_next_bridge_subscription_paused;
+  g_next_bridge_subscription_paused = false;
+  return paused;
+}
+
 bool bridge_profile_enabled()
 {
   static const bool enabled = std::getenv("AGNOCAST_BRIDGE_PROFILE") != nullptr;
@@ -189,11 +206,8 @@ SubscriberCountResult get_agnocast_subscriber_count(const std::string & topic_na
     return {-1, false};
   }
 
-  int total_subs =
+  const int total_subs =
     static_cast<int>(args.ret_other_process_subscriber_num + args.ret_same_process_subscriber_num);
-  if (args.ret_a2r_bridge_exist && total_subs > 0) {
-    total_subs--;
-  }
 
   return {total_subs, args.ret_a2r_bridge_exist};
 }
@@ -207,10 +221,7 @@ PublisherCountResult get_agnocast_publisher_count(const std::string & topic_name
     return {-1, false};
   }
 
-  int total_pubs = static_cast<int>(args.ret_publisher_num);
-  if (args.ret_r2a_bridge_exist && total_pubs > 0) {
-    total_pubs--;
-  }
+  const int total_pubs = static_cast<int>(args.ret_publisher_num);
 
   return {total_pubs, args.ret_r2a_bridge_exist};
 }
@@ -221,7 +232,15 @@ bool update_ros2_subscriber_num(const rclcpp::Node * node, const std::string & t
     return false;
   }
 
-  size_t ros2_count = node->count_subscribers(topic_name);
+  // Only the subscribers outside the bridge manager: its own (the container node's) are bridges.
+  const std::string self_name = node->get_name();
+  const std::string self_ns = node->get_namespace();
+  size_t ros2_count = 0;
+  for (const auto & info : node->get_subscriptions_info_by_topic(topic_name)) {
+    if (info.node_name() != self_name || info.node_namespace() != self_ns) {
+      ros2_count++;
+    }
+  }
 
   struct ioctl_set_ros2_subscriber_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};
@@ -240,7 +259,15 @@ bool update_ros2_publisher_num(const rclcpp::Node * node, const std::string & to
     return false;
   }
 
-  size_t ros2_count = node->count_publishers(topic_name);
+  // Only the publishers outside the bridge manager: its own (the container node's) are bridges.
+  const std::string self_name = node->get_name();
+  const std::string self_ns = node->get_namespace();
+  size_t ros2_count = 0;
+  for (const auto & info : node->get_publishers_info_by_topic(topic_name)) {
+    if (info.node_name() != self_name || info.node_namespace() != self_ns) {
+      ros2_count++;
+    }
+  }
 
   struct ioctl_set_ros2_publisher_num_args args = {};
   args.topic_name = {topic_name.c_str(), topic_name.size()};

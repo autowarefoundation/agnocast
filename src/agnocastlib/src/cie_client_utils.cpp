@@ -30,11 +30,12 @@ std::mutex bridge_directions_mtx;
 std::map<std::weak_ptr<rclcpp::CallbackGroup>, bool, std::owner_less<>> bridge_directions;
 
 std::mutex shared_executor_keys_mtx;
-std::map<std::weak_ptr<rclcpp::CallbackGroup>, std::string, std::owner_less<>> shared_executor_keys;
+std::map<std::weak_ptr<rclcpp::CallbackGroup>, SharedExecutorKey, std::owner_less<>>
+  shared_executor_keys;
 }  // namespace
 
 void set_shared_executor_key(
-  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & key)
+  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & key, bool agnocast)
 {
   if (!group) {
     return;
@@ -43,10 +44,11 @@ void set_shared_executor_key(
   for (auto it = shared_executor_keys.begin(); it != shared_executor_keys.end();) {
     it = it->first.expired() ? shared_executor_keys.erase(it) : std::next(it);
   }
-  shared_executor_keys[group] = key;
+  shared_executor_keys[group] = SharedExecutorKey{key, agnocast};
 }
 
-std::optional<std::string> get_shared_executor_key(const rclcpp::CallbackGroup::SharedPtr & group)
+std::optional<SharedExecutorKey> get_shared_executor_key(
+  const rclcpp::CallbackGroup::SharedPtr & group)
 {
   std::lock_guard<std::mutex> lock(shared_executor_keys_mtx);
   const auto it = shared_executor_keys.find(group);

@@ -25,6 +25,12 @@ enum class BridgeMode { Off, On };
 // appends JSON lines to <dir>/<manager|app>_<pid>.jsonl. Times are CLOCK_REALTIME nanoseconds so
 // that lines from different processes line up.
 bool bridge_profile_enabled();
+
+// PoC (bridge manager only): the next bridge-internal subscription created on this thread starts
+// paused in the kmod, before any executor can queue a receive for it. The manager routes and
+// resumes it once it knows its id.
+void set_next_bridge_subscription_paused(bool paused);
+bool take_next_bridge_subscription_paused();
 int64_t bridge_profile_now_ns();
 void bridge_profile_write(const std::string & json_line);
 

@@ -449,6 +449,21 @@ union ioctl_topic_endpoints_args {
 
 #define AGNOCAST_GET_TOPIC_ENDPOINTS_CMD _IOWR(0xA6, 34, union ioctl_topic_endpoints_args)
 
+// Bridge only. Routes a bridge endpoint to one peer, and pauses or resumes a bridge subscriber.
+// peer_id is the source publisher of a subscriber or the destination subscriber of a publisher, and
+// -1 removes the route. Resuming hands a transient-local subscriber the latest messages again and
+// a volatile one only what comes next.
+struct ioctl_set_bridge_route_args
+{
+  struct name_info topic_name;
+  topic_local_id_t id;
+  topic_local_id_t peer_id;
+  bool is_publisher;
+  bool paused;
+};
+
+#define AGNOCAST_SET_BRIDGE_ROUTE_CMD _IOW(0xA6, 35, struct ioctl_set_bridge_route_args)
+
 // ================================================
 // public macros and functions in agnocast_main.c
 
@@ -472,6 +487,10 @@ int agnocast_ioctl_add_subscriber(
   const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
   const bool is_take_sub, const bool ignore_local_publications, const bool is_bridge,
   const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
+
+int agnocast_ioctl_set_bridge_route(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const struct ioctl_set_bridge_route_args * route_args);
 
 int agnocast_ioctl_get_topic_endpoints(
   const char * topic_name, const struct ipc_namespace * ipc_ns,

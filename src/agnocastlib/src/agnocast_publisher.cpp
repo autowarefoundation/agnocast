@@ -111,20 +111,10 @@ uint32_t get_subscription_count_core(const std::string & topic_name)
     exit(EXIT_FAILURE);
   }
 
-  uint32_t inter_count = args.ret_other_process_subscriber_num;
-  // If an A2R bridge exists, exclude the agnocast subscriber created by the bridge. The bridge
-  // runs in a forked process, so it is never part of the same-process count.
-  if (args.ret_a2r_bridge_exist && inter_count > 0) {
-    inter_count--;
-  }
-
-  uint32_t ros2_count = args.ret_ros2_subscriber_num;
-  // If an R2A bridge exists, exclude the ROS 2 subscriber created by the bridge
-  if (args.ret_r2a_bridge_exist && ros2_count > 0) {
-    ros2_count--;
-  }
-
-  return inter_count + args.ret_same_process_subscriber_num + ros2_count;
+  // The kmod leaves bridge subscribers out, and the bridge manager writes only the ROS 2
+  // subscribers outside itself.
+  return args.ret_other_process_subscriber_num + args.ret_same_process_subscriber_num +
+         args.ret_ros2_subscriber_num;
 }
 
 uint32_t get_same_process_subscription_count_core(const std::string & topic_name)

@@ -151,16 +151,21 @@ void BridgeManager::worker_loop()
       return shutdown_requested_.load(std::memory_order_relaxed);
     };
 
+    // In show mode the shown parts carry the data, so the topic-level bridges are not created.
     if (shutting_down()) {
       break;
     }
-    check_and_create_pubsub_bridges();
+    if (!show_enabled_) {
+      check_and_create_pubsub_bridges();
+    }
     step("create");
 
     if (shutting_down()) {
       break;
     }
-    create_daemon_forced_bridges();
+    if (!show_enabled_) {
+      create_daemon_forced_bridges();
+    }
 
     check_and_remove_pubsub_bridges();
     step("remove");
@@ -328,6 +333,9 @@ void BridgeManager::dispatch_bridge_message(const BridgeMsg & msg)
       topic_local_id_t target_id = payload.target_id;
       std::string message_type = static_cast<const char *>(payload.message_type);
 
+      if (show_enabled_) {
+        break;
+      }
       request_cache_[topic_name][target_id] = payload;
 
       create_pubsub_bridge_if_needed(
@@ -594,6 +602,7 @@ void BridgeManager::check_and_remove_pubsub_bridges()
 void BridgeManager::check_and_update_service_bridges()
 {
   ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
+  deps.r2a_shown = show_enabled_;
 #if RCLCPP_VERSION_MAJOR < 28
   const int64_t scan_start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   deps.ros2_client_service_names =
@@ -849,6 +858,19 @@ long read_rss_kb()
   return resident * (sysconf(_SC_PAGESIZE) / 1024);
 }
 
+bool set_bridge_route(
+  const std::string & topic_name, topic_local_id_t id, bool is_publisher, topic_local_id_t peer_id,
+  bool paused)
+{
+  struct ioctl_set_bridge_route_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.id = id;
+  args.peer_id = peer_id;
+  args.is_publisher = is_publisher;
+  args.paused = paused;
+  return ioctl(agnocast_fd, AGNOCAST_SET_BRIDGE_ROUTE_CMD, &args) == 0;
+}
+
 }  // namespace
 
 void BridgeManager::profile_event(const std::string & ev, const std::string & fields)
@@ -962,16 +984,31 @@ void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
     } else {
       part.owner = container_node_;
     }
-    part.group = create_shown_part_group(part.owner);
-    part.server = agnocast::vendor_rclcpp::GenericService::create_generic_service(
-      part.owner.get(), service_name, service_type,
-      [this](
-        const std::shared_ptr<agnocast::vendor_rclcpp::GenericService> &,
-        const std::shared_ptr<rmw_request_id_t> &, const std::shared_ptr<void> &) {
-        shown_server_request_count_.fetch_add(1, std::memory_order_relaxed);
-      },
-      rclcpp::ServicesQoS(), part.group);
-    attach_shown_part_group(part);
+    rclcpp::QoS qos = rclcpp::ServicesQoS();
+    try {
+      qos = get_service_qos(service_name);
+    } catch (const std::exception &) {
+      // The service may already be gone; it is then removed on the next sync.
+    }
+    // Stage 2: the shown ROS 2 service relays through a bridge-internal Agnocast client, created
+    // together with it. The service is the DDS-side part, the client's group the kmod-side one.
+    ServiceBridgeEntity entity =
+      loader_->create_r2a_service_bridge(part.owner, service_name, service_type, qos);
+    part.server = entity.entity_handle;
+    part.group = entity.srv_cb_group;
+    part.relay_group = entity.client_cb_group;
+    if (exec_model_ == ExecModel::Grouped) {
+      set_shared_executor_key(part.group, "agnocast_bridge_dds_default");
+    } else {
+      set_bridge_direction(part.group, true);
+    }
+    executor_->add_callback_group(part.group, part.owner->get_node_base_interface());
+    if (exec_model_ == ExecModel::Grouped) {
+      set_shared_executor_key(part.relay_group, "agnocast_bridge_agnocast_default", true);
+    } else {
+      set_bridge_direction(part.relay_group, true);
+    }
+    executor_->add_callback_group(part.relay_group, part.owner->get_node_base_interface());
     shown_services_.emplace(service_name, std::move(part));
     if (bridge_profile_enabled()) {
       profile_event(
@@ -990,6 +1027,7 @@ void BridgeManager::sync_shown_parts()
     return;
   }
   const auto start = std::chrono::steady_clock::now();
+  retiring_receivers_.clear();
   const uint32_t own_domain = static_cast<uint32_t>(
     container_node_->get_node_base_interface()->get_context()->get_domain_id());
 
@@ -1020,6 +1058,9 @@ void BridgeManager::sync_shown_parts()
         ShownPart part;
         part.owner = ep.is_rclcpp_node ? container_node_ : find_or_create_shadow_node(node_name);
         const size_t depth = std::max<uint32_t>(ep.qos_depth, 1);
+        part.type_name = type_name;
+        part.qos_depth = static_cast<uint32_t>(depth);
+        part.qos_is_transient_local = ep.qos_is_transient_local;
         if (ep.is_publisher) {
           rclcpp::QoS qos{rclcpp::KeepLast(depth)};
           qos.reliable();
@@ -1037,14 +1078,27 @@ void BridgeManager::sync_shown_parts()
           if (ep.qos_is_transient_local) {
             qos.transient_local();
           }
+          // T first, routed to this subscriber only, so that R never receives what it cannot pass
+          // on.
+          rclcpp::QoS sender_qos{rclcpp::KeepLast(depth)};
+          if (ep.qos_is_transient_local) {
+            sender_qos.transient_local();
+          }
+          auto sender = std::make_shared<agnocast::GenericPublisher>(
+            container_node_.get(), topic.name, type_name, sender_qos, agnocast::PublisherOptions{},
+            agnocast::PublisherRole::BridgeInternal);
+          set_bridge_route(topic.name, sender->get_id(), true, ep.id, false);
+          part.sender = sender;
+
           part.group = create_shown_part_group(part.owner);
           rclcpp::SubscriptionOptions options;
           options.callback_group = part.group;
           options.ignore_local_publications = true;
           part.reader = part.owner->create_generic_subscription(
             topic.name, type_name, qos,
-            [this](std::shared_ptr<rclcpp::SerializedMessage>) {
+            [this, sender](std::shared_ptr<rclcpp::SerializedMessage> msg) {
               shown_reader_msg_count_.fetch_add(1, std::memory_order_relaxed);
+              sender->publish(*msg);
             },
             options);
           attach_shown_part_group(part);
@@ -1073,8 +1127,33 @@ void BridgeManager::sync_shown_parts()
       ++it;
       continue;
     }
-    detach_shown_part_group(it->second);
+    auto & part = it->second;
+    if (part.receiver && part.relay_group == relay_shared_group_) {
+      set_bridge_route(
+        std::get<0>(it->first), part.receiver->get_id(), false, std::get<1>(it->first), true);
+      retiring_receivers_.push_back(part.receiver);
+    }
+    detach_relay_group(part.relay_group);
+    detach_shown_part_group(part);
     it = shown_pubsub_.erase(it);
+  }
+
+  // Stage 2: start, pause and resume the carrying parts, topic by topic.
+  const auto relay_start = std::chrono::steady_clock::now();
+  for (auto it = shown_pubsub_.begin(); it != shown_pubsub_.end();) {
+    const std::string topic_name = std::get<0>(it->first);
+    std::vector<ShownKey> keys;
+    for (; it != shown_pubsub_.end() && std::get<0>(it->first) == topic_name; ++it) {
+      keys.push_back(it->first);
+    }
+    sync_relays(topic_name, keys);
+  }
+  if (bridge_profile_enabled()) {
+    profile_event(
+      "relay_sync",
+      R"("dur_us":)" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - relay_start)
+                                        .count()));
   }
   for (auto it = failed_pubsub_.begin(); it != failed_pubsub_.end();) {
     it = (seen.count(it->first) > 0) ? std::next(it) : failed_pubsub_.erase(it);
@@ -1086,7 +1165,14 @@ void BridgeManager::sync_shown_parts()
       ++it;
       continue;
     }
-    detach_shown_part_group(it->second);
+    const auto & part = it->second;
+    executor_->remove_callback_group(part.group);
+    if (exec_model_ == ExecModel::Grouped) {
+      executor_->detach_shared_callback_group(part.group);
+    } else {
+      executor_->stop_callback_group(part.group);
+    }
+    detach_relay_group(part.relay_group);
     it = shown_services_.erase(it);
   }
 
@@ -1142,6 +1228,145 @@ void BridgeManager::report_shown_parts(std::chrono::steady_clock::duration sync_
   if (!show_stats_path_.empty()) {
     std::ofstream out(show_stats_path_, std::ios::app);
     out << line << '\n';
+  }
+}
+
+std::set<std::string> BridgeManager::own_node_names() const
+{
+  std::set<std::string> names{container_node_->get_fully_qualified_name()};
+  for (const auto & [identity, weak_node] : shadow_nodes_) {
+    if (auto node = weak_node.lock()) {
+      names.insert(node->get_fully_qualified_name());
+    }
+  }
+  return names;
+}
+
+// The kmod-side parts belong to the container node: they are not on the ROS 2 graph.
+// PerPart: one group (one CIE thread) per receiver. Grouped: the one shared group.
+rclcpp::CallbackGroup::SharedPtr BridgeManager::create_relay_group()
+{
+  if (exec_model_ == ExecModel::Grouped) {
+    if (!relay_shared_group_) {
+      relay_shared_group_ =
+        container_node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+      set_shared_executor_key(relay_shared_group_, "agnocast_bridge_agnocast_default", true);
+      executor_->add_callback_group(
+        relay_shared_group_, container_node_->get_node_base_interface());
+    }
+    return relay_shared_group_;
+  }
+  auto group =
+    container_node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  set_bridge_direction(group, false);
+  return group;
+}
+
+void BridgeManager::attach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group)
+{
+  if (group == relay_shared_group_) {
+    return;  // Attached once, when created.
+  }
+  executor_->add_callback_group(group, container_node_->get_node_base_interface());
+}
+
+// Stops the group's thread before the parts in it are dropped, as the topic-level bridges do.
+void BridgeManager::detach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group)
+{
+  if (!group || group == relay_shared_group_) {
+    return;
+  }
+  executor_->remove_callback_group(group);
+  if (exec_model_ == ExecModel::Grouped) {
+    executor_->detach_shared_callback_group(group);
+  } else {
+    executor_->stop_callback_group(group);
+  }
+}
+
+void BridgeManager::sync_relays(const std::string & topic_name, const std::vector<ShownKey> & keys)
+{
+  const auto own = own_node_names();
+  const auto is_external = [&own](const rclcpp::TopicEndpointInfo & info) {
+    std::string ns = info.node_namespace();
+    const std::string fqn = (ns == "/" ? "" : ns) + "/" + info.node_name();
+    return own.count(fqn) == 0;
+  };
+  const auto subs = container_node_->get_subscriptions_info_by_topic(topic_name);
+  const auto pubs = container_node_->get_publishers_info_by_topic(topic_name);
+  const auto external_subs =
+    static_cast<uint32_t>(std::count_if(subs.begin(), subs.end(), is_external));
+  const auto external_pubs =
+    static_cast<uint32_t>(std::count_if(pubs.begin(), pubs.end(), is_external));
+
+  struct ioctl_set_ros2_subscriber_num_args sub_num_args = {};
+  sub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  sub_num_args.ros2_subscriber_num = external_subs;
+  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &sub_num_args);
+  struct ioctl_set_ros2_publisher_num_args pub_num_args = {};
+  pub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  pub_num_args.ros2_publisher_num = external_pubs;
+  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD, &pub_num_args);
+
+  for (const auto & key : keys) {
+    auto & part = shown_pubsub_.at(key);
+    if (!std::get<2>(key)) {
+      continue;  // R2A: T is created with R and always carries.
+    }
+    const topic_local_id_t publisher_id = std::get<1>(key);
+
+    // A2R: I exists only once W has had an external reader, and is paused while it has none.
+    if (!part.receiver) {
+      if (external_subs == 0) {
+        continue;
+      }
+      const int64_t start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
+      try {
+        rclcpp::QoS qos{rclcpp::KeepLast(part.qos_depth)};
+        qos.reliable();
+        if (part.qos_is_transient_local) {
+          qos.transient_local();
+        }
+        part.relay_group = create_relay_group();
+        agnocast::SubscriptionOptions options;
+        options.callback_group = part.relay_group;
+        options.ignore_local_publications = true;
+        auto writer = part.writer;
+        set_next_bridge_subscription_paused(true);
+        part.receiver = std::make_shared<agnocast::GenericSubscription>(
+          container_node_.get(), topic_name, part.type_name, qos,
+          [writer](const rclcpp::SerializedMessage & msg) { writer->publish(msg); }, options,
+          agnocast::SubscriptionRole::BridgeInternal);
+        // Routed before the group reaches the executor, so the first receive is already routed.
+        set_bridge_route(topic_name, part.receiver->get_id(), false, publisher_id, false);
+        attach_relay_group(part.relay_group);
+        part.relay_paused = false;
+        if (bridge_profile_enabled()) {
+          profile_event(
+            "part", R"("kind":"receiver","dur_us":)" +
+                      std::to_string((bridge_profile_now_ns() - start_ns) / 1000) + R"(,"name":")" +
+                      topic_name + "\"");
+        }
+      } catch (const std::exception & e) {
+        set_next_bridge_subscription_paused(false);
+        RCLCPP_WARN(
+          logger_, "Failed to start relaying '%s' (publisher %d): %s", topic_name.c_str(),
+          publisher_id, e.what());
+        part.receiver.reset();
+        part.relay_group.reset();
+      }
+      continue;
+    }
+
+    const bool want_paused = (external_subs == 0);
+    if (want_paused != part.relay_paused) {
+      if (set_bridge_route(topic_name, part.receiver->get_id(), false, publisher_id, want_paused)) {
+        part.relay_paused = want_paused;
+        profile_event(
+          "relay", std::string(R"("state":")") + (want_paused ? "paused" : "resumed") +
+                     R"(","name":")" + topic_name + "\"");
+      }
+    }
   }
 }
 

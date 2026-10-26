@@ -32,10 +32,17 @@ void set_bridge_direction(const rclcpp::CallbackGroup::SharedPtr & group, bool i
 
 // Groups given the same key are run by one child executor (one thread) of a
 // CallbackIsolatedAgnocastExecutor, which announces the key as that thread's callback group ID.
-// The groups may belong to different nodes. Only groups without Agnocast entities are supported.
+// The groups may belong to different nodes. With `agnocast` the executor is an Agnocast one, for
+// groups with Agnocast subscriptions; without, a plain rclcpp one.
+struct SharedExecutorKey
+{
+  std::string key;
+  bool agnocast = false;
+};
 void set_shared_executor_key(
-  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & key);
-std::optional<std::string> get_shared_executor_key(const rclcpp::CallbackGroup::SharedPtr & group);
+  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & key, bool agnocast = false);
+std::optional<SharedExecutorKey> get_shared_executor_key(
+  const rclcpp::CallbackGroup::SharedPtr & group);
 
 // Caution: Do not call in parallel
 // Caution: Must be called after rclcpp::init() called

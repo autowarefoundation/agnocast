@@ -96,6 +96,9 @@ rclcpp::CallbackGroup::SharedPtr get_valid_callback_group(
 
 class SubscriptionBase
 {
+public:
+  topic_local_id_t get_id() const { return id_; }
+
 protected:
   topic_local_id_t id_{-1};
   const std::string topic_name_;

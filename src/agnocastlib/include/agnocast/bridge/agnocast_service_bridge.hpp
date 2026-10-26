@@ -30,6 +30,9 @@ struct ServiceBridgeDeps
   std::shared_ptr<CallbackIsolatedAgnocastExecutor> executor;
   rclcpp::Logger logger;
   std::shared_ptr<BridgeLoader> bridge_loader;
+  // PoC: the bridge manager already serves every Agnocast service to ROS 2 (shown up front), so
+  // arrow (5) must not add a second ROS 2 service.
+  bool r2a_shown = false;
 #if RCLCPP_VERSION_MAJOR < 28
   // What ros2_client_exists() reads, filled once per maintenance tick because the pre-Jazzy query
   // behind it walks the whole graph.

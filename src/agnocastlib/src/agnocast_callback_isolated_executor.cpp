@@ -1,5 +1,6 @@
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
+#include <agnocast/agnocast_epoll_update_dispatcher.hpp>
 #include <agnocast/agnocast_single_threaded_executor.hpp>
 #include <agnocast/agnocast_utils.hpp>
 #include <agnocast/bridge/agnocast_bridge_utils.hpp>
@@ -8,6 +9,7 @@
 
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -16,12 +18,55 @@ namespace agnocast
 
 namespace
 {
+// An Agnocast executor that runs any number of groups, which SingleThreadedAgnocastExecutor's
+// dedicate_to_callback_group() does not. Internal, so the public class keeps its layout.
+class SharedSingleThreadedAgnocastExecutor : public SingleThreadedAgnocastExecutor
+{
+  mutable std::mutex groups_mtx_;
+  std::set<const rclcpp::CallbackGroup *> groups_;
+
+  bool validate_callback_group(const rclcpp::CallbackGroup::SharedPtr & group) const override
+  {
+    std::lock_guard<std::mutex> lock{groups_mtx_};
+    return group && groups_.count(group.get()) > 0;
+  }
+
+public:
+  using SingleThreadedAgnocastExecutor::SingleThreadedAgnocastExecutor;
+
+  void add_shared_group(
+    const rclcpp::CallbackGroup::SharedPtr & group,
+    const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node)
+  {
+    {
+      std::lock_guard<std::mutex> lock{groups_mtx_};
+      groups_.insert(group.get());
+    }
+    add_callback_group(group, node);
+    // Subscriptions registered before the group arrived wait for an executor to claim them.
+    EpollUpdateDispatcher::get_instance().request_update(epoll_update_tracker_.id());
+  }
+
+  void remove_shared_group(const rclcpp::CallbackGroup::SharedPtr & group)
+  {
+    if (group->get_associated_with_executor_atomic().load()) {
+      remove_callback_group(group);
+    }
+    std::lock_guard<std::mutex> lock{groups_mtx_};
+    groups_.erase(group.get());
+  }
+};
+
+struct SharedChild
+{
+  std::weak_ptr<rclcpp::Executor> executor;
+  bool agnocast = false;
+};
+
 // Child executors shared by groups with the same key, per CallbackIsolatedAgnocastExecutor. Kept
 // outside the class so that its layout, which applications compile against, does not change.
 std::mutex shared_child_executors_mtx;
-std::map<
-  std::pair<const void *, std::string>, std::weak_ptr<rclcpp::executors::SingleThreadedExecutor>>
-  shared_child_executors;
+std::map<std::pair<const void *, std::string>, SharedChild> shared_child_executors;
 }  // namespace
 
 CallbackIsolatedAgnocastExecutor::CallbackIsolatedAgnocastExecutor(
@@ -94,19 +139,31 @@ void CallbackIsolatedAgnocastExecutor::spin()
       const auto shared_key = agnocast::get_shared_executor_key(group);
       if (shared_key) {
         std::lock_guard<std::mutex> lock{shared_child_executors_mtx};
-        auto & weak_shared = shared_child_executors[std::make_pair(this, *shared_key)];
-        if (auto shared = weak_shared.lock()) {
-          shared->add_callback_group(group, node);
+        auto & shared_child = shared_child_executors[std::make_pair(this, shared_key->key)];
+        auto add_to = [&group, &node](const std::shared_ptr<rclcpp::Executor> & ex, bool agnocast) {
+          if (agnocast) {
+            std::static_pointer_cast<SharedSingleThreadedAgnocastExecutor>(ex)->add_shared_group(
+              group, node);
+          } else {
+            ex->add_callback_group(group, node);
+          }
+        };
+        if (auto shared = shared_child.executor.lock()) {
+          add_to(shared, shared_child.agnocast);
           return;
         }
-        auto created = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-        created->add_callback_group(group, node);
-        weak_shared = created;
-        executor = created;
+        if (shared_key->agnocast) {
+          executor = std::make_shared<SharedSingleThreadedAgnocastExecutor>(
+            rclcpp::ExecutorOptions{}, next_exec_timeout_ms_);
+        } else {
+          executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+        }
+        add_to(executor, shared_key->agnocast);
+        shared_child = SharedChild{executor, shared_key->agnocast};
         child_callback_groups_.push_back(group);
         weak_child_executors_.push_back(executor);
-        child_threads_.emplace_back([executor, callback_group_id = *shared_key, &client_publisher,
-                                     &client_publisher_mutex]() {
+        child_threads_.emplace_back([executor, callback_group_id = shared_key->key,
+                                     &client_publisher, &client_publisher_mutex]() {
           auto tid = static_cast<pid_t>(syscall(SYS_gettid));
           if (agnocast::is_bridge_process && agnocast::bridge_profile_enabled()) {
             agnocast::bridge_profile_write(
@@ -529,15 +586,23 @@ void CallbackIsolatedAgnocastExecutor::detach_shared_callback_group(
   if (!group_ptr || !shared_key) {
     return;
   }
-  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> shared;
+  std::shared_ptr<rclcpp::Executor> shared;
+  bool agnocast = false;
   {
     std::lock_guard<std::mutex> lock{shared_child_executors_mtx};
-    const auto it = shared_child_executors.find(std::make_pair(this, *shared_key));
+    const auto it = shared_child_executors.find(std::make_pair(this, shared_key->key));
     if (it != shared_child_executors.end()) {
-      shared = it->second.lock();
+      shared = it->second.executor.lock();
+      agnocast = it->second.agnocast;
     }
   }
-  if (shared && group_ptr->get_associated_with_executor_atomic().load()) {
+  if (!shared) {
+    return;
+  }
+  if (agnocast) {
+    std::static_pointer_cast<SharedSingleThreadedAgnocastExecutor>(shared)->remove_shared_group(
+      group_ptr);
+  } else if (group_ptr->get_associated_with_executor_atomic().load()) {
     shared->remove_callback_group(group_ptr);
   }
 }
