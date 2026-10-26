@@ -153,35 +153,21 @@ void SubscriptionEventHandler::prepare_epoll(
 {
   std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
 
-  for (auto & it : id2_callback_info) {
-    const uint32_t callback_info_id = it.first;
-    CallbackInfo & callback_info = it.second;
+  for (const auto & [callback_info_id, callback_info] : id2_callback_info) {
+    const bool added = registry_.sync(
+      epoll_fd, EpollEventType::Subscription, callback_info_id, callback_info.notify_eventfd,
+      validate_callback_group(callback_info.callback_group));
 
-    if (!callback_info.need_epoll_update) {
-      continue;
-    }
-
-    if (!validate_callback_group(callback_info.callback_group)) {
-      continue;
-    }
-
-    struct epoll_event ev = {};
-    ev.events = EPOLLIN;
-    ev.data.u64 = pack_epoll_data(EpollEventType::Subscription, callback_info_id);
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, callback_info.notify_eventfd, &ev) == -1) {
-      RCLCPP_ERROR(logger, "epoll_ctl failed: %s", strerror(errno));
-      close(agnocast_fd);
-      exit(EXIT_FAILURE);
-    }
-
-    if (callback_info.is_transient_local) {
+    if (added && callback_info.is_transient_local) {
       agnocast::enqueue_receive_and_execute(
         callback_info_id, my_pid_, callback_info, *ready_agnocast_executables_mutex_,
         *ready_agnocast_executables_);
     }
-
-    callback_info.need_epoll_update = false;
   }
+
+  registry_.forget_unless([](const EpollEventLocalID callback_info_id) {
+    return id2_callback_info.count(callback_info_id) > 0;
+  });
 }
 
 void SubscriptionEventHandler::handle(EpollEventLocalID event_local_id)
