@@ -1948,178 +1948,141 @@ unlock:
   return ret;
 }
 
+// Copies up to `capacity` of the topic's subscribers into `buf` and returns how many there are.
+// The htable may be shared with a bridged domain, so only endpoints in the topic's domain count.
+// Caller holds global_htables_rwsem.
+static uint32_t fill_subscriber_info(
+  const struct topic_wrapper * wrapper, struct topic_info_ret * buf, const uint32_t capacity)
+{
+  uint32_t num = 0;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_info_ret * temp_info = &buf[num];
+      strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      temp_info->qos_depth = sub_info->qos_depth;
+      temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
+      temp_info->qos_is_reliable = sub_info->qos_is_reliable;
+      temp_info->is_bridge = sub_info->is_bridge;
+    }
+    num++;
+  }
+  return num;
+}
+
+// The publisher counterpart of fill_subscriber_info().
+static uint32_t fill_publisher_info(
+  const struct topic_wrapper * wrapper, struct topic_info_ret * buf, const uint32_t capacity)
+{
+  uint32_t num = 0;
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_info_ret * temp_info = &buf[num];
+      strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      temp_info->qos_depth = pub_info->qos_depth;
+      temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
+      temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
+      temp_info->is_bridge = pub_info->is_bridge;
+    }
+    num++;
+  }
+  return num;
+}
+
+// Copies the `num` entries of `topic_info_mem` to the caller's buffer and frees `topic_info_mem`.
+// Caller does not hold global_htables_rwsem, because copy_to_user can sleep on a page fault.
+static int copy_topic_info_to_user(
+  union ioctl_topic_info_args * topic_info_args, struct topic_info_ret * topic_info_mem,
+  const uint32_t num, const char * kind, const char * topic_name)
+{
+  const uint32_t buffer_size = topic_info_args->topic_info_ret_buffer_size;
+  struct topic_info_ret __user * user_buffer =
+    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
+  int ret = 0;
+
+  if (num > buffer_size) {
+    dev_warn(
+      agnocast_device,
+      "%s count exceeds limit: num=%u, topic_info_ret_buffer_size=%u (topic_name=%s)\n", kind, num,
+      buffer_size, topic_name);
+    ret = -ENOBUFS;
+  } else if (copy_to_user(user_buffer, topic_info_mem, sizeof(*topic_info_mem) * num)) {
+    ret = -EFAULT;
+  } else {
+    topic_info_args->ret_topic_info_ret_num = num;
+  }
+
+  kvfree(topic_info_mem);
+  return ret;
+}
+
+// kvcalloc and copy_to_user can sleep, so both run with global_htables_rwsem released. The topic
+// can gain endpoints meanwhile, so the walk repeats until the buffer holds all of them. Every
+// buffer comes zeroed from kvcalloc and is filled at most once, so no stale bytes reach user space.
 int agnocast_ioctl_get_topic_subscriber_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  int ret = 0;
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
   topic_info_args->ret_topic_info_ret_num = 0;
 
-  down_read(&global_htables_rwsem);
-
-  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
-  if (!wrapper) {
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_subscriber_info(wrapper, topic_info_mem, capacity) : 0;
     up_read(&global_htables_rwsem);
-    return 0;
-  }
 
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
-  struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
-
-  // Count actual subscribers first. The htable may be shared with a bridged
-  // domain, so only count endpoints in the requested domain.
-  uint32_t subscriber_num = 0;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->domain_id != wrapper->domain_id) continue;
-    subscriber_num++;
-  }
-
-  if (subscriber_num > topic_info_args->topic_info_ret_buffer_size) {
-    dev_warn(
-      agnocast_device,
-      "Subscriber count exceeds limit: subscriber_num=%u, "
-      "topic_info_ret_buffer_size=%u\n",
-      subscriber_num, topic_info_args->topic_info_ret_buffer_size);
-    ret = -ENOBUFS;
-    goto unlock;
-  }
-
-  struct topic_info_ret * topic_info_mem = NULL;
-  if (subscriber_num > 0) {
-    topic_info_mem = kvcalloc(subscriber_num, sizeof(struct topic_info_ret), GFP_KERNEL);
-    if (!topic_info_mem) {
-      ret = -ENOMEM;
-      goto unlock;
-    }
-  }
-
-  uint32_t idx = 0;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->domain_id != wrapper->domain_id) continue;
-
-    if (!sub_info->node_name) {
-      kvfree(topic_info_mem);
-      ret = -EFAULT;
-      goto unlock;
-    }
-
-    struct topic_info_ret * temp_info = &topic_info_mem[idx];
-
-    strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
-    temp_info->qos_depth = sub_info->qos_depth;
-    temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
-    temp_info->qos_is_reliable = sub_info->qos_is_reliable;
-    temp_info->is_bridge = sub_info->is_bridge;
-
-    idx++;
-  }
-
-  if (
-    subscriber_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * subscriber_num)) {
     kvfree(topic_info_mem);
-    ret = -EFAULT;
-    goto unlock;
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
   }
 
-  kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = subscriber_num;
-
-unlock:
-  up_read(&global_htables_rwsem);
-  return ret;
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Subscriber", topic_name);
 }
 
+// The publisher counterpart of agnocast_ioctl_get_topic_subscriber_info().
 int agnocast_ioctl_get_topic_publisher_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  int ret = 0;
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
   topic_info_args->ret_topic_info_ret_num = 0;
 
-  down_read(&global_htables_rwsem);
-
-  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
-  if (!wrapper) {
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_publisher_info(wrapper, topic_info_mem, capacity) : 0;
     up_read(&global_htables_rwsem);
-    return 0;
-  }
 
-  struct publisher_info * pub_info;
-  int bkt_pub_info;
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
-  struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
-
-  // Count actual publishers first. The htable may be shared with a bridged
-  // domain, so only count endpoints in the requested domain.
-  uint32_t publisher_num = 0;
-  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
-  {
-    if (pub_info->domain_id != wrapper->domain_id) continue;
-    publisher_num++;
-  }
-
-  if (publisher_num > topic_info_args->topic_info_ret_buffer_size) {
-    dev_warn(
-      agnocast_device,
-      "Publisher count exceeds limit: publisher_num=%u, "
-      "topic_info_ret_buffer_size=%u\n",
-      publisher_num, topic_info_args->topic_info_ret_buffer_size);
-    ret = -ENOBUFS;
-    goto unlock;
-  }
-
-  struct topic_info_ret * topic_info_mem = NULL;
-  if (publisher_num > 0) {
-    topic_info_mem = kvcalloc(publisher_num, sizeof(struct topic_info_ret), GFP_KERNEL);
-    if (!topic_info_mem) {
-      ret = -ENOMEM;
-      goto unlock;
-    }
-  }
-
-  uint32_t idx = 0;
-  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
-  {
-    if (pub_info->domain_id != wrapper->domain_id) continue;
-
-    if (!pub_info->node_name) {
-      kvfree(topic_info_mem);
-      ret = -EFAULT;
-      goto unlock;
-    }
-
-    struct topic_info_ret * temp_info = &topic_info_mem[idx];
-
-    strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
-    temp_info->qos_depth = pub_info->qos_depth;
-    temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
-    temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
-    temp_info->is_bridge = pub_info->is_bridge;
-
-    idx++;
-  }
-
-  if (
-    publisher_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * publisher_num)) {
     kvfree(topic_info_mem);
-    ret = -EFAULT;
-    goto unlock;
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
   }
 
-  kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = publisher_num;
-
-unlock:
-  up_read(&global_htables_rwsem);
-  return ret;
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Publisher", topic_name);
 }
 
 int agnocast_ioctl_get_subscriber_qos(

@@ -85,3 +85,19 @@ void test_case_get_topic_pub_info_selects_by_domain(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, args_d0.ret_topic_info_ret_num, (uint32_t)0);
 }
+
+// More publishers than the caller's buffer holds: -ENOBUFS, and none are reported.
+void test_case_get_topic_pub_info_buffer_too_small(struct kunit * test)
+{
+  union ioctl_topic_info_args topic_info_args = {0};
+
+  agnocast_kunit_setup_process(test, PID, 0);
+  agnocast_kunit_setup_publisher(test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
+  agnocast_kunit_setup_publisher(test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
+
+  topic_info_args.topic_info_ret_buffer_size = 1;
+  int ret =
+    agnocast_ioctl_get_topic_publisher_info(TOPIC_NAME, current->nsproxy->ipc_ns, &topic_info_args);
+  KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
+  KUNIT_EXPECT_EQ(test, topic_info_args.ret_topic_info_ret_num, (uint32_t)0);
+}
