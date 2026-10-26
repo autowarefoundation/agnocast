@@ -40,16 +40,13 @@ struct TimerInfo
 
   uint32_t timer_id = 0;
   int timer_fd = -1;
-  bool timer_fd_need_update = false;
   int clock_eventfd = -1;  // eventfd to wake epoll on clock updates (ROS_TIME only)
-  bool clock_eventfd_need_update = false;
   std::weak_ptr<TimerBase> timer;
   rclcpp::CallbackGroup::SharedPtr callback_group;
   std::atomic<int64_t> last_call_time_ns;
   std::atomic<int64_t> next_call_time_ns;
   std::atomic<int64_t> time_credit{0};  // Credit for time elapsed before ROS time is activated
   std::atomic<int64_t> period_ns;
-  bool need_epoll_update = true;
 
   rclcpp::Clock::SharedPtr clock;
   rclcpp::JumpHandler::SharedPtr jump_handler;
@@ -84,6 +81,7 @@ class TimerEventHandler : public EpollEventHandler
   pid_t my_pid_;
   std::mutex * ready_agnocast_executables_mutex_;
   std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+  EpollRegistry registry_;  // Guarded by id2_timer_info_mtx.
 
 public:
   TimerEventHandler(
@@ -107,6 +105,7 @@ class ClockEventHandler : public EpollEventHandler
   pid_t my_pid_;
   std::mutex * ready_agnocast_executables_mutex_;
   std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+  EpollRegistry registry_;  // Guarded by id2_timer_info_mtx.
 
 public:
   ClockEventHandler(
