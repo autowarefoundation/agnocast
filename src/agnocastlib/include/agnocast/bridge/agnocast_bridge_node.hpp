@@ -68,7 +68,17 @@ inline void send_pubsub_bridge_registration_by_type_name(
   }
 
   const std::string uds_addr = create_uds_addr_for_bridge();
-  send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
+  const int64_t start_ns = bridge_profile_now_ns();
+  int retries = 0;
+  const bool ok = send_bridge_uds_message(
+    uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger, &retries);
+  if (bridge_profile_enabled()) {
+    bridge_profile_write(
+      std::string(R"({"ev":"reg","kind":"pubsub","t_ns":)") + std::to_string(start_ns) +
+      R"(,"dur_us":)" + std::to_string((bridge_profile_now_ns() - start_ns) / 1000) +
+      R"(,"retries":)" + std::to_string(retries) + R"(,"ok":)" + (ok ? "true" : "false") +
+      R"(,"name":")" + topic_name + R"("})");
+  }
 }
 
 inline void send_service_bridge_registration_by_type_name(
@@ -92,7 +102,17 @@ inline void send_service_bridge_registration_by_type_name(
   }
 
   const std::string uds_addr = create_uds_addr_for_bridge();
-  send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger);
+  const int64_t start_ns = bridge_profile_now_ns();
+  int retries = 0;
+  const bool ok = send_bridge_uds_message(
+    uds_addr, &msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger, &retries);
+  if (bridge_profile_enabled()) {
+    bridge_profile_write(
+      std::string(R"({"ev":"reg","kind":"service","t_ns":)") + std::to_string(start_ns) +
+      R"(,"dur_us":)" + std::to_string((bridge_profile_now_ns() - start_ns) / 1000) +
+      R"(,"retries":)" + std::to_string(retries) + R"(,"ok":)" + (ok ? "true" : "false") +
+      R"(,"name":")" + service_name + R"("})");
+  }
 }
 
 }  // namespace agnocast

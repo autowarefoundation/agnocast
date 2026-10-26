@@ -39,6 +39,7 @@ BridgeManager::BridgeManager()
   event_loop_(logger_),
   loader_(std::make_shared<BridgeLoader>(logger_))
 {
+  profile_event("mgr", R"("phase":"ctor_start")");
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }
@@ -46,6 +47,7 @@ BridgeManager::BridgeManager()
   rclcpp::InitOptions init_options{};
   init_options.shutdown_on_signal = false;
   rclcpp::init(0, nullptr, init_options);
+  profile_event("mgr", R"("phase":"rclcpp_init_done")");
 
   const char * show_env = std::getenv("AGNOCAST_BRIDGE_SHOW");
   show_enabled_ = (show_env != nullptr && std::string(show_env) == "1");
@@ -86,6 +88,7 @@ void BridgeManager::run()
   prctl(PR_SET_NAME, proc_name.c_str(), 0, 0, 0);
 
   start_ros_execution();
+  profile_event("mgr", R"("phase":"ros_started")");
   start_worker_thread();
 
   event_loop_.set_message_handler(
@@ -119,12 +122,27 @@ void BridgeManager::worker_loop()
       batch.swap(pending_msgs_);
     }
 
+    const bool profiling = bridge_profile_enabled();
+    const int64_t loop_start_ns = profiling ? bridge_profile_now_ns() : 0;
+    int64_t mark_ns = loop_start_ns;
+    std::string step_fields;
+    const auto step = [&](const char * name) {
+      if (!profiling) {
+        return;
+      }
+      const int64_t now_ns = bridge_profile_now_ns();
+      step_fields +=
+        std::string(",\"") + name + "_us\":" + std::to_string((now_ns - mark_ns) / 1000);
+      mark_ns = now_ns;
+    };
+
     for (const auto & msg : batch) {
       if (shutdown_requested_.load(std::memory_order_relaxed)) {
         break;
       }
       dispatch_bridge_message(msg);
     }
+    step("dispatch");
 
     // Gate the creating steps and re-check between them: each can dlopen a plugin
     // and build DDS entities, so shutdown may arrive mid-sweep. The reclaiming
@@ -137,6 +155,7 @@ void BridgeManager::worker_loop()
       break;
     }
     check_and_create_pubsub_bridges();
+    step("create");
 
     if (shutting_down()) {
       break;
@@ -144,19 +163,34 @@ void BridgeManager::worker_loop()
     create_daemon_forced_bridges();
 
     check_and_remove_pubsub_bridges();
+    step("remove");
 
     if (shutting_down()) {
       break;
     }
     check_and_update_service_bridges();
+    step("service");
 
     if (shutting_down()) {
       break;
     }
     sync_shown_parts();
+    step("show");
 
     check_and_remove_request_cache();
     check_and_request_shutdown();
+    step("cache");
+
+    if (profiling) {
+      profile_event(
+        "loop", R"("batch":)" + std::to_string(batch.size()) + R"(,"received":)" +
+                  std::to_string(profile_received_msgs_.load()) + R"(,"pending_max":)" +
+                  std::to_string(profile_pending_max_.exchange(0)) + R"(,"total_us":)" +
+                  std::to_string((bridge_profile_now_ns() - loop_start_ns) / 1000) + step_fields +
+                  R"(,"r2a":)" + std::to_string(active_pubsub_r2a_bridges_.size()) + R"(,"a2r":)" +
+                  std::to_string(active_pubsub_a2r_bridges_.size()) + R"(,"services":)" +
+                  std::to_string(active_service_bridges_.size()));
+    }
   }
 }
 
@@ -250,6 +284,10 @@ void BridgeManager::parse_and_enqueue(const void * data, std::size_t size)
     std::lock_guard<std::mutex> lk(pending_msgs_mtx_);
     pending_msgs_.push_back(msg);
     exceeded_threshold = pending_msgs_.size() > PENDING_MSGS_WARN_THRESHOLD;
+    profile_received_msgs_.fetch_add(1, std::memory_order_relaxed);
+    if (pending_msgs_.size() > profile_pending_max_.load(std::memory_order_relaxed)) {
+      profile_pending_max_.store(pending_msgs_.size(), std::memory_order_relaxed);
+    }
   }
   pending_msgs_cv_.notify_one();
 
@@ -557,8 +595,15 @@ void BridgeManager::check_and_update_service_bridges()
 {
   ServiceBridgeDeps deps{container_node_, executor_, logger_, loader_};
 #if RCLCPP_VERSION_MAJOR < 28
+  const int64_t scan_start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   deps.ros2_client_service_names =
     collect_external_ros2_client_service_names(container_node_.get());
+  if (bridge_profile_enabled()) {
+    profile_event(
+      "graph_scan",
+      R"("dur_us":)" + std::to_string((bridge_profile_now_ns() - scan_start_ns) / 1000) +
+        R"(,"client_services":)" + std::to_string(deps.ros2_client_service_names.size()));
+  }
 #endif
 
   auto it = active_service_bridges_.begin();
@@ -649,6 +694,7 @@ void BridgeManager::create_pubsub_bridge_if_needed(
     return;
   }
 
+  const int64_t create_start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   try {
     const bool is_r2a = (direction == BridgeDirection::ROS2_TO_AGNOCAST);
 
@@ -684,6 +730,12 @@ void BridgeManager::create_pubsub_bridge_if_needed(
         }
         active_pubsub_a2r_bridges_[topic_name] = result;
       }
+    }
+    if (bridge_profile_enabled()) {
+      profile_event(
+        "bridge", std::string(R"("dir":")") + (is_r2a ? "r2a" : "a2r") + R"(","dur_us":)" +
+                    std::to_string((bridge_profile_now_ns() - create_start_ns) / 1000) +
+                    R"(,"name":")" + topic_name + "\"");
     }
 
   } catch (const std::exception & e) {
@@ -799,6 +851,16 @@ long read_rss_kb()
 
 }  // namespace
 
+void BridgeManager::profile_event(const std::string & ev, const std::string & fields)
+{
+  if (!bridge_profile_enabled()) {
+    return;
+  }
+  bridge_profile_write(
+    R"({"ev":")" + ev + R"(","t_ns":)" + std::to_string(bridge_profile_now_ns()) + "," + fields +
+    "}");
+}
+
 std::shared_ptr<rclcpp::Node> BridgeManager::find_or_create_shadow_node(
   const std::string & full_node_name)
 {
@@ -810,6 +872,7 @@ std::shared_ptr<rclcpp::Node> BridgeManager::find_or_create_shadow_node(
     }
   }
 
+  const int64_t start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   rclcpp::NodeOptions options;
   options.start_parameter_services(false);
   options.start_parameter_event_publisher(false);
@@ -818,6 +881,12 @@ std::shared_ptr<rclcpp::Node> BridgeManager::find_or_create_shadow_node(
   auto node = std::make_shared<rclcpp::Node>(identity.second, identity.first, options);
   shadow_nodes_[identity] = node;
   register_shadow_rcl_node(identity, node->get_node_base_interface()->get_shared_rcl_node_handle());
+  if (bridge_profile_enabled()) {
+    profile_event(
+      "part", R"("kind":"shadow","dur_us":)" +
+                std::to_string((bridge_profile_now_ns() - start_ns) / 1000) + R"(,"name":")" +
+                full_node_name + "\"");
+  }
   return node;
 }
 
@@ -883,6 +952,7 @@ void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
     return;
   }
 
+  const int64_t start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   try {
     ShownPart part;
     if (payload.create_shadow_node) {
@@ -903,6 +973,12 @@ void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
       rclcpp::ServicesQoS(), part.group);
     attach_shown_part_group(part);
     shown_services_.emplace(service_name, std::move(part));
+    if (bridge_profile_enabled()) {
+      profile_event(
+        "part", R"("kind":"server","dur_us":)" +
+                  std::to_string((bridge_profile_now_ns() - start_ns) / 1000) + R"(,"name":")" +
+                  service_name + "\"");
+    }
   } catch (const std::exception & e) {
     RCLCPP_WARN(logger_, "Failed to show service '%s': %s", service_name.c_str(), e.what());
   }
@@ -918,7 +994,10 @@ void BridgeManager::sync_shown_parts()
     container_node_->get_node_base_interface()->get_context()->get_domain_id());
 
   std::set<ShownKey> seen;
-  for (const auto & topic : list_agnocast_topics()) {
+  const auto topics = list_agnocast_topics();
+  const auto listed_at = std::chrono::steady_clock::now();
+  size_t created = 0;
+  for (const auto & topic : topics) {
     if (topic.domain_id != own_domain || topic.name.rfind("/AGNOCAST_SRV_", 0) == 0) {
       continue;
     }
@@ -936,6 +1015,7 @@ void BridgeManager::sync_shown_parts()
       }
 
       const std::string node_name(ep.node_name, strnlen(ep.node_name, NODE_NAME_BUFFER_SIZE));
+      const int64_t part_start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
       try {
         ShownPart part;
         part.owner = ep.is_rclcpp_node ? container_node_ : find_or_create_shadow_node(node_name);
@@ -970,6 +1050,14 @@ void BridgeManager::sync_shown_parts()
           attach_shown_part_group(part);
         }
         shown_pubsub_.emplace(key, std::move(part));
+        created++;
+        if (bridge_profile_enabled()) {
+          profile_event(
+            "part", std::string(R"("kind":")") + (ep.is_publisher ? "writer" : "reader") +
+                      R"(","dur_us":)" +
+                      std::to_string((bridge_profile_now_ns() - part_start_ns) / 1000) +
+                      R"(,"name":")" + topic.name + R"(","type":")" + type_name + "\"");
+        }
       } catch (const std::exception & e) {
         RCLCPP_WARN(
           logger_, "Failed to show %s of '%s' (type '%s', node '%s'): %s",
@@ -1002,6 +1090,15 @@ void BridgeManager::sync_shown_parts()
     it = shown_services_.erase(it);
   }
 
+  if (bridge_profile_enabled() && created > 0) {
+    const auto to_us = [](std::chrono::steady_clock::duration d) {
+      return std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+    };
+    profile_event(
+      "show", R"("topics":)" + std::to_string(topics.size()) + R"(,"list_us":)" +
+                to_us(listed_at - start) + R"(,"created":)" + std::to_string(created) +
+                R"(,"total_us":)" + to_us(std::chrono::steady_clock::now() - start));
+  }
   report_shown_parts(std::chrono::steady_clock::now() - start);
 }
 

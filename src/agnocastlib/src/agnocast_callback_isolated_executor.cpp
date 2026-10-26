@@ -1,6 +1,8 @@
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
 #include <agnocast/agnocast_single_threaded_executor.hpp>
+#include <agnocast/agnocast_utils.hpp>
+#include <agnocast/bridge/agnocast_bridge_utils.hpp>
 #include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 
@@ -106,6 +108,11 @@ void CallbackIsolatedAgnocastExecutor::spin()
         child_threads_.emplace_back([executor, callback_group_id = *shared_key, &client_publisher,
                                      &client_publisher_mutex]() {
           auto tid = static_cast<pid_t>(syscall(SYS_gettid));
+          if (agnocast::is_bridge_process && agnocast::bridge_profile_enabled()) {
+            agnocast::bridge_profile_write(
+              R"({"ev":"cie_spawn","t_ns":)" + std::to_string(agnocast::bridge_profile_now_ns()) +
+              R"(,"tid":)" + std::to_string(tid) + "}");
+          }
           {
             std::lock_guard<std::mutex> lock{client_publisher_mutex};
             agnocast::publish_callback_group_info(client_publisher, tid, callback_group_id);
@@ -140,6 +147,11 @@ void CallbackIsolatedAgnocastExecutor::spin()
       child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
                                    &client_publisher, &client_publisher_mutex]() {
         auto tid = static_cast<pid_t>(syscall(SYS_gettid));
+        if (agnocast::is_bridge_process && agnocast::bridge_profile_enabled()) {
+          agnocast::bridge_profile_write(
+            R"({"ev":"cie_spawn","t_ns":)" + std::to_string(agnocast::bridge_profile_now_ns()) +
+            R"(,"tid":)" + std::to_string(tid) + "}");
+        }
 
         {
           std::lock_guard<std::mutex> lock{client_publisher_mutex};

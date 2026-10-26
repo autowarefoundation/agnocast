@@ -1,6 +1,7 @@
 #include "agnocast/bridge/agnocast_bridge_utils.hpp"
 
 #include "agnocast/agnocast.hpp"
+#include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -14,13 +15,60 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
 
 namespace agnocast
 {
+
+namespace
+{
+std::mutex g_profile_mtx;
+FILE * g_profile_fp = nullptr;
+pid_t g_profile_pid = 0;
+}  // namespace
+
+bool bridge_profile_enabled()
+{
+  static const bool enabled = std::getenv("AGNOCAST_BRIDGE_PROFILE") != nullptr;
+  return enabled;
+}
+
+int64_t bridge_profile_now_ns()
+{
+  struct timespec ts = {};
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+}
+
+void bridge_profile_write(const std::string & json_line)
+{
+  if (!bridge_profile_enabled()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_profile_mtx);
+  // Reopened after fork: the bridge manager inherits the file of the process it was forked from.
+  if (g_profile_fp == nullptr || g_profile_pid != getpid()) {
+    if (g_profile_fp != nullptr) {
+      fclose(g_profile_fp);
+    }
+    g_profile_pid = getpid();
+    const std::string path = std::string(std::getenv("AGNOCAST_BRIDGE_PROFILE")) + "/" +
+                             (is_bridge_process ? "manager_" : "app_") +
+                             std::to_string(g_profile_pid) + ".jsonl";
+    g_profile_fp = fopen(path.c_str(), "a");
+    if (g_profile_fp == nullptr) {
+      return;
+    }
+  }
+  fputs(json_line.c_str(), g_profile_fp);
+  fputc('\n', g_profile_fp);
+  fflush(g_profile_fp);
+}
 
 BridgeMode get_bridge_mode()
 {

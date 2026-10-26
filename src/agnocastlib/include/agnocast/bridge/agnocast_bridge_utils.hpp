@@ -21,6 +21,13 @@ namespace agnocast
 
 enum class BridgeMode { Off, On };
 
+// PoC profiling of bridge startup. When AGNOCAST_BRIDGE_PROFILE names a directory, each process
+// appends JSON lines to <dir>/<manager|app>_<pid>.jsonl. Times are CLOCK_REALTIME nanoseconds so
+// that lines from different processes line up.
+bool bridge_profile_enabled();
+int64_t bridge_profile_now_ns();
+void bridge_profile_write(const std::string & json_line);
+
 // How long a daemon cross-NS bridge request keeps a bridge forced after the last
 // request. Must exceed the daemon's publish interval (1 s) so a few missed ticks
 // don't tear down a healthy cross-NS bridge, yet stay short so a vanished remote

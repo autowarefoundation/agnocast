@@ -113,6 +113,12 @@ private:
   size_t last_logged_part_num_ = 0;
   int last_logged_thread_num_ = -1;
 
+  // PoC startup profiling (AGNOCAST_BRIDGE_PROFILE).
+  std::atomic<uint64_t> profile_received_msgs_ = 0;
+  std::atomic<uint64_t> profile_pending_max_ = 0;
+  int64_t profile_show_create_us_ = 0;
+  void profile_event(const std::string & ev, const std::string & fields);
+
   void sync_shown_parts();
   void show_service(const BridgeMsgServicePayload & payload);
   std::shared_ptr<rclcpp::Node> find_or_create_shadow_node(const std::string & full_node_name);

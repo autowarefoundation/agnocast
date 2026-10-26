@@ -66,7 +66,8 @@ inline int create_bridge_uds_listener(const std::string & addr)
 // Retries on ECONNREFUSED/EAGAIN/EWOULDBLOCK/ENOBUFS up to
 // BRIDGE_UDS_SEND_MAX_RETRIES * BRIDGE_UDS_SEND_RETRY_INTERVAL_US.
 inline bool send_bridge_uds_message(
-  const std::string & addr, const void * data, size_t size, const rclcpp::Logger & logger)
+  const std::string & addr, const void * data, size_t size, const rclcpp::Logger & logger,
+  int * retries_out = nullptr)
 {
   int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd == -1) {
@@ -89,6 +90,9 @@ inline bool send_bridge_uds_message(
   ssize_t send_result = -1;
   int last_errno = 0;
   for (int retry = 0; retry <= BRIDGE_UDS_SEND_MAX_RETRIES; ++retry) {
+    if (retries_out != nullptr) {
+      *retries_out = retry;
+    }
     send_result = sendto(fd, data, size, MSG_NOSIGNAL, reinterpret_cast<sockaddr *>(&sa), alen);
     if (send_result >= 0) break;
     last_errno = errno;
