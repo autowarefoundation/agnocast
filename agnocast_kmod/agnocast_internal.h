@@ -113,6 +113,12 @@ struct publisher_info
   bool is_bridge;
   // Bridge route: when >= 0, this publisher's messages go to that subscriber only.
   topic_local_id_t destination_subscriber_id;
+  // Bridge group route: when set, this publisher's messages go only to the non-bridge subscribers
+  // whose QoS equals the route_qos_* below.
+  bool route_by_qos;
+  bool route_qos_is_transient_local;
+  bool route_qos_is_reliable;
+  uint32_t route_qos_depth;
   // The eventfd contexts PUBLISH signals, in no particular order. Membership depends only on the
   // endpoints, never on the message, so the list is built as endpoints register and publish only
   // reads it.
@@ -152,6 +158,11 @@ struct subscriber_info
   bool is_bridge;
   // Bridge route: when >= 0, this subscriber takes messages of that publisher only.
   topic_local_id_t source_publisher_id;
+  // Bridge group route: when set, this subscriber takes messages only of the non-bridge publishers
+  // whose durability and depth equal the route_qos_* below.
+  bool route_by_qos;
+  bool route_qos_is_transient_local;
+  uint32_t route_qos_depth;
   // A paused bridge subscriber is neither woken nor handed messages.
   bool paused;
   struct eventfd_ctx * notify_ctx;  // eventfd for publish notifications (NULL for take_sub)

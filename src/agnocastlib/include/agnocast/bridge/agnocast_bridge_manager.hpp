@@ -100,16 +100,26 @@ private:
     std::shared_ptr<agnocast::GenericPublisher> sender;       // T, routed to the subscriber
     rclcpp::CallbackGroup::SharedPtr relay_group;
     bool relay_paused = false;
+    // Group mode: the QoS last written to the kmod-side part, which follows the ROS 2 side.
+    uint32_t applied_depth = 0;
+    bool applied_transient_local = false;
   };
 
   // (topic name, endpoint id, is_publisher)
   using ShownKey = std::tuple<std::string, topic_local_id_t, bool>;
+  // Group mode (AGNOCAST_BRIDGE_SHOW=group): one set of parts per topic and QoS of the Agnocast
+  // endpoints. (topic name, is_publisher, depth, transient local, reliable); a publisher has no
+  // reliability, so it is always false for publisher groups.
+  using GroupKey = std::tuple<std::string, bool, uint32_t, bool, bool>;
 
   bool show_enabled_ = false;
+  bool group_mode_ = false;
   ExecModel exec_model_ = ExecModel::PerPart;
   std::string show_stats_path_;
   std::map<ShownKey, ShownPart> shown_pubsub_;
   std::map<ShownKey, std::string> failed_pubsub_;
+  std::map<GroupKey, ShownPart> shown_groups_;
+  std::map<GroupKey, std::string> failed_groups_;
   std::map<std::string, ShownPart> shown_services_;
   std::map<std::pair<std::string, std::string>, std::weak_ptr<rclcpp::Node>> shadow_nodes_;
   std::atomic<uint64_t> shown_reader_msg_count_ = 0;
@@ -138,6 +148,9 @@ private:
 
   void sync_shown_parts();
   void sync_relays(const std::string & topic_name, const std::vector<ShownKey> & keys);
+  void sync_shown_groups();
+  void sync_group_relays(const std::string & topic_name, const std::vector<GroupKey> & keys);
+  void retire_dead_services();
   rclcpp::CallbackGroup::SharedPtr create_relay_group();
   void attach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group);
   void detach_relay_group(const rclcpp::CallbackGroup::SharedPtr & group);

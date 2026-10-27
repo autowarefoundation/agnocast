@@ -246,6 +246,17 @@ static bool bridge_route_allows(
   if (
     pub_info->destination_subscriber_id >= 0 && pub_info->destination_subscriber_id != sub_info->id)
     return false;
+  if (
+    sub_info->route_by_qos &&
+    (pub_info->is_bridge || pub_info->qos_depth != sub_info->route_qos_depth ||
+     pub_info->qos_is_transient_local != sub_info->route_qos_is_transient_local))
+    return false;
+  if (
+    pub_info->route_by_qos &&
+    (sub_info->is_bridge || sub_info->qos_depth != pub_info->route_qos_depth ||
+     sub_info->qos_is_transient_local != pub_info->route_qos_is_transient_local ||
+     sub_info->qos_is_reliable != pub_info->route_qos_is_reliable))
+    return false;
   return true;
 }
 
@@ -425,6 +436,9 @@ static int insert_subscriber_info(
   (*new_info)->need_mmap_update = true;
   (*new_info)->is_bridge = is_bridge;
   (*new_info)->source_publisher_id = -1;
+  (*new_info)->route_by_qos = false;
+  (*new_info)->route_qos_is_transient_local = false;
+  (*new_info)->route_qos_depth = 0;
   (*new_info)->paused = false;
   (*new_info)->notify_ctx = notify_ctx;
   INIT_HLIST_NODE(&(*new_info)->node);
@@ -534,6 +548,10 @@ static int insert_publisher_info(
   (*new_info)->entries_num = 0;
   (*new_info)->is_bridge = is_bridge;
   (*new_info)->destination_subscriber_id = -1;
+  (*new_info)->route_by_qos = false;
+  (*new_info)->route_qos_is_transient_local = false;
+  (*new_info)->route_qos_is_reliable = false;
+  (*new_info)->route_qos_depth = 0;
   (*new_info)->notify_ctxs = NULL;
   (*new_info)->notify_num = 0;
   (*new_info)->notify_capacity = 0;
@@ -2162,6 +2180,10 @@ int agnocast_ioctl_set_bridge_route(
       goto unlock;
     }
     pub_info->destination_subscriber_id = route_args->peer_id;
+    pub_info->route_by_qos = route_args->by_qos;
+    pub_info->route_qos_is_transient_local = route_args->qos_is_transient_local;
+    pub_info->route_qos_is_reliable = route_args->qos_is_reliable;
+    pub_info->route_qos_depth = route_args->qos_depth;
     rebuild_notify_list(wrapper, pub_info);
   } else {
     struct subscriber_info * sub_info = find_subscriber_info(wrapper, route_args->id);
@@ -2171,15 +2193,59 @@ int agnocast_ioctl_set_bridge_route(
     }
     const bool resuming = sub_info->paused && !route_args->paused;
     sub_info->source_publisher_id = route_args->peer_id;
+    sub_info->route_by_qos = route_args->by_qos;
+    sub_info->route_qos_is_transient_local = route_args->qos_is_transient_local;
+    sub_info->route_qos_depth = route_args->qos_depth;
     sub_info->paused = route_args->paused;
     if (resuming) {
-      if (sub_info->qos_is_transient_local) {
+      if (sub_info->qos_is_transient_local && !route_args->resume_from_next) {
         sub_info->latest_received_entry_id = -1;
       } else {
         sub_info->latest_received_entry_id = wrapper->topic->current_entry_id++;
       }
     }
     rebuild_all_notify_lists(wrapper);
+  }
+
+unlock:
+  up_write(&global_htables_rwsem);
+  return ret;
+}
+
+// Takes global_htables_rwsem for write, as a route change does. A publisher whose depth shrinks
+// releases the excess on its next publish, as any publisher over its depth does.
+int agnocast_ioctl_set_bridge_qos(
+  const char * topic_name, const struct ipc_namespace * ipc_ns,
+  const struct ioctl_set_bridge_qos_args * qos_args)
+{
+  int ret = 0;
+
+  if (qos_args->qos_depth == 0) return -EINVAL;
+
+  down_write(&global_htables_rwsem);
+
+  struct topic_wrapper * wrapper = find_topic_for_current(topic_name, ipc_ns);
+  if (!wrapper) {
+    ret = -EINVAL;
+    goto unlock;
+  }
+
+  if (qos_args->is_publisher) {
+    struct publisher_info * pub_info = find_publisher_info(wrapper, qos_args->id);
+    if (!pub_info || !pub_info->is_bridge) {
+      ret = -EINVAL;
+      goto unlock;
+    }
+    pub_info->qos_depth = qos_args->qos_depth;
+    pub_info->qos_is_transient_local = qos_args->qos_is_transient_local;
+  } else {
+    struct subscriber_info * sub_info = find_subscriber_info(wrapper, qos_args->id);
+    if (!sub_info || !sub_info->is_bridge) {
+      ret = -EINVAL;
+      goto unlock;
+    }
+    sub_info->qos_depth = qos_args->qos_depth;
+    sub_info->qos_is_transient_local = qos_args->qos_is_transient_local;
   }
 
 unlock:
@@ -3628,6 +3694,20 @@ static long set_bridge_route_cmd(struct ioctl_set_bridge_route_args __user * arg
   return agnocast_ioctl_set_bridge_route(topic_name_buf, ipc_ns, &route_args);
 }
 
+static long set_bridge_qos_cmd(struct ioctl_set_bridge_qos_args __user * arg)
+{
+  const struct ipc_namespace * ipc_ns = current->nsproxy->ipc_ns;
+
+  struct ioctl_set_bridge_qos_args qos_args;
+  if (copy_from_user(&qos_args, arg, sizeof(qos_args))) return -EFAULT;
+
+  char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
+  long ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &qos_args.topic_name);
+  if (ret) return ret;
+
+  return agnocast_ioctl_set_bridge_qos(topic_name_buf, ipc_ns, &qos_args);
+}
+
 static long get_topic_endpoints_cmd(union ioctl_topic_endpoints_args __user * arg)
 {
   int ret = 0;
@@ -3960,6 +4040,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg)
       return get_topic_endpoints_cmd((union ioctl_topic_endpoints_args __user *)arg);
     case AGNOCAST_SET_BRIDGE_ROUTE_CMD:
       return set_bridge_route_cmd((struct ioctl_set_bridge_route_args __user *)arg);
+    case AGNOCAST_SET_BRIDGE_QOS_CMD:
+      return set_bridge_qos_cmd((struct ioctl_set_bridge_qos_args __user *)arg);
     case AGNOCAST_GET_SUBSCRIBER_QOS_CMD:
       return get_subscriber_qos_cmd((struct ioctl_get_subscriber_qos_args __user *)arg);
     case AGNOCAST_GET_PUBLISHER_QOS_CMD:

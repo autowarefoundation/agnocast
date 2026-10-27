@@ -426,7 +426,10 @@ union ioctl_topic_endpoints_args {
 // Bridge only. Routes a bridge endpoint to one peer, and pauses or resumes a bridge subscriber.
 // peer_id is the source publisher of a subscriber or the destination subscriber of a publisher, and
 // -1 removes the route. Resuming hands a transient-local subscriber the latest messages again and
-// a volatile one only what comes next.
+// a volatile one only what comes next, unless resume_from_next is set.
+// by_qos routes a bridge endpoint to a QoS group instead: it then exchanges messages only with the
+// non-bridge peers whose QoS equals the one given (a publisher has no reliability, so a bridge
+// subscriber compares durability and depth only).
 struct ioctl_set_bridge_route_args
 {
   struct name_info topic_name;
@@ -434,9 +437,27 @@ struct ioctl_set_bridge_route_args
   topic_local_id_t peer_id;
   bool is_publisher;
   bool paused;
+  bool resume_from_next;
+  bool by_qos;
+  bool qos_is_transient_local;
+  bool qos_is_reliable;
+  uint32_t qos_depth;
 };
 
 #define AGNOCAST_SET_BRIDGE_ROUTE_CMD _IOW(0xA6, 35, struct ioctl_set_bridge_route_args)
+
+// Bridge only. Changes a bridge endpoint's depth and durability in place, so that following the
+// ROS 2 side never needs the endpoint to be recreated.
+struct ioctl_set_bridge_qos_args
+{
+  struct name_info topic_name;
+  topic_local_id_t id;
+  bool is_publisher;
+  bool qos_is_transient_local;
+  uint32_t qos_depth;
+};
+
+#define AGNOCAST_SET_BRIDGE_QOS_CMD _IOW(0xA6, 36, struct ioctl_set_bridge_qos_args)
 
 #define MAX_TOPIC_NUM 2048
 

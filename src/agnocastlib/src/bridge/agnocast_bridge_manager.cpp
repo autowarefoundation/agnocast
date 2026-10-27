@@ -50,7 +50,8 @@ BridgeManager::BridgeManager()
   profile_event("mgr", R"("phase":"rclcpp_init_done")");
 
   const char * show_env = std::getenv("AGNOCAST_BRIDGE_SHOW");
-  show_enabled_ = (show_env != nullptr && std::string(show_env) == "1");
+  group_mode_ = (show_env != nullptr && std::string(show_env) == "group");
+  show_enabled_ = (show_env != nullptr && std::string(show_env) == "1") || group_mode_;
   const char * model_env = std::getenv("AGNOCAST_BRIDGE_EXEC_MODEL");
   if (model_env != nullptr && std::string(model_env) == "grouped") {
     exec_model_ = ExecModel::Grouped;
@@ -871,6 +872,50 @@ bool set_bridge_route(
   return ioctl(agnocast_fd, AGNOCAST_SET_BRIDGE_ROUTE_CMD, &args) == 0;
 }
 
+// Group mode: routes a bridge endpoint to the Agnocast endpoints of its group's QoS.
+bool set_bridge_group_route(
+  const std::string & topic_name, topic_local_id_t id, bool is_publisher, uint32_t depth,
+  bool transient_local, bool reliable, bool paused, bool resume_from_next)
+{
+  struct ioctl_set_bridge_route_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.id = id;
+  args.peer_id = -1;
+  args.is_publisher = is_publisher;
+  args.paused = paused;
+  args.resume_from_next = resume_from_next;
+  args.by_qos = true;
+  args.qos_is_transient_local = transient_local;
+  args.qos_is_reliable = reliable;
+  args.qos_depth = depth;
+  return ioctl(agnocast_fd, AGNOCAST_SET_BRIDGE_ROUTE_CMD, &args) == 0;
+}
+
+bool set_bridge_qos(
+  const std::string & topic_name, topic_local_id_t id, bool is_publisher, uint32_t depth,
+  bool transient_local)
+{
+  struct ioctl_set_bridge_qos_args args = {};
+  args.topic_name = {topic_name.c_str(), topic_name.size()};
+  args.id = id;
+  args.is_publisher = is_publisher;
+  args.qos_is_transient_local = transient_local;
+  args.qos_depth = depth;
+  return ioctl(agnocast_fd, AGNOCAST_SET_BRIDGE_QOS_CMD, &args) == 0;
+}
+
+void write_external_ros2_nums(const std::string & topic_name, uint32_t subs, uint32_t pubs)
+{
+  struct ioctl_set_ros2_subscriber_num_args sub_num_args = {};
+  sub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  sub_num_args.ros2_subscriber_num = subs;
+  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &sub_num_args);
+  struct ioctl_set_ros2_publisher_num_args pub_num_args = {};
+  pub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
+  pub_num_args.ros2_publisher_num = pubs;
+  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD, &pub_num_args);
+}
+
 }  // namespace
 
 void BridgeManager::profile_event(const std::string & ev, const std::string & fields)
@@ -977,7 +1022,7 @@ void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
   const int64_t start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
   try {
     ShownPart part;
-    if (payload.create_shadow_node) {
+    if (payload.create_shadow_node && !group_mode_) {
       const std::string ns = static_cast<const char *>(payload.shadow_node_namespace);
       const std::string name = static_cast<const char *>(payload.shadow_node_name);
       part.owner = find_or_create_shadow_node((ns == "/" ? "" : ns) + "/" + name);
@@ -1024,6 +1069,10 @@ void BridgeManager::show_service(const BridgeMsgServicePayload & payload)
 void BridgeManager::sync_shown_parts()
 {
   if (!show_enabled_) {
+    return;
+  }
+  if (group_mode_) {
+    sync_shown_groups();
     return;
   }
   const auto start = std::chrono::steady_clock::now();
@@ -1159,22 +1208,7 @@ void BridgeManager::sync_shown_parts()
     it = (seen.count(it->first) > 0) ? std::next(it) : failed_pubsub_.erase(it);
   }
 
-  for (auto it = shown_services_.begin(); it != shown_services_.end();) {
-    std::string reason;
-    if (is_agnocast_service_alive(it->first, reason)) {
-      ++it;
-      continue;
-    }
-    const auto & part = it->second;
-    executor_->remove_callback_group(part.group);
-    if (exec_model_ == ExecModel::Grouped) {
-      executor_->detach_shared_callback_group(part.group);
-    } else {
-      executor_->stop_callback_group(part.group);
-    }
-    detach_relay_group(part.relay_group);
-    it = shown_services_.erase(it);
-  }
+  retire_dead_services();
 
   if (bridge_profile_enabled() && created > 0) {
     const auto to_us = [](std::chrono::steady_clock::duration d) {
@@ -1195,9 +1229,13 @@ void BridgeManager::report_shown_parts(std::chrono::steady_clock::duration sync_
   for (const auto & [key, part] : shown_pubsub_) {
     (part.writer ? writers : readers)++;
   }
+  for (const auto & [key, part] : shown_groups_) {
+    (part.writer ? writers : readers)++;
+  }
   // Threads are logged too: CIE spawns a group's thread on its next monitoring pass, after the
   // part.
-  const size_t part_num = shown_pubsub_.size() + shown_services_.size() + failed_pubsub_.size();
+  const size_t part_num = shown_pubsub_.size() + shown_groups_.size() + shown_services_.size() +
+                          failed_pubsub_.size() + failed_groups_.size();
   const int thread_num = count_dir_entries("/proc/self/task");
   if (part_num == last_logged_part_num_ && thread_num == last_logged_thread_num_) {
     return;
@@ -1216,11 +1254,13 @@ void BridgeManager::report_shown_parts(std::chrono::steady_clock::duration sync_
   char line[512];
   snprintf(
     line, sizeof(line),
-    "{\"t_ns\":%lld,\"model\":\"%s\",\"writers\":%zu,\"readers\":%zu,\"servers\":%zu,"
+    "{\"t_ns\":%lld,\"model\":\"%s\",\"unit\":\"%s\",\"writers\":%zu,\"readers\":%zu,"
+    "\"servers\":%zu,"
     "\"failed\":%zu,\"shadows\":%zu,\"threads\":%d,\"fds\":%d,\"rss_kb\":%ld,\"sync_ms\":%lld,"
     "\"reader_msgs\":%llu,\"server_reqs\":%llu}",
     static_cast<long long>(now_ns), exec_model_ == ExecModel::PerPart ? "per_part" : "grouped",
-    writers, readers, shown_services_.size(), failed_pubsub_.size(), shadows, thread_num,
+    group_mode_ ? "group" : "pubsub", writers, readers, shown_services_.size(),
+    failed_pubsub_.size() + failed_groups_.size(), shadows, thread_num,
     count_dir_entries("/proc/self/fd"), read_rss_kb(), static_cast<long long>(sync_ms),
     static_cast<unsigned long long>(shown_reader_msg_count_.load(std::memory_order_relaxed)),
     static_cast<unsigned long long>(shown_server_request_count_.load(std::memory_order_relaxed)));
@@ -1299,14 +1339,7 @@ void BridgeManager::sync_relays(const std::string & topic_name, const std::vecto
   const auto external_pubs =
     static_cast<uint32_t>(std::count_if(pubs.begin(), pubs.end(), is_external));
 
-  struct ioctl_set_ros2_subscriber_num_args sub_num_args = {};
-  sub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  sub_num_args.ros2_subscriber_num = external_subs;
-  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_SUBSCRIBER_NUM_CMD, &sub_num_args);
-  struct ioctl_set_ros2_publisher_num_args pub_num_args = {};
-  pub_num_args.topic_name = {topic_name.c_str(), topic_name.size()};
-  pub_num_args.ros2_publisher_num = external_pubs;
-  (void)ioctl(agnocast_fd, AGNOCAST_SET_ROS2_PUBLISHER_NUM_CMD, &pub_num_args);
+  write_external_ros2_nums(topic_name, external_subs, external_pubs);
 
   for (const auto & key : keys) {
     auto & part = shown_pubsub_.at(key);
@@ -1366,6 +1399,310 @@ void BridgeManager::sync_relays(const std::string & topic_name, const std::vecto
           "relay", std::string(R"("state":")") + (want_paused ? "paused" : "resumed") +
                      R"(","name":")" + topic_name + "\"");
       }
+    }
+  }
+}
+
+void BridgeManager::retire_dead_services()
+{
+  for (auto it = shown_services_.begin(); it != shown_services_.end();) {
+    std::string reason;
+    if (is_agnocast_service_alive(it->first, reason)) {
+      ++it;
+      continue;
+    }
+    const auto & part = it->second;
+    executor_->remove_callback_group(part.group);
+    if (exec_model_ == ExecModel::Grouped) {
+      executor_->detach_shared_callback_group(part.group);
+    } else {
+      executor_->stop_callback_group(part.group);
+    }
+    detach_relay_group(part.relay_group);
+    it = shown_services_.erase(it);
+  }
+}
+
+// Group mode: one set of parts per topic and QoS of the Agnocast endpoints, owned by the bridge
+// node. The DDS-side parts are created up front; the kmod-side ones follow the ROS 2 side.
+void BridgeManager::sync_shown_groups()
+{
+  const auto start = std::chrono::steady_clock::now();
+  retiring_receivers_.clear();
+  const uint32_t own_domain = static_cast<uint32_t>(
+    container_node_->get_node_base_interface()->get_context()->get_domain_id());
+
+  std::set<GroupKey> seen;
+  const auto topics = list_agnocast_topics();
+  const auto listed_at = std::chrono::steady_clock::now();
+  size_t created = 0;
+  for (const auto & topic : topics) {
+    if (topic.domain_id != own_domain || topic.name.rfind("/AGNOCAST_SRV_", 0) == 0) {
+      continue;
+    }
+
+    std::map<GroupKey, std::string> groups;
+    for (const auto & ep : get_topic_endpoints(topic.name, topic.domain_id)) {
+      const std::string type_name(ep.type_name, strnlen(ep.type_name, TYPE_NAME_BUFFER_SIZE));
+      if (ep.is_bridge || type_name.empty()) {
+        continue;
+      }
+      groups.emplace(
+        GroupKey{
+          topic.name, ep.is_publisher, ep.qos_depth, ep.qos_is_transient_local,
+          !ep.is_publisher && ep.qos_is_reliable},
+        type_name);
+    }
+
+    for (const auto & [key, type_name] : groups) {
+      seen.insert(key);
+      if (shown_groups_.count(key) > 0 || failed_groups_.count(key) > 0) {
+        continue;
+      }
+
+      const auto & [topic_name, is_publisher, depth, transient_local, reliable] = key;
+      const int64_t part_start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
+      try {
+        ShownPart part;
+        part.owner = container_node_;
+        part.type_name = type_name;
+        part.qos_depth = depth;
+        part.qos_is_transient_local = transient_local;
+        const size_t dds_depth = std::max<uint32_t>(depth, 1);
+        if (is_publisher) {
+          rclcpp::QoS qos{rclcpp::KeepLast(dds_depth)};
+          qos.reliable();
+          if (transient_local) {
+            qos.transient_local();
+          }
+          part.writer = container_node_->create_generic_publisher(topic_name, type_name, qos);
+        } else {
+          rclcpp::QoS qos{rclcpp::KeepLast(dds_depth)};
+          if (reliable) {
+            qos.reliable();
+          } else {
+            qos.best_effort();
+          }
+          if (transient_local) {
+            qos.transient_local();
+          }
+          // The sender first, routed to the group, so that the reader never receives what it
+          // cannot pass on. Its QoS follows the ROS 2 publishers once they are known.
+          rclcpp::QoS sender_qos{rclcpp::KeepLast(dds_depth)};
+          if (transient_local) {
+            sender_qos.transient_local();
+          }
+          auto sender = std::make_shared<agnocast::GenericPublisher>(
+            container_node_.get(), topic_name, type_name, sender_qos, agnocast::PublisherOptions{},
+            agnocast::PublisherRole::BridgeInternal);
+          set_bridge_group_route(
+            topic_name, sender->get_id(), true, depth, transient_local, reliable, false, false);
+          part.sender = sender;
+          part.applied_depth = static_cast<uint32_t>(dds_depth);
+          part.applied_transient_local = transient_local;
+
+          part.group = create_shown_part_group(container_node_);
+          rclcpp::SubscriptionOptions options;
+          options.callback_group = part.group;
+          options.ignore_local_publications = true;
+          part.reader = container_node_->create_generic_subscription(
+            topic_name, type_name, qos,
+            [this, sender](std::shared_ptr<rclcpp::SerializedMessage> msg) {
+              shown_reader_msg_count_.fetch_add(1, std::memory_order_relaxed);
+              sender->publish(*msg);
+            },
+            options);
+          attach_shown_part_group(part);
+        }
+        shown_groups_.emplace(key, std::move(part));
+        created++;
+        if (bridge_profile_enabled()) {
+          profile_event(
+            "part", std::string(R"("kind":")") + (is_publisher ? "writer" : "reader") +
+                      R"(","dur_us":)" +
+                      std::to_string((bridge_profile_now_ns() - part_start_ns) / 1000) +
+                      R"(,"name":")" + topic_name + R"(","type":")" + type_name + "\"");
+        }
+      } catch (const std::exception & e) {
+        RCLCPP_WARN(
+          logger_, "Failed to show the %s group of '%s' (type '%s', depth %u): %s",
+          is_publisher ? "publisher" : "subscriber", topic_name.c_str(), type_name.c_str(), depth,
+          e.what());
+        failed_groups_.emplace(key, e.what());
+      }
+    }
+  }
+
+  for (auto it = shown_groups_.begin(); it != shown_groups_.end();) {
+    if (seen.count(it->first) > 0) {
+      ++it;
+      continue;
+    }
+    const auto & [topic_name, is_publisher, depth, transient_local, reliable] = it->first;
+    auto & part = it->second;
+    if (part.receiver && part.relay_group == relay_shared_group_) {
+      set_bridge_group_route(
+        topic_name, part.receiver->get_id(), false, depth, transient_local, reliable, true, true);
+      retiring_receivers_.push_back(part.receiver);
+    }
+    detach_relay_group(part.relay_group);
+    detach_shown_part_group(part);
+    it = shown_groups_.erase(it);
+  }
+
+  const auto relay_start = std::chrono::steady_clock::now();
+  for (auto it = shown_groups_.begin(); it != shown_groups_.end();) {
+    const std::string topic_name = std::get<0>(it->first);
+    std::vector<GroupKey> keys;
+    for (; it != shown_groups_.end() && std::get<0>(it->first) == topic_name; ++it) {
+      keys.push_back(it->first);
+    }
+    sync_group_relays(topic_name, keys);
+  }
+  if (bridge_profile_enabled()) {
+    profile_event(
+      "relay_sync",
+      R"("dur_us":)" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - relay_start)
+                                        .count()));
+  }
+  for (auto it = failed_groups_.begin(); it != failed_groups_.end();) {
+    it = (seen.count(it->first) > 0) ? std::next(it) : failed_groups_.erase(it);
+  }
+
+  retire_dead_services();
+
+  if (bridge_profile_enabled() && created > 0) {
+    const auto to_us = [](std::chrono::steady_clock::duration d) {
+      return std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+    };
+    profile_event(
+      "show", R"("topics":)" + std::to_string(topics.size()) + R"(,"list_us":)" +
+                to_us(listed_at - start) + R"(,"created":)" + std::to_string(created) +
+                R"(,"total_us":)" + to_us(std::chrono::steady_clock::now() - start));
+  }
+  report_shown_parts(std::chrono::steady_clock::now() - start);
+}
+
+// Each kmod-side part stands in for the ROS 2 endpoints on the other side of its DDS-side part,
+// which reach every group alike, so it takes the strongest of them: the receiver the deepest ROS 2
+// subscriber, the sender the ROS 2 publishers' depths summed (one sender holds them all). A depth
+// the graph does not carry (0) falls back to the group's.
+void BridgeManager::sync_group_relays(
+  const std::string & topic_name, const std::vector<GroupKey> & keys)
+{
+  const auto own = own_node_names();
+  const auto is_external = [&own](const rclcpp::TopicEndpointInfo & info) {
+    std::string ns = info.node_namespace();
+    const std::string fqn = (ns == "/" ? "" : ns) + "/" + info.node_name();
+    return own.count(fqn) == 0;
+  };
+  uint32_t external_subs = 0;
+  uint32_t sub_depth_max = 0;
+  for (const auto & info : container_node_->get_subscriptions_info_by_topic(topic_name)) {
+    if (is_external(info)) {
+      external_subs++;
+      sub_depth_max = std::max<uint32_t>(
+        sub_depth_max, static_cast<uint32_t>(info.qos_profile().get_rmw_qos_profile().depth));
+    }
+  }
+  uint32_t external_pubs = 0;
+  uint32_t pub_depth_sum = 0;
+  bool pub_transient_local = false;
+  for (const auto & info : container_node_->get_publishers_info_by_topic(topic_name)) {
+    if (is_external(info)) {
+      external_pubs++;
+      const auto & rmw_qos = info.qos_profile().get_rmw_qos_profile();
+      pub_depth_sum += static_cast<uint32_t>(rmw_qos.depth);
+      pub_transient_local |= (rmw_qos.durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+    }
+  }
+  write_external_ros2_nums(topic_name, external_subs, external_pubs);
+
+  for (const auto & key : keys) {
+    auto & part = shown_groups_.at(key);
+    const auto & [unused_topic, is_publisher, depth, transient_local, reliable] = key;
+    const uint32_t group_depth = std::max<uint32_t>(depth, 1);
+
+    if (!is_publisher) {
+      // R2A: the sender always carries; only its QoS follows the ROS 2 publishers.
+      const uint32_t want_depth = pub_depth_sum > 0 ? pub_depth_sum : group_depth;
+      const bool want_transient_local = external_pubs > 0 ? pub_transient_local : transient_local;
+      if (
+        (want_depth != part.applied_depth ||
+         want_transient_local != part.applied_transient_local) &&
+        set_bridge_qos(topic_name, part.sender->get_id(), true, want_depth, want_transient_local)) {
+        part.applied_depth = want_depth;
+        part.applied_transient_local = want_transient_local;
+      }
+      continue;
+    }
+
+    // A2R: the receiver exists only once the topic has had an external reader, and is paused while
+    // it has none. A transient-local group's receiver takes the latest messages on its first start
+    // only; later resumes start from the next message, so as not to replay them again.
+    const uint32_t want_depth = sub_depth_max > 0 ? sub_depth_max : group_depth;
+    if (!part.receiver) {
+      if (external_subs == 0) {
+        continue;
+      }
+      const int64_t start_ns = bridge_profile_enabled() ? bridge_profile_now_ns() : 0;
+      try {
+        rclcpp::QoS qos{rclcpp::KeepLast(want_depth)};
+        qos.reliable();
+        if (transient_local) {
+          qos.transient_local();
+        }
+        part.relay_group = create_relay_group();
+        agnocast::SubscriptionOptions options;
+        options.callback_group = part.relay_group;
+        options.ignore_local_publications = true;
+        auto writer = part.writer;
+        set_next_bridge_subscription_paused(true);
+        part.receiver = std::make_shared<agnocast::GenericSubscription>(
+          container_node_.get(), topic_name, part.type_name, qos,
+          [writer](const rclcpp::SerializedMessage & msg) { writer->publish(msg); }, options,
+          agnocast::SubscriptionRole::BridgeInternal);
+        // Routed before the group reaches the executor, so the first receive is already routed.
+        set_bridge_group_route(
+          topic_name, part.receiver->get_id(), false, depth, transient_local, reliable, false,
+          false);
+        attach_relay_group(part.relay_group);
+        part.relay_paused = false;
+        part.applied_depth = want_depth;
+        part.applied_transient_local = transient_local;
+        if (bridge_profile_enabled()) {
+          profile_event(
+            "part", R"("kind":"receiver","dur_us":)" +
+                      std::to_string((bridge_profile_now_ns() - start_ns) / 1000) + R"(,"name":")" +
+                      topic_name + "\"");
+        }
+      } catch (const std::exception & e) {
+        set_next_bridge_subscription_paused(false);
+        RCLCPP_WARN(
+          logger_, "Failed to start relaying '%s' (depth %u group): %s", topic_name.c_str(), depth,
+          e.what());
+        part.receiver.reset();
+        part.relay_group.reset();
+      }
+      continue;
+    }
+
+    const bool want_paused = (external_subs == 0);
+    if (
+      want_paused != part.relay_paused && set_bridge_group_route(
+                                            topic_name, part.receiver->get_id(), false, depth,
+                                            transient_local, reliable, want_paused, true)) {
+      part.relay_paused = want_paused;
+      profile_event(
+        "relay", std::string(R"("state":")") + (want_paused ? "paused" : "resumed") +
+                   R"(","name":")" + topic_name + "\"");
+    }
+    if (
+      want_depth > part.applied_depth &&
+      set_bridge_qos(
+        topic_name, part.receiver->get_id(), false, want_depth, part.applied_transient_local)) {
+      part.applied_depth = want_depth;
     }
   }
 }
