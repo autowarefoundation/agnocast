@@ -131,6 +131,8 @@ struct mempool_entry * assign_memory(const pid_t pid)
     return NULL;
   }
   new_entry->pid = pid;
+  // The owner maps its own pool at startup, so RECEIVE and TAKE never report it.
+  new_entry->reported = true;
 
   spin_lock_irqsave(&mempool_lock, flags);
   for (int i = 0; i < mempool_num; i++) {
@@ -162,6 +164,7 @@ int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
     return -ENOMEM;
   }
   new_entry->pid = pid;
+  new_entry->reported = false;
 
   spin_lock_irqsave(&mempool_lock, flags);
   list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
@@ -177,6 +180,28 @@ int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
   spin_unlock_irqrestore(&mempool_lock, flags);
 
   return 0;
+}
+
+// Returns 0 the first time it finds pid linked, so the process maps this pool once, -EEXIST after
+// that, and -ENOENT when pid is not linked. Allocates nothing.
+int report_memory(struct mempool_entry * mempool_entry, const pid_t pid)
+{
+  struct mapped_pid_entry * entry;
+  unsigned long flags;
+  int ret = -ENOENT;
+
+  spin_lock_irqsave(&mempool_lock, flags);
+  list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
+  {
+    if (entry->pid == pid) {
+      ret = entry->reported ? -EEXIST : 0;
+      entry->reported = true;
+      break;
+    }
+  }
+  spin_unlock_irqrestore(&mempool_lock, flags);
+
+  return ret;
 }
 
 void free_memory(const pid_t pid)

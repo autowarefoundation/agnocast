@@ -16,6 +16,8 @@ extern uint64_t mempool_size_bytes;
 struct mapped_pid_entry
 {
   pid_t pid;
+  // Whether RECEIVE or TAKE already handed this pool to the process for mapping.
+  bool reported;
   struct list_head list;
 };
 
@@ -30,5 +32,6 @@ int init_memory_allocator(void);
 void cleanup_memory_allocator(void);
 struct mempool_entry * assign_memory(const pid_t pid);
 int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid);
+int report_memory(struct mempool_entry * mempool_entry, const pid_t pid);
 void free_memory(const pid_t pid);
 void exit_memory_allocator(void);
