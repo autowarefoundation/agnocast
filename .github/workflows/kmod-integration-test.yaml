@@ -1,0 +1,175 @@
+name: kmod-integration-test
+
+# Loads agnocast.ko on the hosted runner and runs the tests that need it:
+# the requires_kernel_module ctest label and the 1to1 / 2to2 e2e sweeps (#1328).
+# Hosted runners boot without Secure Boot or lockdown, so an unsigned module
+# can be insmod'ed directly.
+#
+# Kept separate from build-and-test-agnocastlib-components-heaphook.yaml: that
+# workflow builds with --merge-install, while the scripts under scripts/test/
+# build with colcon's default isolated layout, and colcon refuses to mix the two
+# in one install/ directory.
+
+on:
+  pull_request:
+    types:
+      - labeled
+  push:
+    branches:
+      - main
+
+env:
+  RUST_TOOLCHAIN: "1.75.0"
+
+jobs:
+  check-changes:
+    if: ${{ github.event_name == 'pull_request' && github.event.label.name == 'run-build-test' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      relevant: ${{ steps.check_diff.outputs.relevant }}
+    steps:
+    - name: Set PR fetch depth
+      run: echo "PR_FETCH_DEPTH=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "${GITHUB_ENV}"
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ env.PR_FETCH_DEPTH }}
+
+    - name: Check for relevant changes
+      id: check_diff
+      run: |
+        set -euo pipefail
+        CHANGED_FILES="$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})"
+        if echo "$CHANGED_FILES" | grep -qE '^(agnocast_kmod|agnocast_heaphook|src|scripts/test)/|^\.github/workflows/kmod-integration-test\.yaml$'; then
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "relevant=false" >> "$GITHUB_OUTPUT"
+        fi
+
+  kmod-integration-test-matrix:
+    needs: check-changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.check-changes.outputs.relevant == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ros_distro: humble
+            os: ubuntu-22.04
+          - ros_distro: jazzy
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      ROS_DISTRO: ${{ matrix.ros_distro }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup ROS 2 environment
+      run: |
+        # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
+        grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends software-properties-common curl libunwind-dev "linux-headers-$(uname -r)"
+
+        sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ros-${{ env.ROS_DISTRO }}-desktop python3-colcon-common-extensions ros-${{ env.ROS_DISTRO }}-ament-cmake python3-colcon-mixin ros-${{ env.ROS_DISTRO }}-ament-package
+
+    - name: Install dependencies
+      run: |
+        source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
+        sudo apt-get install -y --no-install-recommends python3-rosdep
+        sudo rosdep init
+        rosdep update
+        sudo apt-get update
+        rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO --skip-keys glog
+
+    # See build-and-test-agnocastlib-components-heaphook.yaml for why this is needed on Jazzy.
+    - name: Setup ROS Python packages for system Python
+      run: |
+        ROS_PYTHON_PATH=$(python3 -c "import sys; print(f'/opt/ros/${{ env.ROS_DISTRO }}/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')")
+        SYSTEM_PYTHON_PATH=$(python3 -c "import site; print(site.getsitepackages()[0])")
+        sudo ln -sf "$ROS_PYTHON_PATH/ament_package" "$SYSTEM_PYTHON_PATH/ament_package"
+        python3 -c "import ament_package; print('ament_package found at:', ament_package.__file__)"
+
+    - name: Setup Rust environment
+      run: |
+        rustup set profile minimal
+        rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --no-self-update
+        rustup default ${{ env.RUST_TOOLCHAIN }}
+
+    - name: Build and load agnocast kmod
+      run: |
+        set -euo pipefail
+        echo "Kernel: $(uname -r)"
+        echo "Lockdown: $(cat /sys/kernel/security/lockdown 2>/dev/null || echo 'unavailable')"
+        (cd agnocast_kmod && make)
+        sudo dmesg -C
+        sudo insmod agnocast_kmod/agnocast.ko
+        test -c /dev/agnocast
+
+    - name: rmmod refcount test
+      run: bash scripts/test/test_rmmod_refcount.bash
+
+    - name: Build workspace
+      run: |
+        source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
+        colcon build --packages-up-to agnocast_e2e_test --cmake-args -DBUILD_TESTING=ON
+
+    # The e2e launch files preload libagnocast_heaphook.so by name, and the
+    # requires_heaphook gtests preload it from agnocastlib's install prefix.
+    - name: Build agnocast_heaphook
+      run: |
+        set -euo pipefail
+        cargo build --release --manifest-path agnocast_heaphook/Cargo.toml
+        cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/agnocastlib/lib/
+
+    - name: Run requires_kernel_module tests
+      run: bash scripts/test/run_requires_kernel_module_tests.bash
+
+    - name: Run e2e_test_1to1
+      run: bash scripts/test/e2e_test_1to1.bash --parallel 2
+
+    - name: Run e2e_test_2to2
+      run: bash scripts/test/e2e_test_2to2.bash
+
+    - name: Unload agnocast kmod
+      if: always()
+      run: |
+        if ! grep -q '^agnocast ' /proc/modules; then
+          echo "agnocast is not loaded"
+          exit 0
+        fi
+        # Bridge processes from the e2e tests may take a moment to exit.
+        for _ in $(seq 10); do
+          sudo rmmod agnocast && exit 0
+          sleep 1
+        done
+        sudo fuser -v /dev/agnocast || true
+        echo "::error::Failed to rmmod agnocast"
+        exit 1
+
+    - name: Check dmesg for kernel warnings
+      if: always()
+      run: |
+        kmsg="$(sudo dmesg)"
+        echo "${kmsg}"
+        if grep -qE 'BUG:|WARNING:|Oops|Call Trace:' <<<"${kmsg}"; then
+          echo "::error::Kernel warnings while agnocast was loaded"
+          exit 1
+        fi
+
+    - name: Upload test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: kmod-integration-test-logs-${{ matrix.ros_distro }}
+        path: |
+          log/
+          ~/.ros/log/
+          /tmp/e2e_1to1_logs/
+        if-no-files-found: ignore
