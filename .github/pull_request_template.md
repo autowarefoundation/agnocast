@@ -4,9 +4,6 @@
 
 ## How was this PR tested?
 
-- [ ] `bash scripts/test/e2e_test_1to1.bash` (required)
-- [ ] `bash scripts/test/e2e_test_2to2.bash` (required)
-- [ ] `bash scripts/test/run_requires_kernel_module_tests.bash` (required)
 - [ ] sample application
 - [ ] Autoware
 
