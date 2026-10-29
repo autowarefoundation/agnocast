@@ -132,7 +132,7 @@ jobs:
       run: bash scripts/test/run_requires_kernel_module_tests.bash
 
     - name: Run e2e_test_1to1
-      run: bash scripts/test/e2e_test_1to1.bash
+      run: bash scripts/test/e2e_test_1to1.bash --parallel 2
 
     - name: Run e2e_test_2to2
       run: bash scripts/test/e2e_test_2to2.bash
@@ -171,4 +171,5 @@ jobs:
         path: |
           log/
           ~/.ros/log/
+          /tmp/e2e_1to1_logs/
         if-no-files-found: ignore
