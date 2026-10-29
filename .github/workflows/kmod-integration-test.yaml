@@ -132,7 +132,7 @@ jobs:
       run: bash scripts/test/run_requires_kernel_module_tests.bash
 
     - name: Run e2e_test_1to1
-      run: bash scripts/test/e2e_test_1to1.bash --parallel 4
+      run: bash scripts/test/e2e_test_1to1.bash
 
     - name: Run e2e_test_2to2
       run: bash scripts/test/e2e_test_2to2.bash
@@ -170,5 +170,5 @@ jobs:
         name: kmod-integration-test-logs-${{ matrix.ros_distro }}
         path: |
           log/
-          /tmp/e2e_1to1_logs/
+          ~/.ros/log/
         if-no-files-found: ignore
