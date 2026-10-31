@@ -10,8 +10,7 @@ namespace agnocast::detail
 // The caller must own the thread, must not call from that thread, and must not hold a mutex
 // needed by its callbacks. The worker must make finished ready when it exits.
 template <typename Cancel>
-void cancel_and_join(
-  std::thread & thread, const std::shared_future<void> & finished, Cancel cancel)
+void cancel_and_join(std::thread & thread, const std::shared_future<void> & finished, Cancel cancel)
 {
   if (!thread.joinable()) {
     return;
