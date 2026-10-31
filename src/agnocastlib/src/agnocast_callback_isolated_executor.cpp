@@ -1,10 +1,10 @@
+#include "internal/cancel_and_join.hpp"
+
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
 #include <agnocast/agnocast_single_threaded_executor.hpp>
 #include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
-
-#include "internal/cancel_and_join.hpp"
 
 namespace agnocast
 {

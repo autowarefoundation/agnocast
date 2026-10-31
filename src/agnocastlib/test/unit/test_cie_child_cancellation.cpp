@@ -42,8 +42,8 @@ TEST_F(CieChildCancellationTest, CancelImmediatelyAfterChildRegistration)
     SCOPED_TRACE(iteration);
     auto node = std::make_shared<rclcpp::Node>("cie_cancel_startup_test");
     auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
-    auto executor = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>(
-      rclcpp::ExecutorOptions{}, 1, 1);
+    auto executor =
+      std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>(rclcpp::ExecutorOptions{}, 1, 1);
     executor->add_callback_group(group, node->get_node_base_interface());
 
     std::packaged_task<void()> spin([executor]() { executor->spin(); });
@@ -69,8 +69,8 @@ TEST_F(CieChildCancellationTest, StopCallbackGroupImmediatelyAfterChildRegistrat
     SCOPED_TRACE(iteration);
     auto node = std::make_shared<rclcpp::Node>("cie_stop_startup_test");
     auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
-    auto executor = std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>(
-      rclcpp::ExecutorOptions{}, 1, 1);
+    auto executor =
+      std::make_shared<agnocast::CallbackIsolatedAgnocastExecutor>(rclcpp::ExecutorOptions{}, 1, 1);
     executor->add_callback_group(group, node->get_node_base_interface());
 
     std::packaged_task<void()> spin([executor]() { executor->spin(); });
@@ -78,9 +78,8 @@ TEST_F(CieChildCancellationTest, StopCallbackGroupImmediatelyAfterChildRegistrat
     std::thread worker(std::move(spin));
     const bool registered = wait_for_registration(group, finished);
 
-    auto stopped = std::async(std::launch::async, [executor, group]() {
-      executor->stop_callback_group(group);
-    });
+    auto stopped =
+      std::async(std::launch::async, [executor, group]() { executor->stop_callback_group(group); });
     const auto result = stopped.wait_for(2s);
     executor->cancel();
     if (result != std::future_status::ready || finished.wait_for(2s) != std::future_status::ready) {
