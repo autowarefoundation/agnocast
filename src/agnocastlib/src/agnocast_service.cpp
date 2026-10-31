@@ -17,8 +17,8 @@ void GenericService::send_response(
 {
   auto req_wrapper =
     GenericRequestWrapper(this->service_ts_bundle_.request_members, std::move(request));
-  auto publisher =
-    publisher_manager_.get_or_create_publisher_for(this, req_wrapper.response_topic_name());
+  auto publisher = publisher_manager_.get_or_create_publisher_for(
+    node_, qos_, role_, req_wrapper.response_topic_name());
   publisher->publish(std::move(response), [this](void * p) {
     GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
   });
@@ -29,8 +29,8 @@ void GenericService::cancel_response(
 {
   auto req_wrapper =
     GenericRequestWrapper(this->service_ts_bundle_.request_members, std::move(request));
-  auto publisher =
-    publisher_manager_.get_or_create_publisher_for(this, req_wrapper.response_topic_name());
+  auto publisher = publisher_manager_.get_or_create_publisher_for(
+    node_, qos_, role_, req_wrapper.response_topic_name());
   publisher->cancel_message(std::move(response), [this](void * p) {
     GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
   });
@@ -40,8 +40,8 @@ ipc_shared_ptr<void> GenericService::borrow_loaned_response(const ipc_shared_ptr
 {
   auto req_wrapper =
     GenericRequestWrapper(this->service_ts_bundle_.request_members, ipc_shared_ptr<void>(request));
-  auto publisher =
-    publisher_manager_.get_or_create_publisher_for(this, req_wrapper.response_topic_name());
+  auto publisher = publisher_manager_.get_or_create_publisher_for(
+    node_, qos_, role_, req_wrapper.response_topic_name());
 
   auto res_wrapper = GenericResponseWrapper::allocate(
     this->service_ts_bundle_.response_members,

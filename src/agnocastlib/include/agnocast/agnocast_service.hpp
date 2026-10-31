@@ -47,18 +47,8 @@ constexpr PublisherRole to_publisher_role(const ServiceRole role)
                                              : PublisherRole::AgnocastOnly;
 }
 
-// Forward declaration
-namespace detail
-{
-template <typename>
-class ResponsePublisherManager;
-}  // namespace detail
-
 class ServiceBase
 {
-  template <typename>
-  friend class detail::ResponsePublisherManager;
-
 protected:
   const std::variant<rclcpp::Node *, agnocast::Node *> node_;
   std::string service_name_;
@@ -97,7 +87,8 @@ class ResponsePublisherManager
 
 public:
   typename PublisherT::SharedPtr get_or_create_publisher_for(
-    const ServiceBase * service_base, const std::string & response_topic_name)
+    const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
+    const ServiceRole role, const std::string & response_topic_name)
   {
     typename PublisherT::SharedPtr pub;
     {
@@ -105,20 +96,18 @@ public:
       auto it = pubs_.find(response_topic_name);
       if (it == pubs_.end()) {
         std::visit(
-          [this, service_base, &pub, &response_topic_name](auto * node) {
+          [this, &pub, &qos, role, &response_topic_name](auto * node) {
             agnocast::PublisherOptions pub_options;
             if constexpr (std::is_same_v<PublisherT, agnocast::TypeErasedPublisher>) {
               pub = std::make_shared<PublisherT>(
-                node, response_topic_name, "", service_base->qos_, pub_options,
-                to_publisher_role(service_base->role_));
+                node, response_topic_name, "", qos, pub_options, to_publisher_role(role));
             } else {
               pub = std::make_shared<PublisherT>(
-                node, response_topic_name, service_base->qos_, pub_options,
-                to_publisher_role(service_base->role_));
+                node, response_topic_name, qos, pub_options, to_publisher_role(role));
             }
             pubs_[response_topic_name] = pub;
           },
-          service_base->node_);
+          node_variant);
       } else {
         pub = it->second;
       }
@@ -208,7 +197,7 @@ private:
       typename ServiceResponsePublisher::SharedPtr publisher;
       try {
         publisher = publisher_manager_.get_or_create_publisher_for(
-          this, request->RequestMeta::response_topic_name);
+          node_, qos_, role_, request->RequestMeta::response_topic_name);
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
@@ -340,7 +329,7 @@ public:
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
     auto publisher = publisher_manager_.get_or_create_publisher_for(
-      this, internal_request->RequestMeta::response_topic_name);
+      node_, qos_, role_, internal_request->RequestMeta::response_topic_name);
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
     const auto sent_response = copy_response_if_contents(internal_response);
@@ -369,7 +358,7 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
     auto publisher = publisher_manager_.get_or_create_publisher_for(
-      this, internal_request->RequestMeta::response_topic_name);
+      node_, qos_, role_, internal_request->RequestMeta::response_topic_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
     response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
@@ -437,8 +426,8 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
       // The name comes from the request, so a bad one is the caller's fault.
       typename TypeErasedPublisher::SharedPtr publisher;
       try {
-        publisher =
-          publisher_manager_.get_or_create_publisher_for(this, req_wrapper.response_topic_name());
+        publisher = publisher_manager_.get_or_create_publisher_for(
+          node_, qos_, role_, req_wrapper.response_topic_name());
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
