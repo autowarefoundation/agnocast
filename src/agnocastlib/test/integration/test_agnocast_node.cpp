@@ -194,16 +194,13 @@ TEST_F(AgnocastNodeConstructionTest, automatically_declare_parameters_from_overr
 
 // agnocast::Node must forward `options.use_clock_thread()` to NodeTimeSource, which creates
 // a dedicated clock callback group only when it is true. These tests pin that by counting
-// callback groups. `use_sim_time` is enabled to trigger the clock subscription setup. Parameter
-// services are disabled because each service creates a reaper callback group that would skew
-// these counts.
+// callback groups. `use_sim_time` is enabled to trigger the clock subscription setup.
 
 TEST_F(AgnocastNodeConstructionTest, clock_thread_disabled_skips_clock_callback_group)
 {
   agnocast::init(0, nullptr);
 
   rclcpp::NodeOptions options;
-  options.start_parameter_services(false);
   options.parameter_overrides({rclcpp::Parameter("use_sim_time", true)});
   options.use_clock_thread(false);
 
@@ -218,7 +215,6 @@ TEST_F(AgnocastNodeConstructionTest, clock_thread_enabled_creates_clock_callback
   agnocast::init(0, nullptr);
 
   rclcpp::NodeOptions options;
-  options.start_parameter_services(false);
   options.parameter_overrides({rclcpp::Parameter("use_sim_time", true)});
   options.use_clock_thread(true);
 
