@@ -4,6 +4,8 @@
 #include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "internal/cancel_and_join.hpp"
+
 namespace agnocast
 {
 
@@ -95,8 +97,12 @@ void CallbackIsolatedAgnocastExecutor::spin()
       child_callback_groups_.push_back(group);
       weak_child_executors_.push_back(executor);
 
+      std::promise<void> completion;
+      child_finished_.push_back(completion.get_future().share());
       child_threads_.emplace_back([executor, callback_group_id = std::move(callback_group_id),
-                                   &client_publisher, &client_publisher_mutex]() {
+                                   &client_publisher, &client_publisher_mutex,
+                                   completion = std::move(completion)]() mutable {
+        RCPPUTILS_SCOPE_EXIT(completion.set_value(););
         auto tid = static_cast<pid_t>(syscall(SYS_gettid));
 
         {
@@ -181,26 +187,38 @@ void CallbackIsolatedAgnocastExecutor::spin()
   }
 
   // Join all child threads after monitoring loop exits.
-  // Cancel child executors and move threads out under the lock, then join OUTSIDE the lock.
+  // Move child resources out under the lock, then cancel and join OUTSIDE the lock.
   // A child thread's callback may call cancel() which acquires child_resources_mutex_,
   // so holding it during thread.join() would deadlock.
   std::vector<std::thread> threads_to_join;
+  std::vector<rclcpp::Executor::WeakPtr> executors_to_cancel;
+  std::vector<std::shared_future<void>> finished;
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
-    for (auto & weak_child_executor : weak_child_executors_) {
-      if (auto child_executor = weak_child_executor.lock()) {
-        child_executor->cancel();
-      }
-    }
     threads_to_join = std::move(child_threads_);
+    executors_to_cancel = std::move(weak_child_executors_);
+    finished = std::move(child_finished_);
     child_threads_.clear();
     weak_child_executors_.clear();
+    child_finished_.clear();
     child_callback_groups_.clear();
   }
-  for (auto & thread : threads_to_join) {
-    if (thread.joinable()) {
-      thread.join();
+
+  // A callback may wait for another child to stop. Retry cancellation for every unfinished
+  // child while joining any one of them, including children that have not entered spin yet.
+  auto cancel_children = [&executors_to_cancel, &finished]() {
+    for (size_t i = 0; i < executors_to_cancel.size(); ++i) {
+      if (finished[i].wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        continue;
+      }
+      if (auto executor = executors_to_cancel[i].lock()) {
+        executor->cancel();
+      }
     }
+  };
+  cancel_children();
+  for (size_t i = 0; i < threads_to_join.size(); ++i) {
+    detail::cancel_and_join(threads_to_join[i], finished[i], cancel_children);
   }
 }
 
@@ -428,13 +446,16 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
   }
 
   std::thread thread_to_join;
+  rclcpp::Executor::SharedPtr executor_to_cancel;
+  std::shared_future<void> finished;
   bool found = false;
 
   {
     std::lock_guard<std::mutex> guard{child_resources_mutex_};
     if (
       child_callback_groups_.size() != weak_child_executors_.size() ||
-      child_callback_groups_.size() != child_threads_.size()) {
+      child_callback_groups_.size() != child_threads_.size() ||
+      child_callback_groups_.size() != child_finished_.size()) {
       RCLCPP_ERROR(
         logger, "Child executor vectors are misaligned. Skipping stop_callback_group().");
       return;
@@ -442,14 +463,14 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
     for (size_t i = 0; i < child_callback_groups_.size(); ++i) {
       auto grp = child_callback_groups_[i].lock();
       if (grp && grp == group_ptr) {
-        if (auto executor = weak_child_executors_[i].lock()) {
-          executor->cancel();
-        }
+        executor_to_cancel = weak_child_executors_[i].lock();
         thread_to_join = std::move(child_threads_[i]);
+        finished = std::move(child_finished_[i]);
         auto idx = static_cast<std::ptrdiff_t>(i);
         child_callback_groups_.erase(child_callback_groups_.begin() + idx);
         weak_child_executors_.erase(weak_child_executors_.begin() + idx);
         child_threads_.erase(child_threads_.begin() + idx);
+        child_finished_.erase(child_finished_.begin() + idx);
         found = true;
         break;
       }
@@ -458,12 +479,19 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
 
   if (found && thread_to_join.joinable()) {
     if (thread_to_join.get_id() == std::this_thread::get_id()) {
+      if (executor_to_cancel) {
+        executor_to_cancel->cancel();
+      }
       RCLCPP_ERROR(
         logger,
         "stop_callback_group() called from its own child thread. Detaching to avoid self-join UB.");
       thread_to_join.detach();
     } else {
-      thread_to_join.join();
+      detail::cancel_and_join(thread_to_join, finished, [&executor_to_cancel]() {
+        if (executor_to_cancel) {
+          executor_to_cancel->cancel();
+        }
+      });
     }
   }
 }
