@@ -5,8 +5,6 @@
 #include "agnocast/agnocast_service_event_publisher.hpp"
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_subscription.hpp"
-#include "agnocast/agnocast_timer.hpp"
-#include "agnocast/agnocast_timer_info.hpp"
 #include "agnocast/agnocast_utils.hpp"
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/service_typesupport.hpp"
@@ -17,17 +15,14 @@
 #include <service_msgs/msg/service_event_info.hpp>
 #endif
 
-#include <algorithm>
-#include <chrono>
-#include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <variant>
-
-using namespace std::chrono_literals;
 
 namespace agnocast
 {
@@ -89,62 +84,28 @@ template <typename Publisher>
 class ResponsePublisherManager
 {
   std::mutex mtx_;
-  std::unordered_map<std::string, std::pair<typename Publisher::SharedPtr, uint64_t>> pubs_;
-  uint32_t tick_count_ = 0;
-  agnocast::TimerBase::SharedPtr timer_;
+  std::unordered_map<std::string, typename Publisher::SharedPtr> pubs_;
 
-public:
-  template <typename NodeT>
-  explicit ResponsePublisherManager(NodeT * node)
+  void erase_stale_publishers()
   {
-    uint32_t timer_id = allocate_timer_id();
-    auto period_ns = std::chrono::nanoseconds(2s);
-    auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
-    auto timer_callback = [this]() {
-      std::lock_guard<std::mutex> lock(mtx_);
-      tick_count_ += 1;
-      for (auto it = pubs_.begin(); it != pubs_.end();) {
-        const std::string & res_topic_name = it->first;
-        auto next_check_tick = static_cast<uint32_t>(it->second.second);
-        auto generation = static_cast<uint32_t>(it->second.second >> 32);
-
-        if (next_check_tick > tick_count_) {
-          ++it;
-          continue;
-        }
-
-        union ioctl_get_subscriber_num_args args = {};
-        args.topic_name = {res_topic_name.c_str(), res_topic_name.size()};
-        if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
-          RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
-          close(agnocast_fd);
-          exit(EXIT_FAILURE);
-        };
-
-        if (args.ret_same_process_subscriber_num + args.ret_other_process_subscriber_num == 0) {
-          it = pubs_.erase(it);
-        } else {
-          generation += 1;
-          const uint32_t interval = 1u << std::min(generation, 31u);
-          if (interval > std::numeric_limits<uint32_t>::max() - tick_count_) {
-            next_check_tick = std::numeric_limits<uint32_t>::max();
-          } else {
-            next_check_tick = tick_count_ + interval;
-          }
-          it->second.second =
-            (static_cast<uint64_t>(generation) << 32) | static_cast<uint64_t>(next_check_tick);
-          ++it;
-        }
+    for (auto it = pubs_.begin(); it != pubs_.end();) {
+      union ioctl_get_subscriber_num_args args = {};
+      args.topic_name = {it->first.c_str(), it->first.size()};
+      if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+        RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
       }
-    };
 
-    timer_ = std::make_shared<WallTimer<decltype(timer_callback)>>(
-      timer_id, period_ns, std::move(timer_callback));
-
-    register_timer_info(timer_id, timer_, period_ns, group, timer_->get_clock());
+      if (args.ret_same_process_subscriber_num + args.ret_other_process_subscriber_num == 0) {
+        it = pubs_.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 
+public:
   typename Publisher::SharedPtr get_or_create_publisher_for(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
     const ServiceRole role, const std::string & response_topic_name)
@@ -154,6 +115,10 @@ public:
       std::lock_guard<std::mutex> lock(mtx_);
       auto it = pubs_.find(response_topic_name);
       if (it == pubs_.end()) {
+        // Prune publishers with no clients only when the map is about to grow, amortizing the cost
+        // and keeping the average overhead low.
+        erase_stale_publishers();
+
         std::visit(
           [this, &pub, &qos, role, &response_topic_name](auto * node) {
             agnocast::PublisherOptions pub_options;
@@ -164,11 +129,11 @@ public:
               pub = std::make_shared<Publisher>(
                 node, response_topic_name, qos, pub_options, to_publisher_role(role));
             }
-            pubs_[response_topic_name] = {pub, 0};
+            pubs_.emplace(response_topic_name, pub);
           },
           node_variant);
       } else {
-        pub = it->second.first;
+        pub = it->second;
       }
     }
     return pub;
@@ -354,7 +319,7 @@ public:
     rclcpp::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, qos, role)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -364,7 +329,7 @@ public:
     agnocast::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, qos, role)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -585,7 +550,7 @@ public:
     rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, qos, role)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
@@ -595,7 +560,7 @@ public:
     agnocast::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role), publisher_manager_(node)
+  : ServiceBase(node, service_name, qos, role)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
