@@ -152,11 +152,33 @@ struct mempool_entry * assign_memory(const pid_t pid)
   return result;
 }
 
+// Caller holds mempool_lock.
+static struct mapped_pid_entry * find_mapped_pid(
+  struct mempool_entry * mempool_entry, const pid_t pid)
+{
+  struct mapped_pid_entry * entry;
+  list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
+  {
+    if (entry->pid == pid) {
+      return entry;
+    }
+  }
+  return NULL;
+}
+
 int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
 {
   struct mapped_pid_entry * new_entry;
-  struct mapped_pid_entry * entry;
   unsigned long flags;
+  bool linked;
+
+  // An already linked pair returns before the allocation
+  spin_lock_irqsave(&mempool_lock, flags);
+  linked = find_mapped_pid(mempool_entry, pid) != NULL;
+  spin_unlock_irqrestore(&mempool_lock, flags);
+  if (linked) {
+    return -EEXIST;
+  }
 
   // Allocate outside spinlock because kmalloc with GFP_KERNEL may sleep
   new_entry = kmalloc(sizeof(*new_entry), GFP_KERNEL);
@@ -167,13 +189,10 @@ int reference_memory(struct mempool_entry * mempool_entry, const pid_t pid)
   new_entry->reported = false;
 
   spin_lock_irqsave(&mempool_lock, flags);
-  list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
-  {
-    if (entry->pid == pid) {
-      spin_unlock_irqrestore(&mempool_lock, flags);
-      kfree(new_entry);
-      return -EEXIST;
-    }
+  if (find_mapped_pid(mempool_entry, pid)) {
+    spin_unlock_irqrestore(&mempool_lock, flags);
+    kfree(new_entry);
+    return -EEXIST;
   }
   list_add(&new_entry->list, &mempool_entry->mapped_pid_head);
   mempool_entry->mapped_num++;
@@ -191,13 +210,10 @@ int report_memory(struct mempool_entry * mempool_entry, const pid_t pid)
   int ret = -ENOENT;
 
   spin_lock_irqsave(&mempool_lock, flags);
-  list_for_each_entry(entry, &mempool_entry->mapped_pid_head, list)
-  {
-    if (entry->pid == pid) {
-      ret = entry->reported ? -EEXIST : 0;
-      entry->reported = true;
-      break;
-    }
+  entry = find_mapped_pid(mempool_entry, pid);
+  if (entry) {
+    ret = entry->reported ? -EEXIST : 0;
+    entry->reported = true;
   }
   spin_unlock_irqrestore(&mempool_lock, flags);
 
