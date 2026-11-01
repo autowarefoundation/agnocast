@@ -123,19 +123,26 @@ jobs:
     # The e2e launch files preload libagnocast_heaphook.so by name, and the
     # requires_heaphook gtests preload it from agnocastlib's install prefix.
     - name: Build agnocast_heaphook
+      id: build_heaphook
       run: |
         set -euo pipefail
         cargo build --release --manifest-path agnocast_heaphook/Cargo.toml
         cp agnocast_heaphook/target/release/libagnocast_heaphook.so install/agnocastlib/lib/
 
+    # The test steps below run independently of each other's results, so one
+    # failing suite does not hide failures in the others. They are skipped only
+    # if the build itself failed.
     - name: Run requires_kernel_module tests
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
       run: bash scripts/test/run_requires_kernel_module_tests.bash
 
     - name: Run e2e_test_1to1
-      run: bash scripts/test/e2e_test_1to1.bash --parallel 2
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
+      run: bash scripts/test/e2e_test_1to1.bash --parallel 2 --continue
 
     - name: Run e2e_test_2to2
-      run: bash scripts/test/e2e_test_2to2.bash
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
+      run: bash scripts/test/e2e_test_2to2.bash --continue
 
     - name: Unload agnocast kmod
       if: always()
