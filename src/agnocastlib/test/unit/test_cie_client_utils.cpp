@@ -1,3 +1,4 @@
+#include "agnocast/agnocast.hpp"
 #include "agnocast/cie_client_utils.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -68,6 +69,45 @@ TEST_F(CreateCallbackGroupIdTest, TimerOnly)
 
   // Assert
   EXPECT_EQ(id, "/test_node@Timer(1000000000)");
+}
+
+TEST_F(CreateCallbackGroupIdTest, AgnocastTimerOnly)
+{
+  // Arrange
+  auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto timer = agnocast::create_timer(
+    node_, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME),
+    rclcpp::Duration(std::chrono::seconds(1)), []() {}, group);
+
+  std::vector<std::string> agnocast_topics;
+
+  // Act
+  auto id = agnocast::create_callback_group_id(group, node_, agnocast_topics);
+
+  // Assert
+  EXPECT_EQ(id, "/test_node@Timer(1000000000)");
+}
+
+TEST_F(CreateCallbackGroupIdTest, AgnocastTimersInSeparateGroups)
+{
+  // Arrange
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  auto group_a = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto timer_a = agnocast::create_timer(
+    node_, clock, rclcpp::Duration(std::chrono::seconds(1)), []() {}, group_a);
+  auto group_b = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto timer_b = agnocast::create_timer(
+    node_, clock, rclcpp::Duration(std::chrono::seconds(2)), []() {}, group_b);
+
+  std::vector<std::string> agnocast_topics;
+
+  // Act
+  auto id_a = agnocast::create_callback_group_id(group_a, node_, agnocast_topics);
+  auto id_b = agnocast::create_callback_group_id(group_b, node_, agnocast_topics);
+
+  // Assert: each ID contains only the timer of its own group
+  EXPECT_EQ(id_a, "/test_node@Timer(1000000000)");
+  EXPECT_EQ(id_b, "/test_node@Timer(2000000000)");
 }
 
 TEST_F(CreateCallbackGroupIdTest, MultipleEntriesSorted)
@@ -167,6 +207,29 @@ TEST_F(CreateCallbackGroupIdTest, MixedAgnocastAndRclcppSorted)
 
   // Assert: both labeled "Subscription" and sorted alphabetically
   EXPECT_EQ(id, "/test_node@Subscription(/topic_a)@Subscription(/topic_b)");
+}
+
+TEST_F(CreateCallbackGroupIdTest, BridgeGroupsOfOneTopicShowDirection)
+{
+  // Arrange: an R2A bridge group holds an rclcpp subscription, an A2R bridge group holds an
+  // Agnocast subscription on the same topic.
+  auto group_r2a = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions sub_options;
+  sub_options.callback_group = group_r2a;
+  auto sub = node_->create_subscription<std_msgs::msg::Bool>(
+    "/topic_a", 10, [](const std::shared_ptr<const std_msgs::msg::Bool>) {}, sub_options);
+  agnocast::set_bridge_direction(group_r2a, true);
+
+  auto group_a2r = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  agnocast::set_bridge_direction(group_a2r, false);
+
+  // Act
+  auto id_r2a = agnocast::create_callback_group_id(group_r2a, node_, {});
+  auto id_a2r = agnocast::create_callback_group_id(group_a2r, node_, {"/topic_a"});
+
+  // Assert
+  EXPECT_EQ(id_r2a, "/test_node@Subscription(/topic_a)@BridgeR2A");
+  EXPECT_EQ(id_a2r, "/test_node@Subscription(/topic_a)@BridgeA2R");
 }
 
 TEST_F(CreateCallbackGroupIdTest, NodeBaseInterfaceOverload)
