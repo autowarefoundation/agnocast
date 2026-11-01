@@ -1039,6 +1039,51 @@ void test_case_receive_msg_twice(struct kunit * test)
   KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 0);
 }
 
+void test_case_receive_msg_pool_linked_through_another_topic(struct kunit * test)
+{
+  // Arrange
+  const char * other_topic_name = "/kunit_test_topic_other";
+  const bool is_transient_local = false;
+  const uint32_t qos_depth = 10;
+  const pid_t publisher_pid = 1000;
+  const pid_t subscriber_pid = 2000;
+  uint64_t ret_addr = agnocast_kunit_setup_process(test, publisher_pid, 0);
+  agnocast_kunit_setup_process(test, subscriber_pid, 0);
+
+  // ADD_PUBLISHER links the subscriber to the publisher's pool
+  topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
+  agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, qos_depth, is_transient_local, IS_BRIDGE);
+
+  // ADD_SUBSCRIBER on the other topic finds the pair already linked
+  agnocast_kunit_setup_publisher(
+    test, other_topic_name, NODE_NAME, publisher_pid, qos_depth, is_transient_local, IS_BRIDGE);
+  topic_local_id_t other_subscriber_id = agnocast_kunit_setup_subscriber(
+    test, other_topic_name, NODE_NAME, subscriber_pid, qos_depth, is_transient_local, IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
+
+  union ioctl_receive_msg_args ioctl_receive_msg_ret;
+  struct publisher_shm_info pub_shm_infos[KUNIT_PUB_SHM_BUF_SIZE] = {0};
+  int ret1 = agnocast_ioctl_receive_msg(
+    other_topic_name, current->nsproxy->ipc_ns, other_subscriber_id, pub_shm_infos,
+    KUNIT_PUB_SHM_BUF_SIZE, &ioctl_receive_msg_ret);
+  KUNIT_ASSERT_EQ(test, ret1, 0);
+  KUNIT_ASSERT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 1);
+  KUNIT_ASSERT_EQ(test, pub_shm_infos[0].pid, publisher_pid);
+  KUNIT_ASSERT_EQ(test, pub_shm_infos[0].shm_addr, ret_addr);
+
+  // Act
+  int ret2 = agnocast_ioctl_receive_msg(
+    TOPIC_NAME, current->nsproxy->ipc_ns, subscriber_id, pub_shm_infos, KUNIT_PUB_SHM_BUF_SIZE,
+    &ioctl_receive_msg_ret);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret2, 0);
+  KUNIT_EXPECT_EQ(test, ioctl_receive_msg_ret.ret_pub_shm_num, 0);
+}
+
 void test_case_receive_msg_with_exited_publisher(struct kunit * test)
 {
   // Arrange
