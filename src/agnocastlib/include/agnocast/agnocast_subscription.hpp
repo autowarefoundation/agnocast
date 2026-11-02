@@ -6,7 +6,6 @@
 #include "agnocast/agnocast_smart_pointer.hpp"
 #include "agnocast/agnocast_tracepoint_wrapper.h"
 #include "agnocast/agnocast_utils.hpp"
-#include "rclcpp/detail/qos_parameters.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialized_message.hpp"
 #include "rcpputils/shared_library.hpp"
@@ -407,7 +406,7 @@ public:
     {
       // Must cover the ioctl and the mapping below: it pairs the returned publisher info with the
       // mmap that makes it usable, and it is what serializes same-subscriber takes for the kernel
-      // module, which holds only a topic read lock. See mmap_mtx in agnocast.cpp.
+      // module, which holds only read locks. See mmap_mtx in agnocast.cpp.
       std::lock_guard<std::mutex> lock(mmap_mtx);
 
       if (ioctl(agnocast_fd, AGNOCAST_TAKE_MSG_CMD, &take_args) < 0) {

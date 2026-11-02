@@ -12,6 +12,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
+#include <vector>
 
 namespace agnocast
 {
@@ -78,6 +79,10 @@ void unregister_timer_info(uint32_t timer_id);
 // get_agnocast_topics_by_group() so a timer-only group is still classified as needing an
 // agnocast-capable executor.
 bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group);
+
+// Periods in nanoseconds of the agnocast timers that the given callback group owns.
+std::vector<int64_t> get_agnocast_timer_periods_by_group(
+  const rclcpp::CallbackGroup::SharedPtr & group);
 
 class TimerEventHandler : public EpollEventHandler
 {

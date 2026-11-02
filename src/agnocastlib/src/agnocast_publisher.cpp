@@ -1,9 +1,9 @@
 #include "agnocast/agnocast_publisher.hpp"
 
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
+#include "agnocast/internal/qos_parameters.hpp"
 #include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
-#include "rclcpp/detail/qos_parameters.hpp"
 
 #include <rclcpp/typesupport_helpers.hpp>
 #include <rosidl_runtime_cpp/message_initialization.hpp>
@@ -153,9 +153,9 @@ void PublisherBase::init_base(
 
   auto node_parameters = node->get_node_parameters_interface();
   actual_qos_ = !options.qos_overriding_options.get_policy_kinds().empty()
-                  ? rclcpp::detail::declare_qos_parameters(
+                  ? internal::declare_qos_parameters(
                       options.qos_overriding_options, node_parameters, topic_name_, qos,
-                      rclcpp::detail::PublisherQosParametersTraits{})
+                      internal::QosOverrideEntity::Publisher)
                   : qos;
 
   validate_publisher_qos(actual_qos_);

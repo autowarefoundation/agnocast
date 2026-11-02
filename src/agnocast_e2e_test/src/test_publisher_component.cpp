@@ -1,3 +1,4 @@
+#include <agnocast/agnocast.hpp>
 #include <agnocast_cie_thread_configurator/cie_thread_configurator.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
@@ -26,6 +27,13 @@ public:
       RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", message.data.c_str());
       publisher_->publish(message);
     });
+
+    // The default group has no agnocast subscription, so only this timer makes the group need an
+    // agnocast-capable executor.
+    agnocast_timer_ = agnocast::create_timer(
+      this, std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME),
+      rclcpp::Duration(std::chrono::milliseconds(100)),
+      [this]() { RCLCPP_INFO_ONCE(this->get_logger(), "Agnocast timer fired"); });
 
     // Create a callback group that is NOT automatically added to executor
     no_exec_callback_group_ = this->create_callback_group(
@@ -64,6 +72,7 @@ private:
 
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  agnocast::TimerBase::SharedPtr agnocast_timer_;
   rclcpp::CallbackGroup::SharedPtr no_exec_callback_group_;
   rclcpp::TimerBase::SharedPtr no_exec_timer_;
   int count_;

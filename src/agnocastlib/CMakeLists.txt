@@ -55,7 +55,7 @@ add_library(agnocast SHARED
   src/node/agnocast_only_executor.cpp src/node/agnocast_only_single_threaded_executor.cpp src/node/agnocast_only_multi_threaded_executor.cpp
   src/node/agnocast_only_callback_isolated_executor.cpp src/node/agnocast_parameter_service.cpp src/node/agnocast_parameter_client.cpp
   src/cie_client_utils.cpp
-  src/internal/service_typesupport.cpp src/internal/type_registry_writer.cpp
+  src/internal/service_typesupport.cpp src/internal/type_registry_writer.cpp src/internal/qos_parameters.cpp
   src/node/node_interfaces/node_base.cpp src/node/node_interfaces/node_parameters.cpp src/node/node_interfaces/node_topics.cpp src/node/node_interfaces/node_clock.cpp src/node/node_interfaces/node_time_source.cpp src/node/node_interfaces/node_services.cpp src/node/node_interfaces/node_logging.cpp src/node/node_interfaces/node_graph.cpp
   src/bridge/agnocast_bridge_utils.cpp src/bridge/agnocast_service_bridge.cpp
   src/bridge/agnocast_bridge_ipc_event_loop.cpp src/bridge/agnocast_bridge_loader.cpp src/bridge/agnocast_bridge_manager.cpp
@@ -165,6 +165,7 @@ if(BUILD_TESTING)
     test/unit/test_type_registry_writer.cpp
     test/unit/test_agnocast_generic_publisher.cpp
     test/unit/test_agnocast_publisher.cpp
+    test/unit/test_qos_parameters.cpp
     test/unit/test_daemon_bridge_uds.cpp
     test/unit/test_agnocast_bridge_uds.cpp
     test/unit/test_discovery_agent_auto_fork.cpp
