@@ -29,6 +29,13 @@ protected:
     executor_ = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>();
     executor_->add_node(node_);
     spin_thread_ = std::thread([this]() { executor_->spin(); });
+
+    // Lifecycle-only tests may finish before the worker enters spin(), overwriting cancel().
+    const bool started = wait_for([this]() { return executor_->is_spinning(); });
+    if (!started) {
+      rclcpp::shutdown();
+    }
+    ASSERT_TRUE(started) << "Timed out waiting for the subscription executor to start";
   }
 
   void TearDown() override
