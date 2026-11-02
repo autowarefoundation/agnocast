@@ -263,4 +263,4 @@ TEST_F(
   // Assert
   EXPECT_TRUE(inner_weak.expired());
 }
-/* -------------------------- DestructorTest: end --------------------------- */
+/* -------------------- SubscriptionDestructorTest: end --------------------- */
