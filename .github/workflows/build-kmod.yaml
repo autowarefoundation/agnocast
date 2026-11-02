@@ -23,7 +23,7 @@ jobs:
       id: check_changes
       run: |
         set -e
-        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '^agnocast_kmod/'; then
+        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E '^(agnocast_kmod/|src/agnocast_ioctl_wrapper/include/)'; then
           echo "agnocast_kmod changed"
           echo "kmod_changed=true" >> $GITHUB_OUTPUT
         else

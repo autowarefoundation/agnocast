@@ -20,12 +20,14 @@ on:
   pull_request:
     paths:
       - 'agnocast_kmod/**'
+      - 'src/agnocast_ioctl_wrapper/include/**'
       - '.github/kunit/**'
       - '.github/workflows/kunit.yaml'
   push:
     branches: [main]
     paths:
       - 'agnocast_kmod/**'
+      - 'src/agnocast_ioctl_wrapper/include/**'
       - '.github/kunit/**'
       - '.github/workflows/kunit.yaml'
 
