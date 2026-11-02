@@ -267,8 +267,7 @@ public:
     //   Move the entry out under the lock, but destroy it only after releasing the lock. The
     //   callback may own the last reference to another Subscription (e.g. a Client held by a
     //   relayed service callback); destroying it under the lock would make the nested
-    //   ~Subscription() lock
-    // id2_callback_info_mtx on this thread again and deadlock.
+    //   ~Subscription() lock id2_callback_info_mtx on this thread again and deadlock.
     CallbackInfo callback_info;
     {
       std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
