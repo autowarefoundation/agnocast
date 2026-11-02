@@ -32,6 +32,8 @@ IGNORE="$IGNORE,TRAILING_STATEMENTS,LINUX_VERSION_CODE"
 
 KMOD_DIR="$REPO_ROOT/agnocast_kmod"
 mapfile -d '' TARGET_FILES < <(find "$KMOD_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z)
+# find -type f skips agnocast_kmod/agnocast_ioctl_abi.h, a symlink to this shared header.
+TARGET_FILES+=("$REPO_ROOT/src/agnocast_ioctl_wrapper/include/agnocast_ioctl_wrapper/agnocast_ioctl_abi.h")
 if [[ ${#TARGET_FILES[@]} -eq 0 ]]; then
   echo "Error: no C/H source files found under $KMOD_DIR" >&2
   exit 1
