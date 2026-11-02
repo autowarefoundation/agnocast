@@ -700,11 +700,49 @@ static int insert_message_entry(
   return 0;
 }
 
-// Reads nothing that topic->rwsem guards, so receive and take call it after the topic unlock. This
-// keeps the GFP_KERNEL allocation in reference_memory() out of the topic section.
-// Caller holds global_htables_rwsem (read). Only global write changes the publisher table or sets
-// need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one subscriber, so the clear
-// below needs no lock.
+// The memory pool that a subscriber maps for a publisher, or NULL when it reads nothing from it.
+// A subscriber only reads from publishers that deliver to it; a one-way bridge rule can exclude
+// opposite-domain publishers. Caller holds global_htables_rwsem.
+static struct mempool_entry * pool_to_map(
+  const struct topic_struct * topic, const pid_t pub_pid, const uint32_t pub_domain,
+  const bool pub_is_bridge, const pid_t sub_pid, const uint32_t sub_domain,
+  const bool sub_is_bridge)
+{
+  if (sub_pid == pub_pid) return NULL;
+  if (!domain_delivery_allowed(topic, pub_domain, pub_is_bridge, sub_domain, sub_is_bridge)) {
+    return NULL;
+  }
+  const struct process_info * proc_info = agnocast_find_process_info(pub_pid);
+  if (!proc_info || proc_info->exited) return NULL;
+  return proc_info->mempool_entry;
+}
+
+// The add ioctls link each new (subscriber, publisher) pair under the global write lock, before
+// they insert the endpoint, so that set_publisher_shm_info() allocates nothing under the read lock.
+// They are the only source of new pairs, because a bridge rule cannot open a direction after an
+// endpoint joined it. A link left by a later failure of the add only keeps the pool referenced
+// until the subscriber process exits.
+static int link_subscriber_to_publishers(
+  const struct topic_wrapper * wrapper, const pid_t sub_pid, const bool sub_is_bridge)
+{
+  struct publisher_info * pub_info;
+  int bkt;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
+  {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, sub_pid,
+      wrapper->domain_id, sub_is_bridge);
+    if (!pool) continue;
+    int ret = reference_memory(pool, sub_pid);
+    if (ret < 0 && ret != -EEXIST) return ret;
+  }
+  return 0;
+}
+
+// Reads nothing that topic->rwsem guards, so receive and take call it after the topic unlock.
+// Caller holds global_htables_rwsem (read). Only global write changes the publisher table, links
+// pools, or sets need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one subscriber,
+// so the clear below needs no lock.
 static int set_publisher_shm_info(
   const struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
@@ -721,42 +759,23 @@ static int set_publisher_shm_info(
   int bkt;
   hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
-    if (subscriber_pid == pub_info->pid) {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, subscriber_pid,
+      wrapper->domain_id, sub_info->is_bridge);
+    if (!pool) {
       continue;
     }
 
-    // A subscriber only reads from publishers that deliver to it; a one-way
-    // bridge rule can exclude opposite-domain publishers, so skip mapping them.
-    if (!domain_delivery_allowed(
-          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, wrapper->domain_id,
-          sub_info->is_bridge)) {
+    int ret = report_memory(pool, subscriber_pid);
+    if (ret == -EEXIST) {
       continue;
     }
-
-    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
-      continue;
-    }
-
-    int ret = reference_memory(proc_info->mempool_entry, subscriber_pid);
     if (ret < 0) {
-      if (ret == -EEXIST) {
-        continue;
-      } else if (ret == -ENOMEM) {
-        dev_warn(
-          agnocast_device,
-          "Failed to allocate memory for mapping from pid=%d to process (pid=%d)'s memory pool. "
-          "(%s)\n",
-          subscriber_pid, pub_info->pid, __func__);
-        return ret;
-      } else {
-        dev_warn(
-          agnocast_device,
-          "Unreachable: process (pid=%d) failed to reference memory of (pid=%d). "
-          "(%s)\n",
-          subscriber_pid, pub_info->pid, __func__);
-        return ret;
-      }
+      dev_warn(
+        agnocast_device,
+        "Unreachable: process (pid=%d) has no link to the memory of (pid=%d). (%s)\n",
+        subscriber_pid, pub_info->pid, __func__);
+      return ret;
     }
 
     if (publisher_num == pub_shm_infos_size) {
@@ -778,7 +797,7 @@ static int set_publisher_shm_info(
     pub_shm_infos[publisher_num].pid = pub_info->pid;
 #endif
 
-    pub_shm_infos[publisher_num].shm_addr = proc_info->mempool_entry->addr;
+    pub_shm_infos[publisher_num].shm_addr = pool->addr;
     pub_shm_infos[publisher_num].shm_size = mempool_size_bytes;
     publisher_num++;
   }
@@ -937,6 +956,11 @@ int agnocast_ioctl_add_subscriber(
     goto unlock;
   }
 
+  ret = link_subscriber_to_publishers(wrapper, subscriber_pid, is_bridge);
+  if (ret < 0) {
+    goto unlock;
+  }
+
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
     wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
@@ -970,6 +994,21 @@ int agnocast_ioctl_add_publisher(
     goto unlock;
   }
 
+  // Link each subscriber to the new publisher's pool and set need_mmap_update to notify it
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, publisher_pid, wrapper->domain_id, is_bridge, sub_info->pid,
+      sub_info->domain_id, sub_info->is_bridge);
+    if (pool) {
+      ret = reference_memory(pool, sub_info->pid);
+      if (ret < 0 && ret != -EEXIST) goto unlock;
+    }
+    sub_info->need_mmap_update = true;
+  }
+
   struct publisher_info * pub_info;
   ret = insert_publisher_info(
     wrapper, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, &pub_info);
@@ -978,14 +1017,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-
-  // set true to subscriber_info.need_mmap_update to notify
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    sub_info->need_mmap_update = true;
-  }
 
 unlock:
   up_write(&global_htables_rwsem);
