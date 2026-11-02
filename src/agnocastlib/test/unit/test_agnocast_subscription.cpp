@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace agnocast
 {
@@ -69,6 +70,7 @@ TEST_F(GetValidCallbackGroupTest, get_valid_callback_group_nullptr)
   auto result = agnocast::get_valid_callback_group(node.get(), options);
   EXPECT_EQ(result, node->get_node_base_interface()->get_default_callback_group());
 }
+/* --------------------- GetValidCallbackGroupTest: end --------------------- */
 
 using StringMsg = std_msgs::msg::String;
 
@@ -233,3 +235,32 @@ TEST_F(GetActualQosTest, the_resolved_durability_reaches_the_callback_registry)
   ASSERT_NE(entry, agnocast::id2_callback_info.end());
   EXPECT_TRUE(entry->second.is_transient_local);
 }
+/* ------------------------- GetActualQosTest: end -------------------------- */
+
+using SubscriptionDestructorTest = GetActualQosTest;
+
+TEST_F(
+  SubscriptionDestructorTest,
+  destroying_a_subscription_whose_callback_owns_another_subscription_does_not_deadlock)
+{
+  // Arrange
+  auto node = std::make_shared<rclcpp::Node>("test_nested_subscription_destruction");
+
+  auto inner = agnocast::create_subscription<StringMsg>(
+    node.get(), "/test_nested_inner", 1, [](const agnocast::ipc_shared_ptr<const StringMsg> &) {});
+  std::weak_ptr<agnocast::Subscription<StringMsg>> inner_weak = inner;
+
+  auto outer = agnocast::create_subscription<StringMsg>(
+    node.get(), "/test_nested_outer", 1,
+    [inner = std::move(inner)](const agnocast::ipc_shared_ptr<const StringMsg> &) {});
+
+  ASSERT_EQ(inner_weak.use_count(), 1) << "The outer callback must hold the only reference";
+
+  // Act: destroying outer destroys its callback, which releases the last reference to inner
+  // from within ~Subscription(). That nested destructor must not cause a self-deadlock.
+  EXPECT_NO_THROW(outer.reset());
+
+  // Assert
+  EXPECT_TRUE(inner_weak.expired());
+}
+/* -------------------------- DestructorTest: end --------------------------- */

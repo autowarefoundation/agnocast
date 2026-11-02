@@ -256,13 +256,28 @@ public:
 
   ~Subscription()
   {
-    // Remove from callback info map to prevent stale references on re-subscription and to avoid
-    // fd reuse conflicts. ~SubscriptionBase() closes the eventfd once this body returns, after
-    // which the OS may reuse the same fd number for a new subscription. If the old entry remained
-    // in id2_callback_info, adding the new fd to epoll (EPOLL_CTL_ADD) could fail with EEXIST
-    // because epoll would still associate that fd number with the stale entry.
-    std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
-    id2_callback_info.erase(callback_info_id_);
+    // Stale entries and fd reuse:
+    //   Remove from callback info map to prevent stale references on re-subscription and to avoid
+    //   fd reuse conflicts. ~SubscriptionBase() closes the eventfd once this body returns, after
+    //   which the OS may reuse the same fd number for a new subscription. If the old entry remained
+    //   in id2_callback_info, adding the new fd to epoll (EPOLL_CTL_ADD) could fail with EEXIST
+    //   because epoll would still associate that fd number with the stale entry.
+    //
+    // Lock scope and deadlock avoidance:
+    //   Move the entry out under the lock, but destroy it only after releasing the lock. The
+    //   callback may own the last reference to another Subscription (e.g. a Client held by a
+    //   relayed service callback); destroying it under the lock would make the nested
+    //   ~Subscription() lock
+    // id2_callback_info_mtx on this thread again and deadlock.
+    CallbackInfo callback_info;
+    {
+      std::lock_guard<std::mutex> lock(id2_callback_info_mtx);
+      const auto it = id2_callback_info.find(callback_info_id_);
+      if (it != id2_callback_info.end()) {
+        callback_info = std::move(it->second);
+        id2_callback_info.erase(it);
+      }
+    }
   }
 };
 
