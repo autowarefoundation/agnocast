@@ -1,13 +1,37 @@
-#include "internal/cancel_and_join.hpp"
-
 #include <agnocast/agnocast.hpp>
 #include <agnocast/agnocast_callback_isolated_executor.hpp>
 #include <agnocast/agnocast_single_threaded_executor.hpp>
 #include <agnocast/cie_client_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <chrono>
+#include <future>
+#include <thread>
+
 namespace agnocast
 {
+namespace
+{
+
+// The caller must own the thread, must not call from that thread, and must not hold a mutex
+// needed by its callbacks. The worker must make finished ready when it exits.
+template <typename Cancel>
+void cancel_and_join(std::thread & thread, const std::shared_future<void> & finished, Cancel cancel)
+{
+  if (!thread.joinable()) {
+    return;
+  }
+  // rclcpp::Executor::cancel() only stops an active spin. A cancellation before the worker
+  // enters spin() is overwritten by spinning.exchange(true). Retry until the worker reports
+  // completion; polling is_spinning() alone would miss a worker that has already exited.
+  while (finished.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+    cancel();
+    finished.wait_for(std::chrono::milliseconds(1));
+  }
+  thread.join();
+}
+
+}  // namespace
 
 CallbackIsolatedAgnocastExecutor::CallbackIsolatedAgnocastExecutor(
   const rclcpp::ExecutorOptions & options, int next_exec_timeout_ms,
@@ -216,9 +240,8 @@ void CallbackIsolatedAgnocastExecutor::spin()
       }
     }
   };
-  cancel_children();
   for (size_t i = 0; i < threads_to_join.size(); ++i) {
-    detail::cancel_and_join(threads_to_join[i], finished[i], cancel_children);
+    cancel_and_join(threads_to_join[i], finished[i], cancel_children);
   }
 }
 
@@ -487,7 +510,7 @@ void CallbackIsolatedAgnocastExecutor::stop_callback_group(
         "stop_callback_group() called from its own child thread. Detaching to avoid self-join UB.");
       thread_to_join.detach();
     } else {
-      detail::cancel_and_join(thread_to_join, finished, [&executor_to_cancel]() {
+      cancel_and_join(thread_to_join, finished, [&executor_to_cancel]() {
         if (executor_to_cancel) {
           executor_to_cancel->cancel();
         }
