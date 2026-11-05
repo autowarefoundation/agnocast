@@ -28,6 +28,12 @@ BRIDGE_OFF = check_bridge_mode()
 TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
 TIMEOUT = float(os.environ.get('STRESS_TEST_TIMEOUT', 0.0))
 FOREVER = True if (os.environ.get('STRESS_TEST_TIMEOUT')) else False
+# Upper bound for waiting on a node's completion message. A case normally
+# finishes within ~10s; the margin absorbs slow discovery on loaded machines.
+COMPLETION_TIMEOUT_SEC = 30.0
+# When no message is expected, how long to keep watching after the publisher
+# has finished before asserting that nothing arrived.
+NO_RECEIVE_GRACE_SEC = 1.0
 
 
 def calc_expect_pub_sub_num(config: dict) -> None:
@@ -250,13 +256,21 @@ def generate_test_description():
     if not BRIDGE_OFF:
         context['test_ros2_sub'] = sub_nodes.actions[0]
 
+    # Each test waits for the completion messages it checks, so the tests can
+    # start right away. The stress soak keeps the timer so its soak period still
+    # starts once the nodes are up.
+    if FOREVER:
+        ready_to_test = TimerAction(period=ready_delay, actions=[launch_testing.actions.ReadyToTest()])
+    else:
+        ready_to_test = launch_testing.actions.ReadyToTest()
+
     return (
         LaunchDescription(
             [
                 SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '0'),
                 pub_node,
                 sub_nodes,
-                TimerAction(period=ready_delay, actions=[launch_testing.actions.ReadyToTest()])
+                ready_to_test,
             ]
         ),
         context
@@ -271,7 +285,25 @@ class Test1To1(unittest.TestCase):
         if FOREVER:
             time.sleep(TIMEOUT)
 
+    # A timed-out wait is not fatal by itself: the assertions that follow report
+    # which messages are missing.
+    def wait_for_publisher(self, proc_output, test_pub):
+        proc_output.waitFor(
+            "All messages published. Shutting down.", process=test_pub,
+            timeout=COMPLETION_TIMEOUT_SEC)
+
+    def wait_for_subscriber(self, proc_output, test_pub, sub_proc, expected_count):
+        if expected_count > 0:
+            proc_output.waitFor(
+                "All messages received. Shutting down.", process=sub_proc,
+                timeout=COMPLETION_TIMEOUT_SEC)
+        else:
+            self.wait_for_publisher(proc_output, test_pub)
+            proc_output.waitFor("incompatible QoS", timeout=COMPLETION_TIMEOUT_SEC)
+            time.sleep(NO_RECEIVE_GRACE_SEC)
+
     def test_pub(self, proc_output, test_pub):
+        self.wait_for_publisher(proc_output, test_pub)
         output_text = "".join(
             output.text.decode('utf-8') for output in proc_output[test_pub]
         )
@@ -298,13 +330,14 @@ class Test1To1(unittest.TestCase):
     # - Out: Fast Replay. The Bridge iterates through the burst input and re-publishes sequentially.
     #        The Agnocast Sub sees this as a high-speed stream of "fresh" messages, not history lookup.
     # -> Agnocast Sub receives a "fast replay" of the history.
-    def test_sub(self, proc_output, test_sub):
+    def test_sub(self, proc_output, test_pub, test_sub):
+        start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
+        total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
+
+        self.wait_for_subscriber(proc_output, test_pub, test_sub, total_expected_count)
         output_str = "".join(
             output.text.decode('utf-8') for output in proc_output[test_sub]
         )
-
-        start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
-        total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
 
         if total_expected_count > 0:
             if USE_AGNOCAST_PUB:
@@ -353,12 +386,13 @@ class Test1To1(unittest.TestCase):
             ])
             self.assertIn("incompatible QoS", full_log)
 
-    def test_ros2_sub(self, proc_output, test_ros2_sub):
+    def test_ros2_sub(self, proc_output, test_pub, test_ros2_sub):
+        total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
+
+        self.wait_for_subscriber(proc_output, test_pub, test_ros2_sub, total_expected_count)
         output_str = "".join(
             output.text.decode('utf-8') for output in proc_output[test_ros2_sub]
         )
-
-        total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
         if total_expected_count > 0:
             # ---------------------------------------------------------
             # Pattern B: Agnocast Publisher (A2R Bridge [Case 1]) or ROS 2 Publisher
