@@ -82,6 +82,30 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # Downloaded .deb files are cached so that a slow Ubuntu mirror only delays
+    # `apt-get update`. Like ccache, every job restores and only the
+    # integration-2to2 job saves. The month in the key refreshes the cache as
+    # packages get updated upstream.
+    - name: Compute apt cache key
+      id: apt_key
+      run: echo "key=${{ runner.os }}-${{ matrix.os }}-kmod-apt-$(date -u +%Y-%m)-${{ hashFiles('**/package.xml', '.github/workflows/kmod-integration-test.yaml') }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore apt archives
+      id: restore_apt
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/apt-archives
+        key: ${{ steps.apt_key.outputs.key }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.os }}-kmod-apt-
+
+    # A config file rather than a command-line option, so that the apt-get calls
+    # made by rosdep use the same directory.
+    - name: Configure apt archive directory
+      run: |
+        mkdir -p ~/apt-archives/partial
+        echo "Dir::Cache::Archives \"$HOME/apt-archives\";" | sudo tee /etc/apt/apt.conf.d/99ci-archives
+
     - name: Setup ROS 2 environment
       run: |
         # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
@@ -181,6 +205,22 @@ jobs:
     - name: Run e2e_test_2to2
       if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' }}
       run: bash scripts/test/e2e_test_2to2.bash --continue
+
+    # apt leaves a root-only lock file there, which would make the cache upload fail.
+    - name: Prepare apt archives for caching
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' && steps.restore_apt.outputs.cache-hit != 'true' }}
+      run: |
+        sudo apt-get autoclean
+        sudo rm -f ~/apt-archives/lock
+        sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+        du -sh ~/apt-archives
+
+    - name: Save apt archives
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' && steps.restore_apt.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/apt-archives
+        key: ${{ steps.apt_key.outputs.key }}
 
     # Saved after the tests so it also holds the Release build of
     # agnocast_e2e_test that the e2e scripts make.
