@@ -164,9 +164,12 @@ jobs:
     # The test steps below run independently of each other's results, so one
     # failing suite does not hide failures in the others. They are skipped only
     # if the build itself failed.
+    # Failed tests are retried once: test_integration_client_agnocastlib and
+    # test_integration_generic_subscription_agnocastlib intermittently hang or
+    # crash. Drop the retry once they are fixed.
     - name: Run requires_kernel_module tests
       if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' }}
-      run: bash scripts/test/run_requires_kernel_module_tests.bash
+      run: bash scripts/test/run_requires_kernel_module_tests.bash --retest-until-pass 1
 
     - name: Run e2e_test_1to1
       if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.shard }}

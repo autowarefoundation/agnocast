@@ -1,4 +1,5 @@
 #!/bin/bash
+# Any arguments are passed through to `colcon test` (e.g. --retest-until-pass 1).
 set -eo pipefail
 
 # Pre-flight check: kernel module must be loaded before anything else
@@ -39,4 +40,4 @@ if [ -z "${HEAPHOOK_PATH}" ]; then
 fi
 
 set -u
-colcon test --packages-up-to agnocast_e2e_test --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -L requires_kernel_module
+colcon test --packages-up-to agnocast_e2e_test "$@" --event-handlers console_direct+ --return-code-on-test-failure --ctest-args -L requires_kernel_module
