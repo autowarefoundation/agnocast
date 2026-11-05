@@ -38,6 +38,7 @@ static unsigned long get_topic_hash(const char * str)
 static struct topic_wrapper * find_topic(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id)
 {
+  lockdep_assert_held(&global_htables_rwsem);
   struct topic_wrapper * entry;
   unsigned long hash_val = get_topic_hash(topic_name);
 
@@ -133,6 +134,7 @@ static int add_topic(
   const char * topic_name, const struct ipc_namespace * ipc_ns, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
 {
+  lockdep_assert_held_write(&global_htables_rwsem);
   *wrapper = find_topic(topic_name, ipc_ns, domain_id);
   if (*wrapper) {
     return 0;
