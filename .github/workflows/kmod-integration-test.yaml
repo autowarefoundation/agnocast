@@ -48,20 +48,35 @@ jobs:
         fi
 
   kmod-integration-test-matrix:
+    name: ${{ matrix.ros_distro }} / ${{ matrix.suite.name }}
     needs: check-changes
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.check-changes.outputs.relevant == 'true') }}
     strategy:
       fail-fast: false
       matrix:
+        ros_distro: [humble, jazzy]
+        # The e2e sweeps dominate the run time, so they are split across jobs.
+        # Each job repeats the setup and build (~7 min), so keep the suites
+        # roughly the same length rather than adding more shards.
+        suite:
+          - { slug: integration-2to2, name: "requires_kernel_module + 2to2" }
+          - { slug: 1to1-1, name: "1to1 (1/3)", shard: "1/3" }
+          - { slug: 1to1-2, name: "1to1 (2/3)", shard: "2/3" }
+          - { slug: 1to1-3, name: "1to1 (3/3)", shard: "3/3" }
         include:
           - ros_distro: humble
             os: ubuntu-22.04
           - ros_distro: jazzy
             os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 60
     env:
       ROS_DISTRO: ${{ matrix.ros_distro }}
+      # Picked up by every CMake configure, including the ones inside scripts/test/.
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPRESS: "true"
+      CCACHE_COMPRESSLEVEL: "6"
 
     steps:
     - name: Checkout repository
@@ -72,7 +87,7 @@ jobs:
         # Nothing here installs from Chrome's repo, and its broken index makes apt-get update exit 100.
         grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends software-properties-common curl libunwind-dev "linux-headers-$(uname -r)"
+        sudo apt-get install -y --no-install-recommends software-properties-common curl libunwind-dev ccache "linux-headers-$(uname -r)"
 
         sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
@@ -115,10 +130,27 @@ jobs:
     - name: rmmod refcount test
       run: bash scripts/test/test_rmmod_refcount.bash
 
+    # Every suite builds the same objects, so all jobs restore the cache but only
+    # the integration-2to2 job saves it (see "Save ccache" below).
+    - name: Restore ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-${{ matrix.ros_distro }}-kmod-ccache-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.ros_distro }}-kmod-ccache-
+
+    - name: Configure ccache
+      run: |
+        mkdir -p ~/.ccache
+        ccache --max-size=1G
+        ccache --zero-stats
+
     - name: Build workspace
       run: |
         source /opt/ros/${{ env.ROS_DISTRO }}/setup.bash
         colcon build --packages-up-to agnocast_e2e_test --cmake-args -DBUILD_TESTING=ON
+        ccache --show-stats
 
     # The e2e launch files preload libagnocast_heaphook.so by name, and the
     # requires_heaphook gtests preload it from agnocastlib's install prefix.
@@ -133,16 +165,25 @@ jobs:
     # failing suite does not hide failures in the others. They are skipped only
     # if the build itself failed.
     - name: Run requires_kernel_module tests
-      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' }}
       run: bash scripts/test/run_requires_kernel_module_tests.bash
 
     - name: Run e2e_test_1to1
-      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
-      run: bash scripts/test/e2e_test_1to1.bash --parallel 2 --continue
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.shard }}
+      run: bash scripts/test/e2e_test_1to1.bash --shard ${{ matrix.suite.shard }} --parallel 2 --continue
 
     - name: Run e2e_test_2to2
-      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' }}
       run: bash scripts/test/e2e_test_2to2.bash --continue
+
+    # Saved after the tests so it also holds the Release build of
+    # agnocast_e2e_test that the e2e scripts make.
+    - name: Save ccache
+      if: ${{ !cancelled() && steps.build_heaphook.outcome == 'success' && matrix.suite.slug == 'integration-2to2' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-${{ matrix.ros_distro }}-kmod-ccache-${{ github.sha }}
 
     - name: Unload agnocast kmod
       if: always()
@@ -174,9 +215,26 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: kmod-integration-test-logs-${{ matrix.ros_distro }}
+        name: kmod-integration-test-logs-${{ matrix.ros_distro }}-${{ matrix.suite.slug }}
         path: |
           log/
           ~/.ros/log/
           /tmp/e2e_1to1_logs/
         if-no-files-found: ignore
+
+  # Summary job that provides a single status check for branch protection rules,
+  # since matrix jobs report one status per combination.
+  kmod-integration-test:
+    if: ${{ always() && (github.event_name == 'push' || github.event.label.name == 'run-build-test') }}
+    needs: [check-changes, kmod-integration-test-matrix]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check matrix job results
+        run: |
+          for result in "${{ needs.check-changes.result }}" "${{ needs.kmod-integration-test-matrix.result }}"; do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "One or more jobs failed: check-changes=${{ needs.check-changes.result }}, matrix=${{ needs.kmod-integration-test-matrix.result }}"
+              exit 1
+            fi
+          done
+          echo "All jobs passed or were skipped"
