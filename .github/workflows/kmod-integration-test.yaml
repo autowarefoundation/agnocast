@@ -100,11 +100,13 @@ jobs:
           ${{ runner.os }}-${{ matrix.os }}-kmod-apt-
 
     # A config file rather than a command-line option, so that the apt-get calls
-    # made by rosdep use the same directory.
+    # made by rosdep use the same directory. The _apt sandbox user cannot reach
+    # $HOME, so downloads run as root (apt would fall back to that with a warning
+    # per package anyway).
     - name: Configure apt archive directory
       run: |
         mkdir -p ~/apt-archives/partial
-        echo "Dir::Cache::Archives \"$HOME/apt-archives\";" | sudo tee /etc/apt/apt.conf.d/99ci-archives
+        printf 'Dir::Cache::Archives "%s";\nAPT::Sandbox::User "root";\n' "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99ci-archives
 
     - name: Setup ROS 2 environment
       run: |
