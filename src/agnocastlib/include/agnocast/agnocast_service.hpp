@@ -16,9 +16,11 @@
 #endif
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -78,34 +80,56 @@ public:
 namespace detail
 {
 
-// TODO(bdm-k): Implement reaping of publishers that are no longer needed (Issue #1355).
-template <typename PublisherT>
+template <typename Publisher>
 class ResponsePublisherManager
 {
   std::mutex mtx_;
-  std::unordered_map<std::string, typename PublisherT::SharedPtr> pubs_;
+  std::unordered_map<std::string, typename Publisher::SharedPtr> pubs_;
+
+  void erase_stale_publishers()
+  {
+    for (auto it = pubs_.begin(); it != pubs_.end();) {
+      union ioctl_get_subscriber_num_args args = {};
+      args.topic_name = {it->first.c_str(), it->first.size()};
+      if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+        RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+
+      if (args.ret_same_process_subscriber_num + args.ret_other_process_subscriber_num == 0) {
+        it = pubs_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
 
 public:
-  typename PublisherT::SharedPtr get_or_create_publisher_for(
+  typename Publisher::SharedPtr get_or_create_publisher_for(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
     const ServiceRole role, const std::string & response_topic_name)
   {
-    typename PublisherT::SharedPtr pub;
+    typename Publisher::SharedPtr pub;
     {
       std::lock_guard<std::mutex> lock(mtx_);
       auto it = pubs_.find(response_topic_name);
       if (it == pubs_.end()) {
+        // Prune publishers with no clients only when the map is about to grow, amortizing the cost
+        // and keeping the average overhead low.
+        erase_stale_publishers();
+
         std::visit(
           [this, &pub, &qos, role, &response_topic_name](auto * node) {
             agnocast::PublisherOptions pub_options;
-            if constexpr (std::is_same_v<PublisherT, agnocast::TypeErasedPublisher>) {
-              pub = std::make_shared<PublisherT>(
+            if constexpr (std::is_same_v<Publisher, agnocast::TypeErasedPublisher>) {
+              pub = std::make_shared<Publisher>(
                 node, response_topic_name, "", qos, pub_options, to_publisher_role(role));
             } else {
-              pub = std::make_shared<PublisherT>(
+              pub = std::make_shared<Publisher>(
                 node, response_topic_name, qos, pub_options, to_publisher_role(role));
             }
-            pubs_[response_topic_name] = pub;
+            pubs_.emplace(response_topic_name, pub);
           },
           node_variant);
       } else {
