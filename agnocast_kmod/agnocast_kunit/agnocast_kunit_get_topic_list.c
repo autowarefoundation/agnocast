@@ -2,6 +2,7 @@
 #include "agnocast_kunit_get_topic_list.h"
 
 #include "../agnocast.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 
@@ -19,19 +20,13 @@ static const uint32_t OTHER_DOMAIN_ID = 2;
 
 static void setup_process(struct kunit * test, const pid_t pid, const uint32_t domain_id)
 {
-  union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &add_process_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_process(test, pid, domain_id);
 }
 
 static void add_subscriber(struct kunit * test, const char * topic_name, const pid_t pid)
 {
-  union ioctl_add_subscriber_args add_sub_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, NODE_NAME, pid, QOS_DEPTH, false, true, false, false,
-    false, -1, &add_sub_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_subscriber(
+    test, topic_name, NODE_NAME, pid, QOS_DEPTH, false, true, false, false, false, -1);
 }
 
 // Returns the index of `name` in `buf`, or `num` when it is absent.

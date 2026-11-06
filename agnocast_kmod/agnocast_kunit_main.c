@@ -120,8 +120,8 @@ static int agnocast_test_suite_init(struct kunit_suite * test_suite)
 
 static void agnocast_test_suite_exit(struct kunit_suite * test_suite)
 {
-  agnocast_exit_kthread();
   agnocast_exit_exit_hook();
+  agnocast_exit_kthread();
   cleanup_memory_allocator();
   agnocast_exit_device();
 }

@@ -8,6 +8,7 @@
 # the test objects are shared via agnocast_kunit/Makefile.inc, so only this list
 # needs syncing when a new top-level source file is added.
 obj-$(CONFIG_KUNIT) += agnocast_kunit.o
+obj-$(CONFIG_PREEMPT_RT) += rt_console_flush.o
 
 agnocast_kunit-objs := \
   agnocast_kunit_main.o \

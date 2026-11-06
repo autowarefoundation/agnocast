@@ -9,8 +9,10 @@
 #   ./scripts/setup_thread_configurator.bash
 #
 # This script automates:
-#   1. Granting CAP_SYS_NICE (scheduling syscalls) and CAP_DAC_OVERRIDE (writes
-#      to root-owned /proc/irq/<N>/smp_affinity_list) to thread_configurator_node.
+#   1. Restricting execution of thread_configurator_node to its owner and the
+#      invoking user's primary group, then granting CAP_SYS_NICE (scheduling
+#      syscalls) and CAP_DAC_OVERRIDE (writes to root-owned
+#      /proc/irq/<N>/smp_affinity_list) to it.
 #   2. Registering required library paths in /etc/ld.so.conf.d/agnocast-cie.conf.
 
 set -euo pipefail
@@ -31,11 +33,6 @@ fi
 
 if ! command -v dpkg-architecture >/dev/null 2>&1; then
 	echo "Error: 'dpkg-architecture' not found. Install it with: sudo apt-get install dpkg-dev"
-	exit 1
-fi
-
-if ! command -v getcap >/dev/null 2>&1; then
-	echo "Error: 'getcap' not found. Install it with: sudo apt-get install libcap2-bin"
 	exit 1
 fi
 
@@ -61,9 +58,11 @@ if ! config_msgs_prefix=$(ros2 pkg prefix agnocast_cie_config_msgs 2>/dev/null);
 	exit 1
 fi
 
-# --- Step 1: Grant capabilities --------------------------------------------
+# --- Step 1: Restrict execution and grant capabilities ----------------------
 
-echo "[1/2] Grant CAP_SYS_NICE and CAP_DAC_OVERRIDE to thread_configurator_node"
+run_group=$(id -gn "${SUDO_USER:-$(id -un)}")
+
+echo "[1/2] Restrict thread_configurator_node to group '${run_group}' and grant CAP_SYS_NICE and CAP_DAC_OVERRIDE"
 
 bin_path=$(readlink -f "${thread_configurator_prefix}/lib/agnocast_cie_thread_configurator/thread_configurator_node")
 
@@ -72,17 +71,14 @@ if [ ! -f "$bin_path" ]; then
 	exit 1
 fi
 
-# getcap prints caps in numeric order: "cap_dac_override,cap_sys_nice=eip".
-# An install by an older script version carries only cap_sys_nice and must not
-# match here, or it would never be upgraded to the combined set.
-current_caps=$(getcap "$bin_path" 2>/dev/null || true)
-if echo "$current_caps" | grep -q "cap_dac_override,cap_sys_nice=eip"; then
-	echo "  Already set ($current_caps). Skipping."
-else
-	echo "  Target: $bin_path"
-	sudo setcap "cap_sys_nice,cap_dac_override=eip" "$bin_path"
-	echo "  Done: $(getcap "$bin_path")"
-fi
+# CAP_DAC_OVERRIDE bypasses file permission checks, so only the owner and the
+# invoking user's group may execute the binary. chgrp clears file capabilities,
+# so setcap runs last, and all three run every time to also fix older installs.
+echo "  Target: $bin_path"
+sudo chgrp "$run_group" "$bin_path"
+sudo chmod 0750 "$bin_path"
+sudo setcap "cap_sys_nice,cap_dac_override=eip" "$bin_path"
+echo "  Done: $(stat -c '%A %U:%G' "$bin_path") $(getcap "$bin_path")"
 
 # --- Step 2: Configure library paths ---------------------------------------
 
@@ -92,15 +88,17 @@ conf_file=/etc/ld.so.conf.d/agnocast-cie.conf
 ros_lib_dir="/opt/ros/${ROS_DISTRO}/lib"
 ros_multiarch_lib_dir="/opt/ros/${ROS_DISTRO}/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
 config_msgs_lib_dir="${config_msgs_prefix}/lib"
-expected_content=$(printf '%s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir")
+# The binary links libagnocast_thread_configurator.so from its own package.
+thread_configurator_lib_dir="${thread_configurator_prefix}/lib"
+# Workspace directories come first, matching the overlay order of setup.bash.
+expected_content=$(printf '%s\n' "$thread_configurator_lib_dir" "$config_msgs_lib_dir" "$ros_lib_dir" "$ros_multiarch_lib_dir")
 
 if [ -f "$conf_file" ] && [ "$(cat "$conf_file")" = "$expected_content" ]; then
 	echo "  Already configured ($conf_file). Skipping."
 else
 	echo "  Writing: $conf_file"
 	echo "  Content:"
-	printf '    %s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir"
-	printf '%s\n' "$ros_lib_dir" "$ros_multiarch_lib_dir" "$config_msgs_lib_dir" | sudo tee "$conf_file" >/dev/null
+	sudo tee "$conf_file" <<<"$expected_content" | sed 's/^/    /'
 	sudo ldconfig
 	echo "  Done."
 fi

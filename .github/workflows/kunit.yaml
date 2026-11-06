@@ -50,8 +50,18 @@ env:
 
 jobs:
   agnocast-kunit:
+    name: agnocast-kunit (${{ matrix.kernel }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel: default
+          # PREEMPT_RT makes spinlock_t a sleeping lock, so the sleeping-in-atomic check
+          # below also catches a spinlock_t taken with preemption disabled.
+          - kernel: preempt-rt
+            kconfig_add: --kconfig_add=CONFIG_EXPERT=y --kconfig_add=CONFIG_PREEMPT_RT=y
     steps:
       - uses: actions/checkout@v4
 
@@ -89,9 +99,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kunit-build
-          key: kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-${{ hashFiles('agnocast_kmod/**', '.github/kunit/**', '.github/workflows/kunit.yaml') }}
+          key: kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-${{ matrix.kernel }}-${{ hashFiles('agnocast_kmod/**', '.github/kunit/**', '.github/workflows/kunit.yaml') }}
           restore-keys: |
-            kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-
+            kunit-build-${{ runner.os }}-${{ env.LINUX_REF }}-${{ matrix.kernel }}-
 
       # If the source tree was just re-cloned but restore-keys brought back a
       # build dir from a previous run, that dir may reference object paths the
@@ -115,6 +125,7 @@ jobs:
              agnocast_kmod/agnocast_kunit/Makefile.inc \
              "${dst}/agnocast_kunit/"
           cp .github/kunit/Kbuild "${dst}/Makefile"
+          cp .github/kunit/rt_console_flush.c "${dst}/"
           if ! grep -q 'drivers/agnocast' linux/drivers/Makefile; then
             echo 'obj-$(CONFIG_KUNIT) += agnocast/' >> linux/drivers/Makefile
           fi
@@ -129,6 +140,7 @@ jobs:
             --arch=x86_64 \
             --build_dir="${GITHUB_WORKSPACE}/kunit-build" \
             --jobs="$(nproc)" \
+            ${{ matrix.kconfig_add }} \
             "${KUNIT_FILTER}" 2>&1 | tee "${GITHUB_WORKSPACE}/kunit-run.log"
           # kunit.py exits 0 even when the filter matches zero suites; guard
           # against a silent false-green after a suite rename.
@@ -136,6 +148,11 @@ jobs:
           echo "KUnit tests ran: ${ran:-0}"
           if [ "${ran:-0}" -lt 1 ]; then
             echo "::error::No KUnit tests ran — check KUNIT_FILTER vs the suite name."
+            exit 1
+          fi
+          # CONFIG_DEBUG_ATOMIC_SLEEP only logs the splat; the KUnit cases still pass.
+          if grep -F 'BUG: sleeping function called from invalid context' "${GITHUB_WORKSPACE}/kunit-build/test.log"; then
+            echo "::error::A sleeping function was called from atomic context. See the KTAP log for the stack trace."
             exit 1
           fi
 
@@ -153,7 +170,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: kunit-debug-${{ github.run_id }}
+          name: kunit-debug-${{ github.run_id }}-${{ matrix.kernel }}
           path: |
             kunit-run.log
             kunit-build/test.log

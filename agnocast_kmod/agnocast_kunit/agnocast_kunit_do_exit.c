@@ -2,8 +2,10 @@
 #include "agnocast_kunit_do_exit.h"
 
 #include "../agnocast.h"
+#include "../agnocast_internal.h"
 #include "../agnocast_memory_allocator.h"
 #include "agnocast_kunit_eventfd.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -21,12 +23,9 @@ static const bool IS_BRIDGE = false;
 
 static void setup_processes(struct kunit * test, const int process_num)
 {
-  union ioctl_add_process_args ioctl_ret;
   for (int i = 0; i < process_num; i++) {
     const pid_t pid = PID_BASE + i;
-    int ret = agnocast_ioctl_add_process(
-      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &ioctl_ret);
-    KUNIT_ASSERT_EQ(test, ret, 0);
+    agnocast_kunit_setup_process(test, pid, 0);
     KUNIT_ASSERT_FALSE(test, agnocast_is_proc_exited(pid));
   }
   KUNIT_ASSERT_EQ(test, agnocast_get_alive_proc_num(), process_num);
@@ -34,48 +33,31 @@ static void setup_processes(struct kunit * test, const int process_num)
 
 static uint64_t setup_one_process(struct kunit * test, const pid_t pid)
 {
-  union ioctl_add_process_args ioctl_ret;
-  int ret = agnocast_ioctl_add_process(
-    pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &ioctl_ret);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  const uint64_t ret_addr = agnocast_kunit_setup_process(test, pid, 0);
   KUNIT_ASSERT_FALSE(test, agnocast_is_proc_exited(pid));
-
-  return ioctl_ret.ret_addr;
+  return ret_addr;
 }
 
 static topic_local_id_t setup_one_publisher(struct kunit * test, const pid_t publisher_pid)
 {
-  union ioctl_add_publisher_args add_publisher_args;
-  int ret = agnocast_ioctl_add_publisher(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, publisher_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE, &add_publisher_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  const topic_local_id_t publisher_id = agnocast_kunit_setup_publisher(
+    test, TOPIC_NAME, NODE_NAME, publisher_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, IS_BRIDGE);
   KUNIT_ASSERT_TRUE(test, agnocast_is_in_topic_htable(TOPIC_NAME, current->nsproxy->ipc_ns));
   KUNIT_ASSERT_TRUE(
-    test, agnocast_is_in_publisher_htable(
-            TOPIC_NAME, current->nsproxy->ipc_ns, add_publisher_args.ret_id));
-
-  return add_publisher_args.ret_id;
+    test, agnocast_is_in_publisher_htable(TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id));
+  return publisher_id;
 }
 
 static topic_local_id_t setup_one_subscriber_on_topic(
   struct kunit * test, const pid_t subscriber_pid, const char * topic_name)
 {
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    topic_name, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1,
-    &add_subscriber_args);
-
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  const topic_local_id_t subscriber_id = agnocast_kunit_setup_subscriber(
+    test, topic_name, NODE_NAME, subscriber_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, -1);
   KUNIT_ASSERT_TRUE(test, agnocast_is_in_topic_htable(topic_name, current->nsproxy->ipc_ns));
   KUNIT_ASSERT_TRUE(
-    test, agnocast_is_in_subscriber_htable(
-            topic_name, current->nsproxy->ipc_ns, add_subscriber_args.ret_id));
-
-  return add_subscriber_args.ret_id;
+    test, agnocast_is_in_subscriber_htable(topic_name, current->nsproxy->ipc_ns, subscriber_id));
+  return subscriber_id;
 }
 
 static topic_local_id_t setup_one_subscriber(struct kunit * test, const pid_t subscriber_pid)
@@ -140,9 +122,9 @@ void test_case_do_exit_many(struct kunit * test)
     agnocast_enqueue_exit_pid(pid);
   }
 
-  // wait for exit_worker_thread to handle process exit:
-  // this value is conservatively estimated to be large enough
-  msleep(100);
+  // Wait until exit_worker_thread drains the queue, so the next test does not wait behind it.
+  // On a PREEMPT_RT kernel under QEMU, this can take longer than 100 ms.
+  for (int i = 0; i < 500 && READ_ONCE(has_new_pid); i++) msleep(20);
 
   // Assert
   KUNIT_EXPECT_EQ(test, agnocast_get_alive_proc_num(), 0);
@@ -683,12 +665,9 @@ void test_case_do_exit_releases_notify_context(struct kunit * test)
   const int eventfd = 0;
   setup_one_process(test, subscriber_pid);
 
-  union ioctl_add_subscriber_args add_subscriber_args;
-  int ret = agnocast_ioctl_add_subscriber(
-    TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-    QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
-    eventfd, &add_subscriber_args);
-  KUNIT_ASSERT_EQ(test, ret, 0);
+  agnocast_kunit_setup_subscriber(
+    test, TOPIC_NAME, NODE_NAME, subscriber_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE,
+    IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, eventfd);
   KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)1);
 
   // Act
@@ -714,14 +693,9 @@ void test_case_do_exit_releases_notify_contexts_of_multiple_subscribers(struct k
   setup_one_process(test, subscriber_pid);
 
   for (int eventfd = 0; eventfd < subscriber_num; eventfd++) {
-    union ioctl_add_subscriber_args add_subscriber_args;
-    KUNIT_ASSERT_EQ(
-      test,
-      agnocast_ioctl_add_subscriber(
-        TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, subscriber_pid, QOS_DEPTH,
-        QOS_IS_TRANSIENT_LOCAL, QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE,
-        eventfd, &add_subscriber_args),
-      0);
+    agnocast_kunit_setup_subscriber(
+      test, TOPIC_NAME, NODE_NAME, subscriber_pid, QOS_DEPTH, QOS_IS_TRANSIENT_LOCAL,
+      QOS_IS_RELIABLE, IS_TAKE_SUB, IGNORE_LOCAL_PUBLICATIONS, IS_BRIDGE, eventfd);
   }
   KUNIT_ASSERT_EQ(test, agnocast_kunit_eventfd_outstanding(), (int64_t)subscriber_num);
 

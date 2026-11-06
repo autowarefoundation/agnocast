@@ -295,7 +295,7 @@ jobs:
   build-and-test-agnocastlib-heaphook:
     if: ${{ always() && (github.event_name == 'push' || github.event.label.name == 'run-build-test') }}
     needs: build-and-test-matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check matrix job results
         run: |

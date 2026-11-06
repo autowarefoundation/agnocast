@@ -17,6 +17,7 @@
 #include <iostream>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -262,9 +263,13 @@ void PrerunNode::dump_yaml_config(std::filesystem::path path)
   out << YAML::EndSeq;
   out << YAML::EndMap;
 
-  std::ofstream fout(path / "template.yaml");
+  const auto template_path = path / "template.yaml";
+  std::ofstream fout(template_path);
   fout << out.c_str();
   fout.close();
+  if (!fout) {
+    throw std::runtime_error("Failed to write " + template_path.string());
+  }
 
   std::cout << "template.yaml is created in the current directory" << std::endl;
 }

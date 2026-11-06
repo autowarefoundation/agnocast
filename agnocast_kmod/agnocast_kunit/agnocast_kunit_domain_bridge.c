@@ -3,6 +3,7 @@
 
 #include "../agnocast.h"
 #include "agnocast_kunit_eventfd.h"
+#include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
 #include <linux/delay.h>
@@ -27,25 +28,13 @@ static const char * OUTSIDE = "/kunit_test_domain_bridge_outside";
 static uint64_t setup_process_in_domain(
   struct kunit * test, const pid_t pid, const uint32_t domain_id)
 {
-  union ioctl_add_process_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_process(
-      pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, domain_id, &args),
-    0);
-  return args.ret_addr;
+  return agnocast_kunit_setup_process(test, pid, domain_id);
 }
 
 static topic_local_id_t add_publisher_named(
   struct kunit * test, const pid_t pid, const char * topic_name)
 {
-  union ioctl_add_publisher_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_publisher(
-      topic_name, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, false, &args),
-    0);
-  return args.ret_id;
+  return agnocast_kunit_setup_publisher(test, topic_name, "/kunit_node", pid, 1, false, false);
 }
 
 static topic_local_id_t add_publisher_for(struct kunit * test, const pid_t pid)
@@ -56,14 +45,8 @@ static topic_local_id_t add_publisher_for(struct kunit * test, const pid_t pid)
 static topic_local_id_t add_subscriber_named(
   struct kunit * test, const pid_t pid, const char * topic_name)
 {
-  union ioctl_add_subscriber_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      topic_name, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, true, false, false, false,
-      -1, &args),
-    0);
-  return args.ret_id;
+  return agnocast_kunit_setup_subscriber(
+    test, topic_name, "/kunit_node", pid, 1, false, true, false, false, false, -1);
 }
 
 static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
@@ -77,14 +60,8 @@ static topic_local_id_t add_subscriber_for(struct kunit * test, const pid_t pid)
 static topic_local_id_t add_subscriber_named_with_eventfd(
   struct kunit * test, const pid_t pid, const char * topic_name, const int eventfd)
 {
-  union ioctl_add_subscriber_args args;
-  KUNIT_ASSERT_EQ(
-    test,
-    agnocast_ioctl_add_subscriber(
-      topic_name, current->nsproxy->ipc_ns, "/kunit_node", pid, 1, false, true, false, false, false,
-      eventfd, &args),
-    0);
-  return args.ret_id;
+  return agnocast_kunit_setup_subscriber(
+    test, topic_name, "/kunit_node", pid, 1, false, true, false, false, false, eventfd);
 }
 
 static uint32_t signal_count_of(const int eventfd)

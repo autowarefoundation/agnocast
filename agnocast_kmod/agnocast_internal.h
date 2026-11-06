@@ -173,13 +173,16 @@ struct topic_struct
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
   topic_local_id_t current_pubsub_id;
   int64_t current_entry_id;
-  uint32_t ros2_subscriber_num;  // Updated by Bridge Manager
-  uint32_t ros2_publisher_num;   // Updated by Bridge Manager
-  // Per-topic rwsem. Write is taken by publish and by the Bridge Manager's ros2_*_num setters;
-  // read by receive/take, message-entry reference release, and the query ioctls.
+  // Set by the Bridge Manager under global_htables_rwsem READ only, so accessed with
+  // READ_ONCE/WRITE_ONCE.
+  uint32_t ros2_subscriber_num;
+  uint32_t ros2_publisher_num;
+  // Per-topic rwsem guarding the entries tree. Publish takes it for write. Receive, take and
+  // message-entry reference release take it for read.
   // Structural changes, like adding or removing publishers and subscribers, run under
   // global_htables_rwsem WRITE and do not take this rwsem. This is why holding global read
   // for the whole receive keeps both the tree and this struct alive.
+  // The query ioctls do not take it, for the same reason.
   struct rw_semaphore rwsem;
   // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
   // bridge rule groups two domains' wrappers onto one entry/id space. The struct
@@ -310,7 +313,8 @@ long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
 // pid_queue_lock is a raw_spinlock_t and worker_wait an swait queue because
 // agnocast_enqueue_exit_pid() runs in tracepoint context, where sleeping locks are forbidden on
 // PREEMPT_RT (spinlock_t, including the one embedded in wait_queue_head, becomes a sleeping
-// rt_mutex there).
+// rt_mutex there). No taker runs in IRQ context, so the plain lock variants (without _irqsave)
+// suffice.
 extern raw_spinlock_t pid_queue_lock;
 extern pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
 extern uint32_t queue_head;
