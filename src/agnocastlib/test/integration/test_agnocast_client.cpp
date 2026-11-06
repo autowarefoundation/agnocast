@@ -35,11 +35,11 @@ protected:
   void TearDown() override
   {
     executor_->cancel();
-    if (rclcpp::ok()) {
-      rclcpp::shutdown();
-    }
     if (spin_thread_.joinable()) {
       spin_thread_.join();
+    }
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
     }
   }
 
