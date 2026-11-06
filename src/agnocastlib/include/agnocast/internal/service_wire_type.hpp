@@ -208,6 +208,7 @@ public:
   void * get() const noexcept { return response_.get(); }
 
   int64_t & seqno() { return meta_ptr_->seqno; }
+  int64_t seqno() const { return meta_ptr_->seqno; }
 
   ipc_shared_ptr<void> && take_response() && { return std::move(response_); }
 
