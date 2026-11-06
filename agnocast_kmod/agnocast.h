@@ -15,9 +15,9 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
-#define TYPE_NAME_BUFFER_SIZE 256   // Maximum length of ROS type name: 256 characters
 #define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
+#define TYPE_NAME_BUFFER_SIZE 256   // Maximum length of ROS type name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
 typedef int32_t topic_local_id_t;
@@ -394,6 +394,7 @@ union ioctl_node_info_args {
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
+  char type_name[TYPE_NAME_BUFFER_SIZE];
   uint32_t qos_depth;
   bool qos_is_transient_local;
   bool qos_is_reliable;
