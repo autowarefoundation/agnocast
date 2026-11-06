@@ -700,11 +700,49 @@ static int insert_message_entry(
   return 0;
 }
 
-// Reads nothing that topic->rwsem guards, so receive and take call it after the topic unlock. This
-// keeps the GFP_KERNEL allocation in reference_memory() out of the topic section.
-// Caller holds global_htables_rwsem (read). Only global write changes the publisher table or sets
-// need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one subscriber, so the clear
-// below needs no lock.
+// The memory pool that a subscriber maps for a publisher, or NULL when it reads nothing from it.
+// A subscriber only reads from publishers that deliver to it; a one-way bridge rule can exclude
+// opposite-domain publishers. Caller holds global_htables_rwsem.
+static struct mempool_entry * pool_to_map(
+  const struct topic_struct * topic, const pid_t pub_pid, const uint32_t pub_domain,
+  const bool pub_is_bridge, const pid_t sub_pid, const uint32_t sub_domain,
+  const bool sub_is_bridge)
+{
+  if (sub_pid == pub_pid) return NULL;
+  if (!domain_delivery_allowed(topic, pub_domain, pub_is_bridge, sub_domain, sub_is_bridge)) {
+    return NULL;
+  }
+  const struct process_info * proc_info = agnocast_find_process_info(pub_pid);
+  if (!proc_info || proc_info->exited) return NULL;
+  return proc_info->mempool_entry;
+}
+
+// The add ioctls link each new (subscriber, publisher) pair under the global write lock, before
+// they insert the endpoint, so that set_publisher_shm_info() allocates nothing under the read lock.
+// They are the only source of new pairs, because a bridge rule cannot open a direction after an
+// endpoint joined it. A link left by a later failure of the add only keeps the pool referenced
+// until the subscriber process exits.
+static int link_subscriber_to_publishers(
+  const struct topic_wrapper * wrapper, const pid_t sub_pid, const bool sub_is_bridge)
+{
+  struct publisher_info * pub_info;
+  int bkt;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
+  {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, sub_pid,
+      wrapper->domain_id, sub_is_bridge);
+    if (!pool) continue;
+    int ret = reference_memory(pool, sub_pid);
+    if (ret < 0 && ret != -EEXIST) return ret;
+  }
+  return 0;
+}
+
+// Reads nothing that topic->rwsem guards, so receive and take call it after the topic unlock.
+// Caller holds global_htables_rwsem (read). Only global write changes the publisher table, links
+// pools, or sets need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one subscriber,
+// so the clear below needs no lock.
 static int set_publisher_shm_info(
   const struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
   struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
@@ -721,42 +759,23 @@ static int set_publisher_shm_info(
   int bkt;
   hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
-    if (subscriber_pid == pub_info->pid) {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, subscriber_pid,
+      wrapper->domain_id, sub_info->is_bridge);
+    if (!pool) {
       continue;
     }
 
-    // A subscriber only reads from publishers that deliver to it; a one-way
-    // bridge rule can exclude opposite-domain publishers, so skip mapping them.
-    if (!domain_delivery_allowed(
-          wrapper->topic, pub_info->domain_id, pub_info->is_bridge, wrapper->domain_id,
-          sub_info->is_bridge)) {
+    int ret = report_memory(pool, subscriber_pid);
+    if (ret == -EEXIST) {
       continue;
     }
-
-    const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
-    if (!proc_info || proc_info->exited) {
-      continue;
-    }
-
-    int ret = reference_memory(proc_info->mempool_entry, subscriber_pid);
     if (ret < 0) {
-      if (ret == -EEXIST) {
-        continue;
-      } else if (ret == -ENOMEM) {
-        dev_warn(
-          agnocast_device,
-          "Failed to allocate memory for mapping from pid=%d to process (pid=%d)'s memory pool. "
-          "(%s)\n",
-          subscriber_pid, pub_info->pid, __func__);
-        return ret;
-      } else {
-        dev_warn(
-          agnocast_device,
-          "Unreachable: process (pid=%d) failed to reference memory of (pid=%d). "
-          "(%s)\n",
-          subscriber_pid, pub_info->pid, __func__);
-        return ret;
-      }
+      dev_warn(
+        agnocast_device,
+        "Unreachable: process (pid=%d) has no link to the memory of (pid=%d). (%s)\n",
+        subscriber_pid, pub_info->pid, __func__);
+      return ret;
     }
 
     if (publisher_num == pub_shm_infos_size) {
@@ -778,7 +797,7 @@ static int set_publisher_shm_info(
     pub_shm_infos[publisher_num].pid = pub_info->pid;
 #endif
 
-    pub_shm_infos[publisher_num].shm_addr = proc_info->mempool_entry->addr;
+    pub_shm_infos[publisher_num].shm_addr = pool->addr;
     pub_shm_infos[publisher_num].shm_size = mempool_size_bytes;
     publisher_num++;
   }
@@ -937,6 +956,11 @@ int agnocast_ioctl_add_subscriber(
     goto unlock;
   }
 
+  ret = link_subscriber_to_publishers(wrapper, subscriber_pid, is_bridge);
+  if (ret < 0) {
+    goto unlock;
+  }
+
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
     wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
@@ -970,6 +994,21 @@ int agnocast_ioctl_add_publisher(
     goto unlock;
   }
 
+  // Link each subscriber to the new publisher's pool and set need_mmap_update to notify it
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    struct mempool_entry * pool = pool_to_map(
+      wrapper->topic, publisher_pid, wrapper->domain_id, is_bridge, sub_info->pid,
+      sub_info->domain_id, sub_info->is_bridge);
+    if (pool) {
+      ret = reference_memory(pool, sub_info->pid);
+      if (ret < 0 && ret != -EEXIST) goto unlock;
+    }
+    sub_info->need_mmap_update = true;
+  }
+
   struct publisher_info * pub_info;
   ret = insert_publisher_info(
     wrapper, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, &pub_info);
@@ -978,14 +1017,6 @@ int agnocast_ioctl_add_publisher(
   }
 
   ioctl_ret->ret_id = pub_info->id;
-
-  // set true to subscriber_info.need_mmap_update to notify
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    sub_info->need_mmap_update = true;
-  }
 
 unlock:
   up_write(&global_htables_rwsem);
@@ -1948,178 +1979,141 @@ unlock:
   return ret;
 }
 
+// Copies up to `capacity` of the topic's subscribers into `buf` and returns how many there are.
+// The htable may be shared with a bridged domain, so only endpoints in the topic's domain count.
+// Caller holds global_htables_rwsem.
+static uint32_t fill_subscriber_info(
+  const struct topic_wrapper * wrapper, struct topic_info_ret * buf, const uint32_t capacity)
+{
+  uint32_t num = 0;
+  struct subscriber_info * sub_info;
+  int bkt_sub_info;
+  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
+  {
+    if (sub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_info_ret * temp_info = &buf[num];
+      strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      temp_info->qos_depth = sub_info->qos_depth;
+      temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
+      temp_info->qos_is_reliable = sub_info->qos_is_reliable;
+      temp_info->is_bridge = sub_info->is_bridge;
+    }
+    num++;
+  }
+  return num;
+}
+
+// The publisher counterpart of fill_subscriber_info().
+static uint32_t fill_publisher_info(
+  const struct topic_wrapper * wrapper, struct topic_info_ret * buf, const uint32_t capacity)
+{
+  uint32_t num = 0;
+  struct publisher_info * pub_info;
+  int bkt_pub_info;
+  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
+  {
+    if (pub_info->domain_id != wrapper->domain_id) continue;
+
+    if (num < capacity) {
+      struct topic_info_ret * temp_info = &buf[num];
+      strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
+      temp_info->qos_depth = pub_info->qos_depth;
+      temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
+      temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
+      temp_info->is_bridge = pub_info->is_bridge;
+    }
+    num++;
+  }
+  return num;
+}
+
+// Copies the `num` entries of `topic_info_mem` to the caller's buffer and frees `topic_info_mem`.
+// Caller does not hold global_htables_rwsem, because copy_to_user can sleep on a page fault.
+static int copy_topic_info_to_user(
+  union ioctl_topic_info_args * topic_info_args, struct topic_info_ret * topic_info_mem,
+  const uint32_t num, const char * kind, const char * topic_name)
+{
+  const uint32_t buffer_size = topic_info_args->topic_info_ret_buffer_size;
+  struct topic_info_ret __user * user_buffer =
+    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
+  int ret = 0;
+
+  if (num > buffer_size) {
+    dev_warn(
+      agnocast_device,
+      "%s count exceeds limit: num=%u, topic_info_ret_buffer_size=%u (topic_name=%s)\n", kind, num,
+      buffer_size, topic_name);
+    ret = -ENOBUFS;
+  } else if (copy_to_user(user_buffer, topic_info_mem, sizeof(*topic_info_mem) * num)) {
+    ret = -EFAULT;
+  } else {
+    topic_info_args->ret_topic_info_ret_num = num;
+  }
+
+  kvfree(topic_info_mem);
+  return ret;
+}
+
+// kvcalloc and copy_to_user can sleep, so both run with global_htables_rwsem released. The topic
+// can gain endpoints meanwhile, so the walk repeats until the buffer holds all of them. Every
+// buffer comes zeroed from kvcalloc and is filled at most once, so no stale bytes reach user space.
 int agnocast_ioctl_get_topic_subscriber_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  int ret = 0;
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
   topic_info_args->ret_topic_info_ret_num = 0;
 
-  down_read(&global_htables_rwsem);
-
-  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
-  if (!wrapper) {
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_subscriber_info(wrapper, topic_info_mem, capacity) : 0;
     up_read(&global_htables_rwsem);
-    return 0;
-  }
 
-  struct subscriber_info * sub_info;
-  int bkt_sub_info;
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
-  struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
-
-  // Count actual subscribers first. The htable may be shared with a bridged
-  // domain, so only count endpoints in the requested domain.
-  uint32_t subscriber_num = 0;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->domain_id != wrapper->domain_id) continue;
-    subscriber_num++;
-  }
-
-  if (subscriber_num > topic_info_args->topic_info_ret_buffer_size) {
-    dev_warn(
-      agnocast_device,
-      "Subscriber count exceeds limit: subscriber_num=%u, "
-      "topic_info_ret_buffer_size=%u\n",
-      subscriber_num, topic_info_args->topic_info_ret_buffer_size);
-    ret = -ENOBUFS;
-    goto unlock;
-  }
-
-  struct topic_info_ret * topic_info_mem = NULL;
-  if (subscriber_num > 0) {
-    topic_info_mem = kvcalloc(subscriber_num, sizeof(struct topic_info_ret), GFP_KERNEL);
-    if (!topic_info_mem) {
-      ret = -ENOMEM;
-      goto unlock;
-    }
-  }
-
-  uint32_t idx = 0;
-  hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
-  {
-    if (sub_info->domain_id != wrapper->domain_id) continue;
-
-    if (!sub_info->node_name) {
-      kvfree(topic_info_mem);
-      ret = -EFAULT;
-      goto unlock;
-    }
-
-    struct topic_info_ret * temp_info = &topic_info_mem[idx];
-
-    strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
-    temp_info->qos_depth = sub_info->qos_depth;
-    temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
-    temp_info->qos_is_reliable = sub_info->qos_is_reliable;
-    temp_info->is_bridge = sub_info->is_bridge;
-
-    idx++;
-  }
-
-  if (
-    subscriber_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * subscriber_num)) {
     kvfree(topic_info_mem);
-    ret = -EFAULT;
-    goto unlock;
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
   }
 
-  kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = subscriber_num;
-
-unlock:
-  up_read(&global_htables_rwsem);
-  return ret;
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Subscriber", topic_name);
 }
 
+// The publisher counterpart of agnocast_ioctl_get_topic_subscriber_info().
 int agnocast_ioctl_get_topic_publisher_info(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   union ioctl_topic_info_args * topic_info_args)
 {
-  int ret = 0;
+  struct topic_info_ret * topic_info_mem = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
+
   topic_info_args->ret_topic_info_ret_num = 0;
 
-  down_read(&global_htables_rwsem);
-
-  struct topic_wrapper * wrapper = find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
-  if (!wrapper) {
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    const struct topic_wrapper * wrapper =
+      find_topic(topic_name, ipc_ns, topic_info_args->domain_id);
+    num = wrapper ? fill_publisher_info(wrapper, topic_info_mem, capacity) : 0;
     up_read(&global_htables_rwsem);
-    return 0;
-  }
 
-  struct publisher_info * pub_info;
-  int bkt_pub_info;
+    if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
-  struct topic_info_ret __user * user_buffer =
-    (struct topic_info_ret __user *)topic_info_args->topic_info_ret_buffer_addr;
-
-  // Count actual publishers first. The htable may be shared with a bridged
-  // domain, so only count endpoints in the requested domain.
-  uint32_t publisher_num = 0;
-  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
-  {
-    if (pub_info->domain_id != wrapper->domain_id) continue;
-    publisher_num++;
-  }
-
-  if (publisher_num > topic_info_args->topic_info_ret_buffer_size) {
-    dev_warn(
-      agnocast_device,
-      "Publisher count exceeds limit: publisher_num=%u, "
-      "topic_info_ret_buffer_size=%u\n",
-      publisher_num, topic_info_args->topic_info_ret_buffer_size);
-    ret = -ENOBUFS;
-    goto unlock;
-  }
-
-  struct topic_info_ret * topic_info_mem = NULL;
-  if (publisher_num > 0) {
-    topic_info_mem = kvcalloc(publisher_num, sizeof(struct topic_info_ret), GFP_KERNEL);
-    if (!topic_info_mem) {
-      ret = -ENOMEM;
-      goto unlock;
-    }
-  }
-
-  uint32_t idx = 0;
-  hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
-  {
-    if (pub_info->domain_id != wrapper->domain_id) continue;
-
-    if (!pub_info->node_name) {
-      kvfree(topic_info_mem);
-      ret = -EFAULT;
-      goto unlock;
-    }
-
-    struct topic_info_ret * temp_info = &topic_info_mem[idx];
-
-    strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
-    temp_info->qos_depth = pub_info->qos_depth;
-    temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
-    temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
-    temp_info->is_bridge = pub_info->is_bridge;
-
-    idx++;
-  }
-
-  if (
-    publisher_num > 0 &&
-    copy_to_user(user_buffer, topic_info_mem, sizeof(struct topic_info_ret) * publisher_num)) {
     kvfree(topic_info_mem);
-    ret = -EFAULT;
-    goto unlock;
+    topic_info_mem = kvcalloc(num, sizeof(*topic_info_mem), GFP_KERNEL);
+    if (!topic_info_mem) return -ENOMEM;
+    capacity = num;
   }
 
-  kvfree(topic_info_mem);
-  topic_info_args->ret_topic_info_ret_num = publisher_num;
-
-unlock:
-  up_read(&global_htables_rwsem);
-  return ret;
+  return copy_topic_info_to_user(topic_info_args, topic_info_mem, num, "Publisher", topic_name);
 }
 
 int agnocast_ioctl_get_subscriber_qos(

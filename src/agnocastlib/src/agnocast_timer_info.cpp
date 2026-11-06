@@ -349,6 +349,19 @@ bool group_has_agnocast_timer(const rclcpp::CallbackGroup::SharedPtr & group)
   });
 }
 
+std::vector<int64_t> get_agnocast_timer_periods_by_group(
+  const rclcpp::CallbackGroup::SharedPtr & group)
+{
+  std::vector<int64_t> periods;
+  std::lock_guard<std::mutex> lock(id2_timer_info_mtx);
+  for (const auto & [id, timer_info] : id2_timer_info) {
+    if (timer_info && timer_info->callback_group == group) {
+      periods.push_back(timer_info->period_ns.load(std::memory_order_relaxed));
+    }
+  }
+  return periods;
+}
+
 void TimerInfo::set_period(std::chrono::nanoseconds new_period)
 {
   // rcl_timer_exchange_period semantics.
