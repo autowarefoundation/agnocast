@@ -438,14 +438,16 @@ void agnocast_exit_device(void);
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret);
+  const char * type_name, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool qos_is_reliable, const bool is_take_sub,
+  const bool ignore_local_publications, const bool is_bridge, const int32_t eventfd,
+  union ioctl_add_subscriber_args * ioctl_ret);
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret);
+  const char * type_name, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret);
 
 int agnocast_ioctl_release_message_entry_reference(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t pubsub_id,

@@ -328,10 +328,10 @@ void agnocast_unlink_subscriber_info(
 }
 
 static int insert_subscriber_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t subscriber_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool qos_is_reliable,
-  const bool is_take_sub, bool ignore_local_publications, const bool is_bridge,
-  struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * type_name,
+  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
+  const bool qos_is_reliable, const bool is_take_sub, bool ignore_local_publications,
+  const bool is_bridge, struct eventfd_ctx * notify_ctx, struct subscriber_info ** new_info)
 {
   // rebuild_notify_list() skips take subs by testing notify_ctx alone, so the two must agree.
   WARN_ON_ONCE(is_take_sub != (notify_ctx == NULL));
@@ -368,11 +368,19 @@ static int insert_subscriber_info(
     return -ENOMEM;
   }
 
+  char * type_name_copy = kstrdup(type_name, GFP_KERNEL);
+  if (!type_name_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   // Last failure point: reserving while nothing is committed yet is what lets the rebuild below be
   // infallible, and leaves the id counters untouched on failure.
   if (notify_ctx) {
     int reserve_ret = reserve_all_notify_ctxs(wrapper, notifiable_subscriber_num(wrapper) + 1);
     if (reserve_ret < 0) {
+      kfree(type_name_copy);
       kfree(node_name_copy);
       kfree(*new_info);
       // The caller releases notify_ctx on the error path, so it must not be released here.
@@ -395,6 +403,7 @@ static int insert_subscriber_info(
     (*new_info)->latest_received_entry_id = wrapper->topic->current_entry_id++;
   }
   (*new_info)->node_name = node_name_copy;
+  (*new_info)->type_name = type_name_copy;
   (*new_info)->is_take_sub = is_take_sub;
   (*new_info)->ignore_local_publications = ignore_local_publications;
   (*new_info)->need_mmap_update = true;
@@ -450,9 +459,9 @@ static struct publisher_info * find_publisher_info(
 }
 
 static int insert_publisher_info(
-  struct topic_wrapper * wrapper, const char * node_name, const pid_t publisher_pid,
-  const uint32_t qos_depth, const bool qos_is_transient_local, const bool is_bridge,
-  struct publisher_info ** new_info)
+  struct topic_wrapper * wrapper, const char * node_name, const char * type_name,
+  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
+  const bool is_bridge, struct publisher_info ** new_info)
 {
   int count = agnocast_get_size_pub_info_htable(wrapper);
   if (count == MAX_PUBLISHER_NUM) {
@@ -486,6 +495,13 @@ static int insert_publisher_info(
     return -ENOMEM;
   }
 
+  char * type_name_copy = kstrdup(type_name, GFP_KERNEL);
+  if (!type_name_copy) {
+    kfree(node_name_copy);
+    kfree(*new_info);
+    return -ENOMEM;
+  }
+
   const topic_local_id_t new_id = wrapper->topic->current_pubsub_id;
   wrapper->topic->current_pubsub_id++;
 
@@ -493,6 +509,7 @@ static int insert_publisher_info(
   (*new_info)->domain_id = wrapper->domain_id;
   (*new_info)->pid = publisher_pid;
   (*new_info)->node_name = node_name_copy;
+  (*new_info)->type_name = type_name_copy;
   (*new_info)->qos_depth = qos_depth;
   (*new_info)->qos_is_transient_local = qos_is_transient_local;
   (*new_info)->entries_num = 0;
@@ -933,9 +950,10 @@ unlock:
 
 int agnocast_ioctl_add_subscriber(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t subscriber_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool qos_is_reliable, const bool is_take_sub, const bool ignore_local_publications,
-  const bool is_bridge, const int32_t eventfd, union ioctl_add_subscriber_args * ioctl_ret)
+  const char * type_name, const pid_t subscriber_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool qos_is_reliable, const bool is_take_sub,
+  const bool ignore_local_publications, const bool is_bridge, const int32_t eventfd,
+  union ioctl_add_subscriber_args * ioctl_ret)
 {
   int ret;
   struct eventfd_ctx * notify_ctx = NULL;
@@ -963,8 +981,8 @@ int agnocast_ioctl_add_subscriber(
 
   struct subscriber_info * sub_info;
   ret = insert_subscriber_info(
-    wrapper, node_name, subscriber_pid, qos_depth, qos_is_transient_local, qos_is_reliable,
-    is_take_sub, ignore_local_publications, is_bridge, notify_ctx, &sub_info);
+    wrapper, node_name, type_name, subscriber_pid, qos_depth, qos_is_transient_local,
+    qos_is_reliable, is_take_sub, ignore_local_publications, is_bridge, notify_ctx, &sub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -981,8 +999,9 @@ unlock:
 
 int agnocast_ioctl_add_publisher(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const char * node_name,
-  const pid_t publisher_pid, const uint32_t qos_depth, const bool qos_is_transient_local,
-  const bool is_bridge, union ioctl_add_publisher_args * ioctl_ret)
+  const char * type_name, const pid_t publisher_pid, const uint32_t qos_depth,
+  const bool qos_is_transient_local, const bool is_bridge,
+  union ioctl_add_publisher_args * ioctl_ret)
 {
   int ret;
 
@@ -1011,7 +1030,8 @@ int agnocast_ioctl_add_publisher(
 
   struct publisher_info * pub_info;
   ret = insert_publisher_info(
-    wrapper, node_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge, &pub_info);
+    wrapper, node_name, type_name, publisher_pid, qos_depth, qos_is_transient_local, is_bridge,
+    &pub_info);
   if (ret < 0) {
     goto unlock;
   }
@@ -3004,16 +3024,21 @@ static long add_subscriber_cmd(union ioctl_add_subscriber_args __user * arg)
 
   char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
   char node_name_buf[NODE_NAME_BUFFER_SIZE];
+  char type_name_buf[TYPE_NAME_BUFFER_SIZE];
+
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &sub_args.topic_name);
   if (ret) return ret;
 
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &sub_args.node_name);
   if (ret) return ret;
 
+  ret = copy_name_from_user(type_name_buf, sizeof(type_name_buf), &sub_args.type_name);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_subscriber(
-    topic_name_buf, ipc_ns, node_name_buf, pid, sub_args.qos_depth, sub_args.qos_is_transient_local,
-    sub_args.qos_is_reliable, sub_args.is_take_sub, sub_args.ignore_local_publications,
-    sub_args.is_bridge, sub_args.eventfd, &sub_args);
+    topic_name_buf, ipc_ns, node_name_buf, type_name_buf, pid, sub_args.qos_depth,
+    sub_args.qos_is_transient_local, sub_args.qos_is_reliable, sub_args.is_take_sub,
+    sub_args.ignore_local_publications, sub_args.is_bridge, sub_args.eventfd, &sub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &sub_args, sizeof(sub_args))) return -EFAULT;
   }
@@ -3031,15 +3056,20 @@ static long add_publisher_cmd(union ioctl_add_publisher_args __user * arg)
 
   char topic_name_buf[TOPIC_NAME_BUFFER_SIZE];
   char node_name_buf[NODE_NAME_BUFFER_SIZE];
+  char type_name_buf[TYPE_NAME_BUFFER_SIZE];
+
   ret = copy_name_from_user(topic_name_buf, sizeof(topic_name_buf), &pub_args.topic_name);
   if (ret) return ret;
 
   ret = copy_name_from_user(node_name_buf, sizeof(node_name_buf), &pub_args.node_name);
   if (ret) return ret;
 
+  ret = copy_name_from_user(type_name_buf, sizeof(type_name_buf), &pub_args.type_name);
+  if (ret) return ret;
+
   ret = agnocast_ioctl_add_publisher(
-    topic_name_buf, ipc_ns, node_name_buf, pid, pub_args.qos_depth, pub_args.qos_is_transient_local,
-    pub_args.is_bridge, &pub_args);
+    topic_name_buf, ipc_ns, node_name_buf, type_name_buf, pid, pub_args.qos_depth,
+    pub_args.qos_is_transient_local, pub_args.is_bridge, &pub_args);
   if (ret == 0) {
     if (copy_to_user(arg, &pub_args, sizeof(pub_args))) return -EFAULT;
   }
