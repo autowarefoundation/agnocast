@@ -2016,6 +2016,7 @@ static uint32_t fill_subscriber_info(
       struct topic_info_ret * temp_info = &buf[num];
       strscpy(temp_info->node_name, sub_info->node_name, NODE_NAME_BUFFER_SIZE);
       strscpy(temp_info->type_name, sub_info->type_name, TYPE_NAME_BUFFER_SIZE);
+      temp_info->pid = sub_info->pid;
       temp_info->qos_depth = sub_info->qos_depth;
       temp_info->qos_is_transient_local = sub_info->qos_is_transient_local;
       temp_info->qos_is_reliable = sub_info->qos_is_reliable;
@@ -2041,6 +2042,7 @@ static uint32_t fill_publisher_info(
       struct topic_info_ret * temp_info = &buf[num];
       strscpy(temp_info->node_name, pub_info->node_name, NODE_NAME_BUFFER_SIZE);
       strscpy(temp_info->type_name, pub_info->type_name, TYPE_NAME_BUFFER_SIZE);
+      temp_info->pid = pub_info->pid;
       temp_info->qos_depth = pub_info->qos_depth;
       temp_info->qos_is_transient_local = pub_info->qos_is_transient_local;
       temp_info->qos_is_reliable = false;  // Publishers do not have reliability QoS
