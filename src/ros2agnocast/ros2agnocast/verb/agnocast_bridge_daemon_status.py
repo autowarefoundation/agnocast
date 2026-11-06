@@ -1,7 +1,7 @@
 import json
 import os
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ros2cli.verb import VerbExtension
 
@@ -53,6 +53,7 @@ def _abstract_socket_addr_for_pid(ipc_inode: int, pid: int) -> str:
 class RecvMsgOk:
     type: str
     ipc_ns: int
+    domain_id: int
     pid: int
 
 @dataclass
@@ -75,7 +76,7 @@ class BridgeControlSocket:
         """Connect to the socket, receive the JSON payload, and return a typed result.
 
         The daemon sends a JSON payload immediately on connection:
-        ``{"type":"bridge","ipc_ns":<int>,"pid":<int>}``
+        ``{"type":"bridge","ipc_ns":<int>,"domain_id":<int>,"pid":<int>}``
         """
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         chunks: list[bytes] = []
@@ -101,6 +102,7 @@ class BridgeControlSocket:
             return RecvMsgOk(
                 type=data['type'],
                 ipc_ns=data['ipc_ns'],
+                domain_id=data['domain_id'],
                 pid=data['pid'],
             )
         except Exception:
@@ -122,36 +124,6 @@ _NG_MSG_LEGACY_TYPE = (
 )
 _LEGACY_BRIDGE_TYPES = ('standard', 'performance')
 
-@dataclass
-class _BridgeResult:
-    pid: int
-    ipc_ns: int
-    bridge_type: str  # 'bridge' or 'unknown'
-    is_ok: bool
-    ng_message: str = field(default='')
-
-
-def _build_summary(results: list[_BridgeResult]) -> tuple[str, bool]:
-    if not results:
-        return 'NG. The bridge daemon is not running.', True
-
-    ok_results = [r for r in results if r.is_ok]
-    ng_results = [r for r in results if not r.is_ok]
-
-    if ng_results:
-        first_ng = ng_results[0]
-        return (
-            f'NG. A bridge daemon is not working.'
-            f' (PID: {first_ng.pid}): {first_ng.ng_message}',
-            True,
-        )
-
-    if len(ok_results) >= 2:
-        pids = ', '.join(str(r.pid) for r in ok_results)
-        return f'NG. Multiple bridge daemons are running. (PIDs: {pids})', True
-
-    return f'OK. The bridge daemon is running. (PID: {ok_results[0].pid})', False
-
 
 class BridgeDaemonStatusVerb(VerbExtension):
     """Check liveness of Agnocast Bridge daemon processes via UDS control socket."""
@@ -166,115 +138,91 @@ class BridgeDaemonStatusVerb(VerbExtension):
             metavar='SECONDS',
             help=f'Timeout in seconds for each ping (default: {DEFAULT_TIMEOUT_SEC})',
         )
-        parser.add_argument(
-            '--verbose', '-v',
-            action='store_true',
-            default=False,
-            help='Print detailed output including bridge status',
-        )
 
     def _collect_bridge_results(
         self,
         alive_pids: list[int],
         ipc_inode: int,
         timeout_sec: float,
-    ) -> list[_BridgeResult]:
-        results: list[_BridgeResult] = []
+    ) -> tuple[list[str], bool]:
+        results: list[str] = []
+        ok = bool(alive_pids)
+        domains = set()
+
         for pid in alive_pids:
             sock_addr = _abstract_socket_addr_for_pid(ipc_inode, pid)
             recv_result = self._socket_class(sock_addr).recv_msg(timeout_sec)
 
             if isinstance(recv_result, RecvMsgFailed):
-                results.append(_BridgeResult(
-                    pid=pid,
-                    ipc_ns=ipc_inode,
-                    bridge_type='unknown',
-                    is_ok=False,
-                    ng_message=_NG_MSG_RECV_FAILED,
-                ))
+                ok = False
+                results.append(
+                    f'  PID {pid} NG: {_NG_MSG_RECV_FAILED}'
+                )
                 continue
 
             if isinstance(recv_result, RecvMsgParseError):
-                results.append(_BridgeResult(
-                    pid=pid,
-                    ipc_ns=ipc_inode,
-                    bridge_type='unknown',
-                    is_ok=False,
-                    ng_message=_NG_MSG_PARSE_ERROR,
-                ))
+                ok = False
+                results.append(
+                    f'  PID {pid} NG: {_NG_MSG_PARSE_ERROR}'
+                )
                 continue
 
             bridge_type = recv_result.type
             if bridge_type in _LEGACY_BRIDGE_TYPES:
-                results.append(_BridgeResult(
-                    pid=pid,
-                    ipc_ns=ipc_inode,
-                    bridge_type='unknown',
-                    is_ok=False,
-                    ng_message=_NG_MSG_LEGACY_TYPE,
-                ))
+                ok = False
+                results.append(
+                    f'  PID {pid} NG: {_NG_MSG_LEGACY_TYPE}'
+                )
                 continue
 
             if bridge_type != 'bridge':
-                results.append(_BridgeResult(
-                    pid=pid,
-                    ipc_ns=ipc_inode,
-                    bridge_type='unknown',
-                    is_ok=False,
-                    ng_message=_NG_MSG_UNKNOWN_TYPE,
-                ))
+                ok = False
+                results.append(
+                    f'  PID {pid} NG: {_NG_MSG_UNKNOWN_TYPE}'
+                )
                 continue
 
             if recv_result.pid != pid or recv_result.ipc_ns != ipc_inode:
-                results.append(_BridgeResult(
-                    pid=pid,
-                    ipc_ns=ipc_inode,
-                    bridge_type=bridge_type,
-                    is_ok=False,
-                    ng_message=(
-                        f'Response contains mismatched data: '
-                        f'pid={recv_result.pid}, ipc_ns={recv_result.ipc_ns}'
-                    ),
-                ))
+                ok = False
+                mismatch_message = (
+                    f'Response contains mismatched data: '
+                    f'pid={recv_result.pid}, ipc_ns={recv_result.ipc_ns}'
+                )
+                results.append(
+                    f'  PID {pid} NG: {mismatch_message}'
+                )
                 continue
 
-            results.append(_BridgeResult(
-                pid=pid,
-                ipc_ns=ipc_inode,
-                bridge_type=bridge_type,
-                is_ok=True,
-            ))
-        return results
+            if recv_result.domain_id in domains:
+                ok = False
+                duplicate_message = (
+                    f'Multiple bridge daemons are running for ROS domain '
+                    f'{recv_result.domain_id}.'
+                )
+                results.append(
+                    f'  PID {pid} NG: {duplicate_message}'
+                )
+                continue
+
+            domains.add(recv_result.domain_id)
+            results.append(f'  PID {pid} (ROS domain {recv_result.domain_id}) OK')
+
+        return results, ok
 
     def main(self, *, args):
         ipc_inode = _get_self_ipc_namespace_inode()
         timeout_sec = args.timeout
-        verbose = args.verbose
 
         bridge_pids = _find_bridge_pids(ipc_inode)
+        results, ok = self._collect_bridge_results(bridge_pids, ipc_inode, timeout_sec)
 
-        results = self._collect_bridge_results(bridge_pids, ipc_inode, timeout_sec)
+        print(f'IPC namespace inode: {ipc_inode}')
+        print()
 
-        summary, is_ng = _build_summary(results)
+        print('Bridge Status:')
+        if results:
+            print('\n'.join(results))
+        else:
+            print('  No bridge daemons are running.')
 
-        # output
-        if verbose:
-            print(f'IPC namespace inode: {ipc_inode}')
-            print()
-
-        if verbose and results:
-            print('Bridge Status:')
-            type_width = max(len(f'({r.bridge_type.capitalize()})') for r in results)
-            pid_width = max(len(str(r.pid)) for r in results)
-            for r in results:
-                type_label = f'({r.bridge_type.capitalize()})'.ljust(type_width)
-                pid_str = str(r.pid).rjust(pid_width)
-                if r.is_ok:
-                    print(f'  PID {pid_str} {type_label} OK')
-                else:
-                    print(f'  PID {pid_str} {type_label} NG: {r.ng_message}')
-            print()
-
-        print(summary)
-
-        return 1 if is_ng else 0
+        return 0 if ok else 1

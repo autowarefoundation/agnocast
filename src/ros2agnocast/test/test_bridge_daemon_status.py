@@ -8,14 +8,13 @@ socket servers in place of the real bridge daemon.
 import os
 import socket
 import threading
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 import pytest
 
 from ros2agnocast.verb import agnocast_bridge_daemon_status as br
 from ros2agnocast.verb.agnocast_bridge_daemon_status import (
-    _BridgeResult,
-    _build_summary,
     _find_bridge_pids,
     BridgeControlSocket,
     BridgeDaemonStatusVerb,
@@ -79,52 +78,6 @@ def test_find_bridge_pids_empty_on_oserror():
 
 
 # ---------------------------------------------------------------------------
-# _build_summary
-# ---------------------------------------------------------------------------
-
-def _ok(pid: int, bridge_type: str) -> _BridgeResult:
-    return _BridgeResult(pid=pid, ipc_ns=1, bridge_type=bridge_type, is_ok=True)
-
-
-def _ng(pid: int, bridge_type: str, msg: str = 'error') -> _BridgeResult:
-    return _BridgeResult(pid=pid, ipc_ns=1, bridge_type=bridge_type, is_ok=False, ng_message=msg)
-
-
-def test_build_summary_no_results_is_ng():
-    summary, is_ng = _build_summary([])
-    assert is_ng is True
-    assert 'not running' in summary.lower()
-
-
-def test_build_summary_single_bridge_ok():
-    summary, is_ng = _build_summary([_ok(100, 'bridge')])
-    assert is_ng is False
-    assert 'running' in summary.lower()
-    assert '100' in summary
-
-
-def test_build_summary_multiple_bridges_is_ng():
-    summary, is_ng = _build_summary([_ok(100, 'bridge'), _ok(101, 'bridge')])
-    assert is_ng is True
-    assert 'multiple' in summary.lower()
-    assert '100' in summary
-    assert '101' in summary
-
-
-def test_build_summary_bridge_ng():
-    summary, is_ng = _build_summary([_ng(100, 'bridge')])
-    assert is_ng is True
-    assert 'not working' in summary.lower()
-    assert '100' in summary
-
-
-def test_build_summary_unknown_type_ng():
-    summary, is_ng = _build_summary([_ng(300, 'unknown')])
-    assert is_ng is True
-    assert '300' in summary
-
-
-# ---------------------------------------------------------------------------
 # BridgeControlSocket.recv_msg  (real UNIX socket)
 # ---------------------------------------------------------------------------
 
@@ -156,13 +109,14 @@ def _unique_abstract_addr(suffix: str = '') -> str:
 
 def test_recv_msg_returns_ok_for_valid_bridge_json():
     addr = _unique_abstract_addr('_bridge')
-    payload = b'{"type":"bridge","ipc_ns":99,"pid":456}'
+    payload = b'{"type":"bridge","ipc_ns":99,"domain_id":7,"pid":456}'
     t = _start_server(addr, payload)
     result = BridgeControlSocket(addr).recv_msg(timeout_sec=2.0)
     t.join(timeout=2.0)
     assert isinstance(result, RecvMsgOk)
     assert result.type == 'bridge'
     assert result.ipc_ns == 99
+    assert result.domain_id == 7
     assert result.pid == 456
 
 
@@ -215,69 +169,95 @@ def _make_verb(result_map: dict) -> BridgeDaemonStatusVerb:
 
 
 def test_collect_bridge_results_ok_bridge():
-    ipc_inode, pid = 100, 200
+    ipc_inode, pid, domain_id = 100, 200, 7
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, pid=pid)})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert len(results) == 1
-    assert results[0].is_ok is True
-    assert results[0].bridge_type == 'bridge'
+    recv_msg = RecvMsgOk(type='bridge', ipc_ns=ipc_inode, domain_id=domain_id, pid=pid)
+    verb = _make_verb({sock_addr: recv_msg})
+    _, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is True
 
 
 @pytest.mark.parametrize('legacy_type', ['standard', 'performance'])
 def test_collect_bridge_results_legacy_type_gives_legacy_ng(legacy_type):
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type=legacy_type, ipc_ns=ipc_inode, pid=pid)})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert results[0].bridge_type == 'unknown'
-    assert results[0].ng_message == br._NG_MSG_LEGACY_TYPE
+    recv_msg = RecvMsgOk(type=legacy_type, ipc_ns=ipc_inode, domain_id=7, pid=pid)
+    verb = _make_verb({sock_addr: recv_msg})
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert br._NG_MSG_LEGACY_TYPE in results[0]
 
 
-def test_collect_bridge_results_recv_failed_gives_unknown_ng():
+def test_collect_bridge_results_recv_failed_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
     verb = _make_verb({sock_addr: RecvMsgFailed()})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert results[0].bridge_type == 'unknown'
-    assert results[0].ng_message == br._NG_MSG_RECV_FAILED
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert br._NG_MSG_RECV_FAILED in results[0]
 
 
-def test_collect_bridge_results_parse_error_gives_unknown_ng():
+def test_collect_bridge_results_parse_error_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
     verb = _make_verb({sock_addr: RecvMsgParseError()})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert results[0].bridge_type == 'unknown'
-    assert results[0].ng_message == br._NG_MSG_PARSE_ERROR
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert br._NG_MSG_PARSE_ERROR in results[0]
 
 
 def test_collect_bridge_results_unknown_bridge_type_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='future_type', ipc_ns=ipc_inode, pid=pid)})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert results[0].bridge_type == 'unknown'
-    assert results[0].ng_message == br._NG_MSG_UNKNOWN_TYPE
+    recv_msg = RecvMsgOk(type='future_type', ipc_ns=ipc_inode, domain_id=7, pid=pid)
+    verb = _make_verb({sock_addr: recv_msg})
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert br._NG_MSG_UNKNOWN_TYPE in results[0]
 
 
 def test_collect_bridge_results_mismatched_pid_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, pid=999)})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert 'pid=999' in results[0].ng_message
+    recv_msg = RecvMsgOk(type='bridge', ipc_ns=ipc_inode, domain_id=7, pid=999)
+    verb = _make_verb({sock_addr: recv_msg})
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert 'pid=999' in results[0]
 
 
 def test_collect_bridge_results_mismatched_ipc_ns_gives_ng():
     ipc_inode, pid = 100, 200
     sock_addr = br._abstract_socket_addr_for_pid(ipc_inode, pid)
-    verb = _make_verb({sock_addr: RecvMsgOk(type='bridge', ipc_ns=999, pid=pid)})
-    results = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
-    assert results[0].is_ok is False
-    assert 'ipc_ns=999' in results[0].ng_message
+    recv_msg = RecvMsgOk(type='bridge', ipc_ns=999, domain_id=7, pid=pid)
+    verb = _make_verb({sock_addr: recv_msg})
+    results, ok = verb._collect_bridge_results([pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert 'ipc_ns=999' in results[0]
+
+
+def test_collect_bridge_results_duplicate_ros_domain_gives_ng():
+    ipc_inode, first_pid, second_pid, domain_id = 100, 200, 201, 7
+    first_addr = br._abstract_socket_addr_for_pid(ipc_inode, first_pid)
+    second_addr = br._abstract_socket_addr_for_pid(ipc_inode, second_pid)
+    verb = _make_verb({
+        first_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, domain_id=domain_id, pid=first_pid),
+        second_addr: RecvMsgOk(
+            type='bridge', ipc_ns=ipc_inode, domain_id=domain_id, pid=second_pid
+        ),
+    })
+    results, ok = verb._collect_bridge_results([first_pid, second_pid], ipc_inode, timeout_sec=1.0)
+    assert ok is False
+    assert f'ROS domain {domain_id}' in "".join(results)
+
+
+def test_collect_bridge_results_different_ros_domains_are_ok():
+    ipc_inode, first_pid, second_pid = 100, 200, 201
+    first_addr = br._abstract_socket_addr_for_pid(ipc_inode, first_pid)
+    second_addr = br._abstract_socket_addr_for_pid(ipc_inode, second_pid)
+    verb = _make_verb({
+        first_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, domain_id=7, pid=first_pid),
+        second_addr: RecvMsgOk(type='bridge', ipc_ns=ipc_inode, domain_id=8, pid=second_pid),
+    })
+    _, ok = verb._collect_bridge_results([first_pid, second_pid], ipc_inode, timeout_sec=1.0)
+    assert ok is True
