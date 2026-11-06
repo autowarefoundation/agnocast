@@ -15,6 +15,7 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
+#define TYPE_NAME_BUFFER_SIZE 256   // Maximum length of ROS type name: 256 characters
 #define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
@@ -76,6 +77,7 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
@@ -95,6 +97,7 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;
