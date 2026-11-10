@@ -96,9 +96,7 @@ uint32_t get_ros_domain_id();
 std::string create_uds_addr_for_bridge();
 std::string create_shm_name(const pid_t pid);
 // Return the inode number of the calling process's IPC namespace
-// (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the
-// per-namespace key for the tmpfs directory
-// `${AGNOCAST_TMPFS_DIR:-/dev/shm}/agnocast_type_registry/<ipc_ns_inode>/`.
+// (`/proc/self/ns/ipc`).
 uint64_t get_self_ipc_ns_inode();
 std::string create_service_request_topic_name(const std::string & service_name);
 // A domain bridge merges two domains, where the same fully qualified node name may legitimately

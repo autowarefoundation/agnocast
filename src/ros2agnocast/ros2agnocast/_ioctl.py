@@ -1,6 +1,5 @@
 """ioctl fallback: synthesise an AgnocastDaemonState for the caller's NS."""
 
-from contextlib import contextmanager
 import ctypes
 import os
 from typing import Optional
