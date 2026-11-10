@@ -80,11 +80,11 @@ public:
 namespace detail
 {
 
-template <typename Publisher>
+template <typename PublisherT>
 class ResponsePublisherManager
 {
   std::mutex mtx_;
-  std::unordered_map<std::string, typename Publisher::SharedPtr> pubs_;
+  std::unordered_map<std::string, typename PublisherT::SharedPtr> pubs_;
 
   void erase_stale_publishers()
   {
@@ -106,11 +106,11 @@ class ResponsePublisherManager
   }
 
 public:
-  typename Publisher::SharedPtr get_or_create_publisher_for(
+  typename PublisherT::SharedPtr get_or_create_publisher_for(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
     const ServiceRole role, const std::string & response_topic_name)
   {
-    typename Publisher::SharedPtr pub;
+    typename PublisherT::SharedPtr pub;
     {
       std::lock_guard<std::mutex> lock(mtx_);
       auto it = pubs_.find(response_topic_name);
@@ -122,11 +122,11 @@ public:
         std::visit(
           [this, &pub, &qos, role, &response_topic_name](auto * node) {
             agnocast::PublisherOptions pub_options;
-            if constexpr (std::is_same_v<Publisher, agnocast::TypeErasedPublisher>) {
-              pub = std::make_shared<Publisher>(
+            if constexpr (std::is_same_v<PublisherT, agnocast::TypeErasedPublisher>) {
+              pub = std::make_shared<PublisherT>(
                 node, response_topic_name, "", qos, pub_options, to_publisher_role(role));
             } else {
-              pub = std::make_shared<Publisher>(
+              pub = std::make_shared<PublisherT>(
                 node, response_topic_name, qos, pub_options, to_publisher_role(role));
             }
             pubs_.emplace(response_topic_name, pub);
