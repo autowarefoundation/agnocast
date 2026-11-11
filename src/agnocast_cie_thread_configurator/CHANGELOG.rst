@@ -2,8 +2,8 @@
 Changelog for package agnocast_cie_thread_configurator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.2 (2026-11-11)
+------------------
 * fix(agnocast_cie_thread_configurator): restrict who can run the setcap'd node and drop capabilities in --prerun (`#1664 <https://github.com/tier4/agnocast/issues/1664>`_)
 * fix(cie_thread_configurator): harden ROS_DOMAIN_ID parsing (`#1572 <https://github.com/tier4/agnocast/issues/1572>`_)
 * refactor(agnocast_cie_thread_configurator): hold scheduling attributes in a SchedAttrs value type (`#1627 <https://github.com/tier4/agnocast/issues/1627>`_)

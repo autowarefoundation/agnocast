@@ -2,8 +2,8 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.2 (2026-11-11)
+------------------
 * fix(cie): retry child cancellation until executor thread exits (`#1684 <https://github.com/tier4/agnocast/issues/1684>`_)
 * fix(agnocast_components): fire Agnocast timers in timer-only callback groups (`#1672 <https://github.com/tier4/agnocast/issues/1672>`_)
 

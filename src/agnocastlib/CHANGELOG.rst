@@ -2,8 +2,8 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.2 (2026-11-11)
+------------------
 * refactor(agnocastlib): ClientIntrospection to centralize introspection logic (`#1618 <https://github.com/tier4/agnocast/issues/1618>`_)
 * refactor(agnocastlib): extract response publisher management into reusable class (`#1646 <https://github.com/tier4/agnocast/issues/1646>`_)
 * fix(cie): retry child cancellation until executor thread exits (`#1684 <https://github.com/tier4/agnocast/issues/1684>`_)

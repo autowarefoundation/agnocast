@@ -2,8 +2,8 @@
 Changelog for package agnocast_ioctl_wrapper
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.4.2 (2026-11-11)
+------------------
 * fix(agnocast_kmod): raise MAX_TOPIC_NUM to 4096 (`#1693 <https://github.com/tier4/agnocast/issues/1693>`_)
 
 2.4.1 (2026-09-25)
