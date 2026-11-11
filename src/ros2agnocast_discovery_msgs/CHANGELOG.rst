@@ -2,6 +2,9 @@
 Changelog for package ros2agnocast_discovery_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+
 2.4.1 (2026-09-25)
 ------------------
 

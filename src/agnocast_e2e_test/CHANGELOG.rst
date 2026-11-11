@@ -2,6 +2,11 @@
 Changelog for package agnocast_e2e_test
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* fix(cie): retry child cancellation until executor thread exits (`#1684 <https://github.com/tier4/agnocast/issues/1684>`_)
+* fix(agnocast_components): fire Agnocast timers in timer-only callback groups (`#1672 <https://github.com/tier4/agnocast/issues/1672>`_)
+
 2.4.1 (2026-09-25)
 ------------------
 * fix(agnocastlib): count same-process subscribers like rclcpp does (`#1613 <https://github.com/tier4/agnocast/issues/1613>`_)

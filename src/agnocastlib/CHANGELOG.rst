@@ -2,6 +2,17 @@
 Changelog for package agnocastlib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* refactor(agnocastlib): ClientIntrospection to centralize introspection logic (`#1618 <https://github.com/tier4/agnocast/issues/1618>`_)
+* refactor(agnocastlib): extract response publisher management into reusable class (`#1646 <https://github.com/tier4/agnocast/issues/1646>`_)
+* fix(cie): retry child cancellation until executor thread exits (`#1684 <https://github.com/tier4/agnocast/issues/1684>`_)
+* fix(agnocastlib): include Agnocast timers in the CIE callback group ID (`#1682 <https://github.com/tier4/agnocast/issues/1682>`_)
+* refactor(agnocastlib): stop depending on rclcpp::detail (`#1656 <https://github.com/tier4/agnocast/issues/1656>`_)
+* fix(agnocastlib): show the bridge direction in bridge callback group IDs (`#1681 <https://github.com/tier4/agnocast/issues/1681>`_)
+* fix(agnocast_kmod): take topic->rwsem only around the entries tree (`#1674 <https://github.com/tier4/agnocast/issues/1674>`_)
+* feat(agnocastlib): emit service introspection events from GenericClient (`#1616 <https://github.com/tier4/agnocast/issues/1616>`_)
+
 2.4.1 (2026-09-25)
 ------------------
 * fix(agnocastlib): gate R2A service bridges on ROS 2 client demand on pre-Jazzy (`#1645 <https://github.com/tier4/agnocast/issues/1645>`_)
