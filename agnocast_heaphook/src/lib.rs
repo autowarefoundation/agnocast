@@ -39,6 +39,7 @@ static RESOLVE_START_MAIN: extern "C" fn() = {
     init
 };
 
+mod memory_stats;
 mod tlsf;
 
 /// Version string exported as a C-compatible symbol for external querying.
@@ -481,6 +482,8 @@ pub unsafe extern "C" fn init_child_allocator(
          init_child_allocator must only be called once in an uninitialized child process."
     );
 
+    memory_stats::init();
+
     true
 }
 
@@ -511,6 +514,9 @@ pub unsafe extern "C" fn __libc_start_main(
     {
         panic!("[ERROR] [Agnocast] The memory allocator has already been initialized.");
     }
+
+    #[cfg(not(test))]
+    memory_stats::init();
 
     #[cfg(glibc_pre_2_35)]
     {
