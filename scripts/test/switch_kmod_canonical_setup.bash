@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-CANONICAL_VER="${CANONICAL_VER:-2.4.1}"
+CANONICAL_VER="${CANONICAL_VER:-2.4.2}"
 
 here="$(cd "$(dirname "$0")" && pwd)"
 switch_script="$(cd "${here}/.." && pwd)/switch_kmod.bash"
