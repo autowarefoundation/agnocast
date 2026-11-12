@@ -130,7 +130,7 @@ TEST_F(EpollRegistryTest, sync_removes_an_fd_that_is_no_longer_monitored)
   close(fd);
 }
 
-TEST_F(EpollRegistryTest, sync_forgets_an_entity_whose_fd_was_closed_without_a_new_one)
+TEST_F(EpollRegistryTest, sync_does_not_delete_a_reused_fd_number_after_the_owner_closed_it)
 {
   // Arrange
   EpollRegistry registry;
