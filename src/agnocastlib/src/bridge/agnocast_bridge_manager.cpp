@@ -20,6 +20,14 @@
 #include <mutex>
 #include <string>
 
+namespace
+{
+
+// Matches input_qos_depth of diagnostic_graph_aggregator, the ROS 2 subscriber of /diagnostics.
+constexpr size_t DIAGNOSTICS_A2R_MIN_DEPTH = 1000;
+
+}  // namespace
+
 namespace agnocast
 {
 
@@ -354,7 +362,7 @@ void BridgeManager::activate_daemon_forced_bridge(
   try {
     auto bridge_qos = qos;
     if (!is_r2a && topic_name == "/diagnostics") {
-      bridge_qos.keep_last(std::max<size_t>(qos.depth(), 1000));
+      bridge_qos.keep_last(std::max<size_t>(qos.depth(), DIAGNOSTICS_A2R_MIN_DEPTH));
     }
     PubsubBridgeResult result =
       is_r2a
@@ -635,7 +643,7 @@ void BridgeManager::create_pubsub_bridge_if_needed(
     } else {
       auto qos = get_publisher_qos(topic_name, qos_source_id);
       if (topic_name == "/diagnostics") {
-        qos.keep_last(std::max<size_t>(qos.depth(), 1000));
+        qos.keep_last(std::max<size_t>(qos.depth(), DIAGNOSTICS_A2R_MIN_DEPTH));
       }
       result = loader_->create_a2r_pubsub_bridge(container_node_, topic_name, message_type, qos);
     }
