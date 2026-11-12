@@ -2,6 +2,10 @@
 Changelog for package agnocast_components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.2 (2026-11-11)
+------------------
+* fix(agnocast_components): fire Agnocast timers in timer-only callback groups (`#1672 <https://github.com/tier4/agnocast/issues/1672>`_)
+
 2.4.1 (2026-09-25)
 ------------------
 
