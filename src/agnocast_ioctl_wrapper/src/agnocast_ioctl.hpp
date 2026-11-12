@@ -13,6 +13,7 @@
 
 #define TOPIC_NAME_BUFFER_SIZE 256
 #define NODE_NAME_BUFFER_SIZE 256
+#define TYPE_NAME_BUFFER_SIZE 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -52,6 +53,8 @@ union ioctl_node_info_args {
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
+  char type_name[TYPE_NAME_BUFFER_SIZE];
+  pid_t pid;
   uint32_t qos_depth;
   bool qos_is_transient_local;
   bool qos_is_reliable;

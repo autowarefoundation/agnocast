@@ -1,6 +1,5 @@
 """ioctl fallback: synthesise an AgnocastDaemonState for the caller's NS."""
 
-from contextlib import contextmanager
 import ctypes
 import os
 from typing import Optional
@@ -15,11 +14,15 @@ from ros2agnocast_discovery_msgs.msg import (
 
 BOOT_ID_PATH = '/proc/sys/kernel/random/boot_id'
 SELF_IPC_NS_PATH = '/proc/self/ns/ipc'
+NODE_NAME_BUFFER_SIZE = 256
+TYPE_NAME_BUFFER_SIZE = 256
 
 
 class _TopicInfoRet(ctypes.Structure):
     _fields_ = [
-        ('node_name', ctypes.c_char * 256),
+        ('node_name', ctypes.c_char * NODE_NAME_BUFFER_SIZE),
+        ('type_name', ctypes.c_char * TYPE_NAME_BUFFER_SIZE),
+        ('pid', ctypes.c_int32),
         ('qos_depth', ctypes.c_uint32),
         ('qos_is_transient_local', ctypes.c_bool),
         ('qos_is_reliable', ctypes.c_bool),
@@ -57,7 +60,7 @@ def _load_lib() -> Optional[ctypes.CDLL]:
 def _endpoint_from_topic_info_ret(tir: _TopicInfoRet) -> AgnocastEndpoint:
     ep = AgnocastEndpoint()
     ep.node_name = tir.node_name.decode('utf-8').rstrip('\x00')
-    ep.pid = 0
+    ep.pid = tir.pid
     ep.qos_depth = tir.qos_depth
     ep.qos_is_transient_local = tir.qos_is_transient_local
     ep.qos_is_reliable = tir.qos_is_reliable
@@ -65,19 +68,30 @@ def _endpoint_from_topic_info_ret(tir: _TopicInfoRet) -> AgnocastEndpoint:
     return ep
 
 
-@contextmanager
-def _endpoints(lib, fn, topic_name: str, domain_id: int = 0):
-    """Yield a list[AgnocastEndpoint] for one topic; free the ctypes buffer on exit."""
+def _endpoints_and_type(lib, fn, topic_name: str, domain_id: int = 0):
+    """Return (endpoints, type_name) for one topic; free the ctypes buffer on exit."""
     count = ctypes.c_int()
     arr = fn(topic_name.encode('utf-8'), ctypes.byref(count), domain_id)
+    endpoints = []
+    type_name = ''
+    if not arr:
+        return endpoints, type_name
+
     try:
-        if not arr:
-            yield []
-            return
-        yield [_endpoint_from_topic_info_ret(arr[i]) for i in range(count.value)]
+        for i in range(count.value):
+            tir = arr[i]
+            endpoints.append(_endpoint_from_topic_info_ret(tir))
+
+            # Type name is carried by every endpoint. Use the first non-empty type name.
+            if not type_name:
+                raw = tir.type_name.decode('utf-8', errors='replace')
+                if raw:
+                    type_name = raw
     finally:
         if arr:
             lib.free_agnocast_topic_info_ret(arr)
+
+    return endpoints, type_name
 
 
 def _local_host_uuid() -> str:
@@ -115,14 +129,18 @@ def self_ns_snapshot() -> Optional[AgnocastDaemonState]:
     try:
         for i in range(topic_count.value):
             tname = ctypes.cast(topic_array[i], ctypes.c_char_p).value.decode('utf-8')
+            pubs, pub_type = _endpoints_and_type(lib, lib.get_agnocast_pub_nodes, tname, 0)
+            subs, sub_type = _endpoints_and_type(lib, lib.get_agnocast_sub_nodes, tname, 0)
+
             t = AgnocastTopic()
             t.topic_name = tname
             t.type_name = ''
             t.domain_id = 0
-            with _endpoints(lib, lib.get_agnocast_pub_nodes, tname, 0) as pubs:
-                t.publishers = pubs
-            with _endpoints(lib, lib.get_agnocast_sub_nodes, tname, 0) as subs:
-                t.subscribers = subs
+            t.publishers = pubs
+            t.subscribers = subs
+            # Prioritize pub_type over sub_type.
+            t.type_name = pub_type or sub_type
+
             state.topics.append(t)
     finally:
         if topic_count.value != 0:
