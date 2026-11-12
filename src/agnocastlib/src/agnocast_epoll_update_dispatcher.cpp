@@ -31,16 +31,6 @@ void signal_notify_fd(int notify_fd)
   }
 }
 
-void drain_notify_fd(int notify_fd)
-{
-  if (notify_fd < 0) {
-    return;
-  }
-  uint64_t value = 0;
-  while (read(notify_fd, &value, sizeof(value)) >= 0) {
-  }
-}
-
 }  // namespace
 
 EpollUpdateTracker EpollUpdateDispatcher::register_tracker()
@@ -103,9 +93,13 @@ bool EpollUpdateTracker::take_update_request()
   if (!context_) {
     return false;
   }
-  const bool needed = context_->need_update.exchange(false, std::memory_order_acquire);
-  drain_notify_fd(context_->notify_fd);
-  return needed;
+  if (context_->notify_fd >= 0) {
+    uint64_t value = 0;
+    if (read(context_->notify_fd, &value, sizeof(value)) < 0 && errno != EAGAIN) {
+      RCLCPP_WARN(logger, "Failed to read epoll update notify_fd: %s", strerror(errno));
+    }
+  }
+  return context_->need_update.exchange(false, std::memory_order_acquire);
 }
 
 int EpollUpdateTracker::notify_fd() const
