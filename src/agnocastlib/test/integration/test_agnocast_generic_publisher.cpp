@@ -15,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 using StringMsg = std_msgs::msg::String;
@@ -54,14 +55,25 @@ protected:
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
+    callback_groups_.clear();
     node_.reset();
     executor_.reset();
     rclcpp::shutdown();
   }
 
+  rclcpp::CallbackGroup::SharedPtr create_callback_group()
+  {
+    auto cbg = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    callback_groups_.push_back(cbg);
+    return cbg;
+  }
+
   std::shared_ptr<rclcpp::Node> node_;
   std::shared_ptr<agnocast::SingleThreadedAgnocastExecutor> executor_;
   std::thread spin_thread_;
+  // Keeps every callback group alive until TearDown() has joined the spin thread to avoid flaky
+  // failures on Humble. Reference: <https://github.com/ros2/rclcpp/issues/2163>
+  std::vector<rclcpp::CallbackGroup::SharedPtr> callback_groups_;
 };
 
 // ---------------------------------------------------------------------------
@@ -74,7 +86,7 @@ TEST_F(GenericPublisherTest, round_trip_to_typed_subscription)
   const std::string expected_data = "hello from generic publisher";
   rclcpp::QoS qos{1};
 
-  auto cbg = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto cbg = create_callback_group();
   agnocast::SubscriptionOptions sub_opts;
   sub_opts.callback_group = cbg;
 
@@ -121,7 +133,7 @@ TEST_F(GenericPublisherTest, round_trip_to_generic_subscription)
   const std::string expected_data = "hello via generic subscription";
   rclcpp::QoS qos{1};
 
-  auto cbg = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto cbg = create_callback_group();
   agnocast::SubscriptionOptions sub_opts;
   sub_opts.callback_group = cbg;
 
