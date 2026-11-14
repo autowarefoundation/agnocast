@@ -867,3 +867,71 @@ TEST(AllocateTimerIdTest, succeeds_at_the_highest_valid_id)
   // Cleanup
   agnocast::next_timer_id.store(original);
 }
+
+// =============================================================================
+// #1697 — prepare_epoll() must not probe timer liveness with weak_ptr::lock()
+// =============================================================================
+
+// Both handlers share the same liveness probe, so cover the fix for
+// TimerEventHandler and ClockEventHandler with one typed test. TestTimer's
+// TearDown() clears id2_timer_info.
+template <typename Handler>
+class PrepareEpollLivenessTest : public TestTimer
+{
+};
+
+using PrepareEpollHandlerTypes =
+  ::testing::Types<agnocast::TimerEventHandler, agnocast::ClockEventHandler>;
+TYPED_TEST_SUITE(PrepareEpollLivenessTest, PrepareEpollHandlerTypes);
+
+TYPED_TEST(PrepareEpollLivenessTest, liveness_probe_creates_no_strong_reference)
+{
+  // Arrange. Every epoll fd is -1 so prepare_epoll() skips epoll_ctl() (which
+  // would otherwise need a real epoll instance); only the liveness probe and
+  // the callback-group validator are exercised.
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  auto timer = std::make_shared<agnocast::GenericTimer<std::function<void()>>>(
+    1, 50ms, clock, std::function<void()>{[]() {}});
+  std::weak_ptr<agnocast::TimerBase> weak_timer = timer;
+
+  auto info = std::make_shared<agnocast::TimerInfo>();
+  info->timer_id = 1;
+  info->timer = timer;
+  info->need_epoll_update = true;
+  info->timer_fd = -1;
+  info->timer_fd_need_update = false;
+  info->clock_eventfd = -1;
+  info->clock_eventfd_need_update = false;
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info[1] = info;
+  }
+
+  // prepare_epoll() never touches the executor plumbing, so nullptrs suffice.
+  TypeParam handler(getpid(), nullptr, nullptr);
+
+  long use_count_during_probe = -1;
+  int validator_calls = 0;
+  const agnocast::CallbackGroupValidator validator = [&](const auto &) {
+    ++validator_calls;
+    use_count_during_probe = weak_timer.use_count();
+    return true;
+  };
+
+  // Act
+  handler.prepare_epoll(-1, validator);
+
+  // Assert. Only `timer` may own the object while the validator runs. With
+  // weak_ptr::lock() the temporary shared_ptr is still alive at this point
+  // (use_count == 2) and is destroyed at the end of the condition, i.e. while
+  // id2_timer_info_mtx is held. Should another thread drop the last external
+  // reference in that window, ~TimerBase() -> unregister_timer_info() re-locks
+  // the same non-recursive mutex on this thread and deadlocks (#1697, #1687).
+  EXPECT_EQ(validator_calls, 1);
+  EXPECT_EQ(use_count_during_probe, 1);
+  EXPECT_FALSE(info->need_epoll_update);
+
+  // No manual cleanup: `timer` goes out of scope without id2_timer_info_mtx
+  // held, so ~TimerBase() erases the entry itself; TestTimer's TearDown()
+  // clears the registry for the rest of the suite.
+}
