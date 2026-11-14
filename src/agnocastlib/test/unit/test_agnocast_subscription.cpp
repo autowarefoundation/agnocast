@@ -256,9 +256,11 @@ TEST_F(
 
   ASSERT_EQ(inner_weak.use_count(), 1) << "The outer callback must hold the only reference";
 
-  // Act: destroying outer destroys its callback, which releases the last reference to inner
-  // from within ~Subscription(). That nested destructor must not cause a self-deadlock.
-  EXPECT_NO_THROW(outer.reset());
+  // Act: destroy the outer subscription.
+  // It eventually destroys the inner subscription because the outer callback holds the only
+  // reference to it. That nested destructor (~Subscription()) must not cause a self-deadlock so
+  // the call below does not hang.
+  outer.reset();
 
   // Assert
   EXPECT_TRUE(inner_weak.expired());
