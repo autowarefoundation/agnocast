@@ -363,7 +363,7 @@ struct ioctl_add_domain_bridge_prefix_args
 // ================================================
 // ros2cli ioctls
 
-#define MAX_TOPIC_NUM 2048
+#define MAX_TOPIC_NUM 4096
 
 union ioctl_topic_list_args {
   struct

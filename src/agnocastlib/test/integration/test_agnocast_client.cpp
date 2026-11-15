@@ -29,6 +29,17 @@ protected:
     executor_ = std::make_shared<agnocast::SingleThreadedAgnocastExecutor>();
     executor_->add_node(node_);
     spin_thread_ = std::thread([this]() { executor_->spin(); });
+
+    // spin() overwrites an earlier cancel, so readiness-only tests must wait for the worker.
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!executor_->is_spinning() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(1ms);
+    }
+    const bool started = executor_->is_spinning();
+    if (!started) {
+      rclcpp::shutdown();
+    }
+    ASSERT_TRUE(started) << "Timed out waiting for the client executor to start";
   }
 
   void TearDown() override

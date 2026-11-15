@@ -272,6 +272,10 @@ class Test1To1(unittest.TestCase):
             time.sleep(TIMEOUT)
 
     def test_pub(self, proc_output, test_pub):
+        # ReadyToTest bounds launch startup; DDS discovery and publishing may still be in flight.
+        proc_output.assertWaitFor(
+            "All messages published. Shutting down.", process=test_pub, timeout=20.0
+        )
         output_text = "".join(
             output.text.decode('utf-8') for output in proc_output[test_pub]
         )
@@ -299,12 +303,16 @@ class Test1To1(unittest.TestCase):
     #        The Agnocast Sub sees this as a high-speed stream of "fresh" messages, not history lookup.
     # -> Agnocast Sub receives a "fast replay" of the history.
     def test_sub(self, proc_output, test_sub):
+        total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
+        if total_expected_count > 0:
+            proc_output.assertWaitFor(
+                "All messages received. Shutting down.", process=test_sub, timeout=20.0
+            )
         output_str = "".join(
             output.text.decode('utf-8') for output in proc_output[test_sub]
         )
 
         start_index = EXPECT_INIT_PUB_NUM - EXPECT_INIT_SUB_NUM
-        total_expected_count = EXPECT_INIT_SUB_NUM + EXPECT_SUB_NUM
 
         if total_expected_count > 0:
             if USE_AGNOCAST_PUB:
@@ -354,11 +362,15 @@ class Test1To1(unittest.TestCase):
             self.assertIn("incompatible QoS", full_log)
 
     def test_ros2_sub(self, proc_output, test_ros2_sub):
+        total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
+        if total_expected_count > 0:
+            proc_output.assertWaitFor(
+                "All messages received. Shutting down.", process=test_ros2_sub, timeout=20.0
+            )
         output_str = "".join(
             output.text.decode('utf-8') for output in proc_output[test_ros2_sub]
         )
 
-        total_expected_count = EXPECT_INIT_ROS2_SUB_NUM + EXPECT_ROS2_SUB_NUM
         if total_expected_count > 0:
             # ---------------------------------------------------------
             # Pattern B: Agnocast Publisher (A2R Bridge [Case 1]) or ROS 2 Publisher
