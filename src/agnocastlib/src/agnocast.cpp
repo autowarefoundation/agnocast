@@ -8,6 +8,7 @@
 
 #include <dlfcn.h>
 #include <strings.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -242,10 +243,36 @@ void poll_for_unlink()
   exit(0);
 }
 
+// Each A2R bridge opens an eventfd and an epoll fd, so subscribing to many topics at once (e.g.
+// `ros2 bag record`) can exceed the default soft limit of 1024. Raising it to the hard limit needs
+// no privilege. Fds above 1023 must not be passed to select(): CycloneDDS selects on its UDP
+// sockets, but opens them with the bridge node before any bridge exists, unlike its TCP transport.
+void raise_nofile_soft_limit_to_hard()
+{
+  struct rlimit rl = {};
+  if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
+    RCLCPP_WARN(logger, "getrlimit(RLIMIT_NOFILE) failed: %s", strerror(errno));
+    return;
+  }
+  if (rl.rlim_cur >= rl.rlim_max) {
+    return;
+  }
+  const rlim_t old_soft = rl.rlim_cur;
+  rl.rlim_cur = rl.rlim_max;
+  if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
+    RCLCPP_WARN(logger, "setrlimit(RLIMIT_NOFILE) failed: %s", strerror(errno));
+    return;
+  }
+  RCLCPP_INFO(
+    logger, "Raised RLIMIT_NOFILE soft limit of the bridge manager from %llu to %llu",
+    static_cast<unsigned long long>(old_soft), static_cast<unsigned long long>(rl.rlim_cur));
+}
+
 void poll_for_bridge_manager()
 {
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
+    raise_nofile_soft_limit_to_hard();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     BridgeManager manager;
     manager.run();
