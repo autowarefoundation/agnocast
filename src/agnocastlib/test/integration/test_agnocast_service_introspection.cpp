@@ -47,9 +47,15 @@ protected:
 
   agnocast::Subscription<Event>::SharedPtr event_subscriber_;
 
+  // Keeps every callback group alive until TearDown() has joined the spin thread to avoid flaky
+  // failures on Humble. Reference: <https://github.com/ros2/rclcpp/issues/2163>
+  std::vector<rclcpp::CallbackGroup::SharedPtr> callback_groups_;
+
   rclcpp::CallbackGroup::SharedPtr new_group()
   {
-    return node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    auto group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    callback_groups_.push_back(group);
+    return group;
   }
 
   void SetUp() override
@@ -78,6 +84,7 @@ protected:
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
+    callback_groups_.clear();
     if (rclcpp::ok()) {
       rclcpp::shutdown();
     }
