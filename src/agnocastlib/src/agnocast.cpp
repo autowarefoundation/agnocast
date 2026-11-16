@@ -245,7 +245,8 @@ void poll_for_unlink()
 
 // Each A2R bridge opens an eventfd and an epoll fd, so subscribing to many topics at once (e.g.
 // `ros2 bag record`) can exceed the default soft limit of 1024. Raising it to the hard limit needs
-// no privilege.
+// no privilege. Fds above 1023 must not be passed to select(): CycloneDDS selects on its UDP
+// sockets, but opens them with the bridge node before any bridge exists, unlike its TCP transport.
 void raise_nofile_soft_limit_to_hard()
 {
   struct rlimit rl = {};
