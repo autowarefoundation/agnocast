@@ -243,11 +243,9 @@ void poll_for_unlink()
   exit(0);
 }
 
-// The bridge manager opens an eventfd and an epoll fd for every A2R bridge, so a ROS 2 tool that
-// subscribes to many topics at once (e.g. `ros2 bag record`) can exhaust the default soft limit
-// (1024 under systemd) and kill the bridge. The hard limit is usually much higher (524288 under
-// systemd), and raising the soft limit up to it needs no privilege. Only the forked bridge process
-// is affected; the parent application keeps its own limit.
+// Each A2R bridge opens an eventfd and an epoll fd, so subscribing to many topics at once (e.g.
+// `ros2 bag record`) can exceed the default soft limit of 1024. Raising it to the hard limit needs
+// no privilege.
 void raise_nofile_soft_limit_to_hard()
 {
   struct rlimit rl = {};
