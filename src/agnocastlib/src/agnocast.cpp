@@ -8,6 +8,7 @@
 
 #include <dlfcn.h>
 #include <strings.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -242,8 +243,36 @@ void poll_for_unlink()
   exit(0);
 }
 
+// The bridge manager opens an eventfd and an epoll fd for every A2R bridge, so a ROS 2 tool that
+// subscribes to many topics at once (e.g. `ros2 bag record`) can exhaust the default soft limit
+// (1024 under systemd) and kill the bridge. The hard limit is usually much higher (524288 under
+// systemd), and raising the soft limit up to it needs no privilege. Only the forked bridge process
+// is affected; the parent application keeps its own limit.
+void raise_nofile_soft_limit_to_hard()
+{
+  struct rlimit rl = {};
+  if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
+    RCLCPP_WARN(logger, "getrlimit(RLIMIT_NOFILE) failed: %s", strerror(errno));
+    return;
+  }
+  if (rl.rlim_cur >= rl.rlim_max) {
+    return;
+  }
+  const rlim_t old_soft = rl.rlim_cur;
+  rl.rlim_cur = rl.rlim_max;
+  if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
+    RCLCPP_WARN(logger, "setrlimit(RLIMIT_NOFILE) failed: %s", strerror(errno));
+    return;
+  }
+  RCLCPP_INFO(
+    logger, "Raised RLIMIT_NOFILE soft limit of the bridge manager from %llu to %llu",
+    static_cast<unsigned long long>(old_soft), static_cast<unsigned long long>(rl.rlim_cur));
+}
+
 void poll_for_bridge_manager()
 {
+  raise_nofile_soft_limit_to_hard();
+
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
