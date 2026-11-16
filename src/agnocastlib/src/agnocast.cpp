@@ -269,10 +269,9 @@ void raise_nofile_soft_limit_to_hard()
 
 void poll_for_bridge_manager()
 {
-  raise_nofile_soft_limit_to_hard();
-
   try {
     const auto resources = acquire_agnocast_resources_for_bridge();
+    raise_nofile_soft_limit_to_hard();
     initialize_bridge_allocator(resources.mempool_ptr, resources.mempool_size);
     BridgeManager manager;
     manager.run();
