@@ -21,6 +21,8 @@ class ClientTest : public ::testing::Test
   std::shared_ptr<rclcpp::Node> node_;
   std::shared_ptr<agnocast::SingleThreadedAgnocastExecutor> executor_;
   std::thread spin_thread_;
+
+protected:
   // Keeps every callback group alive until TearDown() has joined the spin thread to avoid flaky
   // failures on Humble. Reference: <https://github.com/ros2/rclcpp/issues/2163>
   std::vector<rclcpp::CallbackGroup::SharedPtr> callback_groups_;
@@ -32,7 +34,6 @@ class ClientTest : public ::testing::Test
     return cb_group;
   }
 
-protected:
   void SetUp() override
   {
     rclcpp::init(0, nullptr);
