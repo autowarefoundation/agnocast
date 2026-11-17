@@ -3,6 +3,8 @@
 #include "agnocast/agnocast_public_api.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+#include <future>
+
 namespace agnocast
 {
 
@@ -32,7 +34,7 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
     std::owner_less<rclcpp::CallbackGroup::WeakPtr>>
     weak_groups_to_nodes_ RCPPUTILS_TSA_GUARDED_BY(mutex_);
 
-  // Mutex to protect child_callback_groups_, weak_child_executors_, and child_threads_
+  // Mutex to protect the aligned child resource vectors below.
   mutable std::mutex child_resources_mutex_;
 
   // Callback groups corresponding to each child executor, used by stop_callback_group()
@@ -45,6 +47,11 @@ class CallbackIsolatedAgnocastExecutor : public rclcpp::Executor
 
   // Child threads created during spin()
   std::vector<std::thread> child_threads_ RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
+
+  // Completion is independent of is_spinning(): a child may not have started or may have
+  // already finished when shutdown requests cancellation.
+  std::vector<std::shared_future<void>> child_finished_
+    RCPPUTILS_TSA_GUARDED_BY(child_resources_mutex_);
 
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_manually_added_callback_groups_internal() const
     RCPPUTILS_TSA_REQUIRES(mutex_);

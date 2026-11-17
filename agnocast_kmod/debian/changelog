@@ -1,3 +1,20 @@
+agnocast-kmod-v2.4.2 (2.4.2-1) noble; urgency=medium
+
+  * fix(agnocast_kmod): raise MAX_TOPIC_NUM to 4096 (#1693 <https://github.com/tier4/agnocast/issues/1693>)
+  * fix(agnocast_kmod): link mmap update pools in the add ioctls (#1677 <https://github.com/tier4/agnocast/issues/1677>)
+  * fix(agnocast_kmod): allocate and copy topic info outside the global read lock (#1675 <https://github.com/tier4/agnocast/issues/1675>)
+  * test(agnocast_kmod): stop leaking the suite allocator in the non-default init test (#1678 <https://github.com/tier4/agnocast/issues/1678>)
+  * fix(agnocast_kmod): take topic->rwsem only around the entries tree (#1674 <https://github.com/tier4/agnocast/issues/1674>)
+  * fix(agnocast_kmod): skip the global write lock on idle daemon polls (#1673 <https://github.com/tier4/agnocast/issues/1673>)
+  * refactor(agnocast_kmod): replace manual process setup with helper functions (#1609 <https://github.com/tier4/agnocast/issues/1609>)
+  * refactor(agnocast_kmod): drop the redundant wakeup before kthread_stop() (#1660 <https://github.com/tier4/agnocast/issues/1660>)
+  * perf(agnocast_kmod): take pid_queue_lock without disabling IRQs (#1661 <https://github.com/tier4/agnocast/issues/1661>)
+  * ci(agnocast_kmod): run the KUnit suite on both default and PREEMPT_RT kernels (#1666 <https://github.com/tier4/agnocast/issues/1666>)
+  * fix(agnocast_kmod): unregister the exit tracepoint before stopping the exit worker (#1606 <https://github.com/tier4/agnocast/issues/1606>)
+  * fix(agnocast_kmod): make the exit tracepoint path atomic-safe on PREEMPT_RT (#1605 <https://github.com/tier4/agnocast/issues/1605>)
+
+ -- Koichi Imai <kotty.0704@gmail.com>  Wed, 11 Nov 2026 18:36:25 +0900
+
 agnocast-kmod-v2.4.1 (2.4.1-1) noble; urgency=medium
 
   * chore(agnocast): warn that the kmod domain bridge is unsupported (#1626 <https://github.com/tier4/agnocast/issues/1626>)

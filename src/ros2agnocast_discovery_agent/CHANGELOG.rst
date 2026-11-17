@@ -2,6 +2,9 @@
 Changelog for package ros2agnocast_discovery_agent
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.2 (2026-11-11)
+------------------
+
 2.4.1 (2026-09-25)
 ------------------
 * fix(ros2agnocast_discovery_agent): exit as soon as the domain is idle (`#1651 <https://github.com/tier4/agnocast/issues/1651>`_)
