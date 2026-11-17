@@ -222,6 +222,88 @@ void ServiceEventPublisher::publish_service_event_message(
   }
 }
 
+void ServiceIntrospection::init(
+  std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
+  const std::string & service_type)
+{
+  event_pub_ = std::make_unique<ServiceEventPublisher>(node, service_name, service_type);
+}
+
+void ServiceIntrospection::configure(
+  const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+  rcl_service_introspection_state_t introspection_state)
+{
+  event_pub_->configure(clock, qos_service_event_pub, introspection_state);
+}
+
+void ServiceIntrospection::publish_request_sent_event(
+  const void * payload, int64_t seqno, const rmw_gid_t & gid)
+{
+  event_pub_->publish_service_event_message(
+    ServiceEventInfo::REQUEST_SENT, payload, seqno, gid.data);
+}
+
+void ServiceIntrospection::publish_request_received_event(
+  const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE])
+{
+  event_pub_->publish_service_event_message(
+    ServiceEventInfo::REQUEST_RECEIVED, payload, seqno, client_gid);
+}
+
+void ServiceIntrospection::publish_response_sent_event(
+  const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE])
+{
+  event_pub_->publish_service_event_message(
+    ServiceEventInfo::RESPONSE_SENT, payload, seqno, client_gid);
+}
+
+void ServiceIntrospection::publish_response_received_event(
+  const void * payload, int64_t seqno, const rmw_gid_t & gid)
+{
+  event_pub_->publish_service_event_message(
+    ServiceEventInfo::RESPONSE_RECEIVED, payload, seqno, gid.data);
+}
+
+bool ServiceIntrospection::want_contents()
+{
+  return event_pub_->introspection_state() == RCL_SERVICE_INTROSPECTION_CONTENTS;
+}
+
+}  // namespace agnocast
+
+#else  // !AGNOCAST_HAS_SERVICE_INTROSPECTION
+
+namespace agnocast
+{
+
+void ServiceIntrospection::init(
+  std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &)
+{
+}
+
+void ServiceIntrospection::publish_request_sent_event(const void *, int64_t, const rmw_gid_t &)
+{
+}
+
+void ServiceIntrospection::publish_request_received_event(
+  const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE])
+{
+}
+
+void ServiceIntrospection::publish_response_sent_event(
+  const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE])
+{
+}
+
+void ServiceIntrospection::publish_response_received_event(const void *, int64_t, const rmw_gid_t &)
+{
+}
+
+bool ServiceIntrospection::want_contents()
+{
+  return false;
+}
+
 }  // namespace agnocast
 
 #endif  // AGNOCAST_HAS_SERVICE_INTROSPECTION
