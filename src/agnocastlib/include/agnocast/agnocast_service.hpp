@@ -15,6 +15,7 @@
 #include <service_msgs/msg/service_event_info.hpp>
 #endif
 
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -440,6 +441,14 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
   void publish_request_received_event(GenericRequestWrapper & req_wrapper);
+
+  void publish_response_sent_event(
+    int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
+    const std::optional<std::shared_ptr<void>> & response);
+
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<std::shared_ptr<void>> copy_response_if_contents(const void * response);
 #endif
 
   template <typename Func>
@@ -470,6 +479,13 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         [&publisher](size_t size) { return publisher->borrow_loaned_message(size); });
       res_wrapper.seqno() = req_wrapper.seqno();
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      // req_wrapper is moved into the callback below, so copy what the response event needs now.
+      const int64_t request_seqno = req_wrapper.seqno();
+      uint8_t client_gid[RMW_GID_STORAGE_SIZE];
+      std::memcpy(client_gid, req_wrapper.client_gid(), RMW_GID_STORAGE_SIZE);
+#endif
+
       ipc_shared_ptr<void> response = std::move(res_wrapper).take_response();
       ipc_shared_ptr<void> response_double(response);
 
@@ -488,9 +504,17 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         throw;
       }
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      const auto sent_response = copy_response_if_contents(response.get());
+#endif
+
       publisher->publish(std::move(response), [this](void * p) {
         GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
       });
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_response_sent_event(request_seqno, client_gid, sent_response);
+#endif
 
       // Safety regarding response_double
       //   When `response` is published, all references that share its control block are
