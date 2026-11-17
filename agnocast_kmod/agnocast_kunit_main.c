@@ -24,6 +24,7 @@
 #include "agnocast_kunit/agnocast_kunit_get_topic_subscriber_info.h"
 #include "agnocast_kunit/agnocast_kunit_get_version.h"
 #include "agnocast_kunit/agnocast_kunit_init_memory_allocator.h"
+#include "agnocast_kunit/agnocast_kunit_ipc_ns.h"
 #include "agnocast_kunit/agnocast_kunit_publish_msg.h"
 #include "agnocast_kunit/agnocast_kunit_receive_msg.h"
 #include "agnocast_kunit/agnocast_kunit_release_sub_ref.h"
@@ -73,6 +74,7 @@ struct kunit_case agnocast_test_cases[] = {
   TEST_CASES_INIT_MEMORY_ALLOCATOR,
   TEST_CASES_EXIT_FREE_DATA,
   TEST_CASES_GET_EXIT_PROCESS,
+  TEST_CASES_IPC_NS,
   {},
 };
 
