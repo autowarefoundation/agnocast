@@ -11,10 +11,6 @@
 #include "agnocast/internal/service_wire_type.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-#include <service_msgs/msg/service_event_info.hpp>
-#endif
-
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -57,9 +53,7 @@ protected:
   std::string service_name_;
   const rclcpp::QoS qos_;
   const ServiceRole role_;
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  std::shared_ptr<ServiceEventPublisher> event_publisher_;
-#endif
+  ServiceIntrospection introspection_;
 
   template <typename NodeT>
   explicit ServiceBase(
@@ -68,9 +62,7 @@ protected:
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
   {
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    event_publisher_ = std::make_shared<ServiceEventPublisher>(node_, service_name_, service_type);
-#endif
+    introspection_.init(node_, service_name_, service_type);
   }
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
@@ -101,7 +93,7 @@ public:
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t introspection_state)
   {
-    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+    introspection_.configure(clock, qos_service_event_pub, introspection_state);
   }
 #endif
 };
@@ -135,6 +127,15 @@ class ResponsePublisherManager
   }
 
 public:
+  /**
+   * @brief Returns the response publisher for a client, creating it if necessary.
+   *
+   * Publishers are keyed by the response topic name and cached. As a side effect, a publisher that
+   * no longer has any corresponding subscribers is pruned when the map is about to grow. This
+   * function is thread-safe.
+   *
+   * @throws rclcpp::exceptions::InvalidTopicNameException if @p response_topic_name is invalid.
+   */
   typename PublisherT::SharedPtr get_or_create_publisher_for(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
     const ServiceRole role, const std::string & response_topic_name)
@@ -203,44 +204,12 @@ private:
   detail::ResponsePublisherManager<ServiceResponsePublisher> publisher_manager_;
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  void publish_request_received_event(const ipc_shared_ptr<RequestT> & request)
-  {
-    const auto * payload = static_cast<const typename ServiceT::Request *>(request.get());
-
-    event_publisher_->publish_service_event_message(
-      service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED, payload, request->RequestMeta::seqno,
-      request->RequestMeta::client_gid);
-  }
-
-  void publish_response_sent_event(
-    const ipc_shared_ptr<RequestT> & request,
-    const std::optional<typename ServiceT::Response> & response)
-  {
-    event_publisher_->publish_service_event_message(
-      service_msgs::msg::ServiceEventInfo::RESPONSE_SENT, response ? &*response : nullptr,
-      request->RequestMeta::seqno, request->RequestMeta::client_gid);
-  }
-
-  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
-  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
-  std::optional<typename ServiceT::Response> copy_response_if_contents(
-    const ipc_shared_ptr<ResponseT> & response)
-  {
-    if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
-      return std::nullopt;
-    }
-    return static_cast<const typename ServiceT::Response &>(*response);
-  }
-#endif
-
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_request_received_event(request);
-#endif
+      introspection_.publish_request_received_event(
+        request.get(), request->RequestMeta::seqno, request->RequestMeta::client_gid);
 
       // The name comes from the request, so a bad one is the caller's fault.
       typename ServiceResponsePublisher::SharedPtr publisher;
@@ -263,15 +232,20 @@ private:
       ipc_shared_ptr<typename ServiceT::Response> response_double(response);
       callback(std::move(request_double), std::move(response_double));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      const auto sent_response = copy_response_if_contents(response);
-#endif
+      // publish() releases ownership of the response, so copy it before publish() (CONTENTS mode
+      // only). If configure() switches the mode to CONTENTS after this check, this RESPONSE_SENT
+      // event goes out without the payload; later responses include it.
+      const std::optional<typename ServiceT::Response> sent_response =
+        introspection_.want_contents()
+          ? std::optional<typename ServiceT::Response>(
+              static_cast<const typename ServiceT::Response &>(*response))
+          : std::nullopt;
 
       publisher->publish(std::move(response));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_response_sent_event(request, sent_response);
-#endif
+      introspection_.publish_response_sent_event(
+        sent_response ? &*sent_response : nullptr, request->RequestMeta::seqno,
+        request->RequestMeta::client_gid);
 
       // Safety regarding response_double
       //   When `response` is published, all references that share its control block are
@@ -285,9 +259,8 @@ private:
   auto wrap_deferred_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<RequestT> && request) {
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_request_received_event(request);
-#endif
+      introspection_.publish_request_received_event(
+        request.get(), request->RequestMeta::seqno, request->RequestMeta::client_gid);
 
       callback(this->shared_from_this(), std::move(request));
     };
@@ -374,15 +347,20 @@ public:
     auto publisher = publisher_manager_.get_or_create_publisher_for(
       node_, qos_, role_, internal_request->RequestMeta::response_topic_name);
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    const auto sent_response = copy_response_if_contents(internal_response);
-#endif
+    // publish() releases ownership of the response, so copy it before publish() (CONTENTS mode
+    // only). If configure() switches the mode to CONTENTS after this check, this RESPONSE_SENT
+    // event goes out without the payload; later responses include it.
+    const std::optional<typename ServiceT::Response> sent_response =
+      introspection_.want_contents()
+        ? std::optional<typename ServiceT::Response>(
+            static_cast<const typename ServiceT::Response &>(*internal_response))
+        : std::nullopt;
 
     publisher->publish(std::move(internal_response));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    publish_response_sent_event(internal_request, sent_response);
-#endif
+    introspection_.publish_response_sent_event(
+      sent_response ? &*sent_response : nullptr, internal_request->RequestMeta::seqno,
+      internal_request->RequestMeta::client_gid);
   }
 
   /**
@@ -439,17 +417,10 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
 
   ServiceTsBundle service_ts_bundle_;
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  void publish_request_received_event(GenericRequestWrapper & req_wrapper);
-
-  void publish_response_sent_event(
-    int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
-    const std::optional<std::shared_ptr<void>> & response);
-
-  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
-  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
-  std::optional<std::shared_ptr<void>> copy_response_if_contents(const void * response);
-#endif
+  void send_response_impl(
+    ipc_shared_ptr<void> && response, int64_t seqno,
+    const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
+    typename TypeErasedPublisher::SharedPtr publisher);
 
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
@@ -458,9 +429,8 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_request_received_event(req_wrapper);
-#endif
+      introspection_.publish_request_received_event(
+        req_wrapper.get(), req_wrapper.seqno(), req_wrapper.client_gid());
 
       // The name comes from the request, so a bad one is the caller's fault.
       typename TypeErasedPublisher::SharedPtr publisher;
@@ -474,17 +444,14 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         return;
       }
 
-      auto res_wrapper = GenericResponseWrapper::allocate(
-        service_ts_bundle_.response_members,
-        [&publisher](size_t size) { return publisher->borrow_loaned_message(size); });
-      res_wrapper.seqno() = req_wrapper.seqno();
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      // req_wrapper is moved into the callback below, so copy what the response event needs now.
       const int64_t request_seqno = req_wrapper.seqno();
       uint8_t client_gid[RMW_GID_STORAGE_SIZE];
       std::memcpy(client_gid, req_wrapper.client_gid(), RMW_GID_STORAGE_SIZE);
-#endif
+
+      auto res_wrapper = GenericResponseWrapper::allocate(
+        service_ts_bundle_.response_members,
+        [&publisher](size_t size) { return publisher->borrow_loaned_message(size); });
+      res_wrapper.seqno() = request_seqno;
 
       ipc_shared_ptr<void> response = std::move(res_wrapper).take_response();
       ipc_shared_ptr<void> response_double(response);
@@ -504,17 +471,7 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         throw;
       }
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      const auto sent_response = copy_response_if_contents(response.get());
-#endif
-
-      publisher->publish(std::move(response), [this](void * p) {
-        GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
-      });
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_response_sent_event(request_seqno, client_gid, sent_response);
-#endif
+      send_response_impl(std::move(response), request_seqno, client_gid, publisher);
 
       // Safety regarding response_double
       //   When `response` is published, all references that share its control block are
@@ -531,9 +488,8 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-      publish_request_received_event(req_wrapper);
-#endif
+      introspection_.publish_request_received_event(
+        req_wrapper.get(), req_wrapper.seqno(), req_wrapper.client_gid());
 
       callback(this->shared_from_this(), std::move(req_wrapper).take_request());
     };
