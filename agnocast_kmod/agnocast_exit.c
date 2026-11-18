@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
-static void remove_all_topics(void)
+static void remove_all_topics(struct agnocast_ns * ns)
 {
   struct topic_wrapper * wrapper;
   struct hlist_node * tmp;
@@ -9,7 +9,7 @@ static void remove_all_topics(void)
 
   // release frees the shared topic_struct (rbtree + pub/sub tables) once its
   // last wrapper goes; for a grouped pair that is the second wrapper.
-  hash_for_each_safe(topic_hashtable, bkt, tmp, wrapper, node)
+  hash_for_each_safe(ns->topic_hashtable, bkt, tmp, wrapper, node)
   {
     agnocast_release_topic_wrapper(wrapper);
   }
@@ -40,12 +40,12 @@ static void remove_all_discovery_agents(void)
   }
 }
 
-static void remove_all_bridge_info(void)
+static void remove_all_bridge_info(struct agnocast_ns * ns)
 {
   struct bridge_info * br_info;
   int bkt;
   struct hlist_node * tmp;
-  hash_for_each_safe(bridge_htable, bkt, tmp, br_info, node)
+  hash_for_each_safe(ns->bridge_htable, bkt, tmp, br_info, node)
   {
     hash_del(&br_info->node);
     kfree(br_info->topic_name);
@@ -53,12 +53,12 @@ static void remove_all_bridge_info(void)
   }
 }
 
-static void remove_all_domain_rules(void)
+static void remove_all_domain_rules(struct agnocast_ns * ns)
 {
   struct domain_bridge_rule * rule;
   int bkt;
   struct hlist_node * tmp;
-  hash_for_each_safe(domain_rule_htable, bkt, tmp, rule, node)
+  hash_for_each_safe(ns->domain_rule_htable, bkt, tmp, rule, node)
   {
     hash_del(&rule->node);
     kfree(rule->topic_name_a);
@@ -70,12 +70,17 @@ static void remove_all_domain_rules(void)
 // Called during module unload. Not an ioctl function, so we manage locks here directly.
 void agnocast_exit_free_data(void)
 {
+  struct agnocast_ns * ns;
+  while ((ns = agnocast_ns_write_lock_any()) != NULL) {
+    remove_all_topics(ns);
+    remove_all_bridge_info(ns);
+    remove_all_domain_rules(ns);
+    agnocast_ns_retire_and_unlock(ns);
+  }
+
   down_write(&global_htables_rwsem);
-  remove_all_topics();
   remove_all_process_info();
   remove_all_discovery_agents();
-  remove_all_bridge_info();
-  remove_all_domain_rules();
   up_write(&global_htables_rwsem);
 }
 

@@ -6,12 +6,104 @@ struct class * agnocast_class;
 struct device * agnocast_device;
 
 DECLARE_RWSEM(global_htables_rwsem);
-
 DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
-DEFINE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
-DEFINE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
-DEFINE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+
+// Every IPC namespace that has registered something. Guarded by global_htables_rwsem.
+static DEFINE_HASHTABLE(ns_htable, AGNOCAST_NS_HASH_BITS);
+
+// Caller holds global_htables_rwsem.
+static struct agnocast_ns * ns_find(const struct ipc_namespace * ipc_ns)
+{
+  struct agnocast_ns * ns;
+  hash_for_each_possible(ns_htable, ns, node, (unsigned long)ipc_ns)
+  {
+    if (ns->ipc_ns == ipc_ns) return ns;
+  }
+  return NULL;
+}
+
+struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns)
+{
+  down_read(&global_htables_rwsem);
+  struct agnocast_ns * ns = ns_find(ipc_ns);
+  if (!ns) up_read(&global_htables_rwsem);
+  return ns;
+}
+
+struct agnocast_ns * agnocast_ns_write_lock(const struct ipc_namespace * ipc_ns)
+{
+  down_write(&global_htables_rwsem);
+  struct agnocast_ns * ns = ns_find(ipc_ns);
+  if (!ns) up_write(&global_htables_rwsem);
+  return ns;
+}
+
+struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace * ipc_ns)
+{
+  down_write(&global_htables_rwsem);
+  struct agnocast_ns * ns = ns_find(ipc_ns);
+  if (ns) return ns;
+
+  ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
+  if (!ns) {
+    up_write(&global_htables_rwsem);
+    return ERR_PTR(-ENOMEM);
+  }
+  ns->ipc_ns = ipc_ns;
+  hash_init(ns->topic_hashtable);
+  hash_init(ns->bridge_htable);
+  hash_init(ns->domain_rule_htable);
+  hash_add(ns_htable, &ns->node, (unsigned long)ipc_ns);
+  return ns;
+}
+
+void agnocast_ns_read_unlock(struct agnocast_ns * ns)
+{
+  up_read(&global_htables_rwsem);
+}
+
+static bool ns_is_empty(struct agnocast_ns * ns)
+{
+  return ns->alive_proc_num == 0 && ns->agent_num == 0 && hash_empty(ns->topic_hashtable) &&
+         hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
+}
+
+void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
+{
+  hash_del(&ns->node);
+  kvfree(ns);
+  up_write(&global_htables_rwsem);
+}
+
+void agnocast_ns_write_unlock(struct agnocast_ns * ns)
+{
+  if (ns_is_empty(ns)) {
+    agnocast_ns_retire_and_unlock(ns);
+    return;
+  }
+  up_write(&global_htables_rwsem);
+}
+
+struct agnocast_ns * agnocast_ns_write_lock_any(void)
+{
+  struct agnocast_ns * ns;
+  int bkt;
+  down_write(&global_htables_rwsem);
+  hash_for_each(ns_htable, bkt, ns, node)
+  {
+    return ns;
+  }
+  up_write(&global_htables_rwsem);
+  return NULL;
+}
+
+#ifdef KUNIT_BUILD
+struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns)
+{
+  return ns_find(ipc_ns);
+}
+#endif
 
 DEFINE_RAW_SPINLOCK(pid_queue_lock);
 pid_t exit_pid_queue[EXIT_QUEUE_SIZE];
@@ -278,20 +370,54 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
   }
 }
 
-// Caller holds global_htables_rwsem (write).
-void agnocast_remove_discovery_agent_by_pid(const pid_t pid)
+// Caller holds the namespace lock (write).
+void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid)
 {
   struct discovery_agent_info * agent;
   struct hlist_node * tmp;
   hash_for_each_possible_safe(
     discovery_agent_htable, agent, tmp, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
   {
-    if (agent->pid == pid) {
+    if (agent->pid == pid && agent->ipc_ns == ns->ipc_ns) {
       hash_del_rcu(&agent->node);
       kfree_rcu(agent, rcu_head);
+      ns->agent_num--;
       return;
     }
   }
+}
+
+const struct ipc_namespace * agnocast_process_ipc_ns(const pid_t pid)
+{
+  const struct ipc_namespace * ipc_ns = NULL;
+  struct process_info * proc_info;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      ipc_ns = proc_info->ipc_ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return ipc_ns;
+}
+
+const struct ipc_namespace * agnocast_discovery_agent_ipc_ns(const pid_t pid)
+{
+  const struct ipc_namespace * ipc_ns = NULL;
+  struct discovery_agent_info * agent;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(
+    discovery_agent_htable, agent, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
+  {
+    if (agent->pid == pid) {
+      ipc_ns = agent->ipc_ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return ipc_ns;
 }
 
 // RCU-protected check: returns true if pid is a registered agnocast process or discovery agent.
@@ -326,25 +452,29 @@ bool is_agnocast_pid(const pid_t pid)
 // directly.
 void agnocast_process_exit_cleanup(const pid_t pid)
 {
-  down_write(&global_htables_rwsem);
-
   // The discovery agent is tracked outside proc_info and has no proc_info entry, so drain it
-  // here before the proc_info lookup (which would otherwise return early for the agent's pid).
-  agnocast_remove_discovery_agent_by_pid(pid);
-
-  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
-  // have changed between then and now (e.g., the process was already cleaned up by a prior call).
-  struct process_info * proc_info = NULL;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
-  {
-    if (proc_info->global_pid == pid) {
-      break;
+  // first, in its own namespace: the same pid may also have a stale exited proc_info left in
+  // another namespace, whose unlink daemon died before draining it.
+  const struct ipc_namespace * agent_ipc_ns = agnocast_discovery_agent_ipc_ns(pid);
+  if (agent_ipc_ns) {
+    struct agnocast_ns * agent_ns = agnocast_ns_write_lock(agent_ipc_ns);
+    if (agent_ns) {
+      agnocast_remove_discovery_agent_by_pid(agent_ns, pid);
+      agnocast_ns_write_unlock(agent_ns);
     }
   }
 
-  if (!proc_info || proc_info->global_pid != pid) {
-    up_write(&global_htables_rwsem);
+  const struct ipc_namespace * ipc_ns = agnocast_process_ipc_ns(pid);
+  if (!ipc_ns) return;
+
+  struct agnocast_ns * ns = agnocast_ns_write_lock(ipc_ns);
+  if (!ns) return;
+
+  // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
+  // have changed between then and now (e.g., the process was already cleaned up by a prior call).
+  struct process_info * proc_info = agnocast_find_process_info(pid);
+  if (!proc_info || proc_info->ipc_ns != ns->ipc_ns) {
+    agnocast_ns_write_unlock(ns);
     return;
   }
 
@@ -352,8 +482,11 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   if (proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
+    ns->alive_proc_num--;
   } else {
-    // This proc_info will be removed from proc_info_htable later by the unlink daemon.
+    // This proc_info will be removed from proc_info_htable later by the unlink daemon. It stops
+    // counting as alive now, so a namespace whose unlink daemon died with it can be retired.
+    if (!proc_info->exited) ns->alive_proc_num--;
     proc_info->exited = true;
   }
 
@@ -363,7 +496,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   struct hlist_node * node;
   struct hlist_node * tmp;
   int bkt;
-  hash_for_each_safe(topic_hashtable, bkt, node, wrapper, node)
+  hash_for_each_safe(ns->topic_hashtable, bkt, node, wrapper, node)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
@@ -376,7 +509,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   }
 
   struct bridge_info * br_info;
-  hash_for_each_safe(bridge_htable, bkt, tmp, br_info, node)
+  hash_for_each_safe(ns->bridge_htable, bkt, tmp, br_info, node)
   {
     if (br_info->pid == pid) {
       hash_del(&br_info->node);
@@ -385,7 +518,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     }
   }
 
-  up_write(&global_htables_rwsem);
+  agnocast_ns_write_unlock(ns);
 
 #ifndef KUNIT_BUILD
   dev_info(agnocast_device, "Process (pid=%d) has exited. (%s)\n", pid, __func__);
