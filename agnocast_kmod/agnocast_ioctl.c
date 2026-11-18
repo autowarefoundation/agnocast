@@ -2848,7 +2848,7 @@ static bool bridge_manager_is_alone(const struct agnocast_ns * ns, const pid_t p
 
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
 {
-  const struct ipc_namespace * ipc_ns = agnocast_process_ipc_ns(pid);
+  const struct ipc_namespace * ipc_ns = agnocast_find_process_ipc_ns(pid);
   struct agnocast_ns * ns = ipc_ns ? agnocast_ns_write_lock(ipc_ns) : NULL;
   if (!ns) return 0;
   struct process_info * proc_info = agnocast_find_process_info(pid);

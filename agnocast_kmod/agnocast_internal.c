@@ -387,7 +387,7 @@ void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t
   }
 }
 
-const struct ipc_namespace * agnocast_process_ipc_ns(const pid_t pid)
+const struct ipc_namespace * agnocast_find_process_ipc_ns(const pid_t pid)
 {
   const struct ipc_namespace * ipc_ns = NULL;
   struct process_info * proc_info;
@@ -403,7 +403,7 @@ const struct ipc_namespace * agnocast_process_ipc_ns(const pid_t pid)
   return ipc_ns;
 }
 
-const struct ipc_namespace * agnocast_discovery_agent_ipc_ns(const pid_t pid)
+const struct ipc_namespace * agnocast_find_discovery_agent_ipc_ns(const pid_t pid)
 {
   const struct ipc_namespace * ipc_ns = NULL;
   struct discovery_agent_info * agent;
@@ -455,7 +455,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   // The discovery agent is tracked outside proc_info and has no proc_info entry, so drain it
   // first, in its own namespace: the same pid may also have a stale exited proc_info left in
   // another namespace, whose unlink daemon died before draining it.
-  const struct ipc_namespace * agent_ipc_ns = agnocast_discovery_agent_ipc_ns(pid);
+  const struct ipc_namespace * agent_ipc_ns = agnocast_find_discovery_agent_ipc_ns(pid);
   if (agent_ipc_ns) {
     struct agnocast_ns * agent_ns = agnocast_ns_write_lock(agent_ipc_ns);
     if (agent_ns) {
@@ -464,7 +464,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     }
   }
 
-  const struct ipc_namespace * ipc_ns = agnocast_process_ipc_ns(pid);
+  const struct ipc_namespace * ipc_ns = agnocast_find_process_ipc_ns(pid);
   if (!ipc_ns) return;
 
   struct agnocast_ns * ns = agnocast_ns_write_lock(ipc_ns);

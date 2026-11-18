@@ -309,8 +309,8 @@ void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t
 // agnocast_ns_write_lock(): the entry itself may be gone by the time the caller has the lock.
 // Looked up separately because one pid can have both, in different namespaces: a stale exited
 // process_info and a live discovery agent that reused the pid.
-const struct ipc_namespace * agnocast_process_ipc_ns(const pid_t pid);
-const struct ipc_namespace * agnocast_discovery_agent_ipc_ns(const pid_t pid);
+const struct ipc_namespace * agnocast_find_process_ipc_ns(const pid_t pid);
+const struct ipc_namespace * agnocast_find_discovery_agent_ipc_ns(const pid_t pid);
 
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 
