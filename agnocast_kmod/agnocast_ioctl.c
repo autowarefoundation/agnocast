@@ -646,7 +646,7 @@ int agnocast_ioctl_release_message_entry_reference(
 unlock_all:
   up_read(&wrapper->topic->rwsem);
 unlock_only_ns:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -1190,7 +1190,7 @@ unlock_all:
   }
 
 unlock_only_ns:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   kfree(new_node);
   return ret;
 }
@@ -1369,7 +1369,7 @@ int agnocast_ioctl_receive_msg(
   }
 
 unlock_only_ns:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -1458,7 +1458,7 @@ unlock_topic:
   }
 
 unlock_only_ns:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -1551,7 +1551,7 @@ int agnocast_ioctl_set_ros2_subscriber_num(
     ret = -ENOENT;
   }
 
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -1568,7 +1568,7 @@ int agnocast_ioctl_set_ros2_publisher_num(
     ret = -ENOENT;
   }
 
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -1681,7 +1681,7 @@ void agnocast_commit_exit_process(
   if (global_pid < 0) {
     ns = agnocast_ns_read_lock(ipc_ns);
     *ret_daemon_should_exit = !ns || get_process_num_except_unlink_daemon(ns) == 0;
-    if (ns) agnocast_ns_read_unlock(ns);
+    agnocast_ns_read_unlock(ns);
     if (!*ret_daemon_should_exit) {
       return;
     }
@@ -2094,7 +2094,7 @@ int agnocast_ioctl_get_topic_subscriber_info(
     const struct topic_wrapper * wrapper =
       ns ? find_topic(ns, topic_name, topic_info_args->domain_id) : NULL;
     num = wrapper ? fill_subscriber_info(wrapper, topic_info_mem, capacity) : 0;
-    if (ns) agnocast_ns_read_unlock(ns);
+    agnocast_ns_read_unlock(ns);
 
     if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
@@ -2123,7 +2123,7 @@ int agnocast_ioctl_get_topic_publisher_info(
     const struct topic_wrapper * wrapper =
       ns ? find_topic(ns, topic_name, topic_info_args->domain_id) : NULL;
     num = wrapper ? fill_publisher_info(wrapper, topic_info_mem, capacity) : 0;
-    if (ns) agnocast_ns_read_unlock(ns);
+    agnocast_ns_read_unlock(ns);
 
     if (num <= capacity || num > topic_info_args->topic_info_ret_buffer_size) break;
 
@@ -2166,7 +2166,7 @@ int agnocast_ioctl_get_subscriber_qos(
   args->ret_is_reliable = sub_info->qos_is_reliable;
 
 unlock:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -2199,7 +2199,7 @@ int agnocast_ioctl_get_publisher_qos(
   args->ret_is_transient_local = pub_info->qos_is_transient_local;
 
 unlock:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 
@@ -2779,7 +2779,7 @@ int agnocast_ioctl_remove_bridge(
   }
 
 unlock:
-  if (ns) agnocast_ns_write_unlock(ns);
+  agnocast_ns_write_unlock(ns);
   return ret;
 }
 
@@ -2890,7 +2890,7 @@ int agnocast_ioctl_discovery_agent_should_exit(
     ns = agnocast_ns_read_lock(ipc_ns);
     *ret_should_exit =
       !ns || get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0;
-    if (ns) agnocast_ns_read_unlock(ns);
+    agnocast_ns_read_unlock(ns);
     return 0;
   }
 
@@ -2953,7 +2953,7 @@ int agnocast_ioctl_discovery_agent_exists(
 {
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
   *ret_exists = ns && agnocast_find_discovery_agent(ns, domain_id) != NULL;
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return 0;
 }
 
@@ -2967,7 +2967,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   // agnocast_commit_exit_process().
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
   const bool alone = !ns || bridge_manager_is_alone(ns, pid);
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   if (!alone) {
     return 0;
   }
@@ -2981,7 +2981,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
     }
     ioctl_ret->ret_should_shutdown = true;
   }
-  if (ns) agnocast_ns_write_unlock(ns);
+  agnocast_ns_write_unlock(ns);
   return 0;
 }
 
@@ -3861,7 +3861,7 @@ int agnocast_increment_message_entry_rc(
 unlock_all:
   up_read(&wrapper->topic->rwsem);
 unlock_only_ns:
-  if (ns) agnocast_ns_read_unlock(ns);
+  agnocast_ns_read_unlock(ns);
   return ret;
 }
 

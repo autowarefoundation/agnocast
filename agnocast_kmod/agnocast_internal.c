@@ -66,6 +66,7 @@ struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace
 
 void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 {
+  if (!ns) return;
   up_read(&global_htables_rwsem);
 }
 
@@ -78,6 +79,7 @@ void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
 
 void agnocast_ns_write_unlock(struct agnocast_ns * ns)
 {
+  if (!ns) return;
   if (ns_is_empty(ns)) {
     agnocast_ns_retire_and_unlock(ns);
     return;
@@ -423,29 +425,7 @@ const struct ipc_namespace * agnocast_find_discovery_agent_ipc_ns(const pid_t pi
 // RCU-protected check: returns true if pid is a registered agnocast process or discovery agent.
 bool is_agnocast_pid(const pid_t pid)
 {
-  struct process_info * proc_info;
-  struct discovery_agent_info * agent;
-  bool found = false;
-  rcu_read_lock();
-  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
-  {
-    if (proc_info->global_pid == pid) {
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    hash_for_each_possible_rcu(
-      discovery_agent_htable, agent, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
-    {
-      if (agent->pid == pid) {
-        found = true;
-        break;
-      }
-    }
-  }
-  rcu_read_unlock();
-  return found;
+  return agnocast_find_process_ipc_ns(pid) || agnocast_find_discovery_agent_ipc_ns(pid);
 }
 
 // Called from sched_process_exit tracepoint. Not an ioctl function, so we manage locks here

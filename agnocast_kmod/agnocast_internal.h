@@ -273,6 +273,7 @@ struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns);
 struct agnocast_ns * agnocast_ns_write_lock(const struct ipc_namespace * ipc_ns);
 // For callers that register something. Returns ERR_PTR(-ENOMEM) instead of NULL.
 struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace * ipc_ns);
+// The unlock functions accept NULL, the result of a lookup that found nothing, and do nothing.
 void agnocast_ns_read_unlock(struct agnocast_ns * ns);
 // Retires the namespace if this left it empty.
 void agnocast_ns_write_unlock(struct agnocast_ns * ns);
