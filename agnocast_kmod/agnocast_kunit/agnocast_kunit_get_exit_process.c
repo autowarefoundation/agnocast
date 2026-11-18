@@ -7,6 +7,7 @@
 #include <kunit/test.h>
 
 static const pid_t PID = 1000;
+static const pid_t DAEMON_PID = 1001;
 
 // get_exit_process_cmd tolerates a failed ret_daemon_should_exit copy_to_user because the flag is
 // re-derived on the next poll. That fallback only works if agnocast_commit_exit_process() derives
@@ -53,7 +54,13 @@ void test_case_get_exit_process_idle_poll_process_remains(struct kunit * test)
 
 void test_case_get_exit_process_commit_last_process(struct kunit * test)
 {
-  // Arrange
+  // Arrange: the unlink daemon that drains the process stays registered while it does.
+  union ioctl_add_process_args daemon_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(
+      DAEMON_PID, current->nsproxy->ipc_ns, PROCESS_ROLE_UNLINK_DAEMON, 0, &daemon_args),
+    0);
   agnocast_kunit_setup_process(test, PID, 0);
   agnocast_process_exit_cleanup(PID);
 
