@@ -23,6 +23,12 @@ static struct agnocast_ns * ns_find(const struct ipc_namespace * ipc_ns)
   return NULL;
 }
 
+static bool ns_is_empty(struct agnocast_ns * ns)
+{
+  return ns->alive_proc_num == 0 && ns->agent_num == 0 && hash_empty(ns->topic_hashtable) &&
+         hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
+}
+
 struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns)
 {
   down_read(&global_htables_rwsem);
@@ -61,12 +67,6 @@ struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace
 void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 {
   up_read(&global_htables_rwsem);
-}
-
-static bool ns_is_empty(struct agnocast_ns * ns)
-{
-  return ns->alive_proc_num == 0 && ns->agent_num == 0 && hash_empty(ns->topic_hashtable) &&
-         hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
 }
 
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
