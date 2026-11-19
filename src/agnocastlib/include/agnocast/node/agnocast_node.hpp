@@ -719,7 +719,11 @@ private:
     return timer;
   }
 
-  // ParsedArguments must be stored to keep rcl_arguments_t alive
+  // Stored to keep rcl_arguments_t alive, and declared first on purpose: its initializer brings
+  // the Agnocast context up, and later members -- NodeTimeSource's clock-thread executor among
+  // them -- assume agnocast::ok() by the time they are constructed.
+  // TODO(Koichi98): once the Agnocast-only executors take their context instead of reading the
+  // global one, this becomes a data dependency and the declaration order stops mattering.
   ParsedArguments local_args_;
 
   node_interfaces::NodeBase::SharedPtr node_base_;

@@ -44,9 +44,7 @@ protected:
 
   void TearDown() override
   {
-    if (agnocast::ok()) {
-      agnocast::shutdown();
-    }
+    agnocast::shutdown();
     reset_context_for_test();
   }
 };
