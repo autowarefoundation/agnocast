@@ -48,7 +48,8 @@ extern struct device * agnocast_device;
 // Guards the structure of proc_info_htable and discovery_agent_htable, which stay host-wide
 // because the exit path knows only a pid. Their readers walk them under RCU. An entry's contents
 // are guarded by the rwsem of the namespace it belongs to, so a walk tests ipc_ns before any other
-// field.
+// field. An exited entry never changes again, so it may outlive the namespace's state and be
+// drained under a later one created for the same ipc_ns.
 extern spinlock_t agnocast_pid_index_lock;
 
 // =========================================
@@ -273,8 +274,10 @@ struct agnocast_ns
   // Set under rwsem WRITE when the namespace leaves the registry. A task that looked it up before
   // then sees it once it has the lock and looks the namespace up again.
   bool dead;
-  // This namespace's entries in the host-wide proc_info_htable and discovery_agent_htable.
-  uint32_t proc_num;
+  // This namespace's live entries in the host-wide proc_info_htable and discovery_agent_htable.
+  // Exited processes do not count: in a killed container no unlink daemon is left to drain them,
+  // and counting them would keep this state until rmmod.
+  uint32_t alive_proc_num;
   uint32_t agent_num;
   DECLARE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
   DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);

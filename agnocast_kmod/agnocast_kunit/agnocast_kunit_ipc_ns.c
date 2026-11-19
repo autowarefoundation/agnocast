@@ -86,22 +86,36 @@ void test_case_ipc_ns_write_lock_leaves_other_namespace_free(struct kunit * test
   agnocast_ns_write_unlock(ns);
 }
 
-void test_case_ipc_ns_retired_once_empty(struct kunit * test)
+// A killed container leaves no unlink daemon to drain its exited entries.
+void test_case_ipc_ns_retired_when_last_process_exits(struct kunit * test)
 {
   // Arrange
   setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
-  // The exited process stays registered until its namespace's unlink daemon drains it.
-  agnocast_process_exit_cleanup(OTHER_PID);
-  KUNIT_ASSERT_NOT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
-  struct ioctl_get_exit_process_args get_exit_process_args = {};
-  const pid_t global_pid = agnocast_ioctl_get_exit_process(&other_ipc_ns, &get_exit_process_args);
-  KUNIT_ASSERT_EQ(test, global_pid, OTHER_PID);
 
   // Act
+  agnocast_process_exit_cleanup(OTHER_PID);
+
+  // Assert
+  KUNIT_EXPECT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+  KUNIT_EXPECT_TRUE(test, agnocast_is_proc_exited(OTHER_PID));
+}
+
+void test_case_ipc_ns_exited_entry_drained_after_retirement(struct kunit * test)
+{
+  // Arrange
+  setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
+  agnocast_process_exit_cleanup(OTHER_PID);
+  KUNIT_ASSERT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+
+  // Act
+  struct ioctl_get_exit_process_args get_exit_process_args = {};
+  const pid_t global_pid = agnocast_ioctl_get_exit_process(&other_ipc_ns, &get_exit_process_args);
   bool daemon_should_exit = false;
   agnocast_commit_exit_process(&other_ipc_ns, global_pid, -1, &daemon_should_exit);
 
   // Assert
+  KUNIT_EXPECT_EQ(test, global_pid, OTHER_PID);
+  KUNIT_EXPECT_FALSE(test, is_agnocast_pid(OTHER_PID));
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
   KUNIT_EXPECT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
 }

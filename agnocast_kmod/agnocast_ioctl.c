@@ -946,7 +946,7 @@ int agnocast_ioctl_add_process(
   spin_lock(&agnocast_pid_index_lock);
   hash_add_rcu(proc_info_htable, &new_proc_info->node, hash_val);
   spin_unlock(&agnocast_pid_index_lock);
-  ns->proc_num++;
+  ns->alive_proc_num++;
 
   ioctl_ret->ret_addr = new_proc_info->mempool_entry->addr;
   ioctl_ret->ret_shm_size = mempool_size_bytes;
@@ -1669,8 +1669,8 @@ pid_t agnocast_ioctl_get_exit_process(
   ioctl_ret->ret_daemon_should_exit = false;
   pid_t global_pid = -1;
 
+  // Exited entries outlive the namespace's state, so the walk runs even when it is gone.
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
-  if (!ns) return global_pid;
 
   struct process_info * proc_info;
   int bkt;
@@ -1687,7 +1687,7 @@ pid_t agnocast_ioctl_get_exit_process(
   }
   rcu_read_unlock();
 
-  agnocast_ns_read_unlock(ns);
+  if (ns) agnocast_ns_read_unlock(ns);
   return global_pid;
 }
 
@@ -1697,8 +1697,9 @@ static void remove_process_info(struct agnocast_ns * ns, struct process_info * p
   spin_lock(&agnocast_pid_index_lock);
   hash_del_rcu(&proc_info->node);
   spin_unlock(&agnocast_pid_index_lock);
+  const bool exited = proc_info->exited;
   kfree_rcu(proc_info, rcu_head);
-  ns->proc_num--;
+  if (!exited) ns->alive_proc_num--;
 }
 
 void agnocast_commit_exit_process(
@@ -1718,7 +1719,13 @@ void agnocast_commit_exit_process(
     }
   }
 
-  ns = agnocast_ns_write_lock(ipc_ns);
+  // Draining an entry left behind by a retired namespace recreates it for the removal.
+  ns = global_pid >= 0 ? agnocast_ns_write_lock_or_create(ipc_ns) : agnocast_ns_write_lock(ipc_ns);
+  if (IS_ERR(ns)) {
+    // The entry stays, so the daemon gets it again.
+    *ret_daemon_should_exit = false;
+    return;
+  }
   if (!ns) {
     *ret_daemon_should_exit = true;
     return;

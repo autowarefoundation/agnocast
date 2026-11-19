@@ -113,7 +113,7 @@ void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 
 static bool ns_is_empty(struct agnocast_ns * ns)
 {
-  return ns->proc_num == 0 && ns->agent_num == 0 && hash_empty(ns->topic_hashtable) &&
+  return ns->alive_proc_num == 0 && ns->agent_num == 0 && hash_empty(ns->topic_hashtable) &&
          hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
 }
 
@@ -545,10 +545,11 @@ void agnocast_process_exit_cleanup(const pid_t pid)
     hash_del_rcu(&proc_info->node);
     spin_unlock(&agnocast_pid_index_lock);
     kfree_rcu(proc_info, rcu_head);
-    ns->proc_num--;
-  } else {
+    ns->alive_proc_num--;
+  } else if (!proc_info->exited) {
     // This proc_info will be removed from proc_info_htable later by the unlink daemon.
     proc_info->exited = true;
+    ns->alive_proc_num--;
   }
 
   free_memory(pid);
