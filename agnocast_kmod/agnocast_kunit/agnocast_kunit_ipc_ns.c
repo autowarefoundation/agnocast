@@ -113,6 +113,26 @@ void test_case_ipc_ns_retired_when_unlink_daemon_dies(struct kunit * test)
   KUNIT_EXPECT_TRUE(test, agnocast_is_proc_exited(OTHER_PID));
 }
 
+void test_case_ipc_ns_exited_entry_drained_after_retirement(struct kunit * test)
+{
+  // Arrange
+  setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
+  agnocast_process_exit_cleanup(OTHER_PID);
+  KUNIT_ASSERT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+
+  // Act
+  struct ioctl_get_exit_process_args get_exit_process_args = {};
+  const pid_t global_pid = agnocast_ioctl_get_exit_process(&other_ipc_ns, &get_exit_process_args);
+  bool daemon_should_exit = false;
+  agnocast_commit_exit_process(&other_ipc_ns, global_pid, -1, &daemon_should_exit);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, global_pid, OTHER_PID);
+  KUNIT_EXPECT_FALSE(test, is_agnocast_pid(OTHER_PID));
+  KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  KUNIT_EXPECT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+}
+
 // A discovery agent in one namespace reuses the pid of an exited, undrained process left in
 // another. Its exit must still remove the agent from its own namespace.
 void test_case_ipc_ns_agent_reusing_stale_pid_is_removed(struct kunit * test)

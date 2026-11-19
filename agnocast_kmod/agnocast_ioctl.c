@@ -1641,12 +1641,14 @@ pid_t agnocast_ioctl_get_exit_process(
   ioctl_ret->ret_daemon_should_exit = false;
   pid_t global_pid = -1;
 
+  // Exited entries outlive the namespace's state, so the walk runs even when it is gone. Without
+  // the state no exit cleanup can mark this namespace's entries, so RCU alone is enough then.
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
-  if (!ns) return global_pid;
 
   struct process_info * proc_info;
   int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
   {
     if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
       continue;
@@ -1656,6 +1658,7 @@ pid_t agnocast_ioctl_get_exit_process(
     global_pid = proc_info->global_pid;
     break;
   }
+  rcu_read_unlock();
 
   agnocast_ns_read_unlock(ns);
   return global_pid;
@@ -1689,6 +1692,7 @@ void agnocast_commit_exit_process(
 
   ns = agnocast_ns_write_lock(ipc_ns);
   if (!ns) {
+    if (global_pid >= 0) agnocast_remove_exited_process(ipc_ns, global_pid);
     *ret_daemon_should_exit = true;
     return;
   }

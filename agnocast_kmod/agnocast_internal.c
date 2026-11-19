@@ -324,6 +324,17 @@ struct process_info * agnocast_find_process_info(const pid_t pid)
   return NULL;
 }
 
+void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid)
+{
+  down_write(&global_htables_rwsem);
+  struct process_info * proc_info = agnocast_find_process_info(pid);
+  if (proc_info && proc_info->ipc_ns == ipc_ns && proc_info->exited) {
+    hash_del_rcu(&proc_info->node);
+    kfree_rcu(proc_info, rcu_head);
+  }
+  up_write(&global_htables_rwsem);
+}
+
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
 {
   rb_erase(&en->node, &wrapper->topic->entries);

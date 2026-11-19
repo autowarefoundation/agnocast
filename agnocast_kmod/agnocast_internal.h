@@ -325,6 +325,9 @@ bool agnocast_is_referenced(struct entry_node * en);
 
 // Caller holds the namespace lock.
 struct process_info * agnocast_find_process_info(const pid_t pid);
+// Drops an exited entry whose namespace state was already retired. An exited entry no longer
+// counts as alive, so the namespace state is not needed; takes the host-wide lock itself.
+void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
