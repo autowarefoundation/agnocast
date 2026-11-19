@@ -168,9 +168,9 @@ void MultiThreadedAgnocastExecutor::agnocast_spin()
 
     // Unlike a single-threaded executor, in a multi-threaded executor, each thread is dedicated to
     // handling either ROS 2 callbacks or Agnocast callbacks exclusively.
-    // Given this separation, get_next_agnocast_executable() can block indefinitely without a
-    // timeout. However, since we need to periodically check for epoll updates, we should implement
-    // a long timeout period instead of an infinite block.
+    // get_next_agnocast_executable() can block until an Agnocast event arrives. Epoll set changes
+    // wake the wait via EpollUpdateTracker's notify eventfd; the timeout remains for cancel /
+    // rclcpp::ok checks.
     if (get_next_agnocast_executable(
           agnocast_executable, agnocast_next_exec_timeout_ms_ /* timed-blocking*/)) {
       if (yield_before_execute_) {
