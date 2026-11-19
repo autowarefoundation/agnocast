@@ -76,10 +76,12 @@ void test_case_ipc_ns_write_lock_leaves_other_namespace_free(struct kunit * test
   // Arrange
   setup_publisher_in(test, current->nsproxy->ipc_ns, PID);
   setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
-  struct agnocast_ns * ns = agnocast_ns_write_lock(current->nsproxy->ipc_ns);
-  KUNIT_ASSERT_NOT_NULL(test, ns);
+  // Checked before taking the lock: a failed ASSERT leaves the test at once, and a write lock left
+  // held would hang the suite's cleanup.
   struct agnocast_ns * other_ns = agnocast_ns_peek(&other_ipc_ns);
   KUNIT_ASSERT_NOT_NULL(test, other_ns);
+  struct agnocast_ns * ns = agnocast_ns_write_lock(current->nsproxy->ipc_ns);
+  KUNIT_ASSERT_NOT_NULL(test, ns);
 
   // Act
   const bool other_free = down_read_trylock(&other_ns->rwsem);

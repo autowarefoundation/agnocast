@@ -47,24 +47,33 @@ static struct agnocast_ns * ns_get_or_create(const struct ipc_namespace * ipc_ns
   struct agnocast_ns * ns = ns_get(ipc_ns);
   if (ns) return ns;
 
+  // Allocated before taking the mutex: kvzalloc() may sleep in reclaim, and the mutex also orders
+  // every other namespace's creation and retirement.
+  struct agnocast_ns * new_ns = kvzalloc(sizeof(*new_ns), GFP_KERNEL);
+  if (!new_ns) {
+    // Another task may have created it meanwhile.
+    ns = ns_get(ipc_ns);
+    return ns ? ns : ERR_PTR(-ENOMEM);
+  }
+  // One reference for the registry, one for the caller.
+  refcount_set(&new_ns->ref, 2);
+  new_ns->ipc_ns = ipc_ns;
+  init_rwsem(&new_ns->rwsem);
+  hash_init(new_ns->topic_hashtable);
+  hash_init(new_ns->bridge_htable);
+  hash_init(new_ns->domain_rule_htable);
+
   mutex_lock(&ns_registry_lock);
   // Another task may have created it since the lookup above.
   ns = ns_get(ipc_ns);
   if (!ns) {
-    ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
-    if (ns) {
-      // One reference for the registry, one for the caller.
-      refcount_set(&ns->ref, 2);
-      ns->ipc_ns = ipc_ns;
-      init_rwsem(&ns->rwsem);
-      hash_init(ns->topic_hashtable);
-      hash_init(ns->bridge_htable);
-      hash_init(ns->domain_rule_htable);
-      hash_add_rcu(ns_htable, &ns->node, (unsigned long)ipc_ns);
-    }
+    hash_add_rcu(ns_htable, &new_ns->node, (unsigned long)ipc_ns);
+    ns = new_ns;
+    new_ns = NULL;
   }
   mutex_unlock(&ns_registry_lock);
-  return ns ? ns : ERR_PTR(-ENOMEM);
+  kvfree(new_ns);  // The loser's copy, never published.
+  return ns;
 }
 
 static void ns_put(struct agnocast_ns * ns)
