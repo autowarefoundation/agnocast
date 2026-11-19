@@ -89,6 +89,11 @@ static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
 }
 #endif
 
+// The fields after creation change only while the namespace's state exists, under its lock (write):
+// `exited` in the exit cleanup, `role` when a live bridge manager steps down. An exited entry can
+// outlive the state (its unlink daemon died with it), but nothing writes it any more, so a reader
+// in another namespace needs only RCU, and draining it recreates the state to remove it under the
+// lock (agnocast_commit_exit_process()).
 struct process_info
 {
   bool exited;
