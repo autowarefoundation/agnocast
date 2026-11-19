@@ -1607,8 +1607,8 @@ void agnocast_commit_exit_process(
   bool * ret_daemon_should_exit)
 {
   // Idle polls (once a second) take only the read lock. A waiting writer queues new readers, and
-  // PREEMPT_RT cannot boost the in-flight ones, so one preempted reader would stall all IPC. The
-  // write path re-derives the flag because a process can register between the two locks.
+  // PREEMPT_RT cannot boost the in-flight ones, so one preempted reader would stall the namespace's
+  // IPC. The write path re-derives the flag because a process can register between the two locks.
   struct agnocast_ns * ns;
   if (global_pid < 0) {
     ns = agnocast_ns_read_lock(ipc_ns);

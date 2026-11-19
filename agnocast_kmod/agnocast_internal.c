@@ -5,7 +5,6 @@ int major;
 struct class * agnocast_class;
 struct device * agnocast_device;
 
-DECLARE_RWSEM(global_htables_rwsem);
 // Only the functions in this file touch these two tables, so that adding, removing or marking an
 // entry always updates the namespace's counts with it.
 static DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
@@ -15,19 +14,10 @@ static DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
 // other way around.
 static DEFINE_SPINLOCK(agnocast_pid_index_lock);
 
-// Every IPC namespace that has registered something. Guarded by global_htables_rwsem.
+// Every IPC namespace that has registered something. Looked up under RCU on every ioctl; the
+// mutex only orders creating and retiring.
 static DEFINE_HASHTABLE(ns_htable, AGNOCAST_NS_HASH_BITS);
-
-// Caller holds global_htables_rwsem.
-static struct agnocast_ns * ns_find(const struct ipc_namespace * ipc_ns)
-{
-  struct agnocast_ns * ns;
-  hash_for_each_possible(ns_htable, ns, node, (unsigned long)ipc_ns)
-  {
-    if (ns->ipc_ns == ipc_ns) return ns;
-  }
-  return NULL;
-}
+static DEFINE_MUTEX(ns_registry_lock);
 
 static bool ns_is_empty(struct agnocast_ns * ns)
 {
@@ -35,52 +25,116 @@ static bool ns_is_empty(struct agnocast_ns * ns)
          hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
 }
 
+// Takes a reference, or returns NULL if the namespace is not registered or is being freed.
+static struct agnocast_ns * ns_get(const struct ipc_namespace * ipc_ns)
+{
+  struct agnocast_ns * found = NULL;
+  struct agnocast_ns * ns;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(ns_htable, ns, node, (unsigned long)ipc_ns)
+  {
+    if (ns->ipc_ns == ipc_ns && refcount_inc_not_zero(&ns->ref)) {
+      found = ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+static struct agnocast_ns * ns_get_or_create(const struct ipc_namespace * ipc_ns)
+{
+  struct agnocast_ns * ns = ns_get(ipc_ns);
+  if (ns) return ns;
+
+  mutex_lock(&ns_registry_lock);
+  // Another task may have created it since the lookup above.
+  ns = ns_get(ipc_ns);
+  if (!ns) {
+    ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
+    if (ns) {
+      // One reference for the registry, one for the caller.
+      refcount_set(&ns->ref, 2);
+      ns->ipc_ns = ipc_ns;
+      init_rwsem(&ns->rwsem);
+      hash_init(ns->topic_hashtable);
+      hash_init(ns->bridge_htable);
+      hash_init(ns->domain_rule_htable);
+      hash_add_rcu(ns_htable, &ns->node, (unsigned long)ipc_ns);
+    }
+  }
+  mutex_unlock(&ns_registry_lock);
+  return ns ? ns : ERR_PTR(-ENOMEM);
+}
+
+static void ns_put(struct agnocast_ns * ns)
+{
+  // A lookup that raced the retirement may still be walking past the node.
+  if (refcount_dec_and_test(&ns->ref)) kvfree_rcu(ns, rcu_head);
+}
+
+// Takes the lock on the reference `ns` holds, or drops both and returns false if the namespace was
+// retired meanwhile.
+static bool ns_lock_alive(struct agnocast_ns * ns, const bool write)
+{
+  if (write) {
+    down_write(&ns->rwsem);
+  } else {
+    down_read(&ns->rwsem);
+  }
+  if (!ns->dead) return true;
+
+  if (write) {
+    up_write(&ns->rwsem);
+  } else {
+    up_read(&ns->rwsem);
+  }
+  ns_put(ns);
+  return false;
+}
+
+// The retry ends: a dead namespace has already left the registry, so the next lookup misses it.
+static struct agnocast_ns * ns_lock(
+  const struct ipc_namespace * ipc_ns, const bool write, const bool create)
+{
+  for (;;) {
+    struct agnocast_ns * ns = create ? ns_get_or_create(ipc_ns) : ns_get(ipc_ns);
+    if (IS_ERR_OR_NULL(ns)) return ns;
+    if (ns_lock_alive(ns, write)) return ns;
+  }
+}
+
 struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns)
 {
-  down_read(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (!ns) up_read(&global_htables_rwsem);
-  return ns;
+  return ns_lock(ipc_ns, false, false);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock(const struct ipc_namespace * ipc_ns)
 {
-  down_write(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (!ns) up_write(&global_htables_rwsem);
-  return ns;
+  return ns_lock(ipc_ns, true, false);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace * ipc_ns)
 {
-  down_write(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (ns) return ns;
-
-  ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
-  if (!ns) {
-    up_write(&global_htables_rwsem);
-    return ERR_PTR(-ENOMEM);
-  }
-  ns->ipc_ns = ipc_ns;
-  hash_init(ns->topic_hashtable);
-  hash_init(ns->bridge_htable);
-  hash_init(ns->domain_rule_htable);
-  hash_add(ns_htable, &ns->node, (unsigned long)ipc_ns);
-  return ns;
+  return ns_lock(ipc_ns, true, true);
 }
 
 void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 {
   if (!ns) return;
-  up_read(&global_htables_rwsem);
+  up_read(&ns->rwsem);
+  ns_put(ns);
 }
 
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
 {
-  hash_del(&ns->node);
-  kvfree(ns);
-  up_write(&global_htables_rwsem);
+  ns->dead = true;
+  mutex_lock(&ns_registry_lock);
+  hash_del_rcu(&ns->node);
+  mutex_unlock(&ns_registry_lock);
+  up_write(&ns->rwsem);
+  ns_put(ns);  // the registry's
+  ns_put(ns);  // the caller's
 }
 
 void agnocast_ns_write_unlock(struct agnocast_ns * ns)
@@ -90,26 +144,45 @@ void agnocast_ns_write_unlock(struct agnocast_ns * ns)
     agnocast_ns_retire_and_unlock(ns);
     return;
   }
-  up_write(&global_htables_rwsem);
+  up_write(&ns->rwsem);
+  ns_put(ns);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock_any(void)
 {
-  struct agnocast_ns * ns;
-  int bkt;
-  down_write(&global_htables_rwsem);
-  hash_for_each(ns_htable, bkt, ns, node)
-  {
-    return ns;
+  for (;;) {
+    struct agnocast_ns * ns = NULL;
+    struct agnocast_ns * entry;
+    int bkt;
+    mutex_lock(&ns_registry_lock);
+    hash_for_each(ns_htable, bkt, entry, node)
+    {
+      // Every registered namespace holds the registry's reference, so this cannot fail.
+      refcount_inc(&entry->ref);
+      ns = entry;
+      break;
+    }
+    mutex_unlock(&ns_registry_lock);
+    if (!ns) return NULL;
+    if (ns_lock_alive(ns, true)) return ns;
   }
-  up_write(&global_htables_rwsem);
-  return NULL;
 }
 
 #ifdef KUNIT_BUILD
 struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns)
 {
-  return ns_find(ipc_ns);
+  struct agnocast_ns * found = NULL;
+  struct agnocast_ns * ns;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(ns_htable, ns, node, (unsigned long)ipc_ns)
+  {
+    if (ns->ipc_ns == ipc_ns) {
+      found = ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
 }
 #endif
 

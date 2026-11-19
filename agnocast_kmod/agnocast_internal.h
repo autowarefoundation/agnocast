@@ -12,6 +12,9 @@
 #include <linux/kthread.h>
 #include <linux/mm.h>  // kvzalloc, kvfree
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/swait.h>
@@ -29,17 +32,20 @@ extern struct device * agnocast_device;
 //   agnocast_increment_message_entry_rc, which manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
-//   1. The namespace lock     (agnocast_ns_read_lock() and friends, agnocast_internal.c)
+//   1. The namespace lock     (struct agnocast_ns::rwsem, one per IPC namespace)
 //   2. topic->rwsem           (per-topic, in struct topic_struct)
-//   3. mempool_lock           (agnocast_memory_allocator.c)
+//   3. One of the leaf locks below, never two at once:
+//      - the namespace registry mutex (agnocast_internal.c)
+//      - agnocast_pid_index_lock      (agnocast_internal.c)
+//      - mempool_lock                 (agnocast_memory_allocator.c)
+// Two namespace locks are never held at once.
 //
 // The namespace lock is taken through agnocast_ns_read_lock() / agnocast_ns_write_lock() /
 // agnocast_ns_write_lock_or_create(), which return the caller's struct agnocast_ns:
 // - Read lock: when searching its tables and operating within a topic
 // - Write lock: when adding/removing entries of its tables or its processes
-// For now every namespace shares global_htables_rwsem as its lock. It also guards the namespace
-// registry and the host-wide proc_info_htable and discovery_agent_htable.
-extern struct rw_semaphore global_htables_rwsem;
+// No lock is shared across namespaces except the leaves, which guard only a hash add/del or an
+// allocator bookkeeping step, so one container's endpoint churn cannot stall another's IPC.
 
 // =========================================
 // data structure
@@ -252,8 +258,17 @@ struct domain_bridge_rule
 // reference is held, because put_ipc_ns() is not exported to modules on every kernel.
 struct agnocast_ns
 {
+  // Both precede the tables below: kvfree_rcu() needs the rcu_head within the first 4 KiB.
+  struct rcu_head rcu_head;
   struct hlist_node node;
+  // Holders: the registry while the namespace is in it, plus each task between looking it up and
+  // unlocking it. The memory is freed when the last one lets go.
+  refcount_t ref;
   const struct ipc_namespace * ipc_ns;
+  struct rw_semaphore rwsem;
+  // Set under rwsem WRITE when the namespace leaves the registry. A task that looked it up before
+  // then sees it once it has the lock, and looks the namespace up again.
+  bool dead;
   // This namespace's process_info entries that have not exited yet, the unlink daemon's included.
   // An exited entry stays in proc_info_htable until the unlink daemon drains it, but does not keep
   // the namespace: only a live unlink daemon can drain it, and that daemon is counted here.

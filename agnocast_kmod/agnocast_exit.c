@@ -52,11 +52,9 @@ void agnocast_exit_free_data(void)
     remove_all_domain_rules(ns);
     agnocast_ns_retire_and_unlock(ns);
   }
-
-  down_write(&global_htables_rwsem);
+  // Every namespace is retired, so an exit cleanup still running finds none to lock.
   agnocast_remove_all_process_info();
   agnocast_remove_all_discovery_agents();
-  up_write(&global_htables_rwsem);
 }
 
 void agnocast_exit_kthread(void)

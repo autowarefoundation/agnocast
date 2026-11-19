@@ -69,6 +69,29 @@ void test_case_ipc_ns_exit_cleans_up_only_own_namespace(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
 }
 
+// The point of the per-namespace lock: one namespace registering endpoints must not hold up
+// another's publish/receive.
+void test_case_ipc_ns_write_lock_leaves_other_namespace_free(struct kunit * test)
+{
+  // Arrange
+  setup_publisher_in(test, current->nsproxy->ipc_ns, PID);
+  setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
+  struct agnocast_ns * ns = agnocast_ns_write_lock(current->nsproxy->ipc_ns);
+  KUNIT_ASSERT_NOT_NULL(test, ns);
+  struct agnocast_ns * other_ns = agnocast_ns_peek(&other_ipc_ns);
+  KUNIT_ASSERT_NOT_NULL(test, other_ns);
+
+  // Act
+  const bool other_free = down_read_trylock(&other_ns->rwsem);
+
+  // Assert
+  KUNIT_EXPECT_PTR_NE(test, ns, other_ns);
+  KUNIT_EXPECT_TRUE(test, other_free);
+
+  if (other_free) up_read(&other_ns->rwsem);
+  agnocast_ns_write_unlock(ns);
+}
+
 // The usual end of a namespace: its unlink daemon drains the exited process, then leaves.
 void test_case_ipc_ns_retired_once_unlink_daemon_leaves(struct kunit * test)
 {
