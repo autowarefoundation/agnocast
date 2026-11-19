@@ -420,8 +420,10 @@ void BridgeManager::on_signal()
 
 std::string BridgeManager::on_socket_request() const
 {
-  return R"({"type":"bridge","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"pid":)" +
-         std::to_string(getpid()) + "}";
+  static const std::string response =
+    R"({"type":"bridge","ipc_ns":)" + std::to_string(self_ipc_ns_inode_) + R"(,"domain_id":)" +
+    std::to_string(get_ros_domain_id()) + R"(,"pid":)" + std::to_string(getpid()) + "}";
+  return response;
 }
 
 void BridgeManager::check_and_create_pubsub_bridges()
