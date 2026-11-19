@@ -24,11 +24,6 @@ static pid_t convert_pid_to_local(pid_t global_pid)
 }
 #endif
 
-static bool ipc_eq(const struct ipc_namespace * ipc_ns1, const struct ipc_namespace * ipc_ns2)
-{
-  return ipc_ns1 == ipc_ns2;
-}
-
 static unsigned long get_topic_hash(const char * str)
 {
   unsigned long hash = full_name_hash(NULL /*namespace*/, str, strlen(str));
@@ -589,13 +584,6 @@ static struct entry_node * find_message_entry(
   return NULL;
 }
 
-// Forward declaration
-static int get_process_num_except_unlink_daemon(const struct agnocast_ns * ns);
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id);
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id);
-
 // Release subscriber reference from message entry (set boolean flag to false).
 // Called when subscriber's last ipc_shared_ptr reference is destroyed.
 int agnocast_ioctl_release_message_entry_reference(
@@ -810,40 +798,6 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A bridge manager is per-(ipc_ns, domain): its UDS address carries
-// the domain suffix, so each domain needs its own manager. Gate on the domain too,
-// otherwise a manager in one domain would suppress spawning in another.
-static bool has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
-// abruptly still reads as alive until the worker drains its pid, so a process registering in that
-// window is not told to spawn a replacement.
-static bool has_alive_unlink_daemon(const struct agnocast_ns * ns)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      return true;
-    }
-  }
-  return false;
-}
-
 int agnocast_ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
@@ -876,8 +830,8 @@ int agnocast_ioctl_add_process(
     ret = -EINVAL;
     goto unlock;
   }
-  ioctl_ret->ret_unlink_daemon_exist = has_alive_unlink_daemon(ns);
-  ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ns, domain_id);
+  ioctl_ret->ret_unlink_daemon_exist = agnocast_has_alive_unlink_daemon(ns);
+  ioctl_ret->ret_bridge_daemon_exist = agnocast_has_alive_bridge_manager(ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ns, domain_id) != NULL);
 
   // Deciding under the write lock add_process already holds is what stops two daemons starting
@@ -915,10 +869,7 @@ int agnocast_ioctl_add_process(
   new_proc_info->domain_id =
     (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
 
-  INIT_HLIST_NODE(&new_proc_info->node);
-  uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
-  hash_add_rcu(proc_info_htable, &new_proc_info->node, hash_val);
-  ns->alive_proc_num++;
+  agnocast_add_process_info(ns, new_proc_info);
 
   ioctl_ret->ret_addr = new_proc_info->mempool_entry->addr;
   ioctl_ret->ret_shm_size = mempool_size_bytes;
@@ -1645,32 +1596,10 @@ pid_t agnocast_ioctl_get_exit_process(
   // the state no exit cleanup can mark this namespace's entries, so RCU alone is enough then.
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
 
-  struct process_info * proc_info;
-  int bkt;
-  rcu_read_lock();
-  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
-  {
-    if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
-      continue;
-    }
-
-    ioctl_ret->ret_pid = proc_info->local_pid;
-    global_pid = proc_info->global_pid;
-    break;
-  }
-  rcu_read_unlock();
+  global_pid = agnocast_find_exited_process(ipc_ns, &ioctl_ret->ret_pid);
 
   agnocast_ns_read_unlock(ns);
   return global_pid;
-}
-
-// Caller holds the namespace lock (write).
-static void remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
-{
-  // An exited entry already stopped counting as alive when the exit cleanup marked it.
-  if (!proc_info->exited) ns->alive_proc_num--;
-  hash_del_rcu(&proc_info->node);
-  kfree_rcu(proc_info, rcu_head);
 }
 
 void agnocast_commit_exit_process(
@@ -1683,7 +1612,7 @@ void agnocast_commit_exit_process(
   struct agnocast_ns * ns;
   if (global_pid < 0) {
     ns = agnocast_ns_read_lock(ipc_ns);
-    *ret_daemon_should_exit = !ns || get_process_num_except_unlink_daemon(ns) == 0;
+    *ret_daemon_should_exit = !ns || agnocast_get_process_num_except_unlink_daemon(ns) == 0;
     agnocast_ns_read_unlock(ns);
     if (!*ret_daemon_should_exit) {
       return;
@@ -1700,11 +1629,11 @@ void agnocast_commit_exit_process(
   if (global_pid >= 0) {
     struct process_info * proc_info = agnocast_find_process_info(global_pid);
     if (proc_info && proc_info->ipc_ns == ns->ipc_ns) {
-      remove_process_info(ns, proc_info);
+      agnocast_remove_process_info(ns, proc_info);
     }
   }
 
-  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ns) == 0);
+  *ret_daemon_should_exit = (agnocast_get_process_num_except_unlink_daemon(ns) == 0);
 
   // Deregistering only on death would leave a window where a starting process is told a daemon
   // exists and skips spawning its replacement. Restricted to the idle poll because that is the
@@ -1714,7 +1643,7 @@ void agnocast_commit_exit_process(
     if (
       caller_info && caller_info->ipc_ns == ns->ipc_ns &&
       caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      remove_process_info(ns, caller_info);
+      agnocast_remove_process_info(ns, caller_info);
       free_memory(caller_pid);
     }
   }
@@ -2787,67 +2716,14 @@ unlock:
   return ret;
 }
 
-// Counting the unlink daemon would keep it from ever deciding the namespace is done.
-static int get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Like get_process_num_in_domain_except_unlink_daemon() but also excludes processes that have
-// exited and are still pending cleanup. The discovery agent tracks live endpoints, so an exited
-// entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
-// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
-// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      !proc_info->exited && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
 // A bridge manager is per (ipc_ns, domain), so it must shut down once its
 // own domain is empty -- counting the whole namespace would keep it alive while an
 // unrelated domain is busy. The manager itself is the remaining process (count == 1).
 // Caller holds the namespace lock (read or write).
 static bool bridge_manager_is_alone(const struct agnocast_ns * ns, const pid_t pid)
 {
-  return get_process_num_in_domain_except_unlink_daemon(ns, get_process_domain_id(pid)) <= 1;
+  return agnocast_get_process_num_in_domain_except_unlink_daemon(ns, get_process_domain_id(pid)) <=
+         1;
 }
 
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
@@ -2861,21 +2737,6 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   }
   agnocast_ns_write_unlock(ns);
   return 0;
-}
-
-// Caller holds the namespace lock (read). Scans because the table is keyed by pid.
-struct discovery_agent_info * agnocast_find_discovery_agent(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  struct discovery_agent_info * agent;
-  int bkt;
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
-  {
-    if (ipc_eq(agent->ipc_ns, ns->ipc_ns) && agent->domain_id == domain_id) {
-      return agent;
-    }
-  }
-  return NULL;
 }
 
 // The agent is not a registered Agnocast process, so it passes its own pid + ROS_DOMAIN_ID.
@@ -2893,7 +2754,7 @@ int agnocast_ioctl_discovery_agent_should_exit(
   if (!commit) {
     ns = agnocast_ns_read_lock(ipc_ns);
     *ret_should_exit =
-      !ns || get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0;
+      !ns || agnocast_get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0;
     agnocast_ns_read_unlock(ns);
     return 0;
   }
@@ -2903,7 +2764,7 @@ int agnocast_ioctl_discovery_agent_should_exit(
     *ret_should_exit = true;
     return 0;
   }
-  if (get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0) {
+  if (agnocast_get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0) {
     agnocast_remove_discovery_agent_by_pid(ns, pid);
     *ret_should_exit = true;
   } else {
@@ -2940,9 +2801,7 @@ int agnocast_ioctl_add_discovery_agent(
   agent->pid = pid;
   agent->ipc_ns = ipc_ns;
   agent->domain_id = domain_id;
-  INIT_HLIST_NODE(&agent->node);
-  hash_add_rcu(discovery_agent_htable, &agent->node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS));
-  ns->agent_num++;
+  agnocast_add_discovery_agent_info(ns, agent);
   ioctl_ret->ret_owned_by_caller = true;
 
 unlock:
@@ -3877,51 +3736,6 @@ static struct topic_wrapper * kunit_find_topic_for_current(
 {
   const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
   return ns ? find_topic_for_current(ns, topic_name) : NULL;
-}
-
-int agnocast_get_alive_proc_num(void)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (!proc_info->exited) {
-      count++;
-    }
-  }
-  return count;
-}
-
-int agnocast_get_discovery_agent_num(void)
-{
-  int count = 0;
-  struct discovery_agent_info * agent;
-  int bkt;
-  // Serialize against the exit path's hash_del_rcu()+kfree_rcu(), which runs under the write lock.
-  down_read(&global_htables_rwsem);
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
-  {
-    count++;
-  }
-  up_read(&global_htables_rwsem);
-  return count;
-}
-
-bool agnocast_is_proc_exited(const pid_t pid)
-{
-  struct process_info * proc_info;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
-  {
-    if (proc_info->global_pid == pid) {
-      if (proc_info->exited) {
-        return true;
-      } else {
-        return false;
-      }
-    }
-  }
-  return false;
 }
 
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns)

@@ -98,8 +98,6 @@ struct process_info
   struct rcu_head rcu_head;
 };
 
-extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
-
 struct publisher_info
 {
   topic_local_id_t id;
@@ -300,12 +298,9 @@ struct discovery_agent_info
   struct rcu_head rcu_head;  // read from the atomic sched_process_exit path via is_agnocast_pid()
 };
 
-extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
-
-// Both require the namespace lock (read for find, write for remove).
+// Caller holds the namespace lock.
 struct discovery_agent_info * agnocast_find_discovery_agent(
   const struct agnocast_ns * ns, const uint32_t domain_id);
-void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
 // The namespace a pid registered its process_info / discovery agent in, or NULL. Only a key for
 // agnocast_ns_write_lock(): the entry itself may be gone by the time the caller has the lock.
 // Looked up separately because one pid can have both, in different namespaces: a stale exited
@@ -325,9 +320,34 @@ bool agnocast_is_referenced(struct entry_node * en);
 
 // Caller holds the namespace lock.
 struct process_info * agnocast_find_process_info(const pid_t pid);
+// The process and discovery-agent tables are private to agnocast_internal.c. The functions below
+// are the only ways to change them, so each change keeps the namespace's alive_proc_num and
+// agent_num in step.
+
+// Caller holds the namespace lock (write).
+void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info);
+void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info);
+void agnocast_add_discovery_agent_info(
+  struct agnocast_ns * ns, struct discovery_agent_info * agent);
+void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
 // Drops an exited entry whose namespace state was already retired. An exited entry no longer
 // counts as alive, so the namespace state is not needed; takes the host-wide lock itself.
 void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid);
+
+// Read only. Caller holds the namespace lock.
+bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id);
+bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns);
+int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns);
+int agnocast_get_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id);
+int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id);
+// Read only, under RCU. Needs no namespace lock: exited entries outlive the namespace's state.
+pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * ret_local_pid);
+
+// Module unload only.
+void agnocast_remove_all_process_info(void);
+void agnocast_remove_all_discovery_agents(void);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
