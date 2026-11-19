@@ -61,12 +61,12 @@ Each script is a thin wrapper that runs `source install/setup.bash` followed by 
 | `test/run_kunit.bash` | Build and insert `agnocast_kunit.ko`, parse pass/fail from dmesg, and generate the HTML coverage report for the kernel module. Requires a kernel with `CONFIG_KUNIT=y` and `CONFIG_GCOV_KERNEL=y`. |
 | `test/run_requires_kernel_module_tests.bash` | Build `agnocast_e2e_test` and run `colcon test` filtered to the `requires_kernel_module` label. Kernel module must already be loaded. Extra arguments are passed to `colcon test` (e.g. `--retest-until-pass 1`). |
 | `test/e2e_test_1to1.bash` | 1-publisher / 1-subscriber end-to-end test sweeping publisher type (agnocast/ros2), QoS depth, transient-local, take-subscription, and launch-order combinations. Options: `-s` single, `-c` continue-on-failure, `-p N` parallel workers, `--shard I/N` run only the I-th of N slices. |
-| `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s`, `-c`. |
+| `test/e2e_test_2to2.bash` | 2-publisher / 2-subscriber end-to-end test sweeping container layouts and `agno↔ros2` bridge modes. Options: `-s` single, `-c` continue-on-failure, `-b` bridge-only, `-p N` parallel workers. |
 | `test/e2e_test_many_exit.bash` | Spawn many agnocast talker processes and terminate them via `SIGINT` to exercise graceful-exit cleanup. |
 | `test/e2e_test_stress.bash` | Run `e2e_test_1to1` and `e2e_test_2to2` under `stress-ng` CPU / VM loads. |
 | `test/test_rmmod_refcount.bash` | Verify `rmmod agnocast` is refused while `/dev/agnocast` is open and succeeds once the fd is closed. |
 | `test/switch_kmod.bats` | [bats](https://github.com/bats-core/bats-core) test suite for `switch_kmod.bash` (9 cases). **Destructive** — swaps installed `agnocast-kmod-v*` packages and load/unloads the module. Requires `apt install bats` and a prior run of `switch_kmod_canonical_setup.bash`. Run: `sudo bats scripts/test/switch_kmod.bats`. |
-| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.4.1}` and caches the `.deb` for teardown recovery. |
+| `test/switch_kmod_canonical_setup.bash` | One-time, idempotent setup for `switch_kmod.bats`: installs `agnocast-kmod-v${CANONICAL_VER:-2.4.2}` and caches the `.deb` for teardown recovery. |
 
 ### releases/ — maintainer-only
 

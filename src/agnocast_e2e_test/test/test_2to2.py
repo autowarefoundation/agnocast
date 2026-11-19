@@ -10,11 +10,12 @@ from launch.actions import SetEnvironmentVariable, TimerAction
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config_test_2to2.yaml')
+CONFIG_PATH = os.environ.get('E2E_CONFIG_PATH', os.path.join(os.path.dirname(__file__), 'config_test_2to2.yaml'))
 with open(CONFIG_PATH, 'r') as f:
     CONFIG = yaml.safe_load(f)
 
 TEST_MODE = CONFIG.get('test_mode', os.environ.get('TEST_MODE', 'agno2agno'))
+TOPIC_NAME = os.environ.get('E2E_TOPIC_NAME', '/test_topic')
 QOS_DEPTH = 10
 PUB_NUM = int(QOS_DEPTH / 2)
 TIMEOUT = float(os.environ.get('STRESS_TEST_TIMEOUT', 8.0))
@@ -51,6 +52,7 @@ def generate_test_description():
                             name=f'test_talker_node_{pub_i}',
                             parameters=[
                                 {
+                                    "topic_name": TOPIC_NAME,
                                     "qos_depth": QOS_DEPTH,
                                     "transient_local": False,
                                     "init_pub_num": 0,
@@ -72,6 +74,7 @@ def generate_test_description():
                             name=f'test_talker_node_{pub_i}',
                             parameters=[
                                 {
+                                    "topic_name": TOPIC_NAME,
                                     "qos_depth": QOS_DEPTH,
                                     "transient_local": False,
                                     "init_pub_num": 0,
@@ -96,6 +99,7 @@ def generate_test_description():
                             name=f'test_listener_node_{sub_i}',
                             parameters=[
                                 {
+                                    "topic_name": TOPIC_NAME,
                                     "qos_depth": QOS_DEPTH,
                                     "transient_local": False,
                                     "forever": FOREVER,
@@ -114,6 +118,7 @@ def generate_test_description():
                             name=f'test_listener_node_{sub_i}',
                             parameters=[
                                 {
+                                    "topic_name": TOPIC_NAME,
                                     "qos_depth": QOS_DEPTH,
                                     "transient_local": False,
                                     "forever": FOREVER,
