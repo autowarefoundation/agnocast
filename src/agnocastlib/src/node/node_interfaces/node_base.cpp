@@ -1,6 +1,5 @@
 #include "agnocast/node/node_interfaces/node_base.hpp"
 
-#include "agnocast/node/agnocast_context.hpp"
 #include "rclcpp/contexts/default_context.hpp"
 #include "rclcpp/logging.hpp"
 
@@ -35,12 +34,8 @@ NodeBase::NodeBase(
     namespace_ = ns;
   }
 
-  // Get global arguments from context
   if (use_global_arguments) {
-    std::lock_guard<std::mutex> lock(g_context_mtx);
-    if (g_context.is_initialized()) {
-      global_args_ = g_context.get_parsed_arguments();
-    }
+    global_args_ = resolve_global_arguments(context_);
   }
 
   rcl_allocator_t allocator = rcl_get_default_allocator();

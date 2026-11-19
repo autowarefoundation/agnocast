@@ -1,6 +1,7 @@
 #include "agnocast/node/agnocast_context.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 #include "rclcpp/callback_group.hpp"
+#include "rclcpp/context.hpp"
 #include "rclcpp/exceptions.hpp"
 #include "rclcpp/parameter.hpp"
 
@@ -90,6 +91,26 @@ TEST_F(AgnocastNodeConstructionTest, use_global_arguments_true_inherits_global_u
   auto node = std::make_shared<agnocast::Node>("test_node_global_args_on", options);
 
   EXPECT_TRUE(node->get_parameter("use_sim_time").as_bool());
+}
+
+// A node loaded into a component container resolves its parameter overrides from the container's
+// rclcpp context, since that is what parsed the command line. use_clock_thread is off because the
+// clock thread is beside the point here.
+TEST_F(AgnocastNodeConstructionTest, use_global_arguments_true_inherits_use_sim_time_from_context)
+{
+  const char * argv[] = {"test_agnocast_node", "--ros-args", "-p", "use_sim_time:=true"};
+  auto context = std::make_shared<rclcpp::Context>();
+  context->init(static_cast<int>(sizeof(argv) / sizeof(argv[0])), argv);
+  {
+    rclcpp::NodeOptions options;
+    options.context(context);
+    options.use_global_arguments(true);
+    options.use_clock_thread(false);
+    auto node = std::make_shared<agnocast::Node>("test_node_ctx_global_args_on", options);
+
+    EXPECT_TRUE(node->get_parameter("use_sim_time").as_bool());
+  }
+  context->shutdown("test cleanup");
 }
 
 TEST_F(AgnocastNodeConstructionTest, use_global_arguments_false_ignores_global_use_sim_time)
