@@ -330,9 +330,6 @@ void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info *
 void agnocast_add_discovery_agent_info(
   struct agnocast_ns * ns, struct discovery_agent_info * agent);
 void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
-// Drops an exited entry whose namespace state was already retired. An exited entry no longer
-// counts as alive, so the namespace state is not needed; takes the host-wide lock itself.
-void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid);
 
 // Read only. Caller holds the namespace lock.
 bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id);

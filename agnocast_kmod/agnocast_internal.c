@@ -335,19 +335,6 @@ struct process_info * agnocast_find_process_info(const pid_t pid)
   return found;
 }
 
-void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid)
-{
-  down_write(&global_htables_rwsem);
-  struct process_info * proc_info = agnocast_find_process_info(pid);
-  if (proc_info && proc_info->ipc_ns == ipc_ns && proc_info->exited) {
-    spin_lock(&agnocast_pid_index_lock);
-    hash_del_rcu(&proc_info->node);
-    spin_unlock(&agnocast_pid_index_lock);
-    kfree_rcu(proc_info, rcu_head);
-  }
-  up_write(&global_htables_rwsem);
-}
-
 // Caller holds the namespace lock (write).
 void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
 {

@@ -1619,9 +1619,15 @@ void agnocast_commit_exit_process(
     }
   }
 
-  ns = agnocast_ns_write_lock(ipc_ns);
+  // An exited entry outlives its namespace's state. Draining one recreates the state, so the entry
+  // is still removed under its namespace lock (write), like every other entry of the namespace.
+  ns = global_pid >= 0 ? agnocast_ns_write_lock_or_create(ipc_ns) : agnocast_ns_write_lock(ipc_ns);
+  if (IS_ERR(ns)) {
+    // The entry stays, so the daemon gets it again.
+    *ret_daemon_should_exit = false;
+    return;
+  }
   if (!ns) {
-    if (global_pid >= 0) agnocast_remove_exited_process(ipc_ns, global_pid);
     *ret_daemon_should_exit = true;
     return;
   }
