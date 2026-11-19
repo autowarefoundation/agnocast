@@ -198,7 +198,8 @@ int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
-static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
+static void pre_handler_subscriber_exit(
+  const struct agnocast_ns * ns, struct topic_wrapper * wrapper, const pid_t pid)
 {
   // Unlinked as a batch so the notify lists are rebuilt once instead of once per subscriber, which
   // would repeat the same work and land on the same result.
@@ -251,7 +252,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
+          const struct process_info * pub_proc_info = agnocast_find_process_info(ns, pub_info->pid);
           if (!pub_proc_info || pub_proc_info->exited) {
             publisher_exited = true;
           }
@@ -390,18 +391,37 @@ bool agnocast_is_referenced(struct entry_node * en)
   return !bitmap_empty(en->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 }
 
-// The walk is under RCU because other namespaces add and remove entries concurrently. What keeps
-// an entry of the caller's own namespace alive after this returns is the caller's namespace lock:
-// such entries are removed only under that lock (write).
-struct process_info * agnocast_find_process_info(const pid_t pid)
+// Only an entry of `ns` is returned: a pid may name an entry of another namespace (an exited
+// entry, or a reused pid), which `ns`'s lock does not keep alive. The walk is under RCU because
+// other namespaces add and remove entries concurrently. What keeps the returned entry alive is the
+// caller's namespace lock: entries of a namespace are removed only under its lock (write).
+struct process_info * agnocast_find_process_info(const struct agnocast_ns * ns, const pid_t pid)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct process_info * found = NULL;
   struct process_info * proc_info;
   rcu_read_lock();
   hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
   {
     if (proc_info->global_pid == pid) {
-      found = proc_info;
+      if (proc_info->ipc_ns == ns->ipc_ns) found = proc_info;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+// Host-wide, unlike agnocast_find_process_info(): a pid identifies one process across namespaces.
+bool agnocast_pid_has_process_info(const pid_t pid)
+{
+  bool found = false;
+  struct process_info * proc_info;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      found = true;
       break;
     }
   }
@@ -765,8 +785,8 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 
   // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
   // have changed between then and now (e.g., the process was already cleaned up by a prior call).
-  struct process_info * proc_info = agnocast_find_process_info(pid);
-  if (!proc_info || proc_info->ipc_ns != ns->ipc_ns) {
+  struct process_info * proc_info = agnocast_find_process_info(ns, pid);
+  if (!proc_info) {
     agnocast_ns_write_unlock(ns);
     return;
   }
@@ -789,7 +809,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
-    pre_handler_subscriber_exit(wrapper, pid);
+    pre_handler_subscriber_exit(ns, wrapper, pid);
 
     // Release this wrapper once its own domain has no endpoints left.
     if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {

@@ -339,7 +339,8 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 bool agnocast_is_referenced(struct entry_node * en);
 
 // Caller holds the namespace lock.
-struct process_info * agnocast_find_process_info(const pid_t pid);
+struct process_info * agnocast_find_process_info(const struct agnocast_ns * ns, const pid_t pid);
+bool agnocast_pid_has_process_info(const pid_t pid);
 // The process and discovery-agent tables are private to agnocast_internal.c. The functions below
 // are the only ways to change them, so each change keeps the namespace's alive_proc_num and
 // agent_num in step.
