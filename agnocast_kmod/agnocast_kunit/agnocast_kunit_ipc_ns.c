@@ -7,9 +7,11 @@
 
 #include <kunit/test.h>
 
-static const pid_t PID = 1000;
-static const pid_t OTHER_PID = 1001;
-static const pid_t DAEMON_PID = 1002;
+// Above PID_MAX_LIMIT (4194304 on 64-bit), so no real process has them: a real process with the
+// same pid exiting would make the exit worker clean these entries up in the middle of a test.
+static const pid_t PID = 4194304 + 1000;
+static const pid_t OTHER_PID = 4194304 + 1001;
+static const pid_t DAEMON_PID = 4194304 + 1002;
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 
@@ -83,7 +85,9 @@ void test_case_ipc_ns_write_lock_leaves_other_namespace_free(struct kunit * test
   struct agnocast_ns * ns = agnocast_ns_write_lock(current->nsproxy->ipc_ns);
   KUNIT_ASSERT_NOT_NULL(test, ns);
 
-  // Act
+  // Act: the one place two namespace locks are held at once, and only as a trylock, which cannot
+  // wait. The unreferenced other_ns stays valid: none of this test's pids can reach the exit
+  // worker.
   const bool other_free = down_read_trylock(&other_ns->rwsem);
 
   // Assert
