@@ -10,6 +10,10 @@ DECLARE_RWSEM(global_htables_rwsem);
 // entry always updates the namespace's counts with it.
 static DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 static DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+// Serializes adding and removing entries in the two tables above across namespaces. Readers that
+// hold no namespace lock walk them under RCU. Innermost: taken under a namespace lock, never the
+// other way around.
+static DEFINE_SPINLOCK(agnocast_pid_index_lock);
 
 // Every IPC namespace that has registered something. Guarded by global_htables_rwsem.
 static DEFINE_HASHTABLE(ns_htable, AGNOCAST_NS_HASH_BITS);
@@ -331,7 +335,9 @@ void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const p
   down_write(&global_htables_rwsem);
   struct process_info * proc_info = agnocast_find_process_info(pid);
   if (proc_info && proc_info->ipc_ns == ipc_ns && proc_info->exited) {
+    spin_lock(&agnocast_pid_index_lock);
     hash_del_rcu(&proc_info->node);
+    spin_unlock(&agnocast_pid_index_lock);
     kfree_rcu(proc_info, rcu_head);
   }
   up_write(&global_htables_rwsem);
@@ -341,8 +347,10 @@ void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const p
 void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
 {
   INIT_HLIST_NODE(&proc_info->node);
+  spin_lock(&agnocast_pid_index_lock);
   hash_add_rcu(
     proc_info_htable, &proc_info->node, hash_min(proc_info->global_pid, PROC_INFO_HASH_BITS));
+  spin_unlock(&agnocast_pid_index_lock);
   ns->alive_proc_num++;
 }
 
@@ -351,7 +359,9 @@ void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info *
 {
   // An exited entry already stopped counting as alive when the exit cleanup marked it.
   if (!proc_info->exited) ns->alive_proc_num--;
+  spin_lock(&agnocast_pid_index_lock);
   hash_del_rcu(&proc_info->node);
+  spin_unlock(&agnocast_pid_index_lock);
   kfree_rcu(proc_info, rcu_head);
 }
 
@@ -478,8 +488,10 @@ int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
 void agnocast_add_discovery_agent_info(struct agnocast_ns * ns, struct discovery_agent_info * agent)
 {
   INIT_HLIST_NODE(&agent->node);
+  spin_lock(&agnocast_pid_index_lock);
   hash_add_rcu(
     discovery_agent_htable, &agent->node, hash_min(agent->pid, DISCOVERY_AGENT_HASH_BITS));
+  spin_unlock(&agnocast_pid_index_lock);
   ns->agent_num++;
 }
 
@@ -504,11 +516,13 @@ void agnocast_remove_all_process_info(void)
   struct process_info * proc_info;
   int bkt;
   struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
   hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
   {
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
+  spin_unlock(&agnocast_pid_index_lock);
   // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
 }
 
@@ -517,11 +531,13 @@ void agnocast_remove_all_discovery_agents(void)
   struct discovery_agent_info * agent;
   int bkt;
   struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
   hash_for_each_safe(discovery_agent_htable, bkt, tmp, agent, node)
   {
     hash_del_rcu(&agent->node);
     kfree_rcu(agent, rcu_head);
   }
+  spin_unlock(&agnocast_pid_index_lock);
 }
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
@@ -577,6 +593,7 @@ void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t
 {
   struct discovery_agent_info * agent;
   struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
   hash_for_each_possible_safe(
     discovery_agent_htable, agent, tmp, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
   {
@@ -584,9 +601,10 @@ void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t
       hash_del_rcu(&agent->node);
       kfree_rcu(agent, rcu_head);
       ns->agent_num--;
-      return;
+      break;
     }
   }
+  spin_unlock(&agnocast_pid_index_lock);
 }
 
 const struct ipc_namespace * agnocast_find_process_ipc_ns(const pid_t pid)
