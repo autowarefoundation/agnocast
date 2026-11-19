@@ -128,6 +128,7 @@ void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   ns->dead = true;
   mutex_lock(&ns_registry_lock);
   hash_del_rcu(&ns->node);
@@ -411,6 +412,7 @@ struct process_info * agnocast_find_process_info(const pid_t pid)
 // Caller holds the namespace lock (write).
 void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   INIT_HLIST_NODE(&proc_info->node);
   spin_lock(&agnocast_pid_index_lock);
   hash_add_rcu(
@@ -422,6 +424,7 @@ void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * pr
 // Caller holds the namespace lock (write).
 void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   // An exited entry already stopped counting as alive when the exit cleanup marked it.
   if (!proc_info->exited) ns->alive_proc_num--;
   spin_lock(&agnocast_pid_index_lock);
@@ -435,6 +438,7 @@ void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info *
 // Caller holds the namespace lock (write).
 static void mark_process_exited(struct agnocast_ns * ns, struct process_info * proc_info)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   if (!proc_info->exited) ns->alive_proc_num--;
   proc_info->exited = true;
 }
@@ -466,6 +470,7 @@ pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * 
 // otherwise a manager in one domain would suppress spawning in another.
 bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   bool found = false;
   struct process_info * proc_info;
   int bkt;
@@ -488,6 +493,7 @@ bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint
 // window is not told to spawn a replacement.
 bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns)
 {
+  lockdep_assert_held(&ns->rwsem);
   bool found = false;
   struct process_info * proc_info;
   int bkt;
@@ -506,6 +512,7 @@ bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns)
 // Counting the unlink daemon would keep it from ever deciding the namespace is done.
 int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
 {
+  lockdep_assert_held(&ns->rwsem);
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
@@ -523,6 +530,7 @@ int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
 int agnocast_get_process_num_in_domain_except_unlink_daemon(
   const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
@@ -547,6 +555,7 @@ int agnocast_get_process_num_in_domain_except_unlink_daemon(
 int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
   const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
@@ -566,6 +575,7 @@ int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
 // Caller holds the namespace lock (write).
 void agnocast_add_discovery_agent_info(struct agnocast_ns * ns, struct discovery_agent_info * agent)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   INIT_HLIST_NODE(&agent->node);
   spin_lock(&agnocast_pid_index_lock);
   hash_add_rcu(
@@ -578,6 +588,7 @@ void agnocast_add_discovery_agent_info(struct agnocast_ns * ns, struct discovery
 struct discovery_agent_info * agnocast_find_discovery_agent(
   const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct discovery_agent_info * found = NULL;
   struct discovery_agent_info * agent;
   int bkt;
@@ -674,6 +685,7 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 // Caller holds the namespace lock (write).
 void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct discovery_agent_info * agent;
   struct hlist_node * tmp;
   spin_lock(&agnocast_pid_index_lock);

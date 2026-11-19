@@ -33,6 +33,7 @@ static unsigned long get_topic_hash(const char * str)
 static struct topic_wrapper * find_topic(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct topic_wrapper * entry;
   unsigned long hash_val = get_topic_hash(topic_name);
 
@@ -63,6 +64,7 @@ static uint32_t get_current_domain_id(void)
 static struct topic_wrapper * find_topic_for_current(
   const struct agnocast_ns * ns, const char * topic_name)
 {
+  lockdep_assert_held(&ns->rwsem);
   return find_topic(ns, topic_name, get_current_domain_id());
 }
 
@@ -76,6 +78,7 @@ static struct domain_bridge_rule * find_domain_rule(
 static struct topic_struct * find_grouped_topic_struct(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   const struct domain_bridge_rule * rule = find_domain_rule(ns, topic_name, domain_id);
   if (!rule) return NULL;
 
@@ -125,6 +128,7 @@ static int add_topic(
   struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   *wrapper = find_topic(ns, topic_name, domain_id);
   if (*wrapper) {
     return 0;
@@ -2284,6 +2288,7 @@ unlock:
 
 static struct bridge_info * find_bridge_info(const struct agnocast_ns * ns, const char * topic_name)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct bridge_info * br_info;
   uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
   hash_for_each_possible(ns->bridge_htable, br_info, node, hash_val)
@@ -2389,6 +2394,7 @@ unlock:
 static struct domain_bridge_rule * find_domain_rule(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct domain_bridge_rule * rule;
   int bkt;
   hash_for_each(ns->domain_rule_htable, bkt, rule, node)
@@ -2415,6 +2421,7 @@ static int insert_domain_rule(
   struct agnocast_ns * ns, const char * topic_name_from, const char * topic_name_to,
   const uint32_t from_domain, const uint32_t to_domain, const bool is_prefix)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
   // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
   // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
@@ -2454,6 +2461,7 @@ static int add_domain_rule(
   struct agnocast_ns * ns, const char * topic_name_from, const char * topic_name_to,
   const uint32_t from_domain, const uint32_t to_domain)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
   // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
   // these two cells -- a re-declaration or the reverse direction. Any other overlap (a cell
@@ -2525,6 +2533,7 @@ static bool any_topic_under_prefix(
   const struct agnocast_ns * ns, const char * prefix, const uint32_t from_domain,
   const uint32_t to_domain)
 {
+  lockdep_assert_held(&ns->rwsem);
   const size_t prefix_len = strlen(prefix);
   struct topic_wrapper * wrapper;
   int bkt;
@@ -2543,6 +2552,7 @@ static int add_prefix_domain_rule(
   struct agnocast_ns * ns, const char * prefix, const uint32_t from_domain,
   const uint32_t to_domain)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   const size_t prefix_len = strlen(prefix);
   const uint32_t domain_a = min(from_domain, to_domain);
   const uint32_t domain_b = max(from_domain, to_domain);
@@ -2728,6 +2738,7 @@ unlock:
 // Caller holds the namespace lock (read or write).
 static bool bridge_manager_is_alone(const struct agnocast_ns * ns, const pid_t pid)
 {
+  lockdep_assert_held(&ns->rwsem);
   return agnocast_get_process_num_in_domain_except_unlink_daemon(ns, get_process_domain_id(pid)) <=
          1;
 }
@@ -3734,45 +3745,32 @@ unlock_only_ns:
   return ret;
 }
 
-// No locking needed for the following KUnit helper functions.
-// These are only called from single-threaded KUnit context.
-
-static struct topic_wrapper * kunit_find_topic_for_current(
-  const char * topic_name, const struct ipc_namespace * ipc_ns)
-{
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  return ns ? find_topic_for_current(ns, topic_name) : NULL;
-}
+// The KUnit helpers below take the namespace lock (read) like any other reader: the exit worker
+// can run concurrently with a test, and the lockdep assertions expect the lock.
 
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return 0;
-  }
-
-  struct rb_root * root = &wrapper->topic->entries;
-  struct rb_node * node;
   int count = 0;
-  for (node = rb_first(root); node; node = rb_next(node)) {
-    count++;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  if (wrapper) {
+    struct rb_node * node;
+    for (node = rb_first(&wrapper->topic->entries); node; node = rb_next(node)) {
+      count++;
+    }
   }
+  agnocast_ns_read_unlock(ns);
   return count;
 }
 
 bool agnocast_is_in_topic_entries(
   const char * topic_name, const struct ipc_namespace * ipc_ns, int64_t entry_id)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct entry_node * en = find_message_entry(wrapper, entry_id);
-  if (!en) {
-    return false;
-  }
-
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_message_entry(wrapper, entry_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 // Returns 1 if subscriber is holding a reference to the entry, 0 otherwise.
@@ -3781,102 +3779,100 @@ int agnocast_get_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const int64_t entry_id,
   const topic_local_id_t pubsub_id)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return -1;
-  }
-
-  const struct entry_node * en = find_message_entry(wrapper, entry_id);
-  if (!en) {
-    return -1;
-  }
-
   if (pubsub_id < 0 || pubsub_id >= MAX_TOPIC_LOCAL_ID) {
     return -1;
   }
 
-  return test_bit(pubsub_id, en->referencing_subscribers) ? 1 : 0;
+  int rc = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const struct entry_node * en = wrapper ? find_message_entry(wrapper, entry_id) : NULL;
+  if (en) {
+    rc = test_bit(pubsub_id, en->referencing_subscribers) ? 1 : 0;
+  }
+  agnocast_ns_read_unlock(ns);
+  return rc;
 }
 
 int64_t agnocast_get_latest_received_entry_id(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return -1;
+  int64_t entry_id = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const struct subscriber_info * sub_info =
+    wrapper ? find_subscriber_info(wrapper, subscriber_id) : NULL;
+  if (sub_info) {
+    entry_id = sub_info->latest_received_entry_id;
   }
-  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
-  if (!sub_info) {
-    return -1;
-  }
-
-  return sub_info->latest_received_entry_id;
+  agnocast_ns_read_unlock(ns);
+  return entry_id;
 }
 
 bool agnocast_is_in_subscriber_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
-  if (!sub_info) {
-    return false;
-  }
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_subscriber_info(wrapper, subscriber_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 bool agnocast_is_in_publisher_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
-  if (!pub_info) {
-    return false;
-  }
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_publisher_info(wrapper, publisher_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  if (!ns) return 0;
-
   int count = 0;
-  struct topic_wrapper * wrapper;
-  int bkt_wrapper;
-  hash_for_each(ns->topic_hashtable, bkt_wrapper, wrapper, node)
-  {
-    count++;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  if (ns) {
+    struct topic_wrapper * wrapper;
+    int bkt_wrapper;
+    hash_for_each(ns->topic_hashtable, bkt_wrapper, wrapper, node)
+    {
+      count++;
+    }
   }
+  agnocast_ns_read_unlock(ns);
   return count;
 }
 
 bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  return kunit_find_topic_for_current(topic_name, ipc_ns) != NULL;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const bool found = ns && find_topic_for_current(ns, topic_name);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  return ns && find_bridge_info(ns, topic_name) != NULL;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const bool found = ns && find_bridge_info(ns, topic_name);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
+  pid_t pid = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
   const struct bridge_info * br_info = ns ? find_bridge_info(ns, topic_name) : NULL;
   if (br_info) {
-    return br_info->pid;
+    pid = br_info->pid;
   }
-  return -1;
+  agnocast_ns_read_unlock(ns);
+  return pid;
 }
 
 bool agnocast_get_domain_rule(

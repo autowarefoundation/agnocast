@@ -3,6 +3,7 @@
 
 static void remove_all_topics(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct topic_wrapper * wrapper;
   struct hlist_node * tmp;
   int bkt;
@@ -17,6 +18,7 @@ static void remove_all_topics(struct agnocast_ns * ns)
 
 static void remove_all_bridge_info(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct bridge_info * br_info;
   int bkt;
   struct hlist_node * tmp;
@@ -30,6 +32,7 @@ static void remove_all_bridge_info(struct agnocast_ns * ns)
 
 static void remove_all_domain_rules(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct domain_bridge_rule * rule;
   int bkt;
   struct hlist_node * tmp;

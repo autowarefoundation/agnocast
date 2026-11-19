@@ -300,7 +300,7 @@ void agnocast_ns_write_unlock(struct agnocast_ns * ns);
 struct agnocast_ns * agnocast_ns_write_lock_any(void);
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns);
 #ifdef KUNIT_BUILD
-// Unlocked, unreferenced lookup for the single-threaded KUnit helpers.
+// Unlocked, unreferenced lookup, for KUnit cases that only check whether the state exists.
 struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns);
 #endif
 
