@@ -469,11 +469,13 @@ static void mark_process_exited(struct agnocast_ns * ns, struct process_info * p
 {
   lockdep_assert_held_write(&ns->rwsem);
   if (!proc_info->exited) ns->alive_proc_num--;
-  proc_info->exited = true;
+  // agnocast_find_exited_process() can read this without the namespace lock.
+  WRITE_ONCE(proc_info->exited, true);
 }
 
 // The first exited entry of this namespace, or -1. Exited entries outlive the namespace's state, so
-// this does not need it.
+// this does not need it. Without the state, the walk can race an exit cleanup in a state recreated
+// meanwhile, hence READ_ONCE(); an entry missed that way is found on the daemon's next poll.
 pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * ret_local_pid)
 {
   pid_t global_pid = -1;
@@ -482,7 +484,7 @@ pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * 
   rcu_read_lock();
   hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
   {
-    if (proc_info->ipc_ns != ipc_ns || !proc_info->exited) {
+    if (proc_info->ipc_ns != ipc_ns || !READ_ONCE(proc_info->exited)) {
       continue;
     }
 

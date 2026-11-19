@@ -45,7 +45,11 @@ extern struct device * agnocast_device;
 // - Read lock: when searching its tables and operating within a topic
 // - Write lock: when adding/removing entries of its tables or its processes
 // No lock is shared across namespaces except the leaves, which guard only a hash add/del or an
-// allocator bookkeeping step, so one container's endpoint churn cannot stall another's IPC.
+// allocator bookkeeping step. Another container's endpoint churn can still make this one wait, but
+// only for one such step: a scan of the memory pools under mempool_lock (registration, exit,
+// linking an endpoint, and the first receive after an endpoint change take it). Exit cleanup is
+// also shared: one worker thread handles the exited pids of every namespace in order, so a
+// namespace whose lock is held long delays the cleanup of the others.
 
 // =========================================
 // data structure
