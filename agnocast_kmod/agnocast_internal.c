@@ -133,6 +133,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper)
 {
+  lockdep_assert_held(&global_htables_rwsem);
   int count = 0;
   struct subscriber_info * sub_info;
   int bkt_sub_info;
@@ -145,6 +146,7 @@ int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper)
 
 int agnocast_get_size_pub_info_htable(struct topic_wrapper * wrapper)
 {
+  lockdep_assert_held(&global_htables_rwsem);
   int count = 0;
   struct publisher_info * pub_info;
   int bkt_pub_info;
@@ -218,6 +220,7 @@ bool agnocast_is_referenced(struct entry_node * en)
 
 struct process_info * agnocast_find_process_info(const pid_t pid)
 {
+  lockdep_assert_held(&global_htables_rwsem);
   struct process_info * proc_info;
   uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
   hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
