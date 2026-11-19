@@ -316,18 +316,23 @@ bool agnocast_is_referenced(struct entry_node * en)
   return !bitmap_empty(en->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 }
 
+// The walk is under RCU because other namespaces add and remove entries concurrently. What keeps
+// an entry of the caller's own namespace alive after this returns is the caller's namespace lock:
+// such entries are removed only under that lock (write).
 struct process_info * agnocast_find_process_info(const pid_t pid)
 {
+  struct process_info * found = NULL;
   struct process_info * proc_info;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
   {
     if (proc_info->global_pid == pid) {
-      return proc_info;
+      found = proc_info;
+      break;
     }
   }
-
-  return NULL;
+  rcu_read_unlock();
+  return found;
 }
 
 void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid)
@@ -401,17 +406,21 @@ pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * 
 // otherwise a manager in one domain would suppress spawning in another.
 bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  bool found = false;
   struct process_info * proc_info;
   int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
   {
     if (
       ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id &&
       proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
-      return true;
+      found = true;
+      break;
     }
   }
-  return false;
+  rcu_read_unlock();
+  return found;
 }
 
 // Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
@@ -419,15 +428,19 @@ bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint
 // window is not told to spawn a replacement.
 bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns)
 {
+  bool found = false;
   struct process_info * proc_info;
   int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
   {
     if (ns->ipc_ns == proc_info->ipc_ns && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      return true;
+      found = true;
+      break;
     }
   }
-  return false;
+  rcu_read_unlock();
+  return found;
 }
 
 // Counting the unlink daemon would keep it from ever deciding the namespace is done.
@@ -436,12 +449,14 @@ int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
   {
     if (ns->ipc_ns == proc_info->ipc_ns && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
       count++;
     }
   }
+  rcu_read_unlock();
   return count;
 }
 
@@ -451,7 +466,8 @@ int agnocast_get_process_num_in_domain_except_unlink_daemon(
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
   {
     if (
       ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id &&
@@ -459,6 +475,7 @@ int agnocast_get_process_num_in_domain_except_unlink_daemon(
       count++;
     }
   }
+  rcu_read_unlock();
   return count;
 }
 
@@ -473,7 +490,8 @@ int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
   {
     if (
       ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id && !proc_info->exited &&
@@ -481,6 +499,7 @@ int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
       count++;
     }
   }
+  rcu_read_unlock();
   return count;
 }
 
@@ -499,15 +518,19 @@ void agnocast_add_discovery_agent_info(struct agnocast_ns * ns, struct discovery
 struct discovery_agent_info * agnocast_find_discovery_agent(
   const struct agnocast_ns * ns, const uint32_t domain_id)
 {
+  struct discovery_agent_info * found = NULL;
   struct discovery_agent_info * agent;
   int bkt;
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
+  rcu_read_lock();
+  hash_for_each_rcu(discovery_agent_htable, bkt, agent, node)
   {
     if (agent->ipc_ns == ns->ipc_ns && agent->domain_id == domain_id) {
-      return agent;
+      found = agent;
+      break;
     }
   }
-  return NULL;
+  rcu_read_unlock();
+  return found;
 }
 
 // Module unload: every namespace is gone, so no count needs updating.
@@ -725,12 +748,14 @@ int agnocast_get_alive_proc_num(void)
   int count = 0;
   struct process_info * proc_info;
   int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
   {
     if (!proc_info->exited) {
       count++;
     }
   }
+  rcu_read_unlock();
   return count;
 }
 
@@ -739,29 +764,28 @@ int agnocast_get_discovery_agent_num(void)
   int count = 0;
   struct discovery_agent_info * agent;
   int bkt;
-  // Serialize against the exit path's hash_del_rcu()+kfree_rcu(), which runs under the write lock.
-  down_read(&global_htables_rwsem);
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
+  rcu_read_lock();
+  hash_for_each_rcu(discovery_agent_htable, bkt, agent, node)
   {
     count++;
   }
-  up_read(&global_htables_rwsem);
+  rcu_read_unlock();
   return count;
 }
 
 bool agnocast_is_proc_exited(const pid_t pid)
 {
+  bool exited = false;
   struct process_info * proc_info;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
   {
     if (proc_info->global_pid == pid) {
-      if (proc_info->exited) {
-        return true;
-      } else {
-        return false;
-      }
+      exited = proc_info->exited;
+      break;
     }
   }
-  return false;
+  rcu_read_unlock();
+  return exited;
 }
 #endif
