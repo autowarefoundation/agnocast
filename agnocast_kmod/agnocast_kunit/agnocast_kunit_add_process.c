@@ -231,7 +231,15 @@ void test_case_add_process_unlink_daemon_removed_on_death(struct kunit * test)
   agnocast_process_exit_cleanup(app_pid);
   agnocast_process_exit_cleanup(daemon_pid);
 
-  // Assert
+  // Assert: only the application's entry is left for a replacement daemon to drain. The next
+  // process to register starts that daemon; it is registered directly here.
+  const pid_t new_daemon_pid = pid++;
+  union ioctl_add_process_args new_daemon_args;
+  KUNIT_ASSERT_EQ(
+    test,
+    agnocast_ioctl_add_process(
+      new_daemon_pid, current->nsproxy->ipc_ns, PROCESS_ROLE_UNLINK_DAEMON, 0, &new_daemon_args),
+    0);
   struct ioctl_get_exit_process_args exit_args = {};
   KUNIT_EXPECT_EQ(
     test, agnocast_ioctl_get_exit_process(current->nsproxy->ipc_ns, &exit_args), app_pid);

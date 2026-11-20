@@ -29,13 +29,16 @@ extern struct device * agnocast_device;
 //   agnocast_increment_message_entry_rc, which manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
-//   1. global_htables_rwsem   (this file)
+//   1. The namespace lock     (agnocast_ns_read_lock() and friends, agnocast_internal.c)
 //   2. topic->rwsem           (per-topic, in struct topic_struct)
 //   3. mempool_lock           (agnocast_memory_allocator.c)
 //
-// Global rwsem for hashtables (topic_hashtable, proc_info_htable, bridge_htable)
-// - Read lock (down_read): when searching hashtables and operating within a topic
-// - Write lock (down_write): when adding/removing entries from hashtables
+// The namespace lock is taken through agnocast_ns_read_lock() / agnocast_ns_write_lock() /
+// agnocast_ns_write_lock_or_create(), which return the caller's struct agnocast_ns:
+// - Read lock: when searching its tables and operating within a topic
+// - Write lock: when adding/removing entries of its tables or its processes
+// For now every namespace shares global_htables_rwsem as its lock. It also guards the namespace
+// registry and the host-wide proc_info_htable and discovery_agent_htable.
 extern struct rw_semaphore global_htables_rwsem;
 
 // =========================================
@@ -48,6 +51,7 @@ extern struct rw_semaphore global_htables_rwsem;
 #define PROC_INFO_HASH_BITS 10
 // At most one agent per (IPC namespace, domain), so the table is tiny.
 #define DISCOVERY_AGENT_HASH_BITS 4
+#define AGNOCAST_NS_HASH_BITS 6
 
 // Covers typical ROS 2 fan-out without reallocation, at a negligible per-publisher cost.
 #define NOTIFY_CTXS_MIN_CAPACITY 8
@@ -173,15 +177,15 @@ struct topic_struct
   DECLARE_HASHTABLE(sub_info_htable, SUB_INFO_HASH_BITS);
   topic_local_id_t current_pubsub_id;
   int64_t current_entry_id;
-  // Set by the Bridge Manager under global_htables_rwsem READ only, so accessed with
+  // Set by the Bridge Manager under the namespace lock READ only, so accessed with
   // READ_ONCE/WRITE_ONCE.
   uint32_t ros2_subscriber_num;
   uint32_t ros2_publisher_num;
   // Per-topic rwsem guarding the entries tree. Publish takes it for write. Receive, take and
   // message-entry reference release take it for read.
   // Structural changes, like adding or removing publishers and subscribers, run under
-  // global_htables_rwsem WRITE and do not take this rwsem. This is why holding global read
-  // for the whole receive keeps both the tree and this struct alive.
+  // the namespace lock WRITE and do not take this rwsem. This is why holding the namespace read
+  // lock for the whole receive keeps both the tree and this struct alive.
   // The query ioctls do not take it, for the same reason.
   struct rw_semaphore rwsem;
   // Number of topic_wrappers sharing this struct. 1 normally; 2 when a domain
@@ -195,8 +199,6 @@ struct topic_struct
 
 struct topic_wrapper
 {
-  const struct ipc_namespace *
-    ipc_ns;  // For use in separating topic namespaces when using containers.
   // Part of the topic identity: topics with the same name/ipc_ns but different
   // ROS_DOMAIN_ID are distinct wrappers and do not match (ROS 2 domain isolation).
   uint32_t domain_id;
@@ -216,19 +218,14 @@ struct entry_node
   DECLARE_BITMAP(referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 };
 
-extern DECLARE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
-
 struct bridge_info
 {
   char * topic_name;
   pid_t pid;
   bool has_r2a;  // ROS2 -> Agnocast
   bool has_a2r;  // Agnocast -> ROS2
-  const struct ipc_namespace * ipc_ns;
   struct hlist_node node;
 };
-
-extern DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
 
 // A domain bridge rule relays one topic between two ROS domains within one IPC
 // namespace. The pair is stored canonically (domain_a < domain_b) with the enabled
@@ -241,7 +238,6 @@ struct domain_bridge_rule
   // either way -- only the two wrappers' keys differ.
   char * topic_name_a;
   char * topic_name_b;
-  const struct ipc_namespace * ipc_ns;
   uint32_t domain_a;  // canonical ordering: domain_a < domain_b
   uint32_t domain_b;
   bool a_to_b;  // deliver domain_a's publications to domain_b's subscribers
@@ -253,7 +249,42 @@ struct domain_bridge_rule
   struct hlist_node node;
 };
 
-extern DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+// The state of one IPC namespace. Created by the first ioctl that registers something in it, and
+// retired by the write unlock that leaves it empty. The ipc_namespace pointer is only a key: no
+// reference is held, because put_ipc_ns() is not exported to modules on every kernel.
+struct agnocast_ns
+{
+  struct hlist_node node;
+  const struct ipc_namespace * ipc_ns;
+  // This namespace's process_info entries that have not exited yet, the unlink daemon's included.
+  // An exited entry stays in proc_info_htable until the unlink daemon drains it, but does not keep
+  // the namespace: only a live unlink daemon can drain it, and that daemon is counted here.
+  uint32_t alive_proc_num;
+  // This namespace's entries in discovery_agent_htable.
+  uint32_t agent_num;
+  DECLARE_HASHTABLE(topic_hashtable, TOPIC_HASH_BITS);
+  DECLARE_HASHTABLE(bridge_htable, TOPIC_HASH_BITS);
+  DECLARE_HASHTABLE(domain_rule_htable, TOPIC_HASH_BITS);
+};
+
+// Look up the namespace and lock it. Return NULL when it has no state yet, so a read-only caller
+// can report "nothing" without creating any.
+struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns);
+struct agnocast_ns * agnocast_ns_write_lock(const struct ipc_namespace * ipc_ns);
+// For callers that register something. Returns ERR_PTR(-ENOMEM) instead of NULL.
+struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace * ipc_ns);
+// The unlock functions accept NULL, the result of a lookup that found nothing, and do nothing.
+void agnocast_ns_read_unlock(struct agnocast_ns * ns);
+// Retires the namespace if this left it empty.
+void agnocast_ns_write_unlock(struct agnocast_ns * ns);
+// Module unload: write-locks some namespace (NULL once none is left), to be torn down and
+// passed to agnocast_ns_retire_and_unlock().
+struct agnocast_ns * agnocast_ns_write_lock_any(void);
+void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns);
+#ifdef KUNIT_BUILD
+// Unlocked, unreferenced lookup for the single-threaded KUnit helpers.
+struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns);
+#endif
 
 // The discovery agent's liveness, owned by the kmod so the fork gate and the
 // singleton claim share one source of truth (no userspace flock). Hashed by pid
@@ -271,10 +302,16 @@ struct discovery_agent_info
 
 extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
 
-// Both require global_htables_rwsem held (read for find, write for remove).
+// Both require the namespace lock (read for find, write for remove).
 struct discovery_agent_info * agnocast_find_discovery_agent(
-  const struct ipc_namespace * ipc_ns, const uint32_t domain_id);
-void agnocast_remove_discovery_agent_by_pid(const pid_t pid);
+  const struct agnocast_ns * ns, const uint32_t domain_id);
+void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
+// The namespace a pid registered its process_info / discovery agent in, or NULL. Only a key for
+// agnocast_ns_write_lock(): the entry itself may be gone by the time the caller has the lock.
+// Looked up separately because one pid can have both, in different namespaces: a stale exited
+// process_info and a live discovery agent that reused the pid.
+const struct ipc_namespace * agnocast_find_process_ipc_ns(const pid_t pid);
+const struct ipc_namespace * agnocast_find_discovery_agent_ipc_ns(const pid_t pid);
 
 int agnocast_get_size_sub_info_htable(struct topic_wrapper * wrapper);
 
@@ -286,7 +323,11 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 
 bool agnocast_is_referenced(struct entry_node * en);
 
+// Caller holds the namespace lock.
 struct process_info * agnocast_find_process_info(const pid_t pid);
+// Drops an exited entry whose namespace state was already retired. An exited entry no longer
+// counts as alive, so the namespace state is not needed; takes the host-wide lock itself.
+void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
@@ -297,12 +338,12 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper);
 
 // The single place a subscriber is dropped from a live topic, so that releasing its eventfd
 // context and rebuilding the notify lists pointing at it cannot be forgotten at one call site.
-// Caller holds global_htables_rwsem (write).
+// Caller holds the namespace lock (write).
 void agnocast_unlink_subscriber_info(
   struct topic_wrapper * wrapper, struct subscriber_info * sub_info);
 
 // Recomputes the publishers' notify lists, for the one caller that unlinks subscribers in bulk and
-// so cannot use agnocast_unlink_subscriber_info(). Caller holds global_htables_rwsem (write).
+// so cannot use agnocast_unlink_subscriber_info(). Caller holds the namespace lock (write).
 void agnocast_rebuild_notify_lists(struct topic_wrapper * wrapper);
 
 long agnocast_ioctl(struct file * file, unsigned int cmd, unsigned long arg);
