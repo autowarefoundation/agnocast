@@ -5,23 +5,19 @@ int major;
 struct class * agnocast_class;
 struct device * agnocast_device;
 
-DECLARE_RWSEM(global_htables_rwsem);
-DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
-DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+// Only the functions in this file touch these two tables, so that adding, removing or marking an
+// entry always updates the namespace's counts with it.
+static DEFINE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
+static DEFINE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
+// Serializes adding and removing entries in the two tables above across namespaces. Readers that
+// hold no namespace lock walk them under RCU. Innermost: taken under a namespace lock, never the
+// other way around.
+static DEFINE_SPINLOCK(agnocast_pid_index_lock);
 
-// Every IPC namespace that has registered something. Guarded by global_htables_rwsem.
+// Every IPC namespace that has registered something. Looked up under RCU on every ioctl; the
+// mutex only orders creating and retiring.
 static DEFINE_HASHTABLE(ns_htable, AGNOCAST_NS_HASH_BITS);
-
-// Caller holds global_htables_rwsem.
-static struct agnocast_ns * ns_find(const struct ipc_namespace * ipc_ns)
-{
-  struct agnocast_ns * ns;
-  hash_for_each_possible(ns_htable, ns, node, (unsigned long)ipc_ns)
-  {
-    if (ns->ipc_ns == ipc_ns) return ns;
-  }
-  return NULL;
-}
+static DEFINE_MUTEX(ns_registry_lock);
 
 static bool ns_is_empty(struct agnocast_ns * ns)
 {
@@ -29,52 +25,126 @@ static bool ns_is_empty(struct agnocast_ns * ns)
          hash_empty(ns->bridge_htable) && hash_empty(ns->domain_rule_htable);
 }
 
+// Takes a reference, or returns NULL if the namespace is not registered or is being freed.
+static struct agnocast_ns * ns_get(const struct ipc_namespace * ipc_ns)
+{
+  struct agnocast_ns * found = NULL;
+  struct agnocast_ns * ns;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(ns_htable, ns, node, (unsigned long)ipc_ns)
+  {
+    if (ns->ipc_ns == ipc_ns && refcount_inc_not_zero(&ns->ref)) {
+      found = ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+static struct agnocast_ns * ns_get_or_create(const struct ipc_namespace * ipc_ns)
+{
+  struct agnocast_ns * ns = ns_get(ipc_ns);
+  if (ns) return ns;
+
+  // Allocated before taking the mutex: kvzalloc() may sleep in reclaim, and the mutex also orders
+  // every other namespace's creation and retirement.
+  struct agnocast_ns * new_ns = kvzalloc(sizeof(*new_ns), GFP_KERNEL);
+  if (!new_ns) {
+    // Another task may have created it meanwhile.
+    ns = ns_get(ipc_ns);
+    return ns ? ns : ERR_PTR(-ENOMEM);
+  }
+  // One reference for the registry, one for the caller.
+  refcount_set(&new_ns->ref, 2);
+  new_ns->ipc_ns = ipc_ns;
+  init_rwsem(&new_ns->rwsem);
+  hash_init(new_ns->topic_hashtable);
+  hash_init(new_ns->bridge_htable);
+  hash_init(new_ns->domain_rule_htable);
+
+  mutex_lock(&ns_registry_lock);
+  // Another task may have created it since the lookup above.
+  ns = ns_get(ipc_ns);
+  if (!ns) {
+    hash_add_rcu(ns_htable, &new_ns->node, (unsigned long)ipc_ns);
+    ns = new_ns;
+    new_ns = NULL;
+  }
+  mutex_unlock(&ns_registry_lock);
+  kvfree(new_ns);  // The loser's copy, never published.
+  return ns;
+}
+
+static void ns_put(struct agnocast_ns * ns)
+{
+  // A lookup that raced the retirement may still be walking past the node.
+  if (refcount_dec_and_test(&ns->ref)) kvfree_rcu(ns, rcu_head);
+}
+
+// Takes the lock on the reference `ns` holds, or drops both and returns false if the namespace was
+// retired meanwhile.
+static bool ns_lock_alive(struct agnocast_ns * ns, const bool write)
+{
+  if (write) {
+    down_write(&ns->rwsem);
+  } else {
+    down_read(&ns->rwsem);
+  }
+  if (!ns->dead) return true;
+
+  if (write) {
+    up_write(&ns->rwsem);
+  } else {
+    up_read(&ns->rwsem);
+  }
+  ns_put(ns);
+  return false;
+}
+
+// The retry ends: a dead namespace has already left the registry, so the next lookup misses it.
+static struct agnocast_ns * ns_lock(
+  const struct ipc_namespace * ipc_ns, const bool write, const bool create)
+{
+  for (;;) {
+    struct agnocast_ns * ns = create ? ns_get_or_create(ipc_ns) : ns_get(ipc_ns);
+    if (IS_ERR_OR_NULL(ns)) return ns;
+    if (ns_lock_alive(ns, write)) return ns;
+  }
+}
+
 struct agnocast_ns * agnocast_ns_read_lock(const struct ipc_namespace * ipc_ns)
 {
-  down_read(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (!ns) up_read(&global_htables_rwsem);
-  return ns;
+  return ns_lock(ipc_ns, false, false);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock(const struct ipc_namespace * ipc_ns)
 {
-  down_write(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (!ns) up_write(&global_htables_rwsem);
-  return ns;
+  return ns_lock(ipc_ns, true, false);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace * ipc_ns)
 {
-  down_write(&global_htables_rwsem);
-  struct agnocast_ns * ns = ns_find(ipc_ns);
-  if (ns) return ns;
-
-  ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
-  if (!ns) {
-    up_write(&global_htables_rwsem);
-    return ERR_PTR(-ENOMEM);
-  }
-  ns->ipc_ns = ipc_ns;
-  hash_init(ns->topic_hashtable);
-  hash_init(ns->bridge_htable);
-  hash_init(ns->domain_rule_htable);
-  hash_add(ns_htable, &ns->node, (unsigned long)ipc_ns);
-  return ns;
+  return ns_lock(ipc_ns, true, true);
 }
 
 void agnocast_ns_read_unlock(struct agnocast_ns * ns)
 {
   if (!ns) return;
-  up_read(&global_htables_rwsem);
+  up_read(&ns->rwsem);
+  ns_put(ns);
 }
 
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns)
 {
-  hash_del(&ns->node);
-  kvfree(ns);
-  up_write(&global_htables_rwsem);
+  lockdep_assert_held_write(&ns->rwsem);
+  ns->dead = true;
+  mutex_lock(&ns_registry_lock);
+  hash_del_rcu(&ns->node);
+  mutex_unlock(&ns_registry_lock);
+  up_write(&ns->rwsem);
+  ns_put(ns);  // the registry's
+  ns_put(ns);  // the caller's
 }
 
 void agnocast_ns_write_unlock(struct agnocast_ns * ns)
@@ -84,26 +154,45 @@ void agnocast_ns_write_unlock(struct agnocast_ns * ns)
     agnocast_ns_retire_and_unlock(ns);
     return;
   }
-  up_write(&global_htables_rwsem);
+  up_write(&ns->rwsem);
+  ns_put(ns);
 }
 
 struct agnocast_ns * agnocast_ns_write_lock_any(void)
 {
-  struct agnocast_ns * ns;
-  int bkt;
-  down_write(&global_htables_rwsem);
-  hash_for_each(ns_htable, bkt, ns, node)
-  {
-    return ns;
+  for (;;) {
+    struct agnocast_ns * ns = NULL;
+    struct agnocast_ns * entry;
+    int bkt;
+    mutex_lock(&ns_registry_lock);
+    hash_for_each(ns_htable, bkt, entry, node)
+    {
+      // Every registered namespace holds the registry's reference, so this cannot fail.
+      refcount_inc(&entry->ref);
+      ns = entry;
+      break;
+    }
+    mutex_unlock(&ns_registry_lock);
+    if (!ns) return NULL;
+    if (ns_lock_alive(ns, true)) return ns;
   }
-  up_write(&global_htables_rwsem);
-  return NULL;
 }
 
 #ifdef KUNIT_BUILD
 struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns)
 {
-  return ns_find(ipc_ns);
+  struct agnocast_ns * found = NULL;
+  struct agnocast_ns * ns;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(ns_htable, ns, node, (unsigned long)ipc_ns)
+  {
+    if (ns->ipc_ns == ipc_ns) {
+      found = ns;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
 }
 #endif
 
@@ -118,7 +207,8 @@ int has_new_pid;
 
 struct tracepoint * tp_sched_process_exit;
 
-static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pid_t pid)
+static void pre_handler_subscriber_exit(
+  const struct agnocast_ns * ns, struct topic_wrapper * wrapper, const pid_t pid)
 {
   // Unlinked as a batch so the notify lists are rebuilt once instead of once per subscriber, which
   // would repeat the same work and land on the same result.
@@ -171,7 +261,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
       {
         if (pub_info->id == en->publisher_id) {
-          const struct process_info * pub_proc_info = agnocast_find_process_info(pub_info->pid);
+          const struct process_info * pub_proc_info = agnocast_find_process_info(ns, pub_info->pid);
           if (!pub_proc_info || pub_proc_info->exited) {
             publisher_exited = true;
           }
@@ -310,29 +400,269 @@ bool agnocast_is_referenced(struct entry_node * en)
   return !bitmap_empty(en->referencing_subscribers, MAX_TOPIC_LOCAL_ID);
 }
 
-struct process_info * agnocast_find_process_info(const pid_t pid)
+// Only an entry of `ns` is returned: a pid may name an entry of another namespace (an exited
+// entry, or a reused pid), which `ns`'s lock does not keep alive. The walk is under RCU because
+// other namespaces add and remove entries concurrently. What keeps the returned entry alive is the
+// caller's namespace lock: entries of a namespace are removed only under its lock (write).
+struct process_info * agnocast_find_process_info(const struct agnocast_ns * ns, const pid_t pid)
 {
+  lockdep_assert_held(&ns->rwsem);
+  struct process_info * found = NULL;
   struct process_info * proc_info;
-  uint32_t hash_val = hash_min(pid, PROC_INFO_HASH_BITS);
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_val)
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
   {
     if (proc_info->global_pid == pid) {
-      return proc_info;
+      if (proc_info->ipc_ns == ns->ipc_ns) found = proc_info;
+      break;
     }
   }
-
-  return NULL;
+  rcu_read_unlock();
+  return found;
 }
 
-void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid)
+// Host-wide, unlike agnocast_find_process_info(): a pid identifies one process across namespaces.
+bool agnocast_pid_has_process_info(const pid_t pid)
 {
-  down_write(&global_htables_rwsem);
-  struct process_info * proc_info = agnocast_find_process_info(pid);
-  if (proc_info && proc_info->ipc_ns == ipc_ns && proc_info->exited) {
+  bool found = false;
+  struct process_info * proc_info;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      found = true;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+// Caller holds the namespace lock (write).
+void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
+{
+  lockdep_assert_held_write(&ns->rwsem);
+  INIT_HLIST_NODE(&proc_info->node);
+  spin_lock(&agnocast_pid_index_lock);
+  hash_add_rcu(
+    proc_info_htable, &proc_info->node, hash_min(proc_info->global_pid, PROC_INFO_HASH_BITS));
+  spin_unlock(&agnocast_pid_index_lock);
+  ns->alive_proc_num++;
+}
+
+// Caller holds the namespace lock (write).
+void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
+{
+  lockdep_assert_held_write(&ns->rwsem);
+  // An exited entry already stopped counting as alive when the exit cleanup marked it.
+  if (!proc_info->exited) ns->alive_proc_num--;
+  spin_lock(&agnocast_pid_index_lock);
+  hash_del_rcu(&proc_info->node);
+  spin_unlock(&agnocast_pid_index_lock);
+  kfree_rcu(proc_info, rcu_head);
+}
+
+// It stops counting as alive now, so a namespace whose unlink daemon died with it can be retired.
+// A second call (a stale entry hit again through pid reuse) leaves the count alone.
+// Caller holds the namespace lock (write).
+static void mark_process_exited(struct agnocast_ns * ns, struct process_info * proc_info)
+{
+  lockdep_assert_held_write(&ns->rwsem);
+  if (!proc_info->exited) ns->alive_proc_num--;
+  // agnocast_find_exited_process() can read this without the namespace lock.
+  WRITE_ONCE(proc_info->exited, true);
+}
+
+// The first exited entry of this namespace, or -1. Exited entries outlive the namespace's state, so
+// this does not need it. Without the state, the walk can race an exit cleanup in a state recreated
+// meanwhile, hence READ_ONCE(); an entry missed that way is found on the daemon's next poll.
+pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * ret_local_pid)
+{
+  pid_t global_pid = -1;
+  struct process_info * proc_info;
+  int bkt;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
+  {
+    if (proc_info->ipc_ns != ipc_ns || !READ_ONCE(proc_info->exited)) {
+      continue;
+    }
+
+    *ret_local_pid = proc_info->local_pid;
+    global_pid = proc_info->global_pid;
+    break;
+  }
+  rcu_read_unlock();
+  return global_pid;
+}
+
+// A bridge manager is per-(ipc_ns, domain): its UDS address carries
+// the domain suffix, so each domain needs its own manager. Gate on the domain too,
+// otherwise a manager in one domain would suppress spawning in another.
+bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id)
+{
+  lockdep_assert_held(&ns->rwsem);
+  bool found = false;
+  struct process_info * proc_info;
+  int bkt;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
+  {
+    if (
+      ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id &&
+      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
+      found = true;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
+// abruptly still reads as alive until the worker drains its pid, so a process registering in that
+// window is not told to spawn a replacement.
+bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns)
+{
+  lockdep_assert_held(&ns->rwsem);
+  bool found = false;
+  struct process_info * proc_info;
+  int bkt;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
+  {
+    if (ns->ipc_ns == proc_info->ipc_ns && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+      found = true;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+// Counting the unlink daemon would keep it from ever deciding the namespace is done.
+int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
+{
+  lockdep_assert_held(&ns->rwsem);
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (ns->ipc_ns == proc_info->ipc_ns && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+      count++;
+    }
+  }
+  rcu_read_unlock();
+  return count;
+}
+
+int agnocast_get_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id)
+{
+  lockdep_assert_held(&ns->rwsem);
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (
+      ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id &&
+      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+      count++;
+    }
+  }
+  rcu_read_unlock();
+  return count;
+}
+
+// Like agnocast_get_process_num_in_domain_except_unlink_daemon() but also excludes processes that
+// have exited and are still pending cleanup. The discovery agent tracks live endpoints, so an
+// exited entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
+// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
+// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
+int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id)
+{
+  lockdep_assert_held(&ns->rwsem);
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (
+      ns->ipc_ns == proc_info->ipc_ns && proc_info->domain_id == domain_id && !proc_info->exited &&
+      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
+      count++;
+    }
+  }
+  rcu_read_unlock();
+  return count;
+}
+
+// Caller holds the namespace lock (write).
+void agnocast_add_discovery_agent_info(struct agnocast_ns * ns, struct discovery_agent_info * agent)
+{
+  lockdep_assert_held_write(&ns->rwsem);
+  INIT_HLIST_NODE(&agent->node);
+  spin_lock(&agnocast_pid_index_lock);
+  hash_add_rcu(
+    discovery_agent_htable, &agent->node, hash_min(agent->pid, DISCOVERY_AGENT_HASH_BITS));
+  spin_unlock(&agnocast_pid_index_lock);
+  ns->agent_num++;
+}
+
+// Caller holds the namespace lock (read). Scans because the table is keyed by pid.
+struct discovery_agent_info * agnocast_find_discovery_agent(
+  const struct agnocast_ns * ns, const uint32_t domain_id)
+{
+  lockdep_assert_held(&ns->rwsem);
+  struct discovery_agent_info * found = NULL;
+  struct discovery_agent_info * agent;
+  int bkt;
+  rcu_read_lock();
+  hash_for_each_rcu(discovery_agent_htable, bkt, agent, node)
+  {
+    if (agent->ipc_ns == ns->ipc_ns && agent->domain_id == domain_id) {
+      found = agent;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return found;
+}
+
+// Module unload: every namespace is gone, so no count needs updating.
+void agnocast_remove_all_process_info(void)
+{
+  struct process_info * proc_info;
+  int bkt;
+  struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
+  hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
+  {
     hash_del_rcu(&proc_info->node);
     kfree_rcu(proc_info, rcu_head);
   }
-  up_write(&global_htables_rwsem);
+  spin_unlock(&agnocast_pid_index_lock);
+  // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
+}
+
+void agnocast_remove_all_discovery_agents(void)
+{
+  struct discovery_agent_info * agent;
+  int bkt;
+  struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
+  hash_for_each_safe(discovery_agent_htable, bkt, tmp, agent, node)
+  {
+    hash_del_rcu(&agent->node);
+    kfree_rcu(agent, rcu_head);
+  }
+  spin_unlock(&agnocast_pid_index_lock);
 }
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en)
@@ -386,8 +716,10 @@ void agnocast_enqueue_exit_pid(const pid_t pid)
 // Caller holds the namespace lock (write).
 void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct discovery_agent_info * agent;
   struct hlist_node * tmp;
+  spin_lock(&agnocast_pid_index_lock);
   hash_for_each_possible_safe(
     discovery_agent_htable, agent, tmp, node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS))
   {
@@ -395,9 +727,10 @@ void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t
       hash_del_rcu(&agent->node);
       kfree_rcu(agent, rcu_head);
       ns->agent_num--;
-      return;
+      break;
     }
   }
+  spin_unlock(&agnocast_pid_index_lock);
 }
 
 const struct ipc_namespace * agnocast_find_process_ipc_ns(const pid_t pid)
@@ -463,22 +796,18 @@ void agnocast_process_exit_cleanup(const pid_t pid)
 
   // The PID was already filtered by is_agnocast_pid() in the kprobe handler, but the state may
   // have changed between then and now (e.g., the process was already cleaned up by a prior call).
-  struct process_info * proc_info = agnocast_find_process_info(pid);
-  if (!proc_info || proc_info->ipc_ns != ns->ipc_ns) {
+  struct process_info * proc_info = agnocast_find_process_info(ns, pid);
+  if (!proc_info) {
     agnocast_ns_write_unlock(ns);
     return;
   }
 
   // No daemon can drain the daemon's own entry, so for this role registered means alive.
   if (proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-    hash_del_rcu(&proc_info->node);
-    kfree_rcu(proc_info, rcu_head);
-    ns->alive_proc_num--;
+    agnocast_remove_process_info(ns, proc_info);
   } else {
-    // This proc_info will be removed from proc_info_htable later by the unlink daemon. It stops
-    // counting as alive now, so a namespace whose unlink daemon died with it can be retired.
-    if (!proc_info->exited) ns->alive_proc_num--;
-    proc_info->exited = true;
+    // This proc_info will be removed from proc_info_htable later by the unlink daemon.
+    mark_process_exited(ns, proc_info);
   }
 
   free_memory(pid);
@@ -491,7 +820,7 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   {
     pre_handler_publisher_exit(wrapper, pid);
 
-    pre_handler_subscriber_exit(wrapper, pid);
+    pre_handler_subscriber_exit(ns, wrapper, pid);
 
     // Release this wrapper once its own domain has no endpoints left.
     if (!agnocast_wrapper_has_domain_endpoints(wrapper)) {
@@ -515,3 +844,51 @@ void agnocast_process_exit_cleanup(const pid_t pid)
   dev_info(agnocast_device, "Process (pid=%d) has exited. (%s)\n", pid, __func__);
 #endif
 }
+
+#ifdef KUNIT_BUILD
+int agnocast_get_alive_proc_num(void)
+{
+  int count = 0;
+  struct process_info * proc_info;
+  int bkt_proc_info;
+  rcu_read_lock();
+  hash_for_each_rcu(proc_info_htable, bkt_proc_info, proc_info, node)
+  {
+    if (!proc_info->exited) {
+      count++;
+    }
+  }
+  rcu_read_unlock();
+  return count;
+}
+
+int agnocast_get_discovery_agent_num(void)
+{
+  int count = 0;
+  struct discovery_agent_info * agent;
+  int bkt;
+  rcu_read_lock();
+  hash_for_each_rcu(discovery_agent_htable, bkt, agent, node)
+  {
+    count++;
+  }
+  rcu_read_unlock();
+  return count;
+}
+
+bool agnocast_is_proc_exited(const pid_t pid)
+{
+  bool exited = false;
+  struct process_info * proc_info;
+  rcu_read_lock();
+  hash_for_each_possible_rcu(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
+  {
+    if (proc_info->global_pid == pid) {
+      exited = proc_info->exited;
+      break;
+    }
+  }
+  rcu_read_unlock();
+  return exited;
+}
+#endif

@@ -24,11 +24,6 @@ static pid_t convert_pid_to_local(pid_t global_pid)
 }
 #endif
 
-static bool ipc_eq(const struct ipc_namespace * ipc_ns1, const struct ipc_namespace * ipc_ns2)
-{
-  return ipc_ns1 == ipc_ns2;
-}
-
 static unsigned long get_topic_hash(const char * str)
 {
   unsigned long hash = full_name_hash(NULL /*namespace*/, str, strlen(str));
@@ -38,6 +33,7 @@ static unsigned long get_topic_hash(const char * str)
 static struct topic_wrapper * find_topic(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct topic_wrapper * entry;
   unsigned long hash_val = get_topic_hash(topic_name);
 
@@ -52,15 +48,15 @@ static struct topic_wrapper * find_topic(
 // A process operates in exactly one ROS_DOMAIN_ID, recorded in its process_info.
 // Returns the default domain 0 if the process is not registered.
 // Caller must hold the namespace lock (same as agnocast_find_process_info).
-static uint32_t get_process_domain_id(pid_t pid)
+static uint32_t get_process_domain_id(const struct agnocast_ns * ns, pid_t pid)
 {
-  struct process_info * proc_info = agnocast_find_process_info(pid);
+  struct process_info * proc_info = agnocast_find_process_info(ns, pid);
   return proc_info ? proc_info->domain_id : 0;
 }
 
-static uint32_t get_current_domain_id(void)
+static uint32_t get_current_domain_id(const struct agnocast_ns * ns)
 {
-  return get_process_domain_id(current->tgid);
+  return get_process_domain_id(ns, current->tgid);
 }
 
 // find_topic variant for operations on behalf of the calling process: matches in
@@ -68,7 +64,8 @@ static uint32_t get_current_domain_id(void)
 static struct topic_wrapper * find_topic_for_current(
   const struct agnocast_ns * ns, const char * topic_name)
 {
-  return find_topic(ns, topic_name, get_current_domain_id());
+  lockdep_assert_held(&ns->rwsem);
+  return find_topic(ns, topic_name, get_current_domain_id(ns));
 }
 
 static struct domain_bridge_rule * find_domain_rule(
@@ -81,6 +78,7 @@ static struct domain_bridge_rule * find_domain_rule(
 static struct topic_struct * find_grouped_topic_struct(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   const struct domain_bridge_rule * rule = find_domain_rule(ns, topic_name, domain_id);
   if (!rule) return NULL;
 
@@ -130,6 +128,7 @@ static int add_topic(
   struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id,
   struct topic_wrapper ** wrapper)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   *wrapper = find_topic(ns, topic_name, domain_id);
   if (*wrapper) {
     return 0;
@@ -589,13 +588,6 @@ static struct entry_node * find_message_entry(
   return NULL;
 }
 
-// Forward declaration
-static int get_process_num_except_unlink_daemon(const struct agnocast_ns * ns);
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id);
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id);
-
 // Release subscriber reference from message entry (set boolean flag to false).
 // Called when subscriber's last ipc_shared_ptr reference is destroyed.
 int agnocast_ioctl_release_message_entry_reference(
@@ -699,15 +691,15 @@ static int insert_message_entry(
 // A subscriber only reads from publishers that deliver to it; a one-way bridge rule can exclude
 // opposite-domain publishers. Caller holds the namespace lock.
 static struct mempool_entry * pool_to_map(
-  const struct topic_struct * topic, const pid_t pub_pid, const uint32_t pub_domain,
-  const bool pub_is_bridge, const pid_t sub_pid, const uint32_t sub_domain,
-  const bool sub_is_bridge)
+  const struct agnocast_ns * ns, const struct topic_struct * topic, const pid_t pub_pid,
+  const uint32_t pub_domain, const bool pub_is_bridge, const pid_t sub_pid,
+  const uint32_t sub_domain, const bool sub_is_bridge)
 {
   if (sub_pid == pub_pid) return NULL;
   if (!domain_delivery_allowed(topic, pub_domain, pub_is_bridge, sub_domain, sub_is_bridge)) {
     return NULL;
   }
-  const struct process_info * proc_info = agnocast_find_process_info(pub_pid);
+  const struct process_info * proc_info = agnocast_find_process_info(ns, pub_pid);
   if (!proc_info || proc_info->exited) return NULL;
   return proc_info->mempool_entry;
 }
@@ -718,14 +710,15 @@ static struct mempool_entry * pool_to_map(
 // endpoint joined it. A link left by a later failure of the add only keeps the pool referenced
 // until the subscriber process exits.
 static int link_subscriber_to_publishers(
-  const struct topic_wrapper * wrapper, const pid_t sub_pid, const bool sub_is_bridge)
+  const struct agnocast_ns * ns, const struct topic_wrapper * wrapper, const pid_t sub_pid,
+  const bool sub_is_bridge)
 {
   struct publisher_info * pub_info;
   int bkt;
   hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
     struct mempool_entry * pool = pool_to_map(
-      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, sub_pid,
+      ns, wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, sub_pid,
       wrapper->domain_id, sub_is_bridge);
     if (!pool) continue;
     int ret = reference_memory(pool, sub_pid);
@@ -739,9 +732,9 @@ static int link_subscriber_to_publishers(
 // table, links pools, or sets need_mmap_update. agnocastlib's mmap_mtx serializes the calls for one
 // subscriber, so the clear below needs no lock.
 static int set_publisher_shm_info(
-  const struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
-  struct publisher_shm_info * pub_shm_infos, uint32_t pub_shm_infos_size,
-  uint32_t * ret_pub_shm_num)
+  const struct agnocast_ns * ns, const struct topic_wrapper * wrapper,
+  struct subscriber_info * sub_info, struct publisher_shm_info * pub_shm_infos,
+  uint32_t pub_shm_infos_size, uint32_t * ret_pub_shm_num)
 {
   if (!sub_info->need_mmap_update) {
     *ret_pub_shm_num = 0;
@@ -755,7 +748,7 @@ static int set_publisher_shm_info(
   hash_for_each(wrapper->topic->pub_info_htable, bkt, pub_info, node)
   {
     struct mempool_entry * pool = pool_to_map(
-      wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, subscriber_pid,
+      ns, wrapper->topic, pub_info->pid, pub_info->domain_id, pub_info->is_bridge, subscriber_pid,
       wrapper->domain_id, sub_info->is_bridge);
     if (!pool) {
       continue;
@@ -810,40 +803,6 @@ int agnocast_ioctl_get_version(struct ioctl_get_version_args * ioctl_ret)
   return 0;
 }
 
-// A bridge manager is per-(ipc_ns, domain): its UDS address carries
-// the domain suffix, so each domain needs its own manager. Gate on the domain too,
-// otherwise a manager in one domain would suppress spawning in another.
-static bool has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role == PROCESS_ROLE_BRIDGE_MANAGER && !proc_info->exited) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Namespace-scoped, unlike the bridge manager. Liveness lags the exit worker: a daemon killed
-// abruptly still reads as alive until the worker drains its pid, so a process registering in that
-// window is not told to spawn a replacement.
-static bool has_alive_unlink_daemon(const struct agnocast_ns * ns)
-{
-  struct process_info * proc_info;
-  int bkt;
-  hash_for_each(proc_info_htable, bkt, proc_info, node)
-  {
-    if (ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      return true;
-    }
-  }
-  return false;
-}
-
 int agnocast_ioctl_add_process(
   const pid_t pid, const struct ipc_namespace * ipc_ns, const enum process_role role,
   const uint32_t domain_id, union ioctl_add_process_args * ioctl_ret)
@@ -871,13 +830,13 @@ int agnocast_ioctl_add_process(
   struct agnocast_ns * ns = agnocast_ns_write_lock_or_create(ipc_ns);
   if (IS_ERR(ns)) return PTR_ERR(ns);
 
-  if (agnocast_find_process_info(pid)) {
+  if (agnocast_pid_has_process_info(pid)) {
     dev_warn(agnocast_device, "Process (pid=%d) already exists. (%s)\n", pid, __func__);
     ret = -EINVAL;
     goto unlock;
   }
-  ioctl_ret->ret_unlink_daemon_exist = has_alive_unlink_daemon(ns);
-  ioctl_ret->ret_bridge_daemon_exist = has_alive_bridge_manager(ns, domain_id);
+  ioctl_ret->ret_unlink_daemon_exist = agnocast_has_alive_unlink_daemon(ns);
+  ioctl_ret->ret_bridge_daemon_exist = agnocast_has_alive_bridge_manager(ns, domain_id);
   ioctl_ret->ret_discovery_agent_exist = (agnocast_find_discovery_agent(ns, domain_id) != NULL);
 
   // Deciding under the write lock add_process already holds is what stops two daemons starting
@@ -915,10 +874,7 @@ int agnocast_ioctl_add_process(
   new_proc_info->domain_id =
     (role == PROCESS_ROLE_UNLINK_DAEMON) ? AGNOCAST_DOMAIN_ID_NONE : domain_id;
 
-  INIT_HLIST_NODE(&new_proc_info->node);
-  uint32_t hash_val = hash_min(new_proc_info->global_pid, PROC_INFO_HASH_BITS);
-  hash_add_rcu(proc_info_htable, &new_proc_info->node, hash_val);
-  ns->alive_proc_num++;
+  agnocast_add_process_info(ns, new_proc_info);
 
   ioctl_ret->ret_addr = new_proc_info->mempool_entry->addr;
   ioctl_ret->ret_shm_size = mempool_size_bytes;
@@ -952,12 +908,12 @@ int agnocast_ioctl_add_subscriber(
   }
 
   struct topic_wrapper * wrapper;
-  ret = add_topic(ns, topic_name, get_process_domain_id(subscriber_pid), &wrapper);
+  ret = add_topic(ns, topic_name, get_process_domain_id(ns, subscriber_pid), &wrapper);
   if (ret < 0) {
     goto unlock;
   }
 
-  ret = link_subscriber_to_publishers(wrapper, subscriber_pid, is_bridge);
+  ret = link_subscriber_to_publishers(ns, wrapper, subscriber_pid, is_bridge);
   if (ret < 0) {
     goto unlock;
   }
@@ -992,7 +948,7 @@ int agnocast_ioctl_add_publisher(
   if (IS_ERR(ns)) return PTR_ERR(ns);
 
   struct topic_wrapper * wrapper;
-  ret = add_topic(ns, topic_name, get_process_domain_id(publisher_pid), &wrapper);
+  ret = add_topic(ns, topic_name, get_process_domain_id(ns, publisher_pid), &wrapper);
   if (ret < 0) {
     goto unlock;
   }
@@ -1003,7 +959,7 @@ int agnocast_ioctl_add_publisher(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     struct mempool_entry * pool = pool_to_map(
-      wrapper->topic, publisher_pid, wrapper->domain_id, is_bridge, sub_info->pid,
+      ns, wrapper->topic, publisher_pid, wrapper->domain_id, is_bridge, sub_info->pid,
       sub_info->domain_id, sub_info->is_bridge);
     if (pool) {
       ret = reference_memory(pool, sub_info->pid);
@@ -1147,7 +1103,7 @@ int agnocast_ioctl_publish_msg(
     goto unlock_only_ns;
   }
 
-  struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+  struct process_info * proc_info = agnocast_find_process_info(ns, pub_info->pid);
   if (!proc_info) {
     dev_warn(agnocast_device, "Process (pid=%d) does not exist. (%s)\n", pub_info->pid, __func__);
     ret = -EINVAL;
@@ -1200,8 +1156,8 @@ unlock_only_ns:
 // Caller holds the namespace lock (read), which keeps pub_info and proc_info alive, and
 // wrapper->topic->rwsem (read), which keeps `en` alive.
 static int is_entry_deliverable(
-  const struct topic_wrapper * wrapper, const struct subscriber_info * sub_info,
-  const struct entry_node * en)
+  const struct agnocast_ns * ns, const struct topic_wrapper * wrapper,
+  const struct subscriber_info * sub_info, const struct entry_node * en)
 {
   const struct publisher_info * pub_info = find_publisher_info(wrapper, en->publisher_id);
   if (!pub_info) {
@@ -1213,7 +1169,7 @@ static int is_entry_deliverable(
     return -ENODATA;
   }
 
-  const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+  const struct process_info * proc_info = agnocast_find_process_info(ns, pub_info->pid);
   if (!proc_info || proc_info->exited) {
     return 0;
   }
@@ -1228,7 +1184,7 @@ static int is_entry_deliverable(
 }
 
 static int receive_msg_core(
-  struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
+  const struct agnocast_ns * ns, struct topic_wrapper * wrapper, struct subscriber_info * sub_info,
   const topic_local_id_t subscriber_id, union ioctl_receive_msg_args * ioctl_ret)
 {
   ioctl_ret->ret_entry_num = 0;
@@ -1253,7 +1209,7 @@ static int receive_msg_core(
     if (en->entry_id < oldest_wanted_entry_id) {
       break;
     }
-    int ret = is_entry_deliverable(wrapper, sub_info, en);
+    int ret = is_entry_deliverable(ns, wrapper, sub_info, en);
     if (ret < 0) {
       return ret;
     }
@@ -1275,7 +1231,7 @@ static int receive_msg_core(
       break;
     }
 
-    int ret = is_entry_deliverable(wrapper, sub_info, en);
+    int ret = is_entry_deliverable(ns, wrapper, sub_info, en);
     if (ret < 0) {
       return ret;
     }
@@ -1360,12 +1316,12 @@ int agnocast_ioctl_receive_msg(
   //    elsewhere is NOT atomic; every one of its callers holds a write lock.)
   down_read(&wrapper->topic->rwsem);
 
-  ret = receive_msg_core(wrapper, sub_info, subscriber_id, ioctl_ret);
+  ret = receive_msg_core(ns, wrapper, sub_info, subscriber_id, ioctl_ret);
 
   up_read(&wrapper->topic->rwsem);
   if (ret == 0) {
     ret = set_publisher_shm_info(
-      wrapper, sub_info, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+      ns, wrapper, sub_info, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
   }
 
 unlock_only_ns:
@@ -1421,7 +1377,7 @@ int agnocast_ioctl_take_msg(
       break;  // Never take any messages that are older than the most recently received
     }
 
-    const int deliverable = is_entry_deliverable(wrapper, sub_info, en);
+    const int deliverable = is_entry_deliverable(ns, wrapper, sub_info, en);
     if (deliverable < 0) {
       ret = deliverable;
       goto unlock_topic;
@@ -1454,7 +1410,7 @@ unlock_topic:
   up_read(&wrapper->topic->rwsem);
   if (ret == 0) {
     ret = set_publisher_shm_info(
-      wrapper, sub_info, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
+      ns, wrapper, sub_info, pub_shm_infos, pub_shm_infos_size, &ioctl_ret->ret_pub_shm_num);
   }
 
 unlock_only_ns:
@@ -1641,36 +1597,14 @@ pid_t agnocast_ioctl_get_exit_process(
   ioctl_ret->ret_daemon_should_exit = false;
   pid_t global_pid = -1;
 
-  // Exited entries outlive the namespace's state, so the walk runs even when it is gone. Without
-  // the state no exit cleanup can mark this namespace's entries, so RCU alone is enough then.
+  // Exited entries outlive the namespace's state, so the walk runs even when it is gone, under RCU
+  // only (see agnocast_find_exited_process()).
   struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
 
-  struct process_info * proc_info;
-  int bkt;
-  rcu_read_lock();
-  hash_for_each_rcu(proc_info_htable, bkt, proc_info, node)
-  {
-    if (!ipc_eq(proc_info->ipc_ns, ipc_ns) || !proc_info->exited) {
-      continue;
-    }
-
-    ioctl_ret->ret_pid = proc_info->local_pid;
-    global_pid = proc_info->global_pid;
-    break;
-  }
-  rcu_read_unlock();
+  global_pid = agnocast_find_exited_process(ipc_ns, &ioctl_ret->ret_pid);
 
   agnocast_ns_read_unlock(ns);
   return global_pid;
-}
-
-// Caller holds the namespace lock (write).
-static void remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info)
-{
-  // An exited entry already stopped counting as alive when the exit cleanup marked it.
-  if (!proc_info->exited) ns->alive_proc_num--;
-  hash_del_rcu(&proc_info->node);
-  kfree_rcu(proc_info, rcu_head);
 }
 
 void agnocast_commit_exit_process(
@@ -1678,43 +1612,47 @@ void agnocast_commit_exit_process(
   bool * ret_daemon_should_exit)
 {
   // Idle polls (once a second) take only the read lock. A waiting writer queues new readers, and
-  // PREEMPT_RT cannot boost the in-flight ones, so one preempted reader would stall all IPC. The
-  // write path re-derives the flag because a process can register between the two locks.
+  // PREEMPT_RT cannot boost the in-flight ones, so one preempted reader would stall the namespace's
+  // IPC. The write path re-derives the flag because a process can register between the two locks.
   struct agnocast_ns * ns;
   if (global_pid < 0) {
     ns = agnocast_ns_read_lock(ipc_ns);
-    *ret_daemon_should_exit = !ns || get_process_num_except_unlink_daemon(ns) == 0;
+    *ret_daemon_should_exit = !ns || agnocast_get_process_num_except_unlink_daemon(ns) == 0;
     agnocast_ns_read_unlock(ns);
     if (!*ret_daemon_should_exit) {
       return;
     }
   }
 
-  ns = agnocast_ns_write_lock(ipc_ns);
+  // An exited entry outlives its namespace's state. Draining one recreates the state, so the entry
+  // is still removed under its namespace lock (write), like every other entry of the namespace.
+  ns = global_pid >= 0 ? agnocast_ns_write_lock_or_create(ipc_ns) : agnocast_ns_write_lock(ipc_ns);
+  if (IS_ERR(ns)) {
+    // The entry stays, so the daemon gets it again.
+    *ret_daemon_should_exit = false;
+    return;
+  }
   if (!ns) {
-    if (global_pid >= 0) agnocast_remove_exited_process(ipc_ns, global_pid);
     *ret_daemon_should_exit = true;
     return;
   }
 
   if (global_pid >= 0) {
-    struct process_info * proc_info = agnocast_find_process_info(global_pid);
-    if (proc_info && proc_info->ipc_ns == ns->ipc_ns) {
-      remove_process_info(ns, proc_info);
+    struct process_info * proc_info = agnocast_find_process_info(ns, global_pid);
+    if (proc_info) {
+      agnocast_remove_process_info(ns, proc_info);
     }
   }
 
-  *ret_daemon_should_exit = (get_process_num_except_unlink_daemon(ns) == 0);
+  *ret_daemon_should_exit = (agnocast_get_process_num_except_unlink_daemon(ns) == 0);
 
   // Deregistering only on death would leave a window where a starting process is told a daemon
   // exists and skips spawning its replacement. Restricted to the idle poll because that is the
   // only call whose flag poll_for_unlink() acts on; the drain loop discards the rest.
   if (*ret_daemon_should_exit && global_pid < 0 && caller_pid >= 0) {
-    struct process_info * caller_info = agnocast_find_process_info(caller_pid);
-    if (
-      caller_info && caller_info->ipc_ns == ns->ipc_ns &&
-      caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
-      remove_process_info(ns, caller_info);
+    struct process_info * caller_info = agnocast_find_process_info(ns, caller_pid);
+    if (caller_info && caller_info->role == PROCESS_ROLE_UNLINK_DAEMON) {
+      agnocast_remove_process_info(ns, caller_info);
       free_memory(caller_pid);
     }
   }
@@ -1825,22 +1763,23 @@ static int add_unique_node(struct node_name_collector * col, const char * name, 
 
 // A publisher_info outlives its process while a subscriber still references its entries.
 // Caller holds the namespace lock.
-static bool owner_is_alive(const pid_t pid)
+static bool owner_is_alive(const struct agnocast_ns * ns, const pid_t pid)
 {
-  const struct process_info * proc_info = agnocast_find_process_info(pid);
+  const struct process_info * proc_info = agnocast_find_process_info(ns, pid);
   return proc_info && !proc_info->exited;
 }
 
 // Collects the nodes owning an endpoint of one topic. Caller holds the namespace lock.
 static int collect_node_names_of_topic(
-  const struct topic_wrapper * wrapper, const uint32_t domain_id, struct node_name_collector * col)
+  const struct agnocast_ns * ns, const struct topic_wrapper * wrapper, const uint32_t domain_id,
+  struct node_name_collector * col)
 {
   struct publisher_info * pub_info;
   int bkt_pub_info;
   hash_for_each(wrapper->topic->pub_info_htable, bkt_pub_info, pub_info, node)
   {
     if (pub_info->domain_id != domain_id || pub_info->is_bridge) continue;
-    if (!owner_is_alive(pub_info->pid)) continue;
+    if (!owner_is_alive(ns, pub_info->pid)) continue;
 
     const int ret = add_unique_node(col, pub_info->node_name, pub_info->pid);
     if (ret) return ret;
@@ -1851,7 +1790,7 @@ static int collect_node_names_of_topic(
   hash_for_each(wrapper->topic->sub_info_htable, bkt_sub_info, sub_info, node)
   {
     if (sub_info->domain_id != domain_id || sub_info->is_bridge) continue;
-    if (!owner_is_alive(sub_info->pid)) continue;
+    if (!owner_is_alive(ns, sub_info->pid)) continue;
 
     const int ret = add_unique_node(col, sub_info->node_name, sub_info->pid);
     if (ret) return ret;
@@ -1880,7 +1819,7 @@ int agnocast_ioctl_get_node_names(
     goto free;
   }
 
-  const uint32_t domain_id = get_process_domain_id(pid);
+  const uint32_t domain_id = get_process_domain_id(ns, pid);
 
   struct topic_wrapper * wrapper;
   int bkt_topic;
@@ -1890,7 +1829,7 @@ int agnocast_ioctl_get_node_names(
       continue;
     }
 
-    ret = collect_node_names_of_topic(wrapper, domain_id, &col);
+    ret = collect_node_names_of_topic(ns, wrapper, domain_id, &col);
     if (ret) goto unlock;
   }
 
@@ -2260,7 +2199,7 @@ int agnocast_ioctl_remove_subscriber(
     hash_for_each_possible(wrapper->topic->pub_info_htable, pub_info, node, hash_val)
     {
       if (pub_info->id == en->publisher_id) {
-        const struct process_info * proc_info = agnocast_find_process_info(pub_info->pid);
+        const struct process_info * proc_info = agnocast_find_process_info(ns, pub_info->pid);
         if (!proc_info || proc_info->exited) {
           publisher_exited = true;
         }
@@ -2349,6 +2288,7 @@ unlock:
 
 static struct bridge_info * find_bridge_info(const struct agnocast_ns * ns, const char * topic_name)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct bridge_info * br_info;
   uint32_t hash_val = full_name_hash(NULL, topic_name, strlen(topic_name));
   hash_for_each_possible(ns->bridge_htable, br_info, node, hash_val)
@@ -2454,6 +2394,7 @@ unlock:
 static struct domain_bridge_rule * find_domain_rule(
   const struct agnocast_ns * ns, const char * topic_name, uint32_t domain_id)
 {
+  lockdep_assert_held(&ns->rwsem);
   struct domain_bridge_rule * rule;
   int bkt;
   hash_for_each(ns->domain_rule_htable, bkt, rule, node)
@@ -2480,6 +2421,7 @@ static int insert_domain_rule(
   struct agnocast_ns * ns, const char * topic_name_from, const char * topic_name_to,
   const uint32_t from_domain, const uint32_t to_domain, const bool is_prefix)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   // Store the pair canonically (domain_a < domain_b), each domain keeping its own name
   // (they differ on rename). Direction lives only in the a_to_b / b_to_a flags; grouping
   // (find_grouped_topic_struct) pairs the two cells and delivery direction is enforced by
@@ -2519,6 +2461,7 @@ static int add_domain_rule(
   struct agnocast_ns * ns, const char * topic_name_from, const char * topic_name_to,
   const uint32_t from_domain, const uint32_t to_domain)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   // Invariant: each cell (name, domain) belongs to at most one rule, and a rule pairs
   // exactly two cells. r_from == r_to (non-NULL) means an existing rule already pairs exactly
   // these two cells -- a re-declaration or the reverse direction. Any other overlap (a cell
@@ -2590,6 +2533,7 @@ static bool any_topic_under_prefix(
   const struct agnocast_ns * ns, const char * prefix, const uint32_t from_domain,
   const uint32_t to_domain)
 {
+  lockdep_assert_held(&ns->rwsem);
   const size_t prefix_len = strlen(prefix);
   struct topic_wrapper * wrapper;
   int bkt;
@@ -2608,6 +2552,7 @@ static int add_prefix_domain_rule(
   struct agnocast_ns * ns, const char * prefix, const uint32_t from_domain,
   const uint32_t to_domain)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   const size_t prefix_len = strlen(prefix);
   const uint32_t domain_a = min(from_domain, to_domain);
   const uint32_t domain_b = max(from_domain, to_domain);
@@ -2787,67 +2732,15 @@ unlock:
   return ret;
 }
 
-// Counting the unlink daemon would keep it from ever deciding the namespace is done.
-static int get_process_num_except_unlink_daemon(const struct agnocast_ns * ns)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-static int get_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// Like get_process_num_in_domain_except_unlink_daemon() but also excludes processes that have
-// exited and are still pending cleanup. The discovery agent tracks live endpoints, so an exited
-// entry that lingers until the unlink daemon drains it must not gate the agent's spawn or
-// self-exit. Its domain_id reaches this unvalidated from user space, so the daemon has to be
-// excluded by role: a caller passing AGNOCAST_DOMAIN_ID_NONE would otherwise match it.
-static int get_alive_process_num_in_domain_except_unlink_daemon(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (
-      ipc_eq(ns->ipc_ns, proc_info->ipc_ns) && proc_info->domain_id == domain_id &&
-      !proc_info->exited && proc_info->role != PROCESS_ROLE_UNLINK_DAEMON) {
-      count++;
-    }
-  }
-  return count;
-}
-
 // A bridge manager is per (ipc_ns, domain), so it must shut down once its
 // own domain is empty -- counting the whole namespace would keep it alive while an
 // unrelated domain is busy. The manager itself is the remaining process (count == 1).
 // Caller holds the namespace lock (read or write).
 static bool bridge_manager_is_alone(const struct agnocast_ns * ns, const pid_t pid)
 {
-  return get_process_num_in_domain_except_unlink_daemon(ns, get_process_domain_id(pid)) <= 1;
+  lockdep_assert_held(&ns->rwsem);
+  return agnocast_get_process_num_in_domain_except_unlink_daemon(
+           ns, get_process_domain_id(ns, pid)) <= 1;
 }
 
 int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
@@ -2855,27 +2748,12 @@ int agnocast_ioctl_notify_bridge_shutdown(const pid_t pid)
   const struct ipc_namespace * ipc_ns = agnocast_find_process_ipc_ns(pid);
   struct agnocast_ns * ns = ipc_ns ? agnocast_ns_write_lock(ipc_ns) : NULL;
   if (!ns) return 0;
-  struct process_info * proc_info = agnocast_find_process_info(pid);
+  struct process_info * proc_info = agnocast_find_process_info(ns, pid);
   if (proc_info) {
     proc_info->role = PROCESS_ROLE_APPLICATION;
   }
   agnocast_ns_write_unlock(ns);
   return 0;
-}
-
-// Caller holds the namespace lock (read). Scans because the table is keyed by pid.
-struct discovery_agent_info * agnocast_find_discovery_agent(
-  const struct agnocast_ns * ns, const uint32_t domain_id)
-{
-  struct discovery_agent_info * agent;
-  int bkt;
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
-  {
-    if (ipc_eq(agent->ipc_ns, ns->ipc_ns) && agent->domain_id == domain_id) {
-      return agent;
-    }
-  }
-  return NULL;
 }
 
 // The agent is not a registered Agnocast process, so it passes its own pid + ROS_DOMAIN_ID.
@@ -2893,7 +2771,7 @@ int agnocast_ioctl_discovery_agent_should_exit(
   if (!commit) {
     ns = agnocast_ns_read_lock(ipc_ns);
     *ret_should_exit =
-      !ns || get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0;
+      !ns || agnocast_get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0;
     agnocast_ns_read_unlock(ns);
     return 0;
   }
@@ -2903,7 +2781,7 @@ int agnocast_ioctl_discovery_agent_should_exit(
     *ret_should_exit = true;
     return 0;
   }
-  if (get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0) {
+  if (agnocast_get_alive_process_num_in_domain_except_unlink_daemon(ns, domain_id) == 0) {
     agnocast_remove_discovery_agent_by_pid(ns, pid);
     *ret_should_exit = true;
   } else {
@@ -2940,9 +2818,7 @@ int agnocast_ioctl_add_discovery_agent(
   agent->pid = pid;
   agent->ipc_ns = ipc_ns;
   agent->domain_id = domain_id;
-  INIT_HLIST_NODE(&agent->node);
-  hash_add_rcu(discovery_agent_htable, &agent->node, hash_min(pid, DISCOVERY_AGENT_HASH_BITS));
-  ns->agent_num++;
+  agnocast_add_discovery_agent_info(ns, agent);
   ioctl_ret->ret_owned_by_caller = true;
 
 unlock:
@@ -2979,7 +2855,7 @@ int agnocast_ioctl_check_and_request_bridge_shutdown(
   ns = agnocast_ns_write_lock(ipc_ns);
   // Re-checked because a process can register between the two locks.
   if (!ns || bridge_manager_is_alone(ns, pid)) {
-    struct process_info * proc_info = ns ? agnocast_find_process_info(pid) : NULL;
+    struct process_info * proc_info = ns ? agnocast_find_process_info(ns, pid) : NULL;
     if (proc_info) {
       proc_info->role = PROCESS_ROLE_APPLICATION;
     }
@@ -3869,90 +3745,32 @@ unlock_only_ns:
   return ret;
 }
 
-// No locking needed for the following KUnit helper functions.
-// These are only called from single-threaded KUnit context.
-
-static struct topic_wrapper * kunit_find_topic_for_current(
-  const char * topic_name, const struct ipc_namespace * ipc_ns)
-{
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  return ns ? find_topic_for_current(ns, topic_name) : NULL;
-}
-
-int agnocast_get_alive_proc_num(void)
-{
-  int count = 0;
-  struct process_info * proc_info;
-  int bkt_proc_info;
-  hash_for_each(proc_info_htable, bkt_proc_info, proc_info, node)
-  {
-    if (!proc_info->exited) {
-      count++;
-    }
-  }
-  return count;
-}
-
-int agnocast_get_discovery_agent_num(void)
-{
-  int count = 0;
-  struct discovery_agent_info * agent;
-  int bkt;
-  // Serialize against the exit path's hash_del_rcu()+kfree_rcu(), which runs under the write lock.
-  down_read(&global_htables_rwsem);
-  hash_for_each(discovery_agent_htable, bkt, agent, node)
-  {
-    count++;
-  }
-  up_read(&global_htables_rwsem);
-  return count;
-}
-
-bool agnocast_is_proc_exited(const pid_t pid)
-{
-  struct process_info * proc_info;
-  hash_for_each_possible(proc_info_htable, proc_info, node, hash_min(pid, PROC_INFO_HASH_BITS))
-  {
-    if (proc_info->global_pid == pid) {
-      if (proc_info->exited) {
-        return true;
-      } else {
-        return false;
-      }
-    }
-  }
-  return false;
-}
+// The KUnit helpers below take the namespace lock (read) like any other reader: the exit worker
+// can run concurrently with a test, and the lockdep assertions expect the lock.
 
 int agnocast_get_topic_entries_num(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return 0;
-  }
-
-  struct rb_root * root = &wrapper->topic->entries;
-  struct rb_node * node;
   int count = 0;
-  for (node = rb_first(root); node; node = rb_next(node)) {
-    count++;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  if (wrapper) {
+    struct rb_node * node;
+    for (node = rb_first(&wrapper->topic->entries); node; node = rb_next(node)) {
+      count++;
+    }
   }
+  agnocast_ns_read_unlock(ns);
   return count;
 }
 
 bool agnocast_is_in_topic_entries(
   const char * topic_name, const struct ipc_namespace * ipc_ns, int64_t entry_id)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct entry_node * en = find_message_entry(wrapper, entry_id);
-  if (!en) {
-    return false;
-  }
-
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_message_entry(wrapper, entry_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 // Returns 1 if subscriber is holding a reference to the entry, 0 otherwise.
@@ -3961,102 +3779,100 @@ int agnocast_get_entry_rc(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const int64_t entry_id,
   const topic_local_id_t pubsub_id)
 {
-  struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return -1;
-  }
-
-  const struct entry_node * en = find_message_entry(wrapper, entry_id);
-  if (!en) {
-    return -1;
-  }
-
   if (pubsub_id < 0 || pubsub_id >= MAX_TOPIC_LOCAL_ID) {
     return -1;
   }
 
-  return test_bit(pubsub_id, en->referencing_subscribers) ? 1 : 0;
+  int rc = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const struct entry_node * en = wrapper ? find_message_entry(wrapper, entry_id) : NULL;
+  if (en) {
+    rc = test_bit(pubsub_id, en->referencing_subscribers) ? 1 : 0;
+  }
+  agnocast_ns_read_unlock(ns);
+  return rc;
 }
 
 int64_t agnocast_get_latest_received_entry_id(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return -1;
+  int64_t entry_id = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const struct subscriber_info * sub_info =
+    wrapper ? find_subscriber_info(wrapper, subscriber_id) : NULL;
+  if (sub_info) {
+    entry_id = sub_info->latest_received_entry_id;
   }
-  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
-  if (!sub_info) {
-    return -1;
-  }
-
-  return sub_info->latest_received_entry_id;
+  agnocast_ns_read_unlock(ns);
+  return entry_id;
 }
 
 bool agnocast_is_in_subscriber_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns,
   const topic_local_id_t subscriber_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct subscriber_info * sub_info = find_subscriber_info(wrapper, subscriber_id);
-  if (!sub_info) {
-    return false;
-  }
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_subscriber_info(wrapper, subscriber_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 bool agnocast_is_in_publisher_htable(
   const char * topic_name, const struct ipc_namespace * ipc_ns, const topic_local_id_t publisher_id)
 {
-  const struct topic_wrapper * wrapper = kunit_find_topic_for_current(topic_name, ipc_ns);
-  if (!wrapper) {
-    return false;
-  }
-  const struct publisher_info * pub_info = find_publisher_info(wrapper, publisher_id);
-  if (!pub_info) {
-    return false;
-  }
-  return true;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const struct topic_wrapper * wrapper = ns ? find_topic_for_current(ns, topic_name) : NULL;
+  const bool found = wrapper && find_publisher_info(wrapper, publisher_id);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 int agnocast_get_topic_num(const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  if (!ns) return 0;
-
   int count = 0;
-  struct topic_wrapper * wrapper;
-  int bkt_wrapper;
-  hash_for_each(ns->topic_hashtable, bkt_wrapper, wrapper, node)
-  {
-    count++;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  if (ns) {
+    struct topic_wrapper * wrapper;
+    int bkt_wrapper;
+    hash_for_each(ns->topic_hashtable, bkt_wrapper, wrapper, node)
+    {
+      count++;
+    }
   }
+  agnocast_ns_read_unlock(ns);
   return count;
 }
 
 bool agnocast_is_in_topic_htable(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  return kunit_find_topic_for_current(topic_name, ipc_ns) != NULL;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const bool found = ns && find_topic_for_current(ns, topic_name);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 bool agnocast_is_in_bridge_htable(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
-  return ns && find_bridge_info(ns, topic_name) != NULL;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
+  const bool found = ns && find_bridge_info(ns, topic_name);
+  agnocast_ns_read_unlock(ns);
+  return found;
 }
 
 pid_t agnocast_get_bridge_owner_pid(const char * topic_name, const struct ipc_namespace * ipc_ns)
 {
-  const struct agnocast_ns * ns = agnocast_ns_peek(ipc_ns);
+  pid_t pid = -1;
+  struct agnocast_ns * ns = agnocast_ns_read_lock(ipc_ns);
   const struct bridge_info * br_info = ns ? find_bridge_info(ns, topic_name) : NULL;
   if (br_info) {
-    return br_info->pid;
+    pid = br_info->pid;
   }
-  return -1;
+  agnocast_ns_read_unlock(ns);
+  return pid;
 }
 
 bool agnocast_get_domain_rule(

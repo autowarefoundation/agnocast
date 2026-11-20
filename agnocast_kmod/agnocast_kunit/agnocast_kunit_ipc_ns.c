@@ -7,9 +7,11 @@
 
 #include <kunit/test.h>
 
-static const pid_t PID = 1000;
-static const pid_t OTHER_PID = 1001;
-static const pid_t DAEMON_PID = 1002;
+// Above PID_MAX_LIMIT (4194304 on 64-bit), so no real process has them: a real process with the
+// same pid exiting would make the exit worker clean these entries up in the middle of a test.
+static const pid_t PID = 4194304 + 1000;
+static const pid_t OTHER_PID = 4194304 + 1001;
+static const pid_t DAEMON_PID = 4194304 + 1002;
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
 
@@ -67,6 +69,33 @@ void test_case_ipc_ns_exit_cleans_up_only_own_namespace(struct kunit * test)
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(&other_ipc_ns), 0);
   KUNIT_EXPECT_FALSE(test, agnocast_is_proc_exited(PID));
   KUNIT_EXPECT_EQ(test, agnocast_get_topic_num(current->nsproxy->ipc_ns), 1);
+}
+
+// The point of the per-namespace lock: one namespace registering endpoints must not hold up
+// another's publish/receive.
+void test_case_ipc_ns_write_lock_leaves_other_namespace_free(struct kunit * test)
+{
+  // Arrange
+  setup_publisher_in(test, current->nsproxy->ipc_ns, PID);
+  setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
+  // Checked before taking the lock: a failed ASSERT leaves the test at once, and a write lock left
+  // held would hang the suite's cleanup.
+  struct agnocast_ns * other_ns = agnocast_ns_peek(&other_ipc_ns);
+  KUNIT_ASSERT_NOT_NULL(test, other_ns);
+  struct agnocast_ns * ns = agnocast_ns_write_lock(current->nsproxy->ipc_ns);
+  KUNIT_ASSERT_NOT_NULL(test, ns);
+
+  // Act: the one place two namespace locks are held at once, and only as a trylock, which cannot
+  // wait. The unreferenced other_ns stays valid: none of this test's pids can reach the exit
+  // worker.
+  const bool other_free = down_read_trylock(&other_ns->rwsem);
+
+  // Assert
+  KUNIT_EXPECT_PTR_NE(test, ns, other_ns);
+  KUNIT_EXPECT_TRUE(test, other_free);
+
+  if (other_free) up_read(&other_ns->rwsem);
+  agnocast_ns_write_unlock(ns);
 }
 
 // The usual end of a namespace: its unlink daemon drains the exited process, then leaves.
@@ -130,6 +159,26 @@ void test_case_ipc_ns_exited_entry_drained_after_retirement(struct kunit * test)
   KUNIT_EXPECT_EQ(test, global_pid, OTHER_PID);
   KUNIT_EXPECT_FALSE(test, is_agnocast_pid(OTHER_PID));
   KUNIT_EXPECT_TRUE(test, daemon_should_exit);
+  KUNIT_EXPECT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+}
+
+// An exited entry left after its namespace was retired keeps its pid: a new process reusing that
+// pid elsewhere is refused, as on main, and the entry stays as it was.
+void test_case_ipc_ns_exited_entry_keeps_pid_after_retirement(struct kunit * test)
+{
+  // Arrange
+  setup_publisher_in(test, &other_ipc_ns, OTHER_PID);
+  agnocast_process_exit_cleanup(OTHER_PID);
+  KUNIT_ASSERT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
+
+  // Act
+  union ioctl_add_process_args add_process_args;
+  const int ret = agnocast_ioctl_add_process(
+    OTHER_PID, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+  KUNIT_EXPECT_TRUE(test, agnocast_is_proc_exited(OTHER_PID));
   KUNIT_EXPECT_NULL(test, agnocast_ns_peek(&other_ipc_ns));
 }
 

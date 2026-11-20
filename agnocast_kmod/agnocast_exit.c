@@ -3,6 +3,7 @@
 
 static void remove_all_topics(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct topic_wrapper * wrapper;
   struct hlist_node * tmp;
   int bkt;
@@ -15,33 +16,9 @@ static void remove_all_topics(struct agnocast_ns * ns)
   }
 }
 
-static void remove_all_process_info(void)
-{
-  struct process_info * proc_info;
-  int bkt;
-  struct hlist_node * tmp;
-  hash_for_each_safe(proc_info_htable, bkt, tmp, proc_info, node)
-  {
-    hash_del_rcu(&proc_info->node);
-    kfree_rcu(proc_info, rcu_head);
-  }
-  // No explicit synchronize_rcu() needed: kfree_rcu() defers freeing until after the grace period.
-}
-
-static void remove_all_discovery_agents(void)
-{
-  struct discovery_agent_info * agent;
-  int bkt;
-  struct hlist_node * tmp;
-  hash_for_each_safe(discovery_agent_htable, bkt, tmp, agent, node)
-  {
-    hash_del_rcu(&agent->node);
-    kfree_rcu(agent, rcu_head);
-  }
-}
-
 static void remove_all_bridge_info(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct bridge_info * br_info;
   int bkt;
   struct hlist_node * tmp;
@@ -55,6 +32,7 @@ static void remove_all_bridge_info(struct agnocast_ns * ns)
 
 static void remove_all_domain_rules(struct agnocast_ns * ns)
 {
+  lockdep_assert_held_write(&ns->rwsem);
   struct domain_bridge_rule * rule;
   int bkt;
   struct hlist_node * tmp;
@@ -77,11 +55,9 @@ void agnocast_exit_free_data(void)
     remove_all_domain_rules(ns);
     agnocast_ns_retire_and_unlock(ns);
   }
-
-  down_write(&global_htables_rwsem);
-  remove_all_process_info();
-  remove_all_discovery_agents();
-  up_write(&global_htables_rwsem);
+  // Every namespace is retired, so an exit cleanup still running finds none to lock.
+  agnocast_remove_all_process_info();
+  agnocast_remove_all_discovery_agents();
 }
 
 void agnocast_exit_kthread(void)
