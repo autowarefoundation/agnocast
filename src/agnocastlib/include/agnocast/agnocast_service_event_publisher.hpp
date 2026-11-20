@@ -112,7 +112,8 @@ public:
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t introspection_state);
 
-  void publish_request_sent_event(const void * payload, int64_t seqno, const rmw_gid_t & gid);
+  void publish_request_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
   void publish_request_received_event(
     const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
@@ -120,8 +121,13 @@ public:
   void publish_response_sent_event(
     const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
-  void publish_response_received_event(const void * payload, int64_t seqno, const rmw_gid_t & gid);
+  void publish_response_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
+  /// @brief Returns whether the introspection state is CONTENTS.
+  ///
+  /// If this function returns true, the user should pass message contents when calling the
+  /// publish_*_event() functions.
   bool want_contents();
 };
 
@@ -139,7 +145,8 @@ public:
     std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
     const std::string & service_type);
 
-  void publish_request_sent_event(const void * payload, int64_t seqno, const rmw_gid_t & gid);
+  void publish_request_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
   void publish_request_received_event(
     const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
@@ -147,7 +154,8 @@ public:
   void publish_response_sent_event(
     const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
-  void publish_response_received_event(const void * payload, int64_t seqno, const rmw_gid_t & gid);
+  void publish_response_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
 
   bool want_contents();
 };
