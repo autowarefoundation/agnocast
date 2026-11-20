@@ -16,84 +16,91 @@ rclcpp::Logger ServiceBase::get_logger() const
   return std::visit([](auto * n) { return n->get_logger(); }, node_);
 }
 
+void GenericService::send_response_impl(
+  ipc_shared_ptr<void> && response, int64_t seqno,
+  const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
+  typename TypeErasedPublisher::SharedPtr publisher)
+{
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
-void GenericService::publish_request_received_event(GenericRequestWrapper & req_wrapper)
-{
-  event_publisher_->publish_service_event_message(
-    service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED, req_wrapper.get(), req_wrapper.seqno(),
-    req_wrapper.client_gid());
-}
+  auto copy_response_if_contents =
+    [this](const void * response) -> std::optional<std::shared_ptr<void>> {
+    if (!introspection_.want_contents()) {
+      return std::nullopt;
+    }
 
-void GenericService::publish_response_sent_event(
-  const int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
-  const std::optional<std::shared_ptr<void>> & response)
-{
-  event_publisher_->publish_service_event_message(
-    service_msgs::msg::ServiceEventInfo::RESPONSE_SENT, response ? response->get() : nullptr, seqno,
-    client_gid);
-}
+    // NOTE: response_typesupport only exists from Iron on.
+    const auto * response_ts = service_ts_bundle_.service_ts->response_typesupport;
 
-std::optional<std::shared_ptr<void>> GenericService::copy_response_if_contents(
-  const void * response)
-{
-  if (event_publisher_->introspection_state() != RCL_SERVICE_INTROSPECTION_CONTENTS) {
+    rclcpp::SerializedMessage serialized;
+    if (
+      rmw_serialize(response, response_ts, &serialized.get_rcl_serialized_message()) !=
+      RMW_RET_OK) {
+      RCLCPP_ERROR(
+        get_logger(),
+        "rmw_serialize() failed; only publishing metadata for this RESPONSE_SENT service event");
+      rmw_reset_error();
+      return std::nullopt;
+    }
+
+    // Allocate and initialize memory for the copy.
+    auto * members = service_ts_bundle_.response_members;
+    void * copied_raw = ::operator new(members->size_of_);
+    members->init_function(copied_raw, rosidl_runtime_cpp::MessageInitialization::SKIP);
+    std::shared_ptr<void> copied(copied_raw, [members](void * p) {
+      members->fini_function(p);
+      ::operator delete(p);
+    });
+
+    if (
+      rmw_deserialize(&serialized.get_rcl_serialized_message(), response_ts, copied.get()) !=
+      RMW_RET_OK) {
+      RCLCPP_ERROR(
+        get_logger(),
+        "rmw_deserialize() failed; only publishing metadata for this RESPONSE_SENT service event");
+      rmw_reset_error();
+      return std::nullopt;
+    }
+
+    return copied;
+  };
+#else
+  auto copy_response_if_contents = [](const void *) -> std::optional<std::shared_ptr<void>> {
     return std::nullopt;
-  }
+  };
+#endif  // AGNOCAST_HAS_SERVICE_INTROSPECTION
 
-  const auto * response_ts = service_ts_bundle_.service_ts->response_typesupport;
+  // publish() releases ownership of the response, so copy it before publish() (CONTENTS mode
+  // only). If configure() switches the mode to CONTENTS after this check, this RESPONSE_SENT event
+  // goes out without the payload; later responses include it.
+  const std::optional<std::shared_ptr<void>> sent_response =
+    copy_response_if_contents(response.get());
 
-  rclcpp::SerializedMessage serialized;
-  if (
-    rmw_serialize(response, response_ts, &serialized.get_rcl_serialized_message()) != RMW_RET_OK) {
-    RCLCPP_ERROR(
-      get_logger(),
-      "rmw_serialize() failed; only publishing metadata for this RESPONSE_SENT service event");
-    rmw_reset_error();
-    return std::nullopt;
-  }
-
-  // Allocate and initialize memory for the copy.
-  auto * members = service_ts_bundle_.response_members;
-  void * copied_raw = ::operator new(members->size_of_);
-  members->init_function(copied_raw, rosidl_runtime_cpp::MessageInitialization::SKIP);
-  std::shared_ptr<void> copied(copied_raw, [members](void * p) {
-    members->fini_function(p);
-    ::operator delete(p);
+  publisher->publish(std::move(response), [this](void * p) {
+    GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
   });
 
-  if (
-    rmw_deserialize(&serialized.get_rcl_serialized_message(), response_ts, copied.get()) !=
-    RMW_RET_OK) {
-    RCLCPP_ERROR(
-      get_logger(),
-      "rmw_deserialize() failed; only publishing metadata for this RESPONSE_SENT service event");
-    rmw_reset_error();
-    return std::nullopt;
-  }
-
-  return copied;
+  introspection_.publish_response_sent_event(
+    sent_response ? sent_response->get() : nullptr, seqno, client_gid);
 }
-#endif
 
 void GenericService::send_response(
   ipc_shared_ptr<void> && request, ipc_shared_ptr<void> && response)
 {
   auto req_wrapper =
     GenericRequestWrapper(this->service_ts_bundle_.request_members, std::move(request));
-  auto publisher = publisher_manager_.get_or_create_publisher_for(
-    node_, qos_, role_, req_wrapper.response_topic_name());
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  const auto sent_response = copy_response_if_contents(response.get());
-#endif
+  typename TypeErasedPublisher::SharedPtr publisher;
+  try {
+    publisher = publisher_manager_.get_or_create_publisher_for(
+      node_, qos_, role_, req_wrapper.response_topic_name());
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(
+      this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
+      service_name_.c_str(), req_wrapper.response_topic_name().c_str(), e.what());
+    return;
+  }
 
-  publisher->publish(std::move(response), [this](void * p) {
-    GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
-  });
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  publish_response_sent_event(req_wrapper.seqno(), req_wrapper.client_gid(), sent_response);
-#endif
+  send_response_impl(std::move(response), req_wrapper.seqno(), req_wrapper.client_gid(), publisher);
 }
 
 void GenericService::cancel_response(

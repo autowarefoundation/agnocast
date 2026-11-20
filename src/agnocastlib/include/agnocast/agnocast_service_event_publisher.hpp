@@ -1,6 +1,12 @@
 #pragma once
 
+#include "agnocast/agnocast_publisher.hpp"
+
 #include <rclcpp/version.h>
+
+#include <memory>
+#include <string>
+#include <variant>
 
 // Service introspection needs the event typesupport hooks in rosidl_service_type_support_t and the
 // service_msgs package, neither of which exists before Iron (rclcpp 21).
@@ -8,16 +14,12 @@
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
 
-#include "agnocast/agnocast_publisher.hpp"
 #include "agnocast/internal/service_typesupport.hpp"
 
 #include <rcl/service_introspection.h>
 
-#include <memory>
 #include <mutex>
-#include <string>
 #include <utility>
-#include <variant>
 
 namespace agnocast
 {
@@ -87,6 +89,75 @@ public:
   void publish_service_event_message(
     const uint8_t event_type, const void * payload, int64_t sequence_number,
     const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]) noexcept;
+};
+
+/// @brief A helper class wrapping ServiceEventPublisher.
+///
+/// ServiceEventPublisher is only defined when AGNOCAST_HAS_SERVICE_INTROSPECTION is enabled, but
+/// this class provides a consistent interface regardless of whether that macro is defined.
+///
+/// As an exception, configure() is intentionally absent when AGNOCAST_HAS_SERVICE_INTROSPECTION is
+/// not enabled; the function uses rcl_service_introspection_state_t, which is not available
+/// when the macro is not defined.
+class ServiceIntrospection
+{
+  std::unique_ptr<ServiceEventPublisher> event_pub_;
+
+public:
+  void init(
+    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
+    const std::string & service_type);
+
+  void configure(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t introspection_state);
+
+  void publish_request_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_request_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_response_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_response_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  /// @brief Returns whether the introspection state is CONTENTS.
+  ///
+  /// If this function returns true, the user should pass message contents when calling the
+  /// publish_*_event() functions.
+  bool want_contents();
+};
+
+}  // namespace agnocast
+
+#else  // !AGNOCAST_HAS_SERVICE_INTROSPECTION
+
+namespace agnocast
+{
+
+class ServiceIntrospection
+{
+public:
+  void init(
+    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
+    const std::string & service_type);
+
+  void publish_request_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_request_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_response_sent_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  void publish_response_received_event(
+    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+
+  bool want_contents();
 };
 
 }  // namespace agnocast
