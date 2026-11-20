@@ -237,10 +237,10 @@ void ServiceIntrospection::configure(
 }
 
 void ServiceIntrospection::publish_request_sent_event(
-  const void * payload, int64_t seqno, const rmw_gid_t & gid)
+  const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE])
 {
   event_pub_->publish_service_event_message(
-    ServiceEventInfo::REQUEST_SENT, payload, seqno, gid.data);
+    ServiceEventInfo::REQUEST_SENT, payload, seqno, client_gid);
 }
 
 void ServiceIntrospection::publish_request_received_event(
@@ -258,10 +258,10 @@ void ServiceIntrospection::publish_response_sent_event(
 }
 
 void ServiceIntrospection::publish_response_received_event(
-  const void * payload, int64_t seqno, const rmw_gid_t & gid)
+  const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE])
 {
   event_pub_->publish_service_event_message(
-    ServiceEventInfo::RESPONSE_RECEIVED, payload, seqno, gid.data);
+    ServiceEventInfo::RESPONSE_RECEIVED, payload, seqno, client_gid);
 }
 
 bool ServiceIntrospection::want_contents()
@@ -281,7 +281,8 @@ void ServiceIntrospection::init(
 {
 }
 
-void ServiceIntrospection::publish_request_sent_event(const void *, int64_t, const rmw_gid_t &)
+void ServiceIntrospection::publish_request_sent_event(
+  const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE])
 {
 }
 
@@ -295,7 +296,8 @@ void ServiceIntrospection::publish_response_sent_event(
 {
 }
 
-void ServiceIntrospection::publish_response_received_event(const void *, int64_t, const rmw_gid_t &)
+void ServiceIntrospection::publish_response_received_event(
+  const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE])
 {
 }
 

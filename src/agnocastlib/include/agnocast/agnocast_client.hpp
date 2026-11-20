@@ -247,7 +247,7 @@ private:
     publisher_->publish(std::move(internal_request));
 
     introspection_.publish_request_sent_event(
-      sent_request ? &*sent_request : nullptr, seqno, get_gid());
+      sent_request ? &*sent_request : nullptr, seqno, get_gid().data);
 
     return seqno;
   }
@@ -288,7 +288,7 @@ private:
 
       // Must precede the move into the promise, which leaves `response` empty.
       introspection_.publish_response_received_event(
-        response.get(), response->ResponseMeta::seqno, get_gid());
+        response.get(), response->ResponseMeta::seqno, get_gid().data);
 
       info.promise.set_value(ipc_shared_ptr<typename ServiceT::Response>(std::move(response)));
       if (info.callback.has_value()) {
@@ -489,7 +489,7 @@ private:
     });
 
     introspection_.publish_request_sent_event(
-      sent_request ? sent_request->get() : nullptr, seqno, get_gid());
+      sent_request ? sent_request->get() : nullptr, seqno, get_gid().data);
 
     return seqno;
   }
@@ -535,7 +535,7 @@ private:
 
       // Must precede the move into the promise, which leaves `response` empty.
       introspection_.publish_response_received_event(
-        generic_response_wrapper.get(), response_seqno, get_gid());
+        generic_response_wrapper.get(), response_seqno, get_gid().data);
 
       info.promise.set_value(std::move(generic_response_wrapper).take_response());
       if (info.callback.has_value()) {
