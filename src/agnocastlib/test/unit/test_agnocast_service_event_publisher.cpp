@@ -31,7 +31,7 @@ protected:
   std::unique_ptr<agnocast::ServiceEventPublisher> make_event_publisher(
     const std::string & service_type)
   {
-    return std::make_unique<agnocast::ServiceEventPublisher>(
+    return std::make_unique<agnocast::GenericEventPublisher>(
       node_.get(), "/test_service", service_type);
   }
 };

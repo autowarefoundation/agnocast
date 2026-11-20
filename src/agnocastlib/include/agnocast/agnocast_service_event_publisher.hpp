@@ -24,41 +24,37 @@
 namespace agnocast
 {
 
+struct SnapshotBase
+{
+  rcl_service_introspection_state_t state = RCL_SERVICE_INTROSPECTION_OFF;
+  rclcpp::Clock::SharedPtr clock = nullptr;
+
+  virtual ~SnapshotBase() = default;
+
+  virtual void publish(const rosidl_service_introspection_info_t & info, const void * payload) = 0;
+};
+
 class ServiceEventPublisher
 {
-  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
-  const std::string service_type_;
-  const std::string event_topic_name_;
-  const std::string event_topic_type_;
-
-  // Held for a whole transition, so that the publish path, which takes mtx_ alone, never waits for
-  // one. Lock ordering: acquire transition_mtx_ before mtx_.
+  // Used to serialize concurrent configure() calls.
   std::mutex transition_mtx_;
 
-  mutable std::mutex mtx_;
-  rcl_service_introspection_state_t state_ = RCL_SERVICE_INTROSPECTION_OFF;
-  GenericPublisher::SharedPtr publisher_ = nullptr;
-  rclcpp::Clock::SharedPtr clock_;
-  std::shared_ptr<const ServiceTsBundle> ts_bundle_;
+  virtual std::unique_ptr<SnapshotBase> snapshot() const = 0;
+  virtual void configure_impl(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t state) = 0;
 
-  struct Snapshot
-  {
-    rcl_service_introspection_state_t state;
-    GenericPublisher::SharedPtr publisher;
-    rclcpp::Clock::SharedPtr clock;
-    std::shared_ptr<const ServiceTsBundle> ts_bundle;
-  };
-
-  Snapshot snapshot() const;
-  // Takes const char *, not std::string: this runs from a noexcept context, and the failure it
-  // most often reports is std::bad_alloc.
   void log_failure(const uint8_t event_type, const char * reason) const noexcept;
-  void commit(const Snapshot & next);
+
+protected:
+  const std::variant<rclcpp::Node *, agnocast::Node *> node_;
+  const std::string event_topic_name_;
+
+  ServiceEventPublisher(
+    const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name);
 
 public:
-  ServiceEventPublisher(
-    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
-    const std::string & service_type);
+  virtual ~ServiceEventPublisher() = default;
 
   /// @brief Sets the introspection state, creating or destroying the event publisher as needed
   /// (thread-safe).
@@ -89,6 +85,32 @@ public:
   void publish_service_event_message(
     const uint8_t event_type, const void * payload, int64_t sequence_number,
     const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]) noexcept;
+};
+
+class GenericEventPublisher : public ServiceEventPublisher
+{
+  struct Snapshot : public SnapshotBase
+  {
+    GenericPublisher::SharedPtr publisher = nullptr;
+    std::shared_ptr<const ServiceTsBundle> ts_bundle = nullptr;
+
+    void publish(const rosidl_service_introspection_info_t & info, const void * payload) override;
+  };
+
+  const std::string service_type_;
+
+  mutable std::mutex mtx_;
+  Snapshot active_;
+
+  std::unique_ptr<SnapshotBase> snapshot() const override;
+  void configure_impl(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t state) override;
+
+public:
+  GenericEventPublisher(
+    const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name,
+    const std::string & service_type);
 };
 
 /// @brief A helper class wrapping ServiceEventPublisher.
