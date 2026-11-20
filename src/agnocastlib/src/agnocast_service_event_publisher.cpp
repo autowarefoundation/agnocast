@@ -243,7 +243,7 @@ GenericEventPublisher::GenericEventPublisher(
 {
 }
 
-void ServiceIntrospection::init(
+void ServiceIntrospection::init_generic(
   std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
   const std::string & service_type)
 {
@@ -297,7 +297,7 @@ bool ServiceIntrospection::want_contents()
 namespace agnocast
 {
 
-void ServiceIntrospection::init(
+void ServiceIntrospection::init_generic(
   std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &)
 {
 }

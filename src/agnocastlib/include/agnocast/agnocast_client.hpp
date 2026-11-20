@@ -102,8 +102,9 @@ protected:
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
   rclcpp::Logger get_logger() const;
 
-  template <typename NodeT>
-  void init_base(NodeT * node, const std::string & service_name, const std::string & service_type)
+  template <typename NodeT, typename ServiceT = void>
+  void init_base(
+    NodeT * node, const std::string & service_name, const std::string & service_type = "")
   {
     node_ = node;
     node_name_ = node->get_fully_qualified_name();
@@ -117,7 +118,11 @@ protected:
       }
     };
 
-    introspection_.init(node_, service_name_, service_type);
+    if constexpr (std::is_void_v<ServiceT>) {
+      introspection_.init_generic(node_, service_name_, service_type);
+    } else {
+      introspection_.init_typed<ServiceT>(node_, service_name_);
+    }
   }
 
 public:
@@ -257,7 +262,7 @@ private:
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos_arg,
     rclcpp::CallbackGroup::SharedPtr group, ClientRole role)
   {
-    init_base(node, service_name, rosidl_generator_traits::name<ServiceT>());
+    init_base<NodeT, ServiceT>(node, service_name);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();
@@ -499,7 +504,7 @@ private:
     NodeT * node, const std::string & service_name, const std::string & service_type,
     const rclcpp::QoS & qos_arg, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
   {
-    init_base(node, service_name, service_type);
+    init_base<NodeT>(node, service_name, service_type);
 
     service_ts_bundle_ = load_service_typesupport(service_type);
 

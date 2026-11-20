@@ -16,9 +16,13 @@
 
 #include "agnocast/internal/service_typesupport.hpp"
 
+#include <service_msgs/msg/service_event_info.hpp>
+
 #include <rcl/service_introspection.h>
 
+#include <cstring>
 #include <mutex>
+#include <stdexcept>
 #include <utility>
 
 namespace agnocast
@@ -87,6 +91,7 @@ public:
     const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]) noexcept;
 };
 
+/// @brief Publishes events for generic service endpoints using runtime-loaded typesupport.
 class GenericEventPublisher : public ServiceEventPublisher
 {
   struct Snapshot : public SnapshotBase
@@ -113,6 +118,106 @@ public:
     const std::string & service_type);
 };
 
+/// @brief Publishes events for typed service endpoints.
+template <typename ServiceT>
+class TypedEventPublisher : public ServiceEventPublisher
+{
+  using Event = typename ServiceT::Event;
+
+  struct Snapshot : public SnapshotBase
+  {
+    typename Publisher<Event>::SharedPtr publisher = nullptr;
+
+    void publish(const rosidl_service_introspection_info_t & info, const void * payload) override
+    {
+      ipc_shared_ptr<Event> event = publisher->borrow_loaned_message();
+
+      // Construct the event message (metadata).
+      event->info.event_type = info.event_type;
+      event->info.stamp.sec = info.stamp_sec;
+      event->info.stamp.nanosec = info.stamp_nanosec;
+      event->info.sequence_number = info.sequence_number;
+      std::memcpy(event->info.client_gid.data(), info.client_gid, RMW_GID_STORAGE_SIZE);
+
+      // Construct the event message (contents).
+      switch (info.event_type) {
+        case service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED:
+        case service_msgs::msg::ServiceEventInfo::REQUEST_SENT:
+          if (payload != nullptr) {
+            event->request.push_back(*static_cast<const typename ServiceT::Request *>(payload));
+          }
+          break;
+        case service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED:
+        case service_msgs::msg::ServiceEventInfo::RESPONSE_SENT:
+          if (payload != nullptr) {
+            event->response.push_back(*static_cast<const typename ServiceT::Response *>(payload));
+          }
+          break;
+        default:
+          throw std::invalid_argument("unknown event type");
+      }
+
+      publisher->publish(std::move(event));
+    }
+  };
+
+  mutable std::mutex mtx_;
+  Snapshot active_;
+
+  std::unique_ptr<SnapshotBase> snapshot() const override
+  {
+    Snapshot snap;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      snap = active_;
+    }
+    return std::make_unique<Snapshot>(snap);
+  }
+
+  void configure_impl(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t state) override
+  {
+    // This function shares the same logic as GenericEventPublisher::configure_impl(); refer to it
+    // for reasoning and explanation.
+
+    Snapshot next;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      next = active_;
+    }
+
+    if (state == RCL_SERVICE_INTROSPECTION_OFF) {
+      next.state = state;
+      next.clock = nullptr;
+      next.publisher = nullptr;
+    } else if (next.publisher) {
+      next.state = state;
+    } else {
+      next.state = state;
+      next.clock = clock;
+      std::visit(
+        [this, &next, &qos_service_event_pub](auto * n) {
+          next.publisher = std::make_shared<Publisher<Event>>(
+            n, event_topic_name_, qos_service_event_pub, PublisherOptions{});
+        },
+        node_);
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      active_ = next;
+    }
+  }
+
+public:
+  TypedEventPublisher(
+    const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name)
+  : ServiceEventPublisher(node, service_name)
+  {
+  }
+};
+
 /// @brief A helper class wrapping ServiceEventPublisher.
 ///
 /// ServiceEventPublisher is only defined when AGNOCAST_HAS_SERVICE_INTROSPECTION is enabled, but
@@ -126,9 +231,16 @@ class ServiceIntrospection
   std::unique_ptr<ServiceEventPublisher> event_pub_;
 
 public:
-  void init(
+  void init_generic(
     std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
     const std::string & service_type);
+
+  template <typename ServiceT>
+  void init_typed(
+    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name)
+  {
+    event_pub_ = std::make_unique<TypedEventPublisher<ServiceT>>(node, service_name);
+  }
 
   void configure(
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
@@ -163,21 +275,23 @@ namespace agnocast
 class ServiceIntrospection
 {
 public:
-  void init(
-    std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
-    const std::string & service_type);
+  void init_generic(
+    std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &);
 
-  void publish_request_sent_event(
-    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+  template <typename ServiceT>
+  void init_typed(std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &)
+  {
+  }
+
+  void publish_request_sent_event(const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE]);
 
   void publish_request_received_event(
-    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+    const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE]);
 
-  void publish_response_sent_event(
-    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+  void publish_response_sent_event(const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE]);
 
   void publish_response_received_event(
-    const void * payload, int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]);
+    const void *, int64_t, const uint8_t (&)[RMW_GID_STORAGE_SIZE]);
 
   bool want_contents();
 };
