@@ -58,7 +58,8 @@ protected:
   template <typename NodeT, typename ServiceT = void>
   void init_base(
     NodeT * node, const std::string & service_name, const rclcpp::QoS & qos, ServiceRole role,
-    [[maybe_unused]] const std::string & service_type = "")
+    [[maybe_unused]] const std::string & service_type = "",
+    [[maybe_unused]] const ServiceTsBundle & ts_bundle = ServiceTsBundle{})
   {
     node_ = node;
     qos_ = rclcpp::QoS(qos).durability_volatile();
@@ -66,7 +67,7 @@ protected:
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
 
     if constexpr (std::is_void_v<ServiceT>) {
-      introspection_.init_generic(node_, service_name_, service_type);
+      introspection_.init_generic(node_, service_name_, service_type, ts_bundle);
     } else {
       introspection_.init_typed<ServiceT>(node_, service_name_);
     }
@@ -92,8 +93,6 @@ public:
    * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
    * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
    * is about to be created, so disabling never rejects it.
-   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
-   * loaded. Only the first transition out of OFF loads them.
    */
   AGNOCAST_PUBLIC
   void configure_introspection(
@@ -517,9 +516,9 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
       "2. deferred: (std::shared_ptr<GenericService>, ipc_shared_ptr<void>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
 
-    init_base<NodeT>(node, service_name, qos, role, service_type);
-
     service_ts_bundle_ = load_service_typesupport(service_type);
+
+    init_base<NodeT>(node, service_name, qos, role, service_type, service_ts_bundle_);
 
     SubscriptionOptions sub_options{group};
     std::string req_topic_name = create_service_request_topic_name(service_name_);

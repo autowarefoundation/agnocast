@@ -34,8 +34,6 @@ struct SnapshotBase
   rclcpp::Clock::SharedPtr clock = nullptr;
 
   virtual ~SnapshotBase() = default;
-
-  virtual void publish(const rosidl_service_introspection_info_t & info, const void * payload) = 0;
 };
 
 class ServiceEventPublisher
@@ -47,6 +45,9 @@ class ServiceEventPublisher
   virtual void configure_impl(
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t state) = 0;
+  virtual void publish(
+    const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
+    const void * payload) const = 0;
 
   void log_failure(const uint8_t event_type, const char * reason) const noexcept;
 
@@ -68,8 +69,6 @@ public:
   /// @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
   /// @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
   /// is about to be created.
-  /// @throws std::runtime_error if the typesupport libraries cannot be loaded. Only the first
-  /// transition out of OFF loads them.
   void configure(
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t state);
@@ -97,12 +96,10 @@ class GenericEventPublisher : public ServiceEventPublisher
   struct Snapshot : public SnapshotBase
   {
     GenericPublisher::SharedPtr publisher = nullptr;
-    std::shared_ptr<const ServiceTsBundle> ts_bundle = nullptr;
-
-    void publish(const rosidl_service_introspection_info_t & info, const void * payload) override;
   };
 
   const std::string service_type_;
+  const ServiceTsBundle ts_bundle_;
 
   mutable std::mutex mtx_;
   Snapshot active_;
@@ -111,11 +108,14 @@ class GenericEventPublisher : public ServiceEventPublisher
   void configure_impl(
     const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
     rcl_service_introspection_state_t state) override;
+  void publish(
+    const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
+    const void * payload) const override;
 
 public:
   GenericEventPublisher(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name,
-    const std::string & service_type);
+    const std::string & service_type, const ServiceTsBundle & ts_bundle);
 };
 
 /// @brief Publishes events for typed service endpoints.
@@ -127,38 +127,6 @@ class TypedEventPublisher : public ServiceEventPublisher
   struct Snapshot : public SnapshotBase
   {
     typename Publisher<Event>::SharedPtr publisher = nullptr;
-
-    void publish(const rosidl_service_introspection_info_t & info, const void * payload) override
-    {
-      ipc_shared_ptr<Event> event = publisher->borrow_loaned_message();
-
-      // Construct the event message (metadata).
-      event->info.event_type = info.event_type;
-      event->info.stamp.sec = info.stamp_sec;
-      event->info.stamp.nanosec = info.stamp_nanosec;
-      event->info.sequence_number = info.sequence_number;
-      std::memcpy(event->info.client_gid.data(), info.client_gid, RMW_GID_STORAGE_SIZE);
-
-      // Construct the event message (contents).
-      switch (info.event_type) {
-        case service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED:
-        case service_msgs::msg::ServiceEventInfo::REQUEST_SENT:
-          if (payload != nullptr) {
-            event->request.push_back(*static_cast<const typename ServiceT::Request *>(payload));
-          }
-          break;
-        case service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED:
-        case service_msgs::msg::ServiceEventInfo::RESPONSE_SENT:
-          if (payload != nullptr) {
-            event->response.push_back(*static_cast<const typename ServiceT::Response *>(payload));
-          }
-          break;
-        default:
-          throw std::invalid_argument("unknown event type");
-      }
-
-      publisher->publish(std::move(event));
-    }
   };
 
   mutable std::mutex mtx_;
@@ -210,6 +178,42 @@ class TypedEventPublisher : public ServiceEventPublisher
     }
   }
 
+  void publish(
+    const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
+    const void * payload) const override
+  {
+    const auto & publisher = static_cast<const Snapshot &>(snap).publisher;
+
+    ipc_shared_ptr<Event> event = publisher->borrow_loaned_message();
+
+    // Construct the event message (metadata).
+    event->info.event_type = info.event_type;
+    event->info.stamp.sec = info.stamp_sec;
+    event->info.stamp.nanosec = info.stamp_nanosec;
+    event->info.sequence_number = info.sequence_number;
+    std::memcpy(event->info.client_gid.data(), info.client_gid, RMW_GID_STORAGE_SIZE);
+
+    // Construct the event message (contents).
+    switch (info.event_type) {
+      case service_msgs::msg::ServiceEventInfo::REQUEST_RECEIVED:
+      case service_msgs::msg::ServiceEventInfo::REQUEST_SENT:
+        if (payload != nullptr) {
+          event->request.push_back(*static_cast<const typename ServiceT::Request *>(payload));
+        }
+        break;
+      case service_msgs::msg::ServiceEventInfo::RESPONSE_RECEIVED:
+      case service_msgs::msg::ServiceEventInfo::RESPONSE_SENT:
+        if (payload != nullptr) {
+          event->response.push_back(*static_cast<const typename ServiceT::Response *>(payload));
+        }
+        break;
+      default:
+        throw std::invalid_argument("unknown event type");
+    }
+
+    publisher->publish(std::move(event));
+  }
+
 public:
   TypedEventPublisher(
     const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name)
@@ -233,7 +237,7 @@ class ServiceIntrospection
 public:
   void init_generic(
     std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
-    const std::string & service_type);
+    const std::string & service_type, const ServiceTsBundle & ts_bundle);
 
   template <typename ServiceT>
   void init_typed(
@@ -272,11 +276,14 @@ public:
 namespace agnocast
 {
 
+struct ServiceTsBundle;
+
 class ServiceIntrospection
 {
 public:
   void init_generic(
-    std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &);
+    std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &,
+    const ServiceTsBundle &);
 
   template <typename ServiceT>
   void init_typed(std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &)

@@ -32,7 +32,7 @@ protected:
     const std::string & service_type)
   {
     return std::make_unique<agnocast::GenericEventPublisher>(
-      node_.get(), "/test_service", service_type);
+      node_.get(), "/test_service", service_type, agnocast::load_service_typesupport(service_type));
   }
 };
 
@@ -56,18 +56,6 @@ TEST_F(ServiceEventPublisherTest, ConfigureRejectsANullClockWhenDisabling)
   EXPECT_THROW(
     event_publisher->configure(nullptr, rclcpp::ServicesQoS(), RCL_SERVICE_INTROSPECTION_OFF),
     std::invalid_argument);
-}
-
-TEST_F(ServiceEventPublisherTest, ConfigureReportsAServiceTypeWhoseTypesupportCannotBeLoaded)
-{
-  // Arrange
-  auto event_publisher = make_event_publisher("no_such_package/srv/NoSuchService");
-
-  // Act & Assert: the typesupport is loaded here, not at construction.
-  EXPECT_THROW(
-    event_publisher->configure(
-      node_->get_clock(), rclcpp::ServicesQoS(), RCL_SERVICE_INTROSPECTION_METADATA),
-    std::runtime_error);
 }
 
 TEST_F(ServiceEventPublisherTest, ConfigureRejectsAQosAgnocastCannotUse)

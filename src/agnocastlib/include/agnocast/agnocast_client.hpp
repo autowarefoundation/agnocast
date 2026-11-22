@@ -104,7 +104,8 @@ protected:
 
   template <typename NodeT, typename ServiceT = void>
   void init_base(
-    NodeT * node, const std::string & service_name, const std::string & service_type = "")
+    NodeT * node, const std::string & service_name, const std::string & service_type = "",
+    const ServiceTsBundle & ts_bundle = ServiceTsBundle{})
   {
     node_ = node;
     node_name_ = node->get_fully_qualified_name();
@@ -119,7 +120,7 @@ protected:
     };
 
     if constexpr (std::is_void_v<ServiceT>) {
-      introspection_.init_generic(node_, service_name_, service_type);
+      introspection_.init_generic(node_, service_name_, service_type, ts_bundle);
     } else {
       introspection_.init_typed<ServiceT>(node_, service_name_);
     }
@@ -159,8 +160,6 @@ public:
    * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
    * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
    * is about to be created, so disabling never rejects it.
-   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
-   * loaded. Only the first transition out of OFF loads them.
    */
   AGNOCAST_PUBLIC
   void configure_introspection(
@@ -504,9 +503,9 @@ private:
     NodeT * node, const std::string & service_name, const std::string & service_type,
     const rclcpp::QoS & qos_arg, const rclcpp::CallbackGroup::SharedPtr & group, ClientRole role)
   {
-    init_base<NodeT>(node, service_name, service_type);
-
     service_ts_bundle_ = load_service_typesupport(service_type);
+
+    init_base<NodeT>(node, service_name, service_type, service_ts_bundle_);
 
     // TransientLocal durability is not allowed for services.
     const rclcpp::QoS qos = rclcpp::QoS(qos_arg).durability_volatile();

@@ -130,7 +130,7 @@ void ServiceEventPublisher::publish_service_event_message(
     static_assert(sizeof(info.client_gid) == RMW_GID_STORAGE_SIZE);
     std::memcpy(info.client_gid, static_cast<const void *>(client_gid), RMW_GID_STORAGE_SIZE);
 
-    snap->publish(info, payload);
+    publish(*snap, info, payload);
   } catch (const std::exception & e) {
     log_failure(event_type, e.what());
   } catch (...) {
@@ -138,14 +138,17 @@ void ServiceEventPublisher::publish_service_event_message(
   }
 }
 
-void GenericEventPublisher::Snapshot::publish(
-  const rosidl_service_introspection_info_t & info, const void * payload)
+void GenericEventPublisher::publish(
+  const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
+  const void * payload) const
 {
+  const auto & publisher = static_cast<const Snapshot &>(snap).publisher;
+
   // Prepare the default allocator.
   rcutils_allocator_t allocator = rcutils_get_default_allocator();
 
   // Construct the event message.
-  const auto * service_ts = ts_bundle->service_ts;
+  const auto * service_ts = ts_bundle_.service_ts;
   void * event_msg = nullptr;
   switch (info.event_type) {
     case ServiceEventInfo::REQUEST_RECEIVED:
@@ -197,14 +200,13 @@ void GenericEventPublisher::configure_impl(
     next = active_;
   }
 
-  // Stage transitions locally (using `next`) so an exception during typesupport loading or
-  // publisher creation leaves the last committed state intact.
+  // Stage transitions locally (using `next`) so an exception during publisher creation leaves the
+  // last committed state intact.
 
   if (state == RCL_SERVICE_INTROSPECTION_OFF) {
     next.state = state;
     next.clock = nullptr;
     next.publisher = nullptr;
-    // The bundle is carried over so that re-enabling does not load the libraries again.
   } else if (next.publisher) {
     // The clock and QoS only take effect when the publisher is created, matching
     // rcl_service_configure_service_introspection: a later call that only moves between METADATA
@@ -213,10 +215,6 @@ void GenericEventPublisher::configure_impl(
   } else {
     next.state = state;
     next.clock = clock;
-    if (!next.ts_bundle) {
-      next.ts_bundle =
-        std::make_shared<const ServiceTsBundle>(load_service_typesupport(service_type_));
-    }
 
     // Must stay Default, unlike the AgnocastOnly of to_publisher_role(): register_service_bridge()
     // does not cover the event topic, so this publisher requests its own A2R bridge.
@@ -238,16 +236,16 @@ void GenericEventPublisher::configure_impl(
 
 GenericEventPublisher::GenericEventPublisher(
   const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name,
-  const std::string & service_type)
-: ServiceEventPublisher(node, service_name), service_type_(service_type)
+  const std::string & service_type, const ServiceTsBundle & ts_bundle)
+: ServiceEventPublisher(node, service_name), service_type_(service_type), ts_bundle_(ts_bundle)
 {
 }
 
 void ServiceIntrospection::init_generic(
   std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
-  const std::string & service_type)
+  const std::string & service_type, const ServiceTsBundle & ts_bundle)
 {
-  event_pub_ = std::make_unique<GenericEventPublisher>(node, service_name, service_type);
+  event_pub_ = std::make_unique<GenericEventPublisher>(node, service_name, service_type, ts_bundle);
 }
 
 void ServiceIntrospection::configure(
@@ -298,7 +296,8 @@ namespace agnocast
 {
 
 void ServiceIntrospection::init_generic(
-  std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &)
+  std::variant<rclcpp::Node *, agnocast::Node *>, const std::string &, const std::string &,
+  const ServiceTsBundle &)
 {
 }
 
