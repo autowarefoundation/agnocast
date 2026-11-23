@@ -80,13 +80,23 @@ static std::string bridge_domain_suffix()
   return "_d" + std::to_string(domain_id);
 }
 
-std::string create_uds_addr_for_bridge()
+std::string create_uds_addr_for_bridge_request()
 {
   // Abstract-namespace UDS address is prefixed with '\0' and its length is
   // scoped by the socklen_t passed to bind()/sendto() (no trailing NUL).
   std::string addr;
   addr.push_back('\0');
   addr += "agnocast_bridge_manager_";
+  addr += std::to_string(get_self_ipc_ns_inode());
+  addr += bridge_domain_suffix();
+  return addr;
+}
+
+std::string create_uds_addr_for_bridge_status()
+{
+  std::string addr;
+  addr.push_back('\0');
+  addr += "agnocast_bridge_status_";
   addr += std::to_string(get_self_ipc_ns_inode());
   addr += bridge_domain_suffix();
   return addr;

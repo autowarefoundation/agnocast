@@ -13,7 +13,7 @@ BridgeIpcEventLoop::BridgeIpcEventLoop(const rclcpp::Logger & logger)
 : IpcEventLoopBase(
     logger,
     // 1. Abstract-namespace UDS address
-    create_uds_addr_for_bridge(),
+    create_uds_addr_for_bridge_request(),
     // 2. Upper bound on any single received message
     BRIDGE_MSG_MAX_SIZE,
     // 3. Block Signals

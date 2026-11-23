@@ -67,7 +67,7 @@ inline void send_pubsub_bridge_registration_by_type_name(
     exit(EXIT_FAILURE);
   }
 
-  const std::string uds_addr = create_uds_addr_for_bridge();
+  const std::string uds_addr = create_uds_addr_for_bridge_request();
   send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgPubSubPayload>(), logger);
 }
 
@@ -91,7 +91,7 @@ inline void send_service_bridge_registration_by_type_name(
     exit(EXIT_FAILURE);
   }
 
-  const std::string uds_addr = create_uds_addr_for_bridge();
+  const std::string uds_addr = create_uds_addr_for_bridge_request();
   send_bridge_uds_message(uds_addr, &msg, bridge_msg_wire_size<BridgeMsgServicePayload>(), logger);
 }
 

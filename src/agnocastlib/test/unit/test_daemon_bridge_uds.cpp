@@ -92,7 +92,7 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrEmptyDomainIdHasNoSuffix)
 {
   const ScopedRosDomainId guard;
   setenv("ROS_DOMAIN_ID", "", 1);
-  const auto addr = agnocast::create_uds_addr_for_bridge();
+  const auto addr = agnocast::create_uds_addr_for_bridge_request();
   ASSERT_FALSE(addr.empty());
   EXPECT_EQ(addr[0], '\0');
   const auto expected =
@@ -104,7 +104,7 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrAppendsDomainId)
 {
   const ScopedRosDomainId guard;
   setenv("ROS_DOMAIN_ID", "7", 1);
-  const auto addr = agnocast::create_uds_addr_for_bridge();
+  const auto addr = agnocast::create_uds_addr_for_bridge_request();
   ASSERT_FALSE(addr.empty());
   EXPECT_EQ(addr[0], '\0');
   const auto expected =
@@ -116,7 +116,7 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrUnsetDomainIdHasNoSuffix)
 {
   const ScopedRosDomainId guard;
   unsetenv("ROS_DOMAIN_ID");
-  const auto addr = agnocast::create_uds_addr_for_bridge();
+  const auto addr = agnocast::create_uds_addr_for_bridge_request();
   ASSERT_FALSE(addr.empty());
   EXPECT_EQ(addr[0], '\0');
   const auto expected =
@@ -132,11 +132,11 @@ TEST(DaemonBridgeUdsTest, BridgeUdsAddrIsCanonicalPerDomain)
   const ScopedRosDomainId guard;
   const auto addr_for = [](const char * value) {
     setenv("ROS_DOMAIN_ID", value, 1);
-    return agnocast::create_uds_addr_for_bridge();
+    return agnocast::create_uds_addr_for_bridge_request();
   };
 
   unsetenv("ROS_DOMAIN_ID");
-  const auto domain_0 = agnocast::create_uds_addr_for_bridge();
+  const auto domain_0 = agnocast::create_uds_addr_for_bridge_request();
 
   // Spellings that get_ros_domain_id() normalizes to 0.
   EXPECT_EQ(addr_for("0"), domain_0);

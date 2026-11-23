@@ -93,7 +93,8 @@ void validate_ld_preload();
 // or unparsable), matching ROS 2's default. Registered with the kmod so topics
 // in different domains are isolated.
 uint32_t get_ros_domain_id();
-std::string create_uds_addr_for_bridge();
+std::string create_uds_addr_for_bridge_request();
+std::string create_uds_addr_for_bridge_status();
 std::string create_shm_name(const pid_t pid);
 // Return the inode number of the calling process's IPC namespace
 // (`/proc/self/ns/ipc`). Used by the type registry writer/reader as the
