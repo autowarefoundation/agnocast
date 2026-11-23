@@ -28,6 +28,12 @@
 namespace agnocast
 {
 
+/// @brief The committed introspection state. A snapshot is immutable once committed: a transition
+/// swaps in a new one rather than updating fields in place.
+///
+/// The clock is set iff the snapshot carries a publisher: both are assigned together when the
+/// publisher is created and cleared together on a transition to OFF. configure() and
+/// configure_impl() rely on this invariant.
 struct SnapshotBase
 {
   rcl_service_introspection_state_t state = RCL_SERVICE_INTROSPECTION_OFF;
@@ -40,11 +46,12 @@ class ServiceEventPublisher
 {
   // Used to serialize concurrent configure() calls.
   std::mutex transition_mtx_;
+  // The committed state, as an immutable snapshot.
+  std::shared_ptr<const SnapshotBase> active_ = std::make_shared<const SnapshotBase>();
 
-  virtual std::unique_ptr<SnapshotBase> snapshot() const = 0;
   virtual void configure_impl(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t state) = 0;
+    const std::shared_ptr<const SnapshotBase> & current, const rclcpp::Clock::SharedPtr & clock,
+    const rclcpp::QoS & qos_service_event_pub, rcl_service_introspection_state_t state) = 0;
   virtual void publish(
     const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
     const void * payload) const = 0;
@@ -52,6 +59,11 @@ class ServiceEventPublisher
   void log_failure(const uint8_t event_type, const char * reason) const noexcept;
 
 protected:
+  /// @brief Reads active_ with one atomic shared_ptr load: no copy of the snapshot fields.
+  std::shared_ptr<const SnapshotBase> snapshot() const;
+  /// @brief Swaps in @p next with on atomic shared_ptr store.
+  void commit(std::shared_ptr<const SnapshotBase> && next);
+
   const std::variant<rclcpp::Node *, agnocast::Node *> node_;
   const std::string event_topic_name_;
 
@@ -101,13 +113,9 @@ class GenericEventPublisher : public ServiceEventPublisher
   const std::string service_type_;
   const ServiceTsBundle ts_bundle_;
 
-  mutable std::mutex mtx_;
-  Snapshot active_;
-
-  std::unique_ptr<SnapshotBase> snapshot() const override;
   void configure_impl(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t state) override;
+    const std::shared_ptr<const SnapshotBase> & current, const rclcpp::Clock::SharedPtr & clock,
+    const rclcpp::QoS & qos_service_event_pub, rcl_service_introspection_state_t state) override;
   void publish(
     const SnapshotBase & snap, const rosidl_service_introspection_info_t & info,
     const void * payload) const override;
@@ -129,53 +137,32 @@ class TypedEventPublisher : public ServiceEventPublisher
     typename Publisher<Event>::SharedPtr publisher = nullptr;
   };
 
-  mutable std::mutex mtx_;
-  Snapshot active_;
-
-  std::unique_ptr<SnapshotBase> snapshot() const override
-  {
-    Snapshot snap;
-    {
-      std::lock_guard<std::mutex> lock(mtx_);
-      snap = active_;
-    }
-    return std::make_unique<Snapshot>(snap);
-  }
-
   void configure_impl(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t state) override
+    const std::shared_ptr<const SnapshotBase> & current, const rclcpp::Clock::SharedPtr & clock,
+    const rclcpp::QoS & qos_service_event_pub, rcl_service_introspection_state_t state) override
   {
     // This function shares the same logic as GenericEventPublisher::configure_impl(); refer to it
     // for reasoning and explanation.
+    auto next = std::make_shared<Snapshot>();
+    next->state = state;
 
-    Snapshot next;
-    {
-      std::lock_guard<std::mutex> lock(mtx_);
-      next = active_;
+    if (state != RCL_SERVICE_INTROSPECTION_OFF) {
+      if (current->clock) {
+        const Snapshot & cur = static_cast<const Snapshot &>(*current);
+        next->clock = cur.clock;
+        next->publisher = cur.publisher;
+      } else {
+        next->clock = clock;
+        std::visit(
+          [this, &next, &qos_service_event_pub](auto * n) {
+            next->publisher = std::make_shared<Publisher<Event>>(
+              n, event_topic_name_, qos_service_event_pub, PublisherOptions{});
+          },
+          node_);
+      }
     }
 
-    if (state == RCL_SERVICE_INTROSPECTION_OFF) {
-      next.state = state;
-      next.clock = nullptr;
-      next.publisher = nullptr;
-    } else if (next.publisher) {
-      next.state = state;
-    } else {
-      next.state = state;
-      next.clock = clock;
-      std::visit(
-        [this, &next, &qos_service_event_pub](auto * n) {
-          next.publisher = std::make_shared<Publisher<Event>>(
-            n, event_topic_name_, qos_service_event_pub, PublisherOptions{});
-        },
-        node_);
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(mtx_);
-      active_ = next;
-    }
+    commit(std::move(next));
   }
 
   void publish(

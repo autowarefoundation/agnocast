@@ -64,6 +64,16 @@ void ServiceEventPublisher::log_failure(
   }
 }
 
+std::shared_ptr<const SnapshotBase> ServiceEventPublisher::snapshot() const
+{
+  return std::atomic_load_explicit(&active_, std::memory_order_acquire);
+}
+
+void ServiceEventPublisher::commit(std::shared_ptr<const SnapshotBase> && next)
+{
+  std::atomic_store_explicit(&active_, std::move(next), std::memory_order_release);
+}
+
 ServiceEventPublisher::ServiceEventPublisher(
   const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name)
 : node_(node), event_topic_name_(service_name + RCL_SERVICE_INTROSPECTION_TOPIC_POSTFIX)
@@ -78,30 +88,35 @@ void ServiceEventPublisher::configure(
     throw std::invalid_argument("a clock is required to configure service introspection");
   }
 
-  std::lock_guard<std::mutex> transition_lock(transition_mtx_);
+  // Holds the pre-transition snapshot until after transition_mtx_ is released. The pre-transition
+  // snapshot may contain the last reference to the publisher, so this prevents the publisher
+  // tear-down from happening inside the critical section.
+  std::shared_ptr<const SnapshotBase> current;
 
-  std::unique_ptr<SnapshotBase> snap = snapshot();
+  {
+    std::lock_guard<std::mutex> transition_lock(transition_mtx_);
 
-  if (snap->state == state) {
-    return;
-  }
-
-  if (state != RCL_SERVICE_INTROSPECTION_OFF && snap->clock == nullptr) {
-    // The event publisher is about to be created inside configure_impl(), so check the QoS in
-    // advance. The publisher constructor would run the same check and call exit() on failure.
-    const char * const unsupported = detail::unsupported_qos_reason(qos_service_event_pub);
-    if (unsupported != nullptr) {
-      throw std::invalid_argument(unsupported);
+    current = snapshot();
+    if (current->state == state) {
+      return;
     }
-  }
 
-  configure_impl(clock, qos_service_event_pub, state);
+    if (state != RCL_SERVICE_INTROSPECTION_OFF && current->clock == nullptr) {
+      // The event publisher is about to be created inside configure_impl(), so check the QoS in
+      // advance. The publisher constructor would run the same check and call exit() on failure.
+      const char * const unsupported = detail::unsupported_qos_reason(qos_service_event_pub);
+      if (unsupported != nullptr) {
+        throw std::invalid_argument(unsupported);
+      }
+    }
+
+    configure_impl(current, clock, qos_service_event_pub, state);
+  }
 }
 
 rcl_service_introspection_state_t ServiceEventPublisher::introspection_state() const
 {
-  std::unique_ptr<SnapshotBase> snap = snapshot();
-  return snap->state;
+  return snapshot()->state;
 }
 
 void ServiceEventPublisher::publish_service_event_message(
@@ -109,7 +124,7 @@ void ServiceEventPublisher::publish_service_event_message(
   const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]) noexcept
 {
   try {
-    std::unique_ptr<SnapshotBase> snap = snapshot();
+    std::shared_ptr<const SnapshotBase> snap = snapshot();
 
     if (snap->state == RCL_SERVICE_INTROSPECTION_OFF) {
       return;
@@ -180,58 +195,39 @@ void GenericEventPublisher::publish(
   publisher->publish(serialized_msg);
 }
 
-std::unique_ptr<SnapshotBase> GenericEventPublisher::snapshot() const
-{
-  Snapshot snap;
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    snap = active_;
-  }
-  return std::make_unique<Snapshot>(snap);
-};
-
 void GenericEventPublisher::configure_impl(
-  const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-  rcl_service_introspection_state_t state)
+  const std::shared_ptr<const SnapshotBase> & current, const rclcpp::Clock::SharedPtr & clock,
+  const rclcpp::QoS & qos_service_event_pub, rcl_service_introspection_state_t state)
 {
-  Snapshot next;
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    next = active_;
+  // Stage the transition in `next` so an exception during publisher creation leaves the last
+  // committed state intact.
+  auto next = std::make_shared<Snapshot>();
+  next->state = state;
+
+  if (state != RCL_SERVICE_INTROSPECTION_OFF) {
+    if (current->clock) {
+      // The arguments `clock` and `QoS` are used only when the publisher is created, matching
+      // rcl_service_configure_service_introspection. A call that only moves between METADATA and
+      // CONTENTS keeps the current clock and publisher.
+      const Snapshot & cur = static_cast<const Snapshot &>(*current);
+      next->clock = cur.clock;
+      next->publisher = cur.publisher;
+    } else {
+      next->clock = clock;
+
+      // Must stay Default, unlike the AgnocastOnly of to_publisher_role():
+      // register_service_bridge() does not cover the event topic, so this publisher requests its
+      // own A2R bridge.
+      std::visit(
+        [this, &next, &qos_service_event_pub](auto * n) {
+          next->publisher = std::make_shared<GenericPublisher>(
+            n, event_topic_name_, service_type_ + "_Event", qos_service_event_pub);
+        },
+        node_);
+    }
   }
 
-  // Stage transitions locally (using `next`) so an exception during publisher creation leaves the
-  // last committed state intact.
-
-  if (state == RCL_SERVICE_INTROSPECTION_OFF) {
-    next.state = state;
-    next.clock = nullptr;
-    next.publisher = nullptr;
-  } else if (next.publisher) {
-    // The clock and QoS only take effect when the publisher is created, matching
-    // rcl_service_configure_service_introspection: a later call that only moves between METADATA
-    // and CONTENTS keeps the publisher and leaves them alone.
-    next.state = state;
-  } else {
-    next.state = state;
-    next.clock = clock;
-
-    // Must stay Default, unlike the AgnocastOnly of to_publisher_role(): register_service_bridge()
-    // does not cover the event topic, so this publisher requests its own A2R bridge.
-    std::visit(
-      [this, &next, &qos_service_event_pub](auto * n) {
-        next.publisher = std::make_shared<GenericPublisher>(
-          n, event_topic_name_, service_type_ + "_Event", qos_service_event_pub);
-      },
-      node_);
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    active_ = next;
-    // NOTE: Since ServiceEventPublisher::configure() holds a copy of the pre-transition state
-    // (`snap`), heavy cleanups do not run inside this critical section.
-  }
+  commit(std::move(next));
 }
 
 GenericEventPublisher::GenericEventPublisher(
