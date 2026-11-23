@@ -25,6 +25,7 @@ namespace agnocast
 #define NODE_NAME_BUFFER_SIZE 256
 #define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
+#define TYPE_NAME_BUFFER_SIZE 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
   "Failed to open /dev/agnocast: Device not found. "
@@ -97,6 +98,7 @@ union ioctl_add_subscriber_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool qos_is_reliable;
@@ -119,6 +121,7 @@ union ioctl_add_publisher_args {
   {
     struct name_info topic_name;
     struct name_info node_name;
+    struct name_info type_name;
     uint32_t qos_depth;
     bool qos_is_transient_local;
     bool is_bridge;
@@ -246,6 +249,8 @@ struct ioctl_get_exit_process_args
 struct topic_info_ret
 {
   char node_name[NODE_NAME_BUFFER_SIZE];
+  char type_name[TYPE_NAME_BUFFER_SIZE];
+  pid_t pid;
   uint32_t qos_depth;
   bool qos_is_transient_local;
   bool qos_is_reliable;

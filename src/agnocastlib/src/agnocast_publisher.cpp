@@ -2,7 +2,6 @@
 
 #include "agnocast/bridge/agnocast_bridge_node.hpp"
 #include "agnocast/internal/qos_parameters.hpp"
-#include "agnocast/internal/type_registry_writer.hpp"
 #include "agnocast/node/agnocast_node.hpp"
 
 #include <rclcpp/typesupport_helpers.hpp>
@@ -56,16 +55,10 @@ topic_local_id_t initialize_publisher(
 {
   validate_ld_preload();
 
-  // Announce to the per-IPC-namespace discovery agent before the kmod call so
-  // the registry line is in place whenever a later snapshot sees the
-  // ioctl-side endpoint. Empty `type_name` (e.g. service types) skips this.
-  if (!type_name.empty()) {
-    internal::TypeRegistryWriter::instance().register_type(topic_name, type_name, "pub", node_name);
-  }
-
   union ioctl_add_publisher_args pub_args = {};
   pub_args.topic_name = {topic_name.c_str(), topic_name.size()};
   pub_args.node_name = {node_name.c_str(), node_name.size()};
+  pub_args.type_name = {type_name.c_str(), type_name.size()};
   pub_args.qos_depth = qos.depth();
   pub_args.qos_is_transient_local = qos.durability() == rclcpp::DurabilityPolicy::TransientLocal;
   pub_args.is_bridge = is_bridge;

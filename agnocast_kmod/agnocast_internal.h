@@ -104,6 +104,7 @@ struct publisher_info
   uint32_t domain_id;
   pid_t pid;
   char * node_name;
+  char * type_name;
   uint32_t qos_depth;
   bool qos_is_transient_local;
   uint32_t entries_num;
@@ -123,6 +124,7 @@ static inline void free_publisher_info(struct publisher_info * pub_info)
 {
   kvfree(pub_info->notify_ctxs);
   kfree(pub_info->node_name);
+  kfree(pub_info->type_name);
   kfree(pub_info);
 }
 
@@ -137,6 +139,7 @@ struct subscriber_info
   bool qos_is_reliable;
   int64_t latest_received_entry_id;
   char * node_name;
+  char * type_name;
   bool is_take_sub;
   bool ignore_local_publications;
   bool need_mmap_update;
@@ -151,6 +154,7 @@ static inline void free_subscriber_info(struct subscriber_info * sub_info)
 {
   if (sub_info->notify_ctx) agnocast_eventfd_put(sub_info->notify_ctx);
   kfree(sub_info->node_name);
+  kfree(sub_info->type_name);
   kfree(sub_info);
 }
 
