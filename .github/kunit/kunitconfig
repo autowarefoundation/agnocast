@@ -17,3 +17,7 @@ CONFIG_ENABLE_DEFAULT_TRACERS=y
 # Log sleeping-in-atomic splats. kunit.yaml fails the job on them.
 CONFIG_DEBUG_KERNEL=y
 CONFIG_DEBUG_ATOMIC_SLEEP=y
+
+# For lockdep_assert_held()
+CONFIG_PROVE_LOCKING=y
+
