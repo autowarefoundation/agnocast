@@ -63,8 +63,8 @@ protected:
 
   template <typename NodeT>
   explicit ServiceBase(
-    NodeT * node, const std::string & service_name, const std::string & service_type,
-    const rclcpp::QoS & qos, ServiceRole role)
+    NodeT * node, const std::string & service_name,
+    [[maybe_unused]] const std::string & service_type, const rclcpp::QoS & qos, ServiceRole role)
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
   {
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
