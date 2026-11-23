@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM SIGHUP
 
 # Parsing arguments
-OPTIONS=$(getopt -o hscp: --long help,single,continue,parallel: -- "$@")
+OPTIONS=$(getopt -o hscp: --long help,single,continue,parallel:,shard: -- "$@")
 if [ $? -ne 0 ]; then
     echo "Invalid options provided"
     exit 1
@@ -31,12 +31,14 @@ usage() {
     echo "  -s, --single       Run only one test case using current config file"
     echo "  -c, --continue     Continue running tests even if one fails"
     echo "  -p, --parallel N   Run tests in parallel with N workers (default: 1 = sequential)"
+    echo "      --shard I/N    Run only the I-th of N interleaved slices of the test cases (e.g. 1/3)"
     exit 0
 }
 
 RUN_SINGLE=false
 CONTINUE_ON_FAILURE=false
 PARALLEL=1
+SHARD="1/1"
 while true; do
     case "$1" in
     -h | --help)
@@ -54,6 +56,10 @@ while true; do
         PARALLEL=$2
         shift 2
         ;;
+    --shard)
+        SHARD=$2
+        shift 2
+        ;;
     --)
         shift
         break
@@ -68,6 +74,19 @@ if ! [[ "$PARALLEL" =~ ^[0-9]+$ ]] || [ "$PARALLEL" -lt 1 ]; then
     echo "Error: --parallel must be a positive integer"
     exit 1
 fi
+
+if ! [[ "$SHARD" =~ ^([0-9]+)/([0-9]+)$ ]] || [ "${BASH_REMATCH[1]}" -lt 1 ] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "Error: --shard must be I/N with 1 <= I <= N"
+    exit 1
+fi
+SHARD_INDEX=${BASH_REMATCH[1]}
+SHARD_TOTAL=${BASH_REMATCH[2]}
+
+# Test cases are numbered from 1 in loop order and dealt round-robin to shards,
+# so every shard gets a similar mix of parameters.
+in_shard() {
+    (( ($1 - 1) % SHARD_TOTAL == SHARD_INDEX - 1 ))
+}
 
 # Check bridge mode
 LOWER_BRIDGE_MODE=$(echo "$AGNOCAST_BRIDGE_MODE" | tr '[:upper:]' '[:lower:]')
@@ -144,7 +163,12 @@ SUB_QOS_DEPTH=(1 10)
 SUB_TRANSIENT_LOCAL=(true false)
 USE_TAKE_SUB=(true false)
 
-TOTAL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
+ALL_TESTS=$((${#USE_AGNOCAST_PUB[@]} * ${#LAUNCH_PUB_BEFORE_SUB[@]} * ${#PUB_QOS_DEPTH[@]} * ${#PUB_TRANSIENT_LOCAL[@]} * ${#SUB_QOS_DEPTH[@]} * ${#SUB_TRANSIENT_LOCAL[@]} * ${#USE_TAKE_SUB[@]}))
+TOTAL_TESTS=0
+for ((case_num = 1; case_num <= ALL_TESTS; case_num++)); do
+    in_shard "$case_num" && TOTAL_TESTS=$((TOTAL_TESTS + 1))
+done
+CASE_NUM=0
 
 FAILURE_COUNT=0
 if [ "$RUN_SINGLE" = true ]; then
@@ -182,6 +206,8 @@ elif [ "$PARALLEL" -gt 1 ]; then
                     for sub_qos_depth in ${SUB_QOS_DEPTH[@]}; do
                         for sub_transient_local in ${SUB_TRANSIENT_LOCAL[@]}; do
                             for use_take_sub in ${USE_TAKE_SUB[@]}; do
+                                CASE_NUM=$((CASE_NUM + 1))
+                                in_shard "$CASE_NUM" || continue
                                 TEST_ID=$(generate_test_id "$use_agnocast_pub" "$launch_pub_before_sub" "$pub_qos_depth" "$pub_transient_local" "$sub_qos_depth" "$sub_transient_local" "$use_take_sub")
                                 echo "$WORKER_NUM $TEST_ID $use_agnocast_pub $launch_pub_before_sub $pub_qos_depth $pub_transient_local $sub_qos_depth $sub_transient_local $use_take_sub" >> "$COMMANDS_FILE"
                                 WORKER_NUM=$((WORKER_NUM + 1))
@@ -305,6 +331,8 @@ else
                     for sub_qos_depth in ${SUB_QOS_DEPTH[@]}; do
                         for sub_transient_local in ${SUB_TRANSIENT_LOCAL[@]}; do
                             for use_take_sub in ${USE_TAKE_SUB[@]}; do
+                                CASE_NUM=$((CASE_NUM + 1))
+                                in_shard "$CASE_NUM" || continue
                                 COUNT=$((COUNT + 1))
                                 sed -i "s/use_agnocast_pub:.*/use_agnocast_pub: $use_agnocast_pub/g" $CONFIG_FILE
                                 sed -i "s/launch_pub_before_sub:.*/launch_pub_before_sub: $launch_pub_before_sub/g" $CONFIG_FILE
