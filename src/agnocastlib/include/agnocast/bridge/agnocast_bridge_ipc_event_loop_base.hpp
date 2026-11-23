@@ -288,11 +288,13 @@ inline void IpcEventLoopBase::setup_signals(
 // terminates, eliminating stale socket files left by abnormal process exits.
 // Abstract socket names are scoped to the network namespace.
 //
-// Name format: "\0agnocast_bridge/{ipc_ns_inode}/{pid}"
+// Name format: "\0agnocast_bridge_status_{ipc_ns_inode}{domain_suffix}"
+// The bridge request socket's bind already guarantees one daemon per
+// (IPC namespace, ROS domain), so the name format always gives a unique name
+// for each bridge.
 inline void IpcEventLoopBase::setup_socket()
 {
-  const std::string name =
-    "agnocast_bridge/" + std::to_string(get_self_ipc_ns_inode()) + "/" + std::to_string(getpid());
+  const std::string addr = create_uds_addr_for_bridge_status();
 
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd == -1) {
@@ -300,24 +302,19 @@ inline void IpcEventLoopBase::setup_socket()
     return;
   }
 
-  struct sockaddr_un addr
+  struct sockaddr_un sa
   {
   };
-  addr.sun_family = AF_UNIX;
-  // Abstract namespace: sun_path[0] == '\0', name follows without null terminator.
-  // addrlen must cover exactly the '\0' prefix + name bytes (no null terminator).
-  if (name.size() + 1 > sizeof(addr.sun_path)) {
-    RCLCPP_WARN(
-      logger_, "setup_socket: abstract name too long: '%s' (socket disabled)", name.c_str());
+  socklen_t addrlen = 0;
+  try {
+    addrlen = detail::fill_abstract_sockaddr(addr, sa);
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(logger_, "setup_socket: %s (socket disabled)", e.what());
     close(fd);
     return;
   }
-  addr.sun_path[0] = '\0';
-  memcpy(addr.sun_path + 1, name.c_str(), name.size());
-  const socklen_t addrlen =
-    static_cast<socklen_t>(offsetof(struct sockaddr_un, sun_path) + 1 + name.size());
 
-  if (bind(fd, reinterpret_cast<struct sockaddr *>(&addr), addrlen) == -1) {
+  if (bind(fd, reinterpret_cast<struct sockaddr *>(&sa), addrlen) == -1) {
     RCLCPP_WARN(logger_, "setup_socket: bind() failed: %s (socket disabled)", strerror(errno));
     close(fd);
     return;
