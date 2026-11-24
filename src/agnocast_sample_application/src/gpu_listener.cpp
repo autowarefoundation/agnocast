@@ -66,8 +66,10 @@ int main(int argc, char ** argv)
 {
   agnocast::init(argc, argv);
   agnocast::AgnocastOnlySingleThreadedExecutor executor;
-  // The same binary can watch either end of the pipeline.
-  auto node = std::make_shared<GpuListener>(argc > 1 ? argv[1] : "/gpu_points");
+  // The same binary can watch either end of the pipeline. A launch file appends
+  // --ros-args, so the topic is the first argument left after the ROS ones.
+  const auto args = rclcpp::remove_ros_arguments(argc, argv);
+  auto node = std::make_shared<GpuListener>(args.size() > 1 ? args[1] : "/gpu_points");
   executor.add_node(node);
   executor.spin();
   return 0;
