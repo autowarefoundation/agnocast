@@ -147,9 +147,13 @@ struct publisher_info
   struct hlist_node node;
 };
 
-// Releases everything a publisher_info owns, including each GPU region's file reference. Every
-// teardown path must go through this, or a resource added to publisher_info ends up leaked on some
-// of them.
+// Releases everything a publisher_info owns. Every teardown path must go through
+// it, or a resource added to publisher_info ends up leaked on some of them. The
+// caller unlinks the publisher from the topic's table first, where it was linked
+// at all -- one caller frees a publisher that never got that far.
+//
+// Requires global_htables_rwsem held for write, because releasing a GPU region
+// removes it from the module-wide region index.
 static inline void free_publisher_info(struct publisher_info * pub_info)
 {
   struct gpu_region_info * region;

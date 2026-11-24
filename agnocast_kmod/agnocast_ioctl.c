@@ -3238,7 +3238,9 @@ int agnocast_ioctl_get_gpu_region(
   // publisher whose messages it is never allowed to receive. The host data path
   // applies the same filter when deciding which mempools to map
   // (set_publisher_shm_info).
-  if (!domain_delivery_allowed(wrapper->topic, pub_info->domain_id, sub_info->domain_id)) {
+  if (!domain_delivery_allowed(
+        wrapper->topic, pub_info->domain_id, pub_info->is_bridge, sub_info->domain_id,
+        sub_info->is_bridge)) {
     dev_warn(
       agnocast_device,
       "Publisher (id=%d, domain=%u) does not deliver to subscriber (id=%d, domain=%u) of the topic "

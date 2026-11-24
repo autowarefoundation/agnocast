@@ -262,8 +262,8 @@ internal::GpuSlotPool * PublisherBase::acquire_gpu_slot(
     gpu_pools_.erase(victim);  // the pool's destructor releases the region
   }
 
-  auto grown =
-    internal::GpuSlotPool::create(topic_name_, id_, capacity, gpu_slot_count(qos_depth_));
+  auto grown = internal::GpuSlotPool::create(
+    topic_name_, id_, capacity, gpu_slot_count(static_cast<uint32_t>(actual_qos_.depth())));
   if (grown == nullptr) {
     RCLCPP_ERROR(
       logger,

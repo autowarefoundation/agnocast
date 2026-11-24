@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
 #include "agnocast_internal.h"
 
-#include <linux/file.h>
-
 int major;
 struct class * agnocast_class;
 struct device * agnocast_device;

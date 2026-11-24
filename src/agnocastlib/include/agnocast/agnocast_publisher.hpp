@@ -16,7 +16,6 @@
 #include <unistd.h>
 
 #include <cstdint>
-#include <mutex>
 
 namespace agnocast
 {
@@ -122,7 +121,6 @@ class PublisherBase
 
 protected:
   topic_local_id_t id_ = -1;
-  uint32_t qos_depth_ = 1;
   // Grown on demand rather than fixed. The first is created on the first GPU
   // borrow. Defined in agnocast_publisher.cpp.
   mutable std::mutex gpu_pools_mtx_;
@@ -280,7 +278,6 @@ public:
     const PublisherOptions & options, const PublisherRole role = PublisherRole::Default)
   {
     constructor_impl(node, topic_name, qos, options, role);
-    qos_depth_ = static_cast<uint32_t>(actual_qos_.depth());
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),
@@ -295,7 +292,6 @@ public:
     const PublisherRole role = PublisherRole::Default)
   {
     constructor_impl(node, topic_name, qos, options, role);
-    qos_depth_ = static_cast<uint32_t>(actual_qos_.depth());
 
     TRACEPOINT(
       agnocast_publisher_init, static_cast<const void *>(this),

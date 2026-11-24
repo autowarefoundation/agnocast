@@ -17,12 +17,10 @@ static const uint32_t PUBLISH_NUM = 3;
 // error paths below are shown to clear the count rather than report garbage the
 // caller would take as a number of addresses to free.
 #define RELEASED_NUM_SENTINEL 0xDEADBEEFu
+// These tests never wait on a publish, so they register no eventfd.
+#define NO_EVENTFD (-1)
 
 static pid_t publisher_pid = 4000;
-
-// At file scope, as in the publish_msg suite: MAX_SUBSCRIBER_NUM entries do not
-// fit a kernel stack frame.
-static topic_local_id_t subscriber_ids_buf[MAX_SUBSCRIBER_NUM];
 
 static void setup_publisher(
   struct kunit * test, pid_t * pid, topic_local_id_t * publisher_id, uint64_t * ret_addr)
@@ -31,7 +29,8 @@ static void setup_publisher(
   *pid = publisher_pid;
 
   union ioctl_add_process_args add_process_args;
-  int ret = agnocast_ioctl_add_process(*pid, current->nsproxy->ipc_ns, false, 0, &add_process_args);
+  int ret = agnocast_ioctl_add_process(
+    *pid, current->nsproxy->ipc_ns, PROCESS_ROLE_APPLICATION, 0, &add_process_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   *ret_addr = add_process_args.ret_addr;
 
@@ -48,8 +47,7 @@ static void publish_once(
 {
   union ioctl_publish_msg_args publish_args;
   const int ret = agnocast_ioctl_publish_msg(
-    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, addr, subscriber_ids_buf,
-    MAX_SUBSCRIBER_NUM, &publish_args);
+    TOPIC_NAME, current->nsproxy->ipc_ns, publisher_id, addr, &publish_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
 }
 
@@ -90,7 +88,7 @@ void test_case_reclaim_msgs_releases_what_publish_could_not(struct kunit * test)
   union ioctl_add_subscriber_args add_subscriber_args;
   int ret = agnocast_ioctl_add_subscriber(
     TOPIC_NAME, current->nsproxy->ipc_ns, NODE_NAME, pid, QOS_DEPTH, false, true, false, false,
-    IS_BRIDGE, &add_subscriber_args);
+    IS_BRIDGE, NO_EVENTFD, &add_subscriber_args);
   KUNIT_ASSERT_EQ(test, ret, 0);
   const topic_local_id_t subscriber_id = add_subscriber_args.ret_id;
 
