@@ -15,10 +15,13 @@
 #include <service_msgs/msg/service_event_info.hpp>
 #endif
 
+#include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -54,13 +57,20 @@ protected:
   std::string service_name_;
   const rclcpp::QoS qos_;
   const ServiceRole role_;
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  std::shared_ptr<ServiceEventPublisher> event_publisher_;
+#endif
 
   template <typename NodeT>
   explicit ServiceBase(
-    NodeT * node, const std::string & service_name, const rclcpp::QoS & qos, ServiceRole role)
+    NodeT * node, const std::string & service_name,
+    [[maybe_unused]] const std::string & service_type, const rclcpp::QoS & qos, ServiceRole role)
   : node_(node), qos_(rclcpp::QoS(qos).durability_volatile()), role_(role)
   {
     service_name_ = node->get_node_services_interface()->resolve_service_name(service_name);
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+    event_publisher_ = std::make_shared<ServiceEventPublisher>(node_, service_name_, service_type);
+#endif
   }
 
   // Defined in the .cpp: agnocast::Node is only forward-declared here.
@@ -73,7 +83,93 @@ public:
   const char * get_service_name() const { return service_name_.c_str(); }
 
   virtual ~ServiceBase() = default;
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  /**
+   * @brief Configure service introspection.
+   * @param clock The clock to use to generate introspection timestamps.
+   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
+   * @param introspection_state The state to set introspection to.
+   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
+   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
+   * is about to be created, so disabling never rejects it.
+   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
+   * loaded. Only the first transition out of OFF loads them.
+   */
+  AGNOCAST_PUBLIC
+  void configure_introspection(
+    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+    rcl_service_introspection_state_t introspection_state)
+  {
+    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
+  }
+#endif
 };
+
+namespace detail
+{
+
+template <typename PublisherT>
+class ResponsePublisherManager
+{
+  std::mutex mtx_;
+  std::unordered_map<std::string, typename PublisherT::SharedPtr> pubs_;
+
+  void erase_stale_publishers()
+  {
+    for (auto it = pubs_.begin(); it != pubs_.end();) {
+      union ioctl_get_subscriber_num_args args = {};
+      args.topic_name = {it->first.c_str(), it->first.size()};
+      if (ioctl(agnocast_fd, AGNOCAST_GET_SUBSCRIBER_NUM_CMD, &args) < 0) {
+        RCLCPP_ERROR(logger, "AGNOCAST_GET_SUBSCRIBER_NUM_CMD failed: %s", strerror(errno));
+        close(agnocast_fd);
+        exit(EXIT_FAILURE);
+      }
+
+      if (args.ret_same_process_subscriber_num + args.ret_other_process_subscriber_num == 0) {
+        it = pubs_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+public:
+  typename PublisherT::SharedPtr get_or_create_publisher_for(
+    const std::variant<rclcpp::Node *, agnocast::Node *> & node_variant, const rclcpp::QoS & qos,
+    const ServiceRole role, const std::string & response_topic_name)
+  {
+    typename PublisherT::SharedPtr pub;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      auto it = pubs_.find(response_topic_name);
+      if (it == pubs_.end()) {
+        // Prune publishers with no clients only when the map is about to grow, amortizing the cost
+        // and keeping the average overhead low.
+        erase_stale_publishers();
+
+        std::visit(
+          [this, &pub, &qos, role, &response_topic_name](auto * node) {
+            agnocast::PublisherOptions pub_options;
+            if constexpr (std::is_same_v<PublisherT, agnocast::TypeErasedPublisher>) {
+              pub = std::make_shared<PublisherT>(
+                node, response_topic_name, "", qos, pub_options, to_publisher_role(role));
+            } else {
+              pub = std::make_shared<PublisherT>(
+                node, response_topic_name, qos, pub_options, to_publisher_role(role));
+            }
+            pubs_.emplace(response_topic_name, pub);
+          },
+          node_variant);
+      } else {
+        pub = it->second;
+      }
+    }
+    return pub;
+  }
+};
+
+}  // namespace detail
 
 /**
  * @brief Service server for zero-copy Agnocast service communication.
@@ -104,36 +200,8 @@ private:
   using ServiceResponsePublisher = Publisher<ResponseT>;
   using ServiceRequestSubscriber = Subscription<RequestT>;
 
-  std::mutex publishers_mtx_;
-  std::unordered_map<std::string, typename ServiceResponsePublisher::SharedPtr> publishers_;
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  // Declared before subscriber_ so that it outlives the callback that uses it.
-  std::shared_ptr<ServiceEventPublisher> event_publisher_;
-#endif
+  detail::ResponsePublisherManager<ServiceResponsePublisher> publisher_manager_;
   typename ServiceRequestSubscriber::SharedPtr subscriber_;
-
-  typename ServiceResponsePublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & response_topic_name)
-  {
-    typename ServiceResponsePublisher::SharedPtr pub;
-    {
-      std::lock_guard<std::mutex> lock(publishers_mtx_);
-      auto it = publishers_.find(response_topic_name);
-      if (it == publishers_.end()) {
-        std::visit(
-          [this, &pub, &response_topic_name](auto * node) {
-            agnocast::PublisherOptions pub_options;
-            pub = std::make_shared<ServiceResponsePublisher>(
-              node, response_topic_name, qos_, pub_options, to_publisher_role(role_));
-            publishers_[response_topic_name] = pub;
-          },
-          node_);
-      } else {
-        pub = it->second;
-      }
-    }
-    return pub;
-  }
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
   void publish_request_received_event(const ipc_shared_ptr<RequestT> & request)
@@ -177,7 +245,8 @@ private:
       // The name comes from the request, so a bad one is the caller's fault.
       typename ServiceResponsePublisher::SharedPtr publisher;
       try {
-        publisher = this->get_or_create_publisher_for(request->RequestMeta::response_topic_name);
+        publisher = publisher_manager_.get_or_create_publisher_for(
+          node_, qos_, role_, request->RequestMeta::response_topic_name);
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
@@ -234,12 +303,6 @@ private:
       "2. deferred: (std::shared_ptr<Service>, ipc_shared_ptr<ServiceT::Request>)\n"
       "ipc_shared_ptr arguments can be received by const&, &&, or by value");
 
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-    // Must precede the subscription: its callback is runnable as soon as it is registered.
-    event_publisher_ = std::make_shared<ServiceEventPublisher>(
-      node_, service_name_, rosidl_generator_traits::name<ServiceT>());
-#endif
-
     SubscriptionOptions options{group};
     std::string topic_name = create_service_request_topic_name(service_name_);
     const SubscriptionRole subscriber_role = to_subscription_role(role_);
@@ -275,7 +338,7 @@ public:
     rclcpp::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role)
+  : ServiceBase(node, service_name, rosidl_generator_traits::name<ServiceT>(), qos, role)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -285,7 +348,7 @@ public:
     agnocast::Node * node, const std::string & service_name, Func && callback,
     const rclcpp::QoS & qos, rclcpp::CallbackGroup::SharedPtr group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role)
+  : ServiceBase(node, service_name, rosidl_generator_traits::name<ServiceT>(), qos, role)
   {
     constructor_impl(node, std::forward<Func>(callback), group);
   }
@@ -308,8 +371,8 @@ public:
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(std::move(request));
     auto internal_response = static_ipc_shared_ptr_cast<ResponseT>(std::move(response));
-    auto publisher =
-      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
+    auto publisher = publisher_manager_.get_or_create_publisher_for(
+      node_, qos_, role_, internal_request->RequestMeta::response_topic_name);
 
 #if AGNOCAST_HAS_SERVICE_INTROSPECTION
     const auto sent_response = copy_response_if_contents(internal_response);
@@ -337,33 +400,12 @@ public:
     const ipc_shared_ptr<typename ServiceT::Request> & request)
   {
     auto internal_request = static_ipc_shared_ptr_cast<RequestT>(request);
-    auto publisher =
-      get_or_create_publisher_for(internal_request->RequestMeta::response_topic_name);
+    auto publisher = publisher_manager_.get_or_create_publisher_for(
+      node_, qos_, role_, internal_request->RequestMeta::response_topic_name);
     ipc_shared_ptr<ResponseT> response = publisher->borrow_loaned_message();
     response->ResponseMeta::seqno = internal_request->RequestMeta::seqno;
     return ipc_shared_ptr<typename ServiceT::Response>(std::move(response));
   }
-
-#if AGNOCAST_HAS_SERVICE_INTROSPECTION
-  /**
-   * @brief Configure service introspection.
-   * @param clock The clock to use to generate introspection timestamps.
-   * @param qos_service_event_pub The QoS settings to use when creating the introspection publisher.
-   * @param introspection_state The state to set introspection to.
-   * @throws std::invalid_argument if @p clock is null, including when disabling, as in rcl, or if
-   * @p qos_service_event_pub cannot be used by Agnocast. The QoS is only checked when a publisher
-   * is about to be created, so disabling never rejects it.
-   * @throws std::runtime_error if the typesupport libraries for the event message cannot be
-   * loaded. Only the first transition out of OFF loads them.
-   */
-  AGNOCAST_PUBLIC
-  void configure_introspection(
-    const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
-    rcl_service_introspection_state_t introspection_state)
-  {
-    event_publisher_->configure(clock, qos_service_event_pub, introspection_state);
-  }
-#endif
 };
 
 /**
@@ -392,14 +434,22 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
   {
   };
 
-  std::mutex publishers_mtx_;
-  std::unordered_map<std::string, typename TypeErasedPublisher::SharedPtr> publishers_;
+  detail::ResponsePublisherManager<TypeErasedPublisher> publisher_manager_;
   typename Subscription<void>::SharedPtr subscriber_;
 
   ServiceTsBundle service_ts_bundle_;
 
-  typename TypeErasedPublisher::SharedPtr get_or_create_publisher_for(
-    const std::string & response_topic_name);
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+  void publish_request_received_event(GenericRequestWrapper & req_wrapper);
+
+  void publish_response_sent_event(
+    int64_t seqno, const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE],
+    const std::optional<std::shared_ptr<void>> & response);
+
+  // Must be called before publish(). Only CONTENTS puts the payload in the event, so the other
+  // states pay nothing; raising to CONTENTS in between costs that one event its payload.
+  std::optional<std::shared_ptr<void>> copy_response_if_contents(const void * response);
+#endif
 
   template <typename Func>
   auto wrap_basic_service_callback_for_subscriber(Func && callback)
@@ -407,10 +457,16 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
       auto req_wrapper =
         GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_request_received_event(req_wrapper);
+#endif
+
       // The name comes from the request, so a bad one is the caller's fault.
       typename TypeErasedPublisher::SharedPtr publisher;
       try {
-        publisher = this->get_or_create_publisher_for(req_wrapper.response_topic_name());
+        publisher = publisher_manager_.get_or_create_publisher_for(
+          node_, qos_, role_, req_wrapper.response_topic_name());
       } catch (const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(), "Dropping a request for service %s: response topic name %s: %s",
@@ -422,6 +478,13 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         service_ts_bundle_.response_members,
         [&publisher](size_t size) { return publisher->borrow_loaned_message(size); });
       res_wrapper.seqno() = req_wrapper.seqno();
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      // req_wrapper is moved into the callback below, so copy what the response event needs now.
+      const int64_t request_seqno = req_wrapper.seqno();
+      uint8_t client_gid[RMW_GID_STORAGE_SIZE];
+      std::memcpy(client_gid, req_wrapper.client_gid(), RMW_GID_STORAGE_SIZE);
+#endif
 
       ipc_shared_ptr<void> response = std::move(res_wrapper).take_response();
       ipc_shared_ptr<void> response_double(response);
@@ -441,9 +504,17 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
         throw;
       }
 
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      const auto sent_response = copy_response_if_contents(response.get());
+#endif
+
       publisher->publish(std::move(response), [this](void * p) {
         GenericResponseWrapper::free(p, this->service_ts_bundle_.response_members);
       });
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_response_sent_event(request_seqno, client_gid, sent_response);
+#endif
 
       // Safety regarding response_double
       //   When `response` is published, all references that share its control block are
@@ -457,7 +528,14 @@ class GenericService : public ServiceBase, public std::enable_shared_from_this<G
   auto wrap_deferred_service_callback_for_subscriber(Func && callback)
   {
     return [this, callback = std::forward<Func>(callback)](ipc_shared_ptr<void> && request) {
-      callback(this->shared_from_this(), std::move(request));
+      auto req_wrapper =
+        GenericRequestWrapper(service_ts_bundle_.request_members, std::move(request));
+
+#if AGNOCAST_HAS_SERVICE_INTROSPECTION
+      publish_request_received_event(req_wrapper);
+#endif
+
+      callback(this->shared_from_this(), std::move(req_wrapper).take_request());
     };
   }
 
@@ -509,7 +587,7 @@ public:
     rclcpp::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role)
+  : ServiceBase(node, service_name, service_type, qos, role)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }
@@ -519,7 +597,7 @@ public:
     agnocast::Node * node, const std::string & service_name, const std::string & service_type,
     Func && callback, const rclcpp::QoS & qos, const rclcpp::CallbackGroup::SharedPtr & group,
     ServiceRole role = ServiceRole::Default)
-  : ServiceBase(node, service_name, qos, role)
+  : ServiceBase(node, service_name, service_type, qos, role)
   {
     constructor_impl(node, service_type, std::forward<Func>(callback), group);
   }

@@ -2,6 +2,9 @@
 Changelog for package ros2agnocast
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.2 (2026-11-11)
+------------------
+
 2.4.1 (2026-09-25)
 ------------------
 * fix(bridge): request buffering in A2R service bridge (`#1641 <https://github.com/tier4/agnocast/issues/1641>`_)
