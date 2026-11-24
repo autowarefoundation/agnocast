@@ -869,7 +869,7 @@ TEST(AllocateTimerIdTest, succeeds_at_the_highest_valid_id)
 }
 
 // =============================================================================
-// #1697 — prepare_epoll() must not probe timer liveness with weak_ptr::lock()
+// TimerEventHandler / ClockEventHandler::prepare_epoll — avoid a strong liveness reference
 // =============================================================================
 
 // Both handlers share the same liveness probe, so cover the fix for
@@ -921,17 +921,10 @@ TYPED_TEST(PrepareEpollLivenessTest, liveness_probe_creates_no_strong_reference)
   // Act
   handler.prepare_epoll(-1, validator);
 
-  // Assert. Only `timer` may own the object while the validator runs. With
-  // weak_ptr::lock() the temporary shared_ptr is still alive at this point
-  // (use_count == 2) and is destroyed at the end of the condition, i.e. while
-  // id2_timer_info_mtx is held. Should another thread drop the last external
-  // reference in that window, ~TimerBase() -> unregister_timer_info() re-locks
-  // the same non-recursive mutex on this thread and deadlocks (#1697, #1687).
+  // Assert. lock() would keep a temporary owner alive here (use_count == 2);
+  // expired() must not.
   EXPECT_EQ(validator_calls, 1);
   EXPECT_EQ(use_count_during_probe, 1);
   EXPECT_FALSE(info->need_epoll_update);
 
-  // No manual cleanup: `timer` goes out of scope without id2_timer_info_mtx
-  // held, so ~TimerBase() erases the entry itself; TestTimer's TearDown()
-  // clears the registry for the rest of the suite.
 }
