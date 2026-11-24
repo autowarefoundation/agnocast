@@ -10,7 +10,10 @@ fi
 
 source /opt/ros/${ROS_DISTRO}/setup.bash
 
-colcon build --packages-up-to agnocast_e2e_test --cmake-args -DBUILD_TESTING=ON
+# agnocast_gpu is named explicitly because nothing depends on it: it is loaded at
+# run time rather than linked, so --packages-up-to agnocast_e2e_test alone would
+# leave its requires_kernel_module test unbuilt and silently unrun.
+colcon build --packages-up-to agnocast_e2e_test agnocast_gpu --cmake-args -DBUILD_TESTING=ON
 source install/setup.bash
 
 # Pre-flight check: heaphook library must exist somewhere on COLCON_PREFIX_PATH.

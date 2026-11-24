@@ -41,12 +41,14 @@ This includes changes that affect compatibility between:
 
 - kmod
 - agnocastlib
+- agnocast_gpu
 
 Examples:
 
 - Removing or renaming ioctl commands
 - Modifying data structures used in ioctl interfaces
 - Changing shared data structures between kmod/agnocastlib
+- Changing the `GpuMemoryBackend` interface between agnocastlib and agnocast_gpu
 - Breaking changes to internal APIs not exposed to end users
 
 ### PATCH version (`need-patch-update`)

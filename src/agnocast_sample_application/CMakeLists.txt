@@ -196,4 +196,44 @@ install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/
 )
 
+# GPU samples build only where the CUDA headers are present, matching how the
+# agnocast_gpu package itself is gated.
+find_package(agnocast_gpu QUIET)
+find_package(sensor_msgs REQUIRED)
+find_package(CUDAToolkit QUIET)
+# check_language reports CUDA availability without enabling it; testing
+# CMAKE_CUDA_COMPILER first would silently disable these targets, since it does
+# not exist until then. It only searches PATH and CUDACXX, so seed it from
+# FindCUDAToolkit, which also honours CUDAToolkit_ROOT.
+include(CheckLanguage)
+if(NOT CMAKE_CUDA_COMPILER AND CUDAToolkit_NVCC_EXECUTABLE)
+  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
+endif()
+check_language(CUDA)
+if(CUDAToolkit_FOUND AND agnocast_gpu_FOUND AND CMAKE_CUDA_COMPILER)
+  # The samples launch kernels, so they are compiled as CUDA.
+  enable_language(CUDA)
+  foreach(gpu_target gpu_talker gpu_listener gpu_listen_talker)
+    add_executable(${gpu_target} src/${gpu_target}.cpp)
+    set_source_files_properties(src/${gpu_target}.cpp PROPERTIES LANGUAGE CUDA)
+    target_include_directories(${gpu_target} PRIVATE
+      ${CUDAToolkit_INCLUDE_DIRS} ${agnocast_gpu_INCLUDE_DIRS})
+    target_link_libraries(${gpu_target} CUDA::cudart)
+    # Replaces the directory-wide options rather than adding to them: -Wpedantic
+    # rejects the #line directives in the stubs nvcc generates.
+    set_property(TARGET ${gpu_target} PROPERTY COMPILE_OPTIONS -Wall -Wextra)
+    # Samples run on whatever GPU is present, so leave the architecture to nvcc's
+    # default rather than pinning one here.
+    set_property(TARGET ${gpu_target} PROPERTY CUDA_ARCHITECTURES OFF)
+    ament_target_dependencies(${gpu_target} agnocastlib rclcpp agnocast_gpu sensor_msgs)
+    install(TARGETS ${gpu_target} DESTINATION lib/${PROJECT_NAME})
+  endforeach()
+else()
+  message(STATUS
+    "agnocast_sample_application: skipping the GPU samples "
+    "(CUDAToolkit_FOUND=${CUDAToolkit_FOUND} "
+    "agnocast_gpu_FOUND=${agnocast_gpu_FOUND} "
+    "CMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}).")
+endif()
+
 ament_package()

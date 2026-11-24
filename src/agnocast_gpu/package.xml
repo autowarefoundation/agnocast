@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>agnocast_gpu</name>
+  <version>2.4.2</version>
+  <description>
+    GPU device memory sharing backends for Agnocast. Builds only where the CUDA
+    driver headers are available, and loads libcuda.so.1 at run time so the
+    package is harmless on machines without a GPU.
+  </description>
+  <maintainer email="sykwer@gmail.com">Takahiro Ishikawa-Aso</maintainer>
+  <maintainer email="atsushi.yano.2@tier4.jp">Atsushi Yano</maintainer>
+  <maintainer email="koichi.imai.2@tier4.jp">Koichi Imai</maintainer>
+  <maintainer email="kawaguchitnon@icloud.com">Tetsuhiro Kawaguchi</maintainer>
+  <license>Apache License 2.0</license>
+
+  <!-- Original authors -->
+  <author email="sykwer@gmail.com">Takahiro Ishikawa-Aso</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>agnocastlib</depend>
+  <depend>rclcpp</depend>
+  <!-- dispatch.hpp, which this package installs, includes rcpputils/scope_exit.hpp. -->
+  <depend>rcpputils</depend>
+  <!-- message_types.hpp, which this package installs, includes sensor_msgs headers. -->
+  <depend>sensor_msgs</depend>
+
+  <test_depend>ament_cmake_gmock</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
