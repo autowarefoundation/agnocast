@@ -2,6 +2,9 @@
 
 #include "agnocast_ioctl_wrapper/agnocast_ioctl_abi.h"
 
+// This package's .cpp files use the ABI types without qualification.
+using namespace agnocast;
+
 #include <algorithm>
 #include <cstdint>
 

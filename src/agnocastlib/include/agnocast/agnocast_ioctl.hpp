@@ -1,17 +1,12 @@
 #pragma once
 
-// Everything agnocast_ioctl_abi.h includes must come first: it is included inside the namespace.
-#include <stdint.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
+#include "agnocast_ioctl_wrapper/agnocast_ioctl_abi.h"
 
 #include <algorithm>
 #include <cstdint>
 
 namespace agnocast
 {
-
-#include "agnocast_ioctl_wrapper/agnocast_ioctl_abi.h"
 
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 

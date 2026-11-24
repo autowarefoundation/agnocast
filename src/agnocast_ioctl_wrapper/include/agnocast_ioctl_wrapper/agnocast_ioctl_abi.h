@@ -4,8 +4,9 @@
  * This is the single source of truth: agnocast_kmod/agnocast_ioctl_abi.h is a symlink to this
  * file, and agnocastlib includes it from the installed agnocast_ioctl_wrapper headers.
  *
- * Keep it free of kernel-only and C++-only constructs. agnocastlib includes it inside
- * `namespace agnocast`, so every header it pulls in must already be included before that.
+ * System headers are included first, at global scope. Under C++ the ABI types then live in
+ * namespace agnocast so callers never need to wrap this include in a namespace (which would put
+ * later-added system includes into that namespace, depending on include order).
  */
 #pragma once
 
@@ -33,6 +34,8 @@
 #endif
 
 #ifdef __cplusplus
+namespace agnocast
+{
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"  // anonymous structs inside unions
 #endif
@@ -488,6 +491,7 @@ AGNOCAST_ABI_ASSERT_SIZE(union ioctl_topic_info_args, 32);
 
 #ifdef __cplusplus
 #pragma GCC diagnostic pop
+}  // namespace agnocast
 #endif
 
 #undef AGNOCAST_ABI_ASSERT_SIZE
