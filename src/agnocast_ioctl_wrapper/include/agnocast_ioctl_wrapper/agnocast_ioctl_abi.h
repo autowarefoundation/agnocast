@@ -50,7 +50,7 @@
 #define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
-#define MAX_TOPIC_NUM 2048          // Maximum number of topics returned by GET_TOPIC_LIST
+#define MAX_TOPIC_NUM 4096          // Maximum number of topics returned by GET_TOPIC_LIST
 
 typedef int32_t topic_local_id_t;
 struct publisher_shm_info
