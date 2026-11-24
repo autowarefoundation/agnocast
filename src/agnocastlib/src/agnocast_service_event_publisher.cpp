@@ -64,34 +64,9 @@ void ServiceEventPublisher::log_failure(
   }
 }
 
-ServiceEventPublisher::Snapshot ServiceEventPublisher::snapshot() const
-{
-  std::lock_guard<std::mutex> lock(mtx_);
-  return Snapshot{state_, publisher_, clock_, ts_bundle_};
-}
-
-void ServiceEventPublisher::commit(const Snapshot & next)
-{
-  std::lock_guard<std::mutex> lock(mtx_);
-  state_ = next.state;
-  publisher_ = next.publisher;
-  clock_ = next.clock;
-  ts_bundle_ = next.ts_bundle;
-}
-
-rcl_service_introspection_state_t ServiceEventPublisher::introspection_state() const
-{
-  std::lock_guard<std::mutex> lock(mtx_);
-  return state_;
-}
-
 ServiceEventPublisher::ServiceEventPublisher(
-  std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
-  const std::string & service_type)
-: node_(std::move(node)),
-  service_type_(service_type),
-  event_topic_name_(service_name + RCL_SERVICE_INTROSPECTION_TOPIC_POSTFIX),
-  event_topic_type_(service_type + "_Event")
+  const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name)
+: node_(node), event_topic_name_(service_name + RCL_SERVICE_INTROSPECTION_TOPIC_POSTFIX)
 {
 }
 
@@ -105,67 +80,46 @@ void ServiceEventPublisher::configure(
 
   std::lock_guard<std::mutex> transition_lock(transition_mtx_);
 
-  Snapshot current = snapshot();
+  std::unique_ptr<SnapshotBase> snap = snapshot();
 
-  if (current.state == state) {
+  if (snap->state == state) {
     return;
   }
 
-  if (state == RCL_SERVICE_INTROSPECTION_OFF) {
-    // The bundle is carried over so that re-enabling does not load the libraries again.
-    commit(Snapshot{state, nullptr, nullptr, current.ts_bundle});
-    // The publisher is destroyed here rather than inside commit(), keeping mtx_ off the teardown
-    // path.
-    return;
+  if (state != RCL_SERVICE_INTROSPECTION_OFF && snap->clock == nullptr) {
+    // The event publisher is about to be created inside configure_impl(), so check the QoS in
+    // advance. The publisher constructor would run the same check and call exit() on failure.
+    const char * const unsupported = detail::unsupported_qos_reason(qos_service_event_pub);
+    if (unsupported != nullptr) {
+      throw std::invalid_argument(unsupported);
+    }
   }
 
-  // The clock and the QoS only take effect when the publisher is created, matching
-  // rcl_service_configure_service_introspection: a later call that only moves between METADATA and
-  // CONTENTS keeps the publisher and leaves them alone.
-  if (current.publisher) {
-    commit(Snapshot{state, current.publisher, current.clock, current.ts_bundle});
-    return;
-  }
+  configure_impl(clock, qos_service_event_pub, state);
+}
 
-  // Checked only here, where the QoS is about to be used: GenericPublisher would run the same
-  // check and call exit() on failure.
-  const char * const unsupported = detail::unsupported_qos_reason(qos_service_event_pub);
-  if (unsupported != nullptr) {
-    throw std::invalid_argument(unsupported);
-  }
-
-  Snapshot next{state, nullptr, clock, current.ts_bundle};
-
-  if (!next.ts_bundle) {
-    next.ts_bundle =
-      std::make_shared<const ServiceTsBundle>(load_service_typesupport(service_type_));
-  }
-
-  // Must stay Default, unlike the AgnocastOnly of to_publisher_role(): register_service_bridge()
-  // does not cover the event topic, so this publisher requests its own A2R bridge.
-  std::visit(
-    [this, &next, &qos_service_event_pub](auto * n) {
-      next.publisher = std::make_shared<GenericPublisher>(
-        n, event_topic_name_, event_topic_type_, qos_service_event_pub);
-    },
-    node_);
-
-  commit(next);
+rcl_service_introspection_state_t ServiceEventPublisher::introspection_state() const
+{
+  std::unique_ptr<SnapshotBase> snap = snapshot();
+  return snap->state;
 }
 
 void ServiceEventPublisher::publish_service_event_message(
   const uint8_t event_type, const void * payload, int64_t sequence_number,
   const uint8_t (&client_gid)[RMW_GID_STORAGE_SIZE]) noexcept
 {
-  Snapshot active = snapshot();
-
-  if (active.state == RCL_SERVICE_INTROSPECTION_OFF) {
-    return;
-  }
-
   try {
+    std::unique_ptr<SnapshotBase> snap = snapshot();
+
+    if (snap->state == RCL_SERVICE_INTROSPECTION_OFF) {
+      return;
+    }
+    if (snap->state == RCL_SERVICE_INTROSPECTION_METADATA) {
+      payload = nullptr;
+    }
+
     // Prepare the introspection info (metadata).
-    builtin_interfaces::msg::Time stamp = active.clock->now();
+    builtin_interfaces::msg::Time stamp = snap->clock->now();
 
     rosidl_service_introspection_info_t info = {};
     info.event_type = event_type;
@@ -176,45 +130,7 @@ void ServiceEventPublisher::publish_service_event_message(
     static_assert(sizeof(info.client_gid) == RMW_GID_STORAGE_SIZE);
     std::memcpy(info.client_gid, static_cast<const void *>(client_gid), RMW_GID_STORAGE_SIZE);
 
-    // Prepare the default allocator.
-    rcutils_allocator_t allocator = rcutils_get_default_allocator();
-
-    // Construct the event message.
-    if (active.state == RCL_SERVICE_INTROSPECTION_METADATA) {
-      payload = nullptr;
-    }
-    const auto * service_ts = active.ts_bundle->service_ts;
-    void * event_msg = nullptr;
-    switch (event_type) {
-      case ServiceEventInfo::REQUEST_RECEIVED:
-      case ServiceEventInfo::REQUEST_SENT:
-        event_msg =
-          service_ts->event_message_create_handle_function(&info, &allocator, payload, nullptr);
-        break;
-      case ServiceEventInfo::RESPONSE_RECEIVED:
-      case ServiceEventInfo::RESPONSE_SENT:
-        event_msg =
-          service_ts->event_message_create_handle_function(&info, &allocator, nullptr, payload);
-        break;
-      default:
-        log_failure(event_type, "unsupported event type");
-        return;
-    }
-    if (event_msg == nullptr) {
-      log_failure(event_type, "event_message_create_handle_function() returned null");
-      return;
-    }
-
-    auto destroy = [service_ts, &allocator](void * msg) {
-      service_ts->event_message_destroy_handle_function(msg, &allocator);
-    };
-    std::unique_ptr<void, decltype(destroy)> event_msg_owner(event_msg, std::move(destroy));
-
-    // Serialize the event message and publish it.
-    rclcpp::SerializedMessage serialized_msg;
-    rclcpp::SerializationBase serialization(service_ts->event_typesupport);
-    serialization.serialize_message(event_msg, &serialized_msg);
-    active.publisher->publish(serialized_msg);
+    snap->publish(info, payload);
   } catch (const std::exception & e) {
     log_failure(event_type, e.what());
   } catch (...) {
@@ -222,11 +138,116 @@ void ServiceEventPublisher::publish_service_event_message(
   }
 }
 
+void GenericEventPublisher::Snapshot::publish(
+  const rosidl_service_introspection_info_t & info, const void * payload)
+{
+  // Prepare the default allocator.
+  rcutils_allocator_t allocator = rcutils_get_default_allocator();
+
+  // Construct the event message.
+  const auto * service_ts = ts_bundle->service_ts;
+  void * event_msg = nullptr;
+  switch (info.event_type) {
+    case ServiceEventInfo::REQUEST_RECEIVED:
+    case ServiceEventInfo::REQUEST_SENT:
+      event_msg =
+        service_ts->event_message_create_handle_function(&info, &allocator, payload, nullptr);
+      break;
+    case ServiceEventInfo::RESPONSE_RECEIVED:
+    case ServiceEventInfo::RESPONSE_SENT:
+      event_msg =
+        service_ts->event_message_create_handle_function(&info, &allocator, nullptr, payload);
+      break;
+    default:
+      throw std::invalid_argument("unknown event type");
+  }
+  if (event_msg == nullptr) {
+    throw std::runtime_error("event_message_create_handle_function() returned null");
+  }
+
+  auto destroy = [service_ts, &allocator](void * msg) {
+    service_ts->event_message_destroy_handle_function(msg, &allocator);
+  };
+  std::unique_ptr<void, decltype(destroy)> event_msg_owner(event_msg, std::move(destroy));
+
+  // Serialize the event message and publish it.
+  rclcpp::SerializedMessage serialized_msg;
+  rclcpp::SerializationBase serialization(service_ts->event_typesupport);
+  serialization.serialize_message(event_msg, &serialized_msg);
+  publisher->publish(serialized_msg);
+}
+
+std::unique_ptr<SnapshotBase> GenericEventPublisher::snapshot() const
+{
+  Snapshot snap;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    snap = active_;
+  }
+  return std::make_unique<Snapshot>(snap);
+};
+
+void GenericEventPublisher::configure_impl(
+  const rclcpp::Clock::SharedPtr & clock, const rclcpp::QoS & qos_service_event_pub,
+  rcl_service_introspection_state_t state)
+{
+  Snapshot next;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    next = active_;
+  }
+
+  // Stage transitions locally (using `next`) so an exception during typesupport loading or
+  // publisher creation leaves the last committed state intact.
+
+  if (state == RCL_SERVICE_INTROSPECTION_OFF) {
+    next.state = state;
+    next.clock = nullptr;
+    next.publisher = nullptr;
+    // The bundle is carried over so that re-enabling does not load the libraries again.
+  } else if (next.publisher) {
+    // The clock and QoS only take effect when the publisher is created, matching
+    // rcl_service_configure_service_introspection: a later call that only moves between METADATA
+    // and CONTENTS keeps the publisher and leaves them alone.
+    next.state = state;
+  } else {
+    next.state = state;
+    next.clock = clock;
+    if (!next.ts_bundle) {
+      next.ts_bundle =
+        std::make_shared<const ServiceTsBundle>(load_service_typesupport(service_type_));
+    }
+
+    // Must stay Default, unlike the AgnocastOnly of to_publisher_role(): register_service_bridge()
+    // does not cover the event topic, so this publisher requests its own A2R bridge.
+    std::visit(
+      [this, &next, &qos_service_event_pub](auto * n) {
+        next.publisher = std::make_shared<GenericPublisher>(
+          n, event_topic_name_, service_type_ + "_Event", qos_service_event_pub);
+      },
+      node_);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    active_ = next;
+    // NOTE: Since ServiceEventPublisher::configure() holds a copy of the pre-transition state
+    // (`snap`), heavy cleanups do not run inside this critical section.
+  }
+}
+
+GenericEventPublisher::GenericEventPublisher(
+  const std::variant<rclcpp::Node *, agnocast::Node *> & node, const std::string & service_name,
+  const std::string & service_type)
+: ServiceEventPublisher(node, service_name), service_type_(service_type)
+{
+}
+
 void ServiceIntrospection::init(
   std::variant<rclcpp::Node *, agnocast::Node *> node, const std::string & service_name,
   const std::string & service_type)
 {
-  event_pub_ = std::make_unique<ServiceEventPublisher>(node, service_name, service_type);
+  event_pub_ = std::make_unique<GenericEventPublisher>(node, service_name, service_type);
 }
 
 void ServiceIntrospection::configure(
