@@ -759,25 +759,6 @@ TEST_F(TestRegisterTimerInfo, populates_timer_info_from_arguments_and_clock)
   EXPECT_EQ(info->next_call_time_ns.load(std::memory_order_relaxed), now_ns + kPeriodNs);
 }
 
-TEST_F(TestRegisterTimerInfo, sets_epoll_update_flags_per_created_fds)
-{
-  // Arrange — STEADY_TIME so only timer_fd is created (no clock_eventfd).
-  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
-  const auto period = std::chrono::nanoseconds{kPeriodNs};
-  const uint32_t timer_id = 5;
-  auto timer = make_generic_timer(timer_id, period, clock);
-
-  // Act
-  agnocast::register_timer_info(timer_id, timer, period, default_callback_group(), clock);
-
-  // Assert
-  auto info = find_registered(timer_id);
-  ASSERT_NE(info, nullptr);
-  EXPECT_TRUE(info->need_epoll_update);
-  EXPECT_TRUE(info->timer_fd_need_update);
-  EXPECT_FALSE(info->clock_eventfd_need_update);
-}
-
 TEST_F(TestRegisterTimerInfo, attaches_jump_handler_only_for_ros_time)
 {
   // STEADY_TIME — no jump handler.

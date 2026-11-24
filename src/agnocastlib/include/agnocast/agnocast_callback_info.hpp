@@ -58,7 +58,6 @@ struct CallbackInfo
   rclcpp::CallbackGroup::SharedPtr callback_group;
   TypeErasedCallback callback;
   MessageCreator message_creator;
-  bool need_epoll_update = true;
 };
 
 std::vector<std::string> get_agnocast_topics_by_group(
@@ -145,6 +144,7 @@ class SubscriptionEventHandler : public EpollEventHandler
   pid_t my_pid_;
   std::mutex * ready_agnocast_executables_mutex_;
   std::vector<AgnocastExecutable> * ready_agnocast_executables_;
+  EpollRegistry registry_;  // Guarded by id2_callback_info_mtx.
 
 public:
   SubscriptionEventHandler(
