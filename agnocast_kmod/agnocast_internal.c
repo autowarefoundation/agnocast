@@ -51,17 +51,17 @@ struct agnocast_ns * agnocast_ns_write_lock_or_create(const struct ipc_namespace
   struct agnocast_ns * ns = ns_find(ipc_ns);
   if (ns) return ns;
 
-  ns = kvzalloc(sizeof(*ns), GFP_KERNEL);
-  if (!ns) {
+  struct agnocast_ns * new_ns = kvzalloc(sizeof(*new_ns), GFP_KERNEL);
+  if (!new_ns) {
     up_write(&global_htables_rwsem);
     return ERR_PTR(-ENOMEM);
   }
-  ns->ipc_ns = ipc_ns;
-  hash_init(ns->topic_hashtable);
-  hash_init(ns->bridge_htable);
-  hash_init(ns->domain_rule_htable);
-  hash_add(ns_htable, &ns->node, (unsigned long)ipc_ns);
-  return ns;
+  new_ns->ipc_ns = ipc_ns;
+  hash_init(new_ns->topic_hashtable);
+  hash_init(new_ns->bridge_htable);
+  hash_init(new_ns->domain_rule_htable);
+  hash_add(ns_htable, &new_ns->node, (unsigned long)ipc_ns);
+  return new_ns;
 }
 
 void agnocast_ns_read_unlock(struct agnocast_ns * ns)
