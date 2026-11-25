@@ -1755,7 +1755,7 @@ unlock:
 // stalls every publish behind a waiting endpoint add/remove. Hence the scratch preallocated
 // below, and the copy_to_user left to get_node_names_cmd.
 
-#define NODE_NAME_SLOT_BITS 11
+#define NODE_NAME_SLOT_BITS 13
 #define NODE_NAME_SLOT_NUM (1u << NODE_NAME_SLOT_BITS)
 // add_unique_node's probe loop has no bound: it terminates only because a free slot always exists.
 static_assert(NODE_NAME_SLOT_NUM >= 2 * MAX_NODE_NUM, "node name slots must outnumber the names");
