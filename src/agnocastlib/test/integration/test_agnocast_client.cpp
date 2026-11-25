@@ -9,6 +9,7 @@
 #include <future>
 #include <memory>
 #include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -22,6 +23,17 @@ class ClientTest : public ::testing::Test
   std::thread spin_thread_;
 
 protected:
+  // Keeps every callback group alive until TearDown() has joined the spin thread to avoid flaky
+  // failures on Humble. Reference: <https://github.com/ros2/rclcpp/issues/2163>
+  std::vector<rclcpp::CallbackGroup::SharedPtr> callback_groups_;
+
+  rclcpp::CallbackGroup::SharedPtr create_callback_group()
+  {
+    auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    callback_groups_.push_back(cb_group);
+    return cb_group;
+  }
+
   void SetUp() override
   {
     rclcpp::init(0, nullptr);
@@ -48,6 +60,7 @@ protected:
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
+    callback_groups_.clear();
     if (rclcpp::ok()) {
       rclcpp::shutdown();
     }
@@ -55,18 +68,16 @@ protected:
 
   auto create_service()
   {
-    auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     return agnocast::create_service<std_srvs::srv::Empty>(
       node_.get(), "test_service",
       [](agnocast::ipc_shared_ptr<Request> &&, agnocast::ipc_shared_ptr<Response> &&) { return; },
-      rclcpp::ServicesQoS(), cb_group);
+      rclcpp::ServicesQoS(), create_callback_group());
   }
 
   auto create_client()
   {
-    auto cb_group = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     return agnocast::create_client<std_srvs::srv::Empty>(
-      node_.get(), "test_service", rclcpp::ServicesQoS(), cb_group);
+      node_.get(), "test_service", rclcpp::ServicesQoS(), create_callback_group());
   }
 };
 
