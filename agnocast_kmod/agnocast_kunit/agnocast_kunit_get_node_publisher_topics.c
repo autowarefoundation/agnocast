@@ -5,6 +5,7 @@
 #include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
+#include <linux/mm.h>
 
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * NODE_NAME = "/kunit_test_node";
@@ -15,7 +16,7 @@ static const bool IS_BRIDGE = false;
 
 void test_case_get_node_pub_topics_exact_match(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  char * buf = NULL;
   uint32_t topic_num = UINT_MAX;
   int ret;
 
@@ -23,15 +24,16 @@ void test_case_get_node_pub_topics_exact_match(struct kunit * test)
   agnocast_kunit_setup_publisher(test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
-    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
+    current->nsproxy->ipc_ns, NODE_NAME, 1, &buf, &topic_num);
   KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, topic_num, 1);
-  KUNIT_EXPECT_STREQ(test, buf[0], TOPIC_NAME);
+  KUNIT_ASSERT_EQ(test, topic_num, 1);
+  KUNIT_EXPECT_STREQ(test, buf, TOPIC_NAME);
+  kvfree(buf);
 }
 
 void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  char * buf = NULL;
   uint32_t topic_num = UINT_MAX;
   int ret;
 
@@ -40,15 +42,16 @@ void test_case_get_node_pub_topics_prefix_no_match(struct kunit * test)
     test, TOPIC_NAME, NODE_NAME_WITH_SUFFIX, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
-    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, ARRAY_SIZE(buf), &topic_num);
+    current->nsproxy->ipc_ns, NODE_NAME, 1, &buf, &topic_num);
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ_MSG(
     test, topic_num, (uint32_t)0, "Prefix of node name should not match (strcmp, not strncmp)");
+  kvfree(buf);
 }
 
 void test_case_get_node_pub_topics_buffer_size_exceeded(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
+  char * buf = NULL;
   uint32_t topic_num = UINT_MAX;
   int ret;
 
@@ -56,7 +59,9 @@ void test_case_get_node_pub_topics_buffer_size_exceeded(struct kunit * test)
   agnocast_kunit_setup_publisher(test, TOPIC_NAME, NODE_NAME, PID, QOS_DEPTH, false, IS_BRIDGE);
 
   ret = agnocast_ioctl_get_node_publisher_topics(
-    current->nsproxy->ipc_ns, NODE_NAME, (char *)buf, 0, &topic_num);
+    current->nsproxy->ipc_ns, NODE_NAME, 0, &buf, &topic_num);
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
   KUNIT_EXPECT_EQ(test, topic_num, UINT_MAX);
+  KUNIT_EXPECT_NULL(test, buf);
+  kvfree(buf);
 }

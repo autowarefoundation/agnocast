@@ -5,6 +5,8 @@
 #include "agnocast_kunit_helpers.h"
 
 #include <kunit/test.h>
+#include <linux/mm.h>
+#include <linux/slab.h>
 
 static const char * TOPIC_NAME = "/kunit_test_topic";
 static const char * TOPIC_NAME2 = "/kunit_test_topic2";
@@ -43,25 +45,27 @@ static uint32_t index_of(const char * buf, const uint32_t num, const char * name
 
 void test_case_get_topic_list_no_topic(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
-  uint32_t domain_ids[1];
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
   uint32_t topic_num = UINT_MAX;
 
   // Act
-  int ret = agnocast_ioctl_get_topic_list(
-    current->nsproxy->ipc_ns, (char *)buf, domain_ids, ARRAY_SIZE(buf), &topic_num);
+  int ret =
+    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, 1, &names, &domain_ids, &topic_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, topic_num, 0);
+  KUNIT_EXPECT_NULL(test, names);
+  kvfree(names);
 }
 
 // No room for a single topic, so a response topic that reached the buffer bound at all would fail
 // with -ENOBUFS, whichever one the walk happens to reach first.
 void test_case_get_topic_list_skips_service_response_topic(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
-  uint32_t domain_ids[1];
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
   uint32_t topic_num = UINT_MAX;
 
   // Arrange
@@ -70,18 +74,19 @@ void test_case_get_topic_list_skips_service_response_topic(struct kunit * test)
 
   // Act
   int ret =
-    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, (char *)buf, domain_ids, 0, &topic_num);
+    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, 0, &names, &domain_ids, &topic_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_EXPECT_EQ(test, topic_num, 0);
+  kvfree(names);
 }
 
 // A comparison shorter than the whole response prefix would skip this topic too.
 void test_case_get_topic_list_lists_service_request_topic(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
-  uint32_t domain_ids[1];
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
   uint32_t topic_num = 0;
 
   // Arrange
@@ -89,21 +94,22 @@ void test_case_get_topic_list_lists_service_request_topic(struct kunit * test)
   add_subscriber(test, SRV_REQUEST_TOPIC_NAME, PID);
 
   // Act
-  int ret = agnocast_ioctl_get_topic_list(
-    current->nsproxy->ipc_ns, (char *)buf, domain_ids, ARRAY_SIZE(buf), &topic_num);
+  int ret =
+    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, 1, &names, &domain_ids, &topic_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
-  KUNIT_EXPECT_EQ(test, topic_num, 1);
-  KUNIT_EXPECT_STREQ(test, buf[0], SRV_REQUEST_TOPIC_NAME);
+  KUNIT_ASSERT_EQ(test, topic_num, 1);
+  KUNIT_EXPECT_STREQ(test, names, SRV_REQUEST_TOPIC_NAME);
+  kvfree(names);
 }
 
 // One list covers every domain in the namespace, so a name only means something paired with the
 // domain id at the same index.
 void test_case_get_topic_list_pairs_each_topic_with_its_domain_id(struct kunit * test)
 {
-  char buf[2][TOPIC_NAME_BUFFER_SIZE];
-  uint32_t domain_ids[2] = {UINT_MAX, UINT_MAX};
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
   uint32_t topic_num = 0;
   uint32_t i;
   uint32_t j;
@@ -115,24 +121,25 @@ void test_case_get_topic_list_pairs_each_topic_with_its_domain_id(struct kunit *
   add_subscriber(test, TOPIC_NAME2, PID2);
 
   // Act
-  int ret = agnocast_ioctl_get_topic_list(
-    current->nsproxy->ipc_ns, (char *)buf, domain_ids, ARRAY_SIZE(buf), &topic_num);
+  int ret =
+    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, 2, &names, &domain_ids, &topic_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, 0);
   KUNIT_ASSERT_EQ(test, topic_num, 2);
-  i = index_of((const char *)buf, topic_num, TOPIC_NAME);
-  j = index_of((const char *)buf, topic_num, TOPIC_NAME2);
+  i = index_of(names, topic_num, TOPIC_NAME);
+  j = index_of(names, topic_num, TOPIC_NAME2);
   KUNIT_ASSERT_LT(test, i, topic_num);
   KUNIT_ASSERT_LT(test, j, topic_num);
   KUNIT_EXPECT_EQ(test, domain_ids[i], DOMAIN_ID);
   KUNIT_EXPECT_EQ(test, domain_ids[j], OTHER_DOMAIN_ID);
+  kvfree(names);
 }
 
 void test_case_get_topic_list_fails_when_buffer_is_full(struct kunit * test)
 {
-  char buf[1][TOPIC_NAME_BUFFER_SIZE];
-  uint32_t domain_ids[1];
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
   uint32_t topic_num = UINT_MAX;
 
   // Arrange
@@ -141,10 +148,39 @@ void test_case_get_topic_list_fails_when_buffer_is_full(struct kunit * test)
   add_subscriber(test, TOPIC_NAME2, PID);
 
   // Act
-  int ret = agnocast_ioctl_get_topic_list(
-    current->nsproxy->ipc_ns, (char *)buf, domain_ids, ARRAY_SIZE(buf), &topic_num);
+  int ret =
+    agnocast_ioctl_get_topic_list(current->nsproxy->ipc_ns, 1, &names, &domain_ids, &topic_num);
 
   // Assert
   KUNIT_EXPECT_EQ(test, ret, -ENOBUFS);
   KUNIT_EXPECT_EQ(test, topic_num, UINT_MAX);
+  KUNIT_EXPECT_NULL(test, names);
+}
+
+// The scratch follows the number of topics, not max_topic_num, so two topics under the full limit
+// take a small kmalloc object instead of a MAX_TOPIC_NUM-sized one.
+void test_case_get_topic_list_sizes_scratch_to_topic_count(struct kunit * test)
+{
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
+  uint32_t topic_num = 0;
+
+  // Arrange
+  setup_process(test, PID, DOMAIN_ID);
+  add_subscriber(test, TOPIC_NAME, PID);
+  add_subscriber(test, TOPIC_NAME2, PID);
+
+  // Act
+  int ret = agnocast_ioctl_get_topic_list(
+    current->nsproxy->ipc_ns, MAX_TOPIC_NUM, &names, &domain_ids, &topic_num);
+
+  // Assert
+  KUNIT_EXPECT_EQ(test, ret, 0);
+  KUNIT_ASSERT_EQ(test, topic_num, 2);
+  KUNIT_ASSERT_NOT_NULL(test, names);
+  KUNIT_ASSERT_FALSE(test, is_vmalloc_addr(names));
+  KUNIT_EXPECT_LT(test, ksize(names), (size_t)PAGE_SIZE);
+  KUNIT_EXPECT_LT(test, index_of(names, topic_num, TOPIC_NAME), topic_num);
+  KUNIT_EXPECT_LT(test, index_of(names, topic_num, TOPIC_NAME2), topic_num);
+  kvfree(names);
 }
