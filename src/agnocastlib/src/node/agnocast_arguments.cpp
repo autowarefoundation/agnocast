@@ -1,5 +1,7 @@
 #include "agnocast/node/agnocast_arguments.hpp"
 
+#include "agnocast/node/agnocast_context.hpp"
+
 #include <rclcpp/parameter_map.hpp>
 
 #include <rcl_yaml_param_parser/parser.h>
@@ -101,6 +103,24 @@ ParsedArguments parse_arguments(const std::vector<std::string> & arguments)
   ParsedArguments result;
   result.parse(arguments);
   return result;
+}
+
+const rcl_arguments_t * resolve_global_arguments(const rclcpp::Context::SharedPtr & context)
+{
+  {
+    std::lock_guard<std::mutex> lock(g_context_mtx);
+    if (g_context.is_initialized()) {
+      const rcl_arguments_t * agnocast_args = g_context.get_parsed_arguments();
+      if (agnocast_args != nullptr) {
+        return agnocast_args;
+      }
+    }
+  }
+
+  if (context && context->is_valid()) {
+    return &context->get_rcl_context()->global_arguments;
+  }
+  return nullptr;
 }
 
 std::map<std::string, rclcpp::ParameterValue> resolve_parameter_overrides(
