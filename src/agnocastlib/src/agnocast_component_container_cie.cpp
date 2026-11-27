@@ -81,8 +81,20 @@ private:
     const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node);
   void check_for_new_callback_groups();
 
+  // A loaded node and the executors started for its callback groups.
+  struct NodeEntry
+  {
+    rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node;
+    std::list<ExecutorWrapper> executor_wrappers;
+  };
+
   std::mutex executor_wrappers_mutex_;
-  std::unordered_map<uint64_t, std::list<ExecutorWrapper>> node_id_to_executor_wrappers_;
+  // Guarded by executor_wrappers_mutex_. Every loaded node is registered here, even if no
+  // executor is started for it at load time, so that check_for_new_callback_groups() can find
+  // callback groups created later. check_for_new_callback_groups() must read this map instead of
+  // node_wrappers_: node_wrappers_ is written by the load/unload services, which run in a
+  // different callback group from the monitor timer.
+  std::unordered_map<uint64_t, NodeEntry> node_entries_;
   rclcpp::Publisher<agnocast_cie_config_msgs::msg::CallbackGroupInfo>::SharedPtr client_publisher_;
   std::mutex client_publisher_mutex_;
   int get_next_timeout_ms_;
@@ -100,8 +112,8 @@ ComponentManagerCallbackIsolated::~ComponentManagerCallbackIsolated()
   }
 
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
-  for (auto & p : node_id_to_executor_wrappers_) {
-    auto & executor_wrappers = p.second;
+  for (auto & p : node_entries_) {
+    auto & executor_wrappers = p.second.executor_wrappers;
 
     for (auto & executor_wrapper : executor_wrappers) {
       cancel_executor(executor_wrapper);
@@ -175,8 +187,8 @@ void ComponentManagerCallbackIsolated::start_executor_for_callback_group(
     executor = std::move(agnocast_executor);
   }
 
-  auto it = node_id_to_executor_wrappers_[node_id].begin();
-  it = node_id_to_executor_wrappers_[node_id].emplace(it, executor);
+  auto it = node_entries_[node_id].executor_wrappers.begin();
+  it = node_entries_[node_id].executor_wrappers.emplace(it, executor);
   auto & executor_wrapper = *it;
 
   executor_wrapper.thread_ =
@@ -197,6 +209,7 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
   auto node = node_wrappers_[node_id].get_node_base_interface();
 
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
+  node_entries_[node_id].node = node;
   node->for_each_callback_group(
     [nid = node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
       if (!callback_group->automatically_add_to_executor_with_node()) {
@@ -221,8 +234,8 @@ void ComponentManagerCallbackIsolated::add_node_to_executor(uint64_t node_id)
 void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
 {
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
-  for (auto & [node_id, node_wrapper] : node_wrappers_) {
-    auto node = node_wrapper.get_node_base_interface();
+  for (auto & [node_id, node_entry] : node_entries_) {
+    auto node = node_entry.node;
 
     node->for_each_callback_group(
       [nid = node_id, &node, this](const rclcpp::CallbackGroup::SharedPtr & callback_group) {
@@ -247,16 +260,16 @@ void ComponentManagerCallbackIsolated::check_for_new_callback_groups()
 void ComponentManagerCallbackIsolated::remove_node_from_executor(uint64_t node_id)
 {
   std::lock_guard<std::mutex> lock{executor_wrappers_mutex_};
-  auto it = node_id_to_executor_wrappers_.find(node_id);
-  if (it == node_id_to_executor_wrappers_.end()) {
+  auto it = node_entries_.find(node_id);
+  if (it == node_entries_.end()) {
     return;
   }
 
-  for (ExecutorWrapper & executor_wrapper : it->second) {
+  for (ExecutorWrapper & executor_wrapper : it->second.executor_wrappers) {
     cancel_executor(executor_wrapper);
   }
 
-  node_id_to_executor_wrappers_.erase(it);
+  node_entries_.erase(it);
 }
 
 void ComponentManagerCallbackIsolated::cancel_executor(ExecutorWrapper & executor_wrapper)
