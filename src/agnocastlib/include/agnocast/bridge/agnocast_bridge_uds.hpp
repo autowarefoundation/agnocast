@@ -21,6 +21,9 @@ namespace agnocast
 inline constexpr int BRIDGE_UDS_SEND_MAX_RETRIES = 100;
 inline constexpr useconds_t BRIDGE_UDS_SEND_RETRY_INTERVAL_US = 100000;
 
+inline constexpr int BRIDGE_UDS_BIND_MAX_RETRIES = 50;
+inline constexpr useconds_t BRIDGE_UDS_BIND_RETRY_INTERVAL_US = 100000;
+
 namespace detail
 {
 
@@ -42,7 +45,12 @@ inline socklen_t fill_abstract_sockaddr(const std::string & addr, sockaddr_un & 
 
 }  // namespace detail
 
-inline int create_bridge_uds_listener(const std::string & addr)
+// Retries on EADDRINUSE up to `max_retries` * `retry_interval_us`: a manager that has decided to
+// shut down keeps this address bound until it exits, while the kmod already reports that no manager
+// exists, so the replacement manager forked in that window must wait rather than give up.
+inline int create_bridge_uds_listener(
+  const std::string & addr, int max_retries = BRIDGE_UDS_BIND_MAX_RETRIES,
+  useconds_t retry_interval_us = BRIDGE_UDS_BIND_RETRY_INTERVAL_US)
 {
   int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd == -1) {
@@ -52,8 +60,14 @@ inline int create_bridge_uds_listener(const std::string & addr)
   try {
     sockaddr_un sa{};
     const socklen_t alen = detail::fill_abstract_sockaddr(addr, sa);
-    if (bind(fd, reinterpret_cast<sockaddr *>(&sa), alen) == -1) {
-      throw std::system_error(errno, std::generic_category(), "bridge UDS bind() failed");
+    for (int retry = 0;; ++retry) {
+      if (bind(fd, reinterpret_cast<sockaddr *>(&sa), alen) == 0) {
+        break;
+      }
+      if (errno != EADDRINUSE || retry >= max_retries) {
+        throw std::system_error(errno, std::generic_category(), "bridge UDS bind() failed");
+      }
+      usleep(retry_interval_us);
     }
   } catch (...) {
     close(fd);

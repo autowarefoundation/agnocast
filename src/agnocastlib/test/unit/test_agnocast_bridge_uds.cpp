@@ -11,12 +11,14 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 
 namespace
 {
@@ -123,16 +125,33 @@ TEST(BridgeUdsListenerTest, RejectsInvalidAddress)
 TEST(BridgeUdsListenerTest, DuplicateBindFailsWithAddrInUse)
 {
   const std::string addr = make_unique_abstract_addr("dup");
-  ScopedFd first(agnocast::create_bridge_uds_listener(addr));
+  ScopedFd first(agnocast::create_bridge_uds_listener(addr, 0));
   ASSERT_NE(first.get(), -1);
 
   try {
-    ScopedFd second(agnocast::create_bridge_uds_listener(addr));
+    ScopedFd second(agnocast::create_bridge_uds_listener(addr, 0));
     FAIL() << "second listener on the same abstract address must fail";
   } catch (const std::system_error & e) {
     EXPECT_EQ(e.code().value(), EADDRINUSE)
       << "expected EADDRINUSE, got " << e.code().value() << " (" << e.what() << ")";
   }
+}
+
+TEST(BridgeUdsListenerTest, BindRetriesUntilAddressIsReleased)
+{
+  const std::string addr = make_unique_abstract_addr("retry");
+  const int holder = agnocast::create_bridge_uds_listener(addr, 0);
+  ASSERT_NE(holder, -1);
+
+  std::thread releaser([holder]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    close(holder);
+  });
+
+  // 100 * 20ms = 2s budget, comfortably longer than the 200ms hold above.
+  ScopedFd second(agnocast::create_bridge_uds_listener(addr, 100, 20000));
+  EXPECT_NE(second.get(), -1);
+  releaser.join();
 }
 
 // ---- send_bridge_uds_message ----------------------------------------------
