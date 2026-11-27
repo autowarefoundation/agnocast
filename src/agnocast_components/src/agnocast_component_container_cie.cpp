@@ -118,6 +118,10 @@ ComponentManagerCallbackIsolated::~ComponentManagerCallbackIsolated()
     for (auto & executor_wrapper : executor_wrappers) {
       cancel_executor(executor_wrapper);
     }
+
+    // Drop the node base interface here so that each node and its NodeBase are destroyed together
+    // in node_wrappers_.clear() below. The executors are still destroyed after the nodes.
+    p.second.node.reset();
   }
 
   node_wrappers_.clear();
