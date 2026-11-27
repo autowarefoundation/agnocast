@@ -25,8 +25,9 @@ struct AgnocastExecutable;
 class Node;
 
 /**
- * @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW). Used with
- * agnocast::Node.
+ * @brief Base class for Stage 2 executors that handle only Agnocast callbacks (no RMW).
+ *
+ * Drives agnocast::Node only. An rclcpp::Node is not supported.
  *
  * One-shot: once cancel() is called, spin() will not run again on the same instance -- create a
  * new executor instead. All current uses (clock executor, CIE child executors) are recreated.
@@ -88,7 +89,7 @@ public:
 
   /// Add a callback group to this executor.
   /// @param group_ptr Callback group to add.
-  /// @param node_ptr Node the group belongs to.
+  /// @param node_ptr Node the group belongs to. Must be an agnocast::Node's base interface.
   /// @param notify If true, wake the executor so it picks up the change immediately.
   AGNOCAST_PUBLIC
   void add_callback_group(
@@ -117,7 +118,7 @@ public:
   std::vector<rclcpp::CallbackGroup::WeakPtr> get_automatically_added_callback_groups_from_nodes();
 
   /// Add a node to this executor.
-  /// @param node_ptr Node to add.
+  /// @param node_ptr Node to add. Must be an agnocast::Node's base interface.
   /// @param notify If true, wake the executor so it picks up the change immediately.
   AGNOCAST_PUBLIC
   void add_node(rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_ptr, bool notify = true);
