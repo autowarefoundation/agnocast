@@ -926,5 +926,4 @@ TYPED_TEST(PrepareEpollLivenessTest, liveness_probe_creates_no_strong_reference)
   EXPECT_EQ(validator_calls, 1);
   EXPECT_EQ(use_count_during_probe, 1);
   EXPECT_FALSE(info->need_epoll_update);
-
 }
