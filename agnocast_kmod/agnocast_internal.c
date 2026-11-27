@@ -51,7 +51,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
     const topic_local_id_t subscriber_id = sub_info->id;
 
     hlist_del(&sub_info->node);
-    free_subscriber_info(sub_info);
+    free_subscriber_info(wrapper->topic, sub_info);
 
     if (subscriber_id < 0 || subscriber_id >= MAX_TOPIC_LOCAL_ID) {
       dev_warn(
@@ -91,7 +91,7 @@ static void pre_handler_subscriber_exit(struct topic_wrapper * wrapper, const pi
       pub_info->entries_num--;
       if (pub_info->entries_num == 0) {
         hash_del(&pub_info->node);
-        free_publisher_info(pub_info);
+        free_publisher_info(wrapper->topic, pub_info);
       }
     }
   }
@@ -126,7 +126,7 @@ static void pre_handler_publisher_exit(struct topic_wrapper * wrapper, const pid
 
     if (pub_info->entries_num == 0) {
       hash_del(&pub_info->node);
-      free_publisher_info(pub_info);
+      free_publisher_info(wrapper->topic, pub_info);
     }
   }
 }
@@ -188,13 +188,15 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
       kfree(en);
     }
 
+    // The id clears inside the frees below are dead writes: pubsub_id_map is freed with the
+    // topic_struct a few lines down. Kept for one free path rather than a teardown-only variant.
     struct publisher_info * pub_info;
     int bkt_pub;
     struct hlist_node * tmp_pub;
     hash_for_each_safe(wrapper->topic->pub_info_htable, bkt_pub, tmp_pub, pub_info, node)
     {
       hash_del(&pub_info->node);
-      free_publisher_info(pub_info);
+      free_publisher_info(wrapper->topic, pub_info);
     }
 
     struct subscriber_info * sub_info;
@@ -203,7 +205,7 @@ void agnocast_release_topic_wrapper(struct topic_wrapper * wrapper)
     hash_for_each_safe(wrapper->topic->sub_info_htable, bkt_sub, tmp_sub, sub_info, node)
     {
       hash_del(&sub_info->node);
-      free_subscriber_info(sub_info);
+      free_subscriber_info(wrapper->topic, sub_info);
     }
 
     kfree(wrapper->topic);
