@@ -397,7 +397,9 @@ void TimerEventHandler::prepare_epoll(
       continue;
     }
 
-    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
+    // Use expired() instead of lock(): a temporary shared_ptr could become the last
+    // owner and run ~TimerBase() under id2_timer_info_mtx, causing a self-deadlock.
+    if (timer_info.timer.expired() || !validate_callback_group(timer_info.callback_group)) {
       continue;
     }
 
@@ -493,7 +495,9 @@ void ClockEventHandler::prepare_epoll(
       continue;
     }
 
-    if (!timer_info.timer.lock() || !validate_callback_group(timer_info.callback_group)) {
+    // Use expired() instead of lock(): a temporary shared_ptr could become the last
+    // owner and run ~TimerBase() under id2_timer_info_mtx, causing a self-deadlock.
+    if (timer_info.timer.expired() || !validate_callback_group(timer_info.callback_group)) {
       continue;
     }
 

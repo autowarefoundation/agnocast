@@ -867,3 +867,63 @@ TEST(AllocateTimerIdTest, succeeds_at_the_highest_valid_id)
   // Cleanup
   agnocast::next_timer_id.store(original);
 }
+
+// =============================================================================
+// TimerEventHandler / ClockEventHandler::prepare_epoll — avoid a strong liveness reference
+// =============================================================================
+
+// Both handlers share the same liveness probe, so cover the fix for
+// TimerEventHandler and ClockEventHandler with one typed test. TestTimer's
+// TearDown() clears id2_timer_info.
+template <typename Handler>
+class PrepareEpollLivenessTest : public TestTimer
+{
+};
+
+using PrepareEpollHandlerTypes =
+  ::testing::Types<agnocast::TimerEventHandler, agnocast::ClockEventHandler>;
+TYPED_TEST_SUITE(PrepareEpollLivenessTest, PrepareEpollHandlerTypes);
+
+TYPED_TEST(PrepareEpollLivenessTest, liveness_probe_creates_no_strong_reference)
+{
+  // Arrange. Every epoll fd is -1 so prepare_epoll() skips epoll_ctl() (which
+  // would otherwise need a real epoll instance); only the liveness probe and
+  // the callback-group validator are exercised.
+  auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  auto timer = std::make_shared<agnocast::GenericTimer<std::function<void()>>>(
+    1, 50ms, clock, std::function<void()>{[]() {}});
+  std::weak_ptr<agnocast::TimerBase> weak_timer = timer;
+
+  auto info = std::make_shared<agnocast::TimerInfo>();
+  info->timer_id = 1;
+  info->timer = timer;
+  info->need_epoll_update = true;
+  info->timer_fd = -1;
+  info->timer_fd_need_update = false;
+  info->clock_eventfd = -1;
+  info->clock_eventfd_need_update = false;
+  {
+    std::lock_guard<std::mutex> lock(agnocast::id2_timer_info_mtx);
+    agnocast::id2_timer_info[1] = info;
+  }
+
+  // prepare_epoll() never touches the executor plumbing, so nullptrs suffice.
+  TypeParam handler(getpid(), nullptr, nullptr);
+
+  long use_count_during_probe = -1;
+  int validator_calls = 0;
+  const agnocast::CallbackGroupValidator validator = [&](const auto &) {
+    ++validator_calls;
+    use_count_during_probe = weak_timer.use_count();
+    return true;
+  };
+
+  // Act
+  handler.prepare_epoll(-1, validator);
+
+  // Assert. lock() would keep a temporary owner alive here (use_count == 2);
+  // expired() must not.
+  EXPECT_EQ(validator_calls, 1);
+  EXPECT_EQ(use_count_during_probe, 1);
+  EXPECT_FALSE(info->need_epoll_update);
+}
