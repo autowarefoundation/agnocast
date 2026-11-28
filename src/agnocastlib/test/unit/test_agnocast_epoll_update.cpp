@@ -1,6 +1,8 @@
 #include "agnocast/agnocast_epoll_update_dispatcher.hpp"
 
 #include <gtest/gtest.h>
+#include <sys/epoll.h>
+#include <unistd.h>
 
 namespace agnocast
 {
@@ -104,6 +106,40 @@ TEST(EpollUpdateTrackerTest, TakeUpdateRequestReturnsAfterMultipleNotifies)
 
   EXPECT_TRUE(tracker.take_update_request());
   EXPECT_FALSE(tracker.take_update_request());
+}
+
+TEST(EpollUpdateTrackerTest, NotifyFdIsValid)
+{
+  auto tracker = EpollUpdateDispatcher::get_instance().register_tracker();
+  EXPECT_GE(tracker.notify_fd(), 0);
+}
+
+TEST(EpollUpdateTrackerTest, RequestUpdateMakesNotifyFdReadable)
+{
+  auto tracker = EpollUpdateDispatcher::get_instance().register_tracker();
+  drain(tracker);
+
+  const int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+  ASSERT_GE(epoll_fd, 0);
+
+  struct epoll_event ev = {};
+  ev.events = EPOLLIN;
+  ev.data.fd = tracker.notify_fd();
+  ASSERT_EQ(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, tracker.notify_fd(), &ev), 0);
+
+  // No pending notification: wait should time out.
+  EXPECT_EQ(epoll_wait(epoll_fd, &ev, 1, 0), 0);
+
+  EpollUpdateDispatcher::get_instance().request_update(tracker.id());
+
+  EXPECT_EQ(epoll_wait(epoll_fd, &ev, 1, 0), 1);
+  EXPECT_EQ(ev.data.fd, tracker.notify_fd());
+
+  // take_update_request drains the eventfd so epoll is quiet again.
+  EXPECT_TRUE(tracker.take_update_request());
+  EXPECT_EQ(epoll_wait(epoll_fd, &ev, 1, 0), 0);
+
+  EXPECT_EQ(close(epoll_fd), 0);
 }
 
 }  // namespace agnocast
