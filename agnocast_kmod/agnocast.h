@@ -5,8 +5,8 @@
 #include <linux/limits.h>
 #include <linux/types.h>
 
-#define MAX_PUBLISHER_NUM 1024   // Maximum number of publishers per topic
-#define MAX_TOPIC_LOCAL_ID 4096  // Bitmap size for per-entry subscriber reference tracking
+#define MAX_PUBLISHER_NUM 1024    // Maximum number of publishers per topic
+#define MAX_TOPIC_LOCAL_ID 16000  // Bitmap size for per-entry subscriber reference tracking
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 /* Maximum number of entries that can be received at one ioctl. This value is heuristically set to
@@ -15,7 +15,7 @@
 #define MAX_RECEIVE_NUM 10
 #define MAX_RELEASE_NUM 3           // Maximum number of entries that can be released at one ioctl
 #define NODE_NAME_BUFFER_SIZE 256   // Maximum length of node name: 256 characters
-#define MAX_NODE_NUM 1024           // Maximum number of node names returned by GET_NODE_NAMES
+#define MAX_NODE_NUM 4096           // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256  // Maximum length of topic name: 256 characters
 #define VERSION_BUFFER_LEN 32       // Maximum size of version number represented as a string
 
@@ -363,7 +363,7 @@ struct ioctl_add_domain_bridge_prefix_args
 // ================================================
 // ros2cli ioctls
 
-#define MAX_TOPIC_NUM 4096
+#define MAX_TOPIC_NUM 16384
 
 union ioctl_topic_list_args {
   struct

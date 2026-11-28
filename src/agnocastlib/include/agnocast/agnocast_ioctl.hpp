@@ -9,8 +9,8 @@
 namespace agnocast
 {
 
-#define MAX_PUBLISHER_NUM 1024   // Maximum number of publishers per topic
-#define MAX_TOPIC_LOCAL_ID 4096  // Bitmap size for per-entry subscriber reference tracking
+#define MAX_PUBLISHER_NUM 1024    // Maximum number of publishers per topic
+#define MAX_TOPIC_LOCAL_ID 16000  // Bitmap size for per-entry subscriber reference tracking
 #define MAX_SUBSCRIBER_NUM \
   (MAX_TOPIC_LOCAL_ID - MAX_PUBLISHER_NUM)  // Maximum number of subscribers per topic
 /* Maximum number of entries that can be received at one ioctl. This value is heuristically set to
@@ -23,7 +23,7 @@ namespace agnocast
 #define MAX_TOPIC_INFO_RET_NUM std::max(MAX_PUBLISHER_NUM, MAX_SUBSCRIBER_NUM)
 
 #define NODE_NAME_BUFFER_SIZE 256
-#define MAX_NODE_NUM 1024  // Maximum number of node names returned by GET_NODE_NAMES
+#define MAX_NODE_NUM 4096  // Maximum number of node names returned by GET_NODE_NAMES
 #define TOPIC_NAME_BUFFER_SIZE 256
 
 constexpr const char * AGNOCAST_DEVICE_NOT_FOUND_MSG =
