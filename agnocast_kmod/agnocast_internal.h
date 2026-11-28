@@ -12,6 +12,9 @@
 #include <linux/kthread.h>
 #include <linux/mm.h>  // kvzalloc, kvfree
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>  // kmalloc, kfree
 #include <linux/swait.h>
@@ -29,17 +32,24 @@ extern struct device * agnocast_device;
 //   agnocast_increment_message_entry_rc, which manage locks directly.
 //
 // Lock ordering (to prevent deadlocks, always acquire in this order):
-//   1. The namespace lock     (agnocast_ns_read_lock() and friends, agnocast_internal.c)
+//   1. The namespace lock     (struct agnocast_ns::rwsem, one per IPC namespace)
 //   2. topic->rwsem           (per-topic, in struct topic_struct)
-//   3. mempool_lock           (agnocast_memory_allocator.c)
+//   3. One of the leaf locks below, never two at once:
+//      - the namespace registry mutex (agnocast_internal.c)
+//      - agnocast_pid_index_lock      (agnocast_internal.c)
+//      - mempool_lock                 (agnocast_memory_allocator.c)
+// Two namespace locks are never held at once.
 //
 // The namespace lock is taken through agnocast_ns_read_lock() / agnocast_ns_write_lock() /
 // agnocast_ns_write_lock_or_create(), which return the caller's struct agnocast_ns:
 // - Read lock: when searching its tables and operating within a topic
 // - Write lock: when adding/removing entries of its tables or its processes
-// For now every namespace shares global_htables_rwsem as its lock. It also guards the namespace
-// registry and the host-wide proc_info_htable and discovery_agent_htable.
-extern struct rw_semaphore global_htables_rwsem;
+// No lock is shared across namespaces except the leaves, which guard only a hash add/del or an
+// allocator bookkeeping step. Another container's endpoint churn can still make this one wait, but
+// only for one such step: a scan of the memory pools under mempool_lock (registration, exit,
+// linking an endpoint, and the first receive after an endpoint change take it). Exit cleanup is
+// also shared: one worker thread handles the exited pids of every namespace in order, so a
+// namespace whose lock is held long delays the cleanup of the others.
 
 // =========================================
 // data structure
@@ -83,6 +93,11 @@ static inline void agnocast_eventfd_put(struct eventfd_ctx * ctx)
 }
 #endif
 
+// The fields after creation change only while the namespace's state exists, under its lock (write):
+// `exited` in the exit cleanup, `role` when a live bridge manager steps down. An exited entry can
+// outlive the state (its unlink daemon died with it), but nothing writes it any more, so a reader
+// in another namespace needs only RCU, and draining it recreates the state to remove it under the
+// lock (agnocast_commit_exit_process()).
 struct process_info
 {
   bool exited;
@@ -97,8 +112,6 @@ struct process_info
   struct hlist_node node;
   struct rcu_head rcu_head;
 };
-
-extern DECLARE_HASHTABLE(proc_info_htable, PROC_INFO_HASH_BITS);
 
 struct publisher_info
 {
@@ -254,8 +267,17 @@ struct domain_bridge_rule
 // reference is held, because put_ipc_ns() is not exported to modules on every kernel.
 struct agnocast_ns
 {
+  // Both precede the tables below: kvfree_rcu() needs the rcu_head within the first 4 KiB.
+  struct rcu_head rcu_head;
   struct hlist_node node;
+  // Holders: the registry while the namespace is in it, plus each task between looking it up and
+  // unlocking it. The memory is freed when the last one lets go.
+  refcount_t ref;
   const struct ipc_namespace * ipc_ns;
+  struct rw_semaphore rwsem;
+  // Set under rwsem WRITE when the namespace leaves the registry. A task that looked it up before
+  // then sees it once it has the lock, and looks the namespace up again.
+  bool dead;
   // This namespace's process_info entries that have not exited yet, the unlink daemon's included.
   // An exited entry stays in proc_info_htable until the unlink daemon drains it, but does not keep
   // the namespace: only a live unlink daemon can drain it, and that daemon is counted here.
@@ -282,7 +304,7 @@ void agnocast_ns_write_unlock(struct agnocast_ns * ns);
 struct agnocast_ns * agnocast_ns_write_lock_any(void);
 void agnocast_ns_retire_and_unlock(struct agnocast_ns * ns);
 #ifdef KUNIT_BUILD
-// Unlocked, unreferenced lookup for the single-threaded KUnit helpers.
+// Unlocked, unreferenced lookup, for KUnit cases that only check whether the state exists.
 struct agnocast_ns * agnocast_ns_peek(const struct ipc_namespace * ipc_ns);
 #endif
 
@@ -300,12 +322,9 @@ struct discovery_agent_info
   struct rcu_head rcu_head;  // read from the atomic sched_process_exit path via is_agnocast_pid()
 };
 
-extern DECLARE_HASHTABLE(discovery_agent_htable, DISCOVERY_AGENT_HASH_BITS);
-
-// Both require the namespace lock (read for find, write for remove).
+// Caller holds the namespace lock.
 struct discovery_agent_info * agnocast_find_discovery_agent(
   const struct agnocast_ns * ns, const uint32_t domain_id);
-void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
 // The namespace a pid registered its process_info / discovery agent in, or NULL. Only a key for
 // agnocast_ns_write_lock(): the entry itself may be gone by the time the caller has the lock.
 // Looked up separately because one pid can have both, in different namespaces: a stale exited
@@ -324,10 +343,33 @@ bool agnocast_wrapper_has_domain_endpoints(const struct topic_wrapper * wrapper)
 bool agnocast_is_referenced(struct entry_node * en);
 
 // Caller holds the namespace lock.
-struct process_info * agnocast_find_process_info(const pid_t pid);
-// Drops an exited entry whose namespace state was already retired. An exited entry no longer
-// counts as alive, so the namespace state is not needed; takes the host-wide lock itself.
-void agnocast_remove_exited_process(const struct ipc_namespace * ipc_ns, const pid_t pid);
+struct process_info * agnocast_find_process_info(const struct agnocast_ns * ns, const pid_t pid);
+bool agnocast_pid_has_process_info(const pid_t pid);
+// The process and discovery-agent tables are private to agnocast_internal.c. The functions below
+// are the only ways to change them, so each change keeps the namespace's alive_proc_num and
+// agent_num in step.
+
+// Caller holds the namespace lock (write).
+void agnocast_add_process_info(struct agnocast_ns * ns, struct process_info * proc_info);
+void agnocast_remove_process_info(struct agnocast_ns * ns, struct process_info * proc_info);
+void agnocast_add_discovery_agent_info(
+  struct agnocast_ns * ns, struct discovery_agent_info * agent);
+void agnocast_remove_discovery_agent_by_pid(struct agnocast_ns * ns, const pid_t pid);
+
+// Read only. Caller holds the namespace lock.
+bool agnocast_has_alive_bridge_manager(const struct agnocast_ns * ns, const uint32_t domain_id);
+bool agnocast_has_alive_unlink_daemon(const struct agnocast_ns * ns);
+int agnocast_get_process_num_except_unlink_daemon(const struct agnocast_ns * ns);
+int agnocast_get_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id);
+int agnocast_get_alive_process_num_in_domain_except_unlink_daemon(
+  const struct agnocast_ns * ns, const uint32_t domain_id);
+// Read only, under RCU. Needs no namespace lock: exited entries outlive the namespace's state.
+pid_t agnocast_find_exited_process(const struct ipc_namespace * ipc_ns, pid_t * ret_local_pid);
+
+// Module unload only.
+void agnocast_remove_all_process_info(void);
+void agnocast_remove_all_discovery_agents(void);
 
 void agnocast_remove_entry_node(struct topic_wrapper * wrapper, struct entry_node * en);
 
