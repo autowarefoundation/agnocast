@@ -18,8 +18,9 @@ PKG_NAME="agnocast-kmod-v${VERSION}-${VERSION}"
 # Clean up old artifacts
 rm -rf ${PKG_NAME} agnocast-kmod-v${VERSION}_${VERSION}*
 
-# Copy source into the package directory and remove stale debian/files
-cp -r agnocast_kmod ${PKG_NAME}
+# Copy source into the package directory and remove stale debian/files.
+# -L dereferences agnocast_ioctl_abi.h, a symlink into src/agnocast_ioctl_wrapper.
+cp -rL agnocast_kmod ${PKG_NAME}
 rm -f ${PKG_NAME}/debian/files
 
 # Create orig tarball (exclude debian/ so dpkg-source generates a proper debian diff)

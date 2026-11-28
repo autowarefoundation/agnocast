@@ -8,7 +8,7 @@ VERSION = $(shell cat $(CURDIR)/version.txt)
 
 override_dh_auto_install:
 	mkdir -p $(CURDIR)/debian/$(PACKAGE)/usr/src/agnocast-$(VERSION)
-	rsync -av --exclude='debian' ./ $(CURDIR)/debian/$(PACKAGE)/usr/src/agnocast-$(VERSION)/
+	rsync -avL --exclude='debian' ./ $(CURDIR)/debian/$(PACKAGE)/usr/src/agnocast-$(VERSION)/
 
 override_dh_auto_build:
 	@echo "Skipping build due to DKMS."

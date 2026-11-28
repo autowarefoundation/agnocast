@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'agnocast_kmod/**'
+      - 'src/agnocast_ioctl_wrapper/include/**'
 
 permissions:
   contents: read
@@ -49,5 +50,9 @@ jobs:
           # kernel MAINTAINERS file, so adding or moving kmod files never needs one.
           IGNORE="$IGNORE,FILE_PATH_CHANGES"
 
-          git diff origin/${{ github.base_ref }}...HEAD -- agnocast_kmod/ \
+          # agnocast_kmod/agnocast_ioctl_abi.h is a symlink whose diff is just its target path;
+          # the header it points to is checked through src/agnocast_ioctl_wrapper/include/.
+          git diff origin/${{ github.base_ref }}...HEAD -- \
+              agnocast_kmod/ src/agnocast_ioctl_wrapper/include/ \
+              ':(exclude)agnocast_kmod/agnocast_ioctl_abi.h' \
             | ./checkpatch.pl --no-tree --show-types --ignore="$IGNORE" -
