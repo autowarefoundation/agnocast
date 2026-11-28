@@ -1703,6 +1703,31 @@ void agnocast_commit_exit_process(
   up_write(&global_htables_rwsem);
 }
 
+// Copies up to `capacity` of the namespace's topics into the buffers and returns how many there
+// are. Caller holds global_htables_rwsem.
+static uint32_t fill_topic_list(
+  const struct ipc_namespace * ipc_ns, char * topic_name_buf, uint32_t * domain_id_buf,
+  const uint32_t capacity)
+{
+  uint32_t num = 0;
+  struct topic_wrapper * wrapper;
+  int bkt_topic;
+  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
+  {
+    if (!ipc_eq(ipc_ns, wrapper->ipc_ns)) continue;
+    if (is_service_response_topic(wrapper->key)) continue;
+
+    if (num < capacity) {
+      strscpy_pad(
+        topic_name_buf + (size_t)num * TOPIC_NAME_BUFFER_SIZE, wrapper->key,
+        TOPIC_NAME_BUFFER_SIZE);
+      domain_id_buf[num] = wrapper->domain_id;
+    }
+    num++;
+  }
+  return num;
+}
+
 // Intentionally namespace-scoped, not caller-domain-scoped: this returns every
 // domain's topics, each stamped with its domain_id, rather than filtering to the
 // caller's ROS_DOMAIN_ID. get_topic_*_info takes a domain input and filters here;
@@ -1710,45 +1735,46 @@ void agnocast_commit_exit_process(
 // filters client-side -- cheap) and a cross-domain view (e.g. a future domain-aware
 // `ros2 topic list_agnocast`). Revisit by adding a domain input if a strictly
 // per-domain enumeration is ever needed.
+//
+// kvmalloc can sleep, so it runs with global_htables_rwsem released, and the scratch is sized to
+// the topics that exist rather than to max_topic_num. Topics can be added meanwhile, so the walk
+// repeats until the scratch holds all of them. On success the caller owns *topic_name_buf (NULL
+// when there is no topic) and frees it with kvfree(); *domain_id_buf points into the same
+// allocation, after the names, where it stays uint32_t-aligned because a name slot is
+// TOPIC_NAME_BUFFER_SIZE bytes. fill_topic_list writes every byte of the first *ret_topic_num
+// entries, so the scratch needs no zeroing.
 int agnocast_ioctl_get_topic_list(
-  const struct ipc_namespace * ipc_ns, char * topic_name_buf, uint32_t * domain_id_buf,
-  const uint32_t buf_topic_num, uint32_t * ret_topic_num)
+  const struct ipc_namespace * ipc_ns, const uint32_t max_topic_num, char ** topic_name_buf,
+  uint32_t ** domain_id_buf, uint32_t * ret_topic_num)
 {
-  int ret = 0;
-  uint32_t topic_num = 0;
+  char * names = NULL;
+  uint32_t * domain_ids = NULL;
+  uint32_t capacity = 0;
+  uint32_t num;
 
-  down_read(&global_htables_rwsem);
+  for (;;) {
+    down_read(&global_htables_rwsem);
+    num = fill_topic_list(ipc_ns, names, domain_ids, capacity);
+    up_read(&global_htables_rwsem);
 
-  struct topic_wrapper * wrapper;
-  int bkt_topic;
-  hash_for_each(topic_hashtable, bkt_topic, wrapper, node)
-  {
-    if (!ipc_eq(ipc_ns, wrapper->ipc_ns)) {
-      continue;
-    }
+    if (num <= capacity) break;
 
-    if (is_service_response_topic(wrapper->key)) {
-      continue;
-    }
+    kvfree(names);
+    names = NULL;
+    domain_ids = NULL;
+    if (num > max_topic_num) return -ENOBUFS;
 
-    if (topic_num >= buf_topic_num) {
-      ret = -ENOBUFS;
-      goto unlock;
-    }
-
-    strscpy_pad(
-      topic_name_buf + (size_t)topic_num * TOPIC_NAME_BUFFER_SIZE, wrapper->key,
-      TOPIC_NAME_BUFFER_SIZE);
-    domain_id_buf[topic_num] = wrapper->domain_id;
-
-    topic_num++;
+    const size_t names_bytes = (size_t)num * TOPIC_NAME_BUFFER_SIZE;
+    names = kvmalloc(names_bytes + (size_t)num * sizeof(*domain_ids), GFP_KERNEL);
+    if (!names) return -ENOMEM;
+    domain_ids = (uint32_t *)(names + names_bytes);
+    capacity = num;
   }
 
-  *ret_topic_num = topic_num;
-
-unlock:
-  up_read(&global_htables_rwsem);
-  return ret;
+  *topic_name_buf = names;
+  *domain_id_buf = domain_ids;
+  *ret_topic_num = num;
+  return 0;
 }
 
 // Nothing may sleep under global_htables_rwsem: it is writer-preferring, so a sleeping reader
@@ -3248,32 +3274,25 @@ static long get_topic_list_cmd(union ioctl_topic_list_args __user * arg)
   union ioctl_topic_list_args topic_list_args;
   if (copy_from_user(&topic_list_args, arg, sizeof(topic_list_args))) return -EFAULT;
 
-  const uint32_t buf_topic_num =
+  const uint32_t max_topic_num =
     min_t(uint32_t, topic_list_args.topic_name_buffer_size, MAX_TOPIC_NUM);
   char __user * user_topic_name_buf =
     (char __user *)u64_to_user_ptr(topic_list_args.topic_name_buffer_addr);
   uint32_t __user * user_domain_id_buf =
     (uint32_t __user *)u64_to_user_ptr(topic_list_args.domain_id_buffer_addr);
 
-  // One allocation for both arrays: a name slot is TOPIC_NAME_BUFFER_SIZE bytes, so the domain ids
-  // that follow the names stay uint32_t-aligned. agnocast_ioctl_get_topic_list writes every byte
-  // that is copied out, so the scratch needs no zeroing.
-  const size_t names_bytes = (size_t)buf_topic_num * TOPIC_NAME_BUFFER_SIZE;
-  char * topic_name_buf =
-    kvmalloc(names_bytes + (size_t)buf_topic_num * sizeof(uint32_t), GFP_KERNEL);
-  if (!topic_name_buf) return -ENOMEM;
-  uint32_t * domain_id_buf = (uint32_t *)(topic_name_buf + names_bytes);
-
+  char * topic_name_buf = NULL;
+  uint32_t * domain_id_buf = NULL;
   uint32_t topic_num = 0;
-  long ret =
-    agnocast_ioctl_get_topic_list(ipc_ns, topic_name_buf, domain_id_buf, buf_topic_num, &topic_num);
+  long ret = agnocast_ioctl_get_topic_list(
+    ipc_ns, max_topic_num, &topic_name_buf, &domain_id_buf, &topic_num);
   if (ret != 0) {
     if (ret == -ENOBUFS) {
       dev_warn(
         agnocast_device, "Topic count exceeds limit: MAX_TOPIC_NUM=%d, topic_name_buffer_size=%u\n",
         MAX_TOPIC_NUM, topic_list_args.topic_name_buffer_size);
     }
-    goto free;
+    return ret;
   }
 
   if (copy_to_user(
